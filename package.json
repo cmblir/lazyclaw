@@ -1,0 +1,70 @@
+{
+  "name": "lazyclaw",
+  "version": "3.99.28",
+  "description": "Lazy, elegant terminal CLI for chatting with Claude / OpenAI / Gemini / Ollama and orchestrating multi-step LLM workflows. Banner-on-launch, slash-command ghost autocomplete, persistent sessions, local HTTP gateway.",
+  "keywords": [
+    "claude",
+    "anthropic",
+    "openai",
+    "gemini",
+    "ollama",
+    "llm",
+    "cli",
+    "repl",
+    "chatbot",
+    "workflow",
+    "agent"
+  ],
+  "homepage": "https://github.com/cmblir/lazyclaw#readme",
+  "bugs": {
+    "url": "https://github.com/cmblir/lazyclaw/issues"
+  },
+  "license": "MIT",
+  "author": "cmblir",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cmblir/lazyclaw.git"
+  },
+  "type": "module",
+  "main": "cli.mjs",
+  "bin": {
+    "lazyclaw": "cli.mjs"
+  },
+  "scripts": {
+    "test": "playwright test",
+    "test:bench": "node scripts/bench-providers.mjs"
+  },
+  "files": [
+    "cli.mjs",
+    "daemon.mjs",
+    "sessions.mjs",
+    "skills.mjs",
+    "logger.mjs",
+    "ratelimit.mjs",
+    "config-validate.mjs",
+    "rates-validate.mjs",
+    "config_features.mjs",
+    "workspace.mjs",
+    "browse.mjs",
+    "sandbox.mjs",
+    "skills_install.mjs",
+    "cron.mjs",
+    "providers/",
+    "workflow/",
+    "web/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/node": "^25.6.0",
+    "playwright": "^1.59.1",
+    "typescript": "^6.0.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

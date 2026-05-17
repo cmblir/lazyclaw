@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# npm pack / publish artifacts
+*.tgz
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# Local runtime state written by the CLI
+.lazyclaw/
+
+# OS / editor metadata
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+# Logs
+*.log
