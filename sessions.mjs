@@ -17,6 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { appendRecent as _memoryAppendRecent } from './memory.mjs';
 
 const SESSIONS_DIRNAME = 'sessions';
 
@@ -74,6 +75,10 @@ export function appendTurn(id, role, content, configDir = defaultConfigDir()) {
   fs.mkdirSync(path.dirname(p), { recursive: true });
   const line = JSON.stringify({ role, content: String(content ?? ''), ts: Date.now() }) + '\n';
   fs.appendFileSync(p, line);
+  // Write-through to the memory recency log. Best-effort; failures
+  // never propagate up — a missing or broken memory store must not
+  // break the session-write path.
+  _memoryAppendRecent(id, role, content, configDir);
 }
 
 export function clearSession(id, configDir = defaultConfigDir()) {

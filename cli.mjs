@@ -859,6 +859,8 @@ const SLASH_COMMANDS = [
   { cmd: '/model',  help: 'switch model: /model gpt-4.1 or anthropic/claude-opus-4-7' },
   { cmd: '/loop',   help: 'repeat one prompt: /loop "fix lint" [--max N] [--until "<regex>"]' },
   { cmd: '/goal',   help: 'register/switch goal: /goal add NAME [--desc "..."] / /goal NAME / /goal list' },
+  { cmd: '/memory', help: 'show layered memory: /memory [core|recent|episodic [topic]]' },
+  { cmd: '/dream',  help: 'consolidate recent memory into per-topic episodic files' },
   { cmd: '/exit',   help: 'leave the chat' },
 ];
 
@@ -919,7 +921,7 @@ const SUBCOMMANDS = [
   // v3.99.22 — multi-agent orchestrator config
   'orchestrator',
   // v3.99.30 — /loop and /goal slash commands (in-session + detached)
-  'loop', 'loops', 'goal',
+  'loop', 'loops', 'goal', 'memory',
 ];
 
 const SUBCOMMAND_SUBS = {
@@ -938,6 +940,7 @@ const SUBCOMMAND_SUBS = {
   orchestrator: ['status', 'set-planner', 'workers', 'set-max-subtasks', 'clear'],
   loops:     ['list', 'show', 'kill', 'tail'],
   goal:      ['add', 'list', 'show', 'close', 'switch', 'tick', 'channel'],
+  memory:    ['show', 'dream', 'edit'],
 };
 
 function bashCompletion() {
@@ -2809,6 +2812,47 @@ async function cmdChat(flags = {}) {
         process.stdout.write(`✓ switched to goal: ${g.name} (session: ${sessionId}, ${prior.length} prior turn(s))\n`);
         return true;
       }
+      case '/memory': {
+        const arg = line.slice('/memory'.length).trim();
+        const memMod = await import('./memory.mjs');
+        const tokens = arg.split(/\s+/).filter(Boolean);
+        const which = tokens[0] || 'core';
+        if (which === 'core') {
+          const body = memMod.loadCore(cfgDir);
+          process.stdout.write(body || '(empty core memory)\n');
+          return true;
+        }
+        if (which === 'recent') {
+          const items = memMod.loadRecent(20, cfgDir);
+          process.stdout.write(JSON.stringify(items, null, 2) + '\n');
+          return true;
+        }
+        if (which === 'episodic') {
+          const topic = tokens[1];
+          if (topic) {
+            const body = memMod.loadEpisodic(topic, cfgDir);
+            process.stdout.write(body || `(no episodic file "${topic}")\n`);
+          } else {
+            process.stdout.write(JSON.stringify(memMod.listEpisodic(cfgDir), null, 2) + '\n');
+          }
+          return true;
+        }
+        process.stdout.write('usage: /memory [core|recent|episodic [topic]]\n');
+        return true;
+      }
+      case '/dream': {
+        const memMod = await import('./memory.mjs');
+        process.stdout.write('  ↯ dreaming…\n');
+        try {
+          const r = await memMod.dream(sessionId, {
+            provider: prov,
+            model: activeModel,
+            apiKey: _resolveAuthKey(cfg, activeProvName),
+          }, cfgDir);
+          process.stdout.write(`✓ wrote ${r.topics.length} episodic file(s): ${r.topics.join(', ') || '(none)'}\n`);
+        } catch (e) { process.stdout.write(`dream error: ${e?.message || e}\n`); }
+        return true;
+      }
       case '/exit': {
         return 'EXIT';
       }
@@ -3949,11 +3993,14 @@ async function _detachGoalCron(name) {
 }
 
 // Builds the prompt the scheduler sends to the LLM on every tick.
-// Surfaces the goal description and the most recent three check-ins so
-// the model can see what it has already proposed before suggesting a
-// next step.
-function _composeTickPrompt(goal) {
+// Surfaces (in order) any matching memory (core + episodic), the goal
+// description, the most recent three check-ins, and finally the next-
+// step question. Memory is computed by memory.getMemoryForGoal so the
+// substring-match against goal name/description keywords stays in one
+// place.
+function _composeTickPrompt(goal, memoryText = '') {
   const parts = [];
+  if (memoryText && memoryText.trim()) parts.push(memoryText);
   parts.push(`Goal: ${goal.description || goal.name}`);
   const recent = (goal.checkIns || []).slice(-3);
   if (recent.length) {
@@ -3961,7 +4008,7 @@ function _composeTickPrompt(goal) {
     for (const c of recent) parts.push(`- ${c.at}: ${c.summary}`);
   }
   parts.push("What's the next concrete step?");
-  return parts.join('\n');
+  return parts.join('\n\n');
 }
 
 // `lazyclaw goal <add|list|show|close|switch|tick|channel> ...`
@@ -4047,7 +4094,9 @@ async function cmdGoal(sub, positional, flags = {}) {
       if (!prov) { console.error(`unknown provider: ${provName}`); process.exit(2); }
       const model = flags.model || cfg.model;
 
-      const tickPrompt = _composeTickPrompt(g);
+      const memoryMod = await import('./memory.mjs');
+      const memoryText = memoryMod.getMemoryForGoal(g.name, g.description || '', cfgDir);
+      const tickPrompt = _composeTickPrompt(g, memoryText);
       const loopEng = await import('./loop-engine.mjs');
       const sessionsMod = await import('./sessions.mjs');
       const sessionId = g.sessionId;
@@ -4102,6 +4151,82 @@ async function cmdGoal(sub, positional, flags = {}) {
     }
     default:
       console.error('Usage: lazyclaw goal <add|list|show|close|switch> ...');
+      process.exit(2);
+  }
+}
+
+// `lazyclaw memory <show|dream|edit> [args]`
+//
+// show core|recent|episodic [topic]    print contents to stdout
+// dream                                consolidate recent into episodic
+// edit core                            open $EDITOR on core.md
+async function cmdMemory(sub, positional, flags = {}) {
+  const memMod = await import('./memory.mjs');
+  const cfgDir = path.dirname(configPath());
+  switch (sub) {
+    case undefined:
+    case 'show': {
+      const which = positional[0] || 'core';
+      if (which === 'core') {
+        process.stdout.write(memMod.loadCore(cfgDir));
+        return;
+      }
+      if (which === 'recent') {
+        const n = flags.n !== undefined ? Number(flags.n) : 20;
+        console.log(JSON.stringify(memMod.loadRecent(n, cfgDir), null, 2));
+        return;
+      }
+      if (which === 'episodic') {
+        const topic = positional[1];
+        if (topic) { process.stdout.write(memMod.loadEpisodic(topic, cfgDir)); return; }
+        console.log(JSON.stringify(memMod.listEpisodic(cfgDir), null, 2));
+        return;
+      }
+      console.error(`unknown memory.show target: ${which} (expected: core, recent, episodic)`);
+      process.exit(2);
+      return;
+    }
+    case 'dream': {
+      await ensureRegistry();
+      const cfg = readConfig();
+      const provName = flags.provider || cfg.provider || 'mock';
+      const prov = _registryMod.PROVIDERS[provName];
+      if (!prov) { console.error(`unknown provider: ${provName}`); process.exit(2); }
+      const sid = positional[0] || flags.session || null;
+      try {
+        const result = await memMod.dream(sid, {
+          provider: prov,
+          model: flags.model || cfg.model,
+          apiKey: _resolveAuthKey(cfg, provName),
+        }, cfgDir);
+        console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+      } catch (e) { console.error(`dream error: ${e?.message || e}`); process.exit(1); }
+      return;
+    }
+    case 'edit': {
+      const which = positional[0] || 'core';
+      if (which !== 'core') {
+        console.error('Only core.md is editable right now (episodic is LLM-curated, recent is append-only)');
+        process.exit(2);
+      }
+      const p = memMod.corePath(cfgDir);
+      const fs_ = await import('node:fs');
+      fs_.mkdirSync(memMod.memoryDir(cfgDir), { recursive: true });
+      if (!fs_.existsSync(p)) fs_.writeFileSync(p, '');
+      const editor = process.env.EDITOR || 'vi';
+      const { spawnSync } = await import('node:child_process');
+      // EDITOR=cat is the test-only escape hatch: spawnSync with stdio
+      // inherit makes the file's contents land on stdout and the
+      // command exits 0 without blocking.
+      const r = spawnSync(editor, [p], { stdio: 'inherit' });
+      if (r.status !== 0 && r.status !== null) {
+        console.error(`editor exited ${r.status}`);
+        process.exit(r.status);
+      }
+      return;
+    }
+    default:
+      console.error('Usage: lazyclaw memory <show|dream|edit> ...');
       process.exit(2);
   }
 }
@@ -5169,6 +5294,7 @@ async function _dispatchMenuChoice(argv) {
       case 'loop':         return await cmdLoop(rest[0] || '', {});
       case 'loops':        return await cmdLoops(rest[0], rest.slice(1), {});
       case 'goal':         return await cmdGoal(rest[0], rest.slice(1), {});
+      case 'memory':       return await cmdMemory(rest[0], rest.slice(1), {});
       case 'auth':         return await cmdAuth(rest[0], rest.slice(1), {});
       case 'pairing':      return await cmdPairing(rest[0], rest.slice(1), {});
       case 'nodes':        return await cmdNodes(rest[0], rest.slice(1), {});
@@ -5706,6 +5832,11 @@ async function main() {
     case 'goal': {
       const sub = rest.positional[0];
       await cmdGoal(sub, rest.positional.slice(1), rest.flags);
+      break;
+    }
+    case 'memory': {
+      const sub = rest.positional[0];
+      await cmdMemory(sub, rest.positional.slice(1), rest.flags);
       break;
     }
     case 'setup': {
