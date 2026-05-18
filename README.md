@@ -192,6 +192,14 @@ Slash commands inside the REPL:
 | `/model` | Open the per-provider model picker (type-filter + live `/v1/models` fetch) |
 | `/model X` | Switch model directly. Accepts unified `provider/model` form |
 | `/skill a,b` | Replace the system prompt with a composition of named skills |
+| `/loop "<prompt>" [--max N] [--until "<regex>"]` | Repeat one prompt N times (default 3, cap 50). `--until` short-circuits when the regex matches. Ctrl-C aborts the loop. |
+| `/loop "..." --use-memory --recall "<query>"` | Inject `~/.lazyclaw/memory/core.md` and the top-3 matching episodic/recent fragments into the system slot per iteration |
+| `/goal` | List active goals |
+| `/goal <name>` | Switch the chat to the goal's session (subsequent turns persist to `goal:<name>.jsonl`) |
+| `/goal add <name> [--desc "..."] [--cron "<spec>"]` | Register a persistent goal; `--cron` schedules `lazyclaw goal tick <name>` |
+| `/goal close <name> [done\|abandoned]` | Close the goal and uninstall its cron entry |
+| `/memory [core\|recent\|episodic [topic]]` | Show layered memory contents |
+| `/dream` | Consolidate `recent.jsonl` into per-topic `episodic/<topic>.md` files |
 | `/usage` | Message count + chars + cumulative token totals |
 | `/new` / `/reset` | Wipe history and start over |
 | `/exit` | Leave the chat REPL (returns to the launcher when chat was opened from it) |
@@ -208,6 +216,37 @@ lazyclaw agent "..." --skill review           # compose system prompt
 lazyclaw agent "..." --usage                  # token counts on stderr
 lazyclaw agent "..." --cost                   # USD when rates configured
 ```
+
+## Loops and goals (durable agents)
+
+```bash
+# Repeat one prompt N times against the active provider. Foreground
+# blocks the terminal; --detach forks a worker and prints {loopId,
+# pid, statePath}. Worker state under ~/.lazyclaw/loops/<id>/.
+lazyclaw loop "fix the failing tests" --max 5 --until "DONE"
+lazyclaw loop "ship checklist" --max 10 --detach --session daily
+lazyclaw loops list
+lazyclaw loops show <loopId>
+lazyclaw loops tail <loopId>
+lazyclaw loops kill <loopId>      # SIGTERM; repeat within 5s for SIGKILL
+
+# Goals: persistent objectives with optional cron schedule + channel fan-out.
+lazyclaw goal add ship-v4 --desc "Ship v4" --cron "0 9 * * 1-5"
+lazyclaw goal list
+lazyclaw goal tick ship-v4 --force
+lazyclaw goal channel add ship-v4 slack:#deploys
+lazyclaw goal close ship-v4 done  # also uninstalls the cron entry
+
+# Memory: ~/.lazyclaw/memory/{core.md,recent.jsonl,episodic/*.md}
+lazyclaw memory show core
+lazyclaw memory show recent
+lazyclaw memory dream             # consolidate recent → episodic files
+lazyclaw memory edit core         # open $EDITOR
+```
+
+For Slack fan-out, set `SLACK_BOT_TOKEN` (xoxb-...) in `~/.lazyclaw/.env`.
+Tokens never appear in goal records or logs. Socket Mode inbound also
+needs `SLACK_APP_TOKEN` (xapp-...) and `SLACK_SIGNING_SECRET`.
 
 ## Providers / sessions / skills
 

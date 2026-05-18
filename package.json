@@ -1,6 +1,6 @@
 {
   "name": "lazyclaw",
-  "version": "3.99.29",
+  "version": "4.0.0",
   "description": "Lazy, elegant terminal CLI for chatting with Claude / OpenAI / Gemini / Ollama and orchestrating multi-step LLM workflows. Banner-on-launch, slash-command ghost autocomplete, persistent sessions, local HTTP gateway.",
   "keywords": [
     "claude",
@@ -49,9 +49,15 @@
     "sandbox.mjs",
     "skills_install.mjs",
     "cron.mjs",
+    "loop-engine.mjs",
+    "loops.mjs",
+    "goals.mjs",
+    "memory.mjs",
+    "channels/",
     "providers/",
     "workflow/",
     "web/",
+    "scripts/loop-worker.mjs",
     "README.md",
     "LICENSE"
   ],
