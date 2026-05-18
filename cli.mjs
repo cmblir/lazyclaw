@@ -2684,6 +2684,27 @@ async function cmdChat(flags = {}) {
         };
 
         if (useTerminal) _ghost.suspend();
+        // Capture the chat's existing system message (workspace / skill
+        // composition) before we let the engine touch it; we restore it
+        // after the loop so the chat continues with the same system.
+        const _sysBefore = messages.find(m => m.role === 'system')?.content ?? null;
+        const memMod = (parsed.useMemory || parsed.recall) ? await import('./memory.mjs') : null;
+        const buildSystem = memMod ? (() => {
+          // Called per iteration: memory.loadCore + recall re-read from
+          // disk every call so a parallel writer mutating core.md /
+          // episodic/* between iterations is reflected immediately.
+          const parts = [];
+          if (parsed.useMemory) {
+            const core = memMod.loadCore(cfgDir);
+            if (core && core.trim()) parts.push(core);
+          }
+          if (parsed.recall) {
+            const text = memMod.recall(parsed.recall, { topN: 3 }, cfgDir);
+            if (text && text.trim()) parts.push(text);
+          }
+          if (_sysBefore) parts.push(_sysBefore);
+          return parts.join('\n\n---\n\n');
+        }) : null;
         try {
           const result = await loopMod.runLoop({
             prompt: parsed.prompt,
@@ -2696,6 +2717,7 @@ async function cmdChat(flags = {}) {
               process.stderr.write(`\x1b[2m  ↻ loop iteration ${i}/${max}\x1b[22m\n`);
             },
             signal: loopAc.signal,
+            buildSystem,
           });
           charsSent += parsed.prompt.length * result.iterations;
           if (result.stoppedBy === 'until') {
@@ -2708,6 +2730,20 @@ async function cmdChat(flags = {}) {
         } finally {
           process.off('SIGINT', onSigint);
           if (useTerminal) _ghost.resume();
+          // Restore the chat's prior system message. The engine may have
+          // overwritten messages[0] with the per-iter memory composition;
+          // we put the original (workspace / skill) back so the
+          // subsequent free-form chat turn sees the same system the user
+          // configured before /loop ran.
+          if (buildSystem) {
+            const sysIdx = messages.findIndex(m => m.role === 'system');
+            if (_sysBefore) {
+              if (sysIdx >= 0) messages[sysIdx] = { role: 'system', content: _sysBefore };
+              else messages.unshift({ role: 'system', content: _sysBefore });
+            } else if (sysIdx >= 0) {
+              messages.splice(sysIdx, 1);
+            }
+          }
         }
         return true;
       }
@@ -3848,8 +3884,26 @@ async function cmdLoop(prompt, flags = {}) {
     loopsMod.appendIteration(loopId, { iteration: i, of: m, bytes: reply.length, preview: reply.slice(0, 200) }, cfgDir);
   };
 
+  // Detached/foreground both honor --use-memory and --recall by
+  // rebuilding the system message before each iteration. The
+  // computation lives in memory.mjs so the same logic powers
+  // `/loop --use-memory` in the REPL.
+  const memMod = (flags['use-memory'] || flags.recall) ? await import('./memory.mjs') : null;
+  const buildSystem = memMod ? (() => {
+    const parts = [];
+    if (flags['use-memory']) {
+      const core = memMod.loadCore(cfgDir);
+      if (core && core.trim()) parts.push(core);
+    }
+    if (flags.recall) {
+      const text = memMod.recall(String(flags.recall), { topN: 3 }, cfgDir);
+      if (text && text.trim()) parts.push(text);
+    }
+    return parts.join('\n\n---\n\n');
+  }) : null;
+
   try {
-    const result = await loopEng.runLoop({ prompt, max, until: untilRe, messages, sendOnce, persist, onIteration, signal: ac.signal });
+    const result = await loopEng.runLoop({ prompt, max, until: untilRe, messages, sendOnce, persist, onIteration, signal: ac.signal, buildSystem });
     const finalStatus = result.stoppedBy === 'abort' ? 'killed' : 'completed';
     loopsMod.patchMeta(loopId, { status: finalStatus, finishedAt: new Date().toISOString() }, cfgDir);
     loopsMod.writeResult(loopId, result, cfgDir);
@@ -3992,15 +4046,13 @@ async function _detachGoalCron(name) {
   return true;
 }
 
-// Builds the prompt the scheduler sends to the LLM on every tick.
-// Surfaces (in order) any matching memory (core + episodic), the goal
-// description, the most recent three check-ins, and finally the next-
-// step question. Memory is computed by memory.getMemoryForGoal so the
-// substring-match against goal name/description keywords stays in one
-// place.
-function _composeTickPrompt(goal, memoryText = '') {
+// Builds the user-side prompt the scheduler sends on every tick. Memory
+// (core + episodic matches) lands in the system slot via Phase 6's
+// buildSystem path, not here — that way a parallel writer touching
+// core.md mid-loop is reflected on the next iteration without us
+// having to rebuild this string.
+function _composeTickPrompt(goal) {
   const parts = [];
-  if (memoryText && memoryText.trim()) parts.push(memoryText);
   parts.push(`Goal: ${goal.description || goal.name}`);
   const recent = (goal.checkIns || []).slice(-3);
   if (recent.length) {
@@ -4095,8 +4147,11 @@ async function cmdGoal(sub, positional, flags = {}) {
       const model = flags.model || cfg.model;
 
       const memoryMod = await import('./memory.mjs');
-      const memoryText = memoryMod.getMemoryForGoal(g.name, g.description || '', cfgDir);
-      const tickPrompt = _composeTickPrompt(g, memoryText);
+      const tickPrompt = _composeTickPrompt(g);
+      // Memory flows into the system slot. Per-iter rebuild is a no-op
+      // here (max=1) but matches Phase 6's contract so a future tick
+      // with max>1 behaves the same as `/loop --use-memory`.
+      const tickBuildSystem = () => memoryMod.getMemoryForGoal(g.name, g.description || '', cfgDir);
       const loopEng = await import('./loop-engine.mjs');
       const sessionsMod = await import('./sessions.mjs');
       const sessionId = g.sessionId;
@@ -4129,6 +4184,7 @@ async function cmdGoal(sub, positional, flags = {}) {
           persist,
           onIteration: undefined,
           signal: undefined,
+          buildSystem: tickBuildSystem,
         });
       } catch (e) {
         console.error(`tick error: ${e?.message || e}`);

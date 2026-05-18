@@ -42,7 +42,14 @@ export const mockProvider = {
   name: 'mock',
   async *sendMessage(messages, opts = {}) {
     const last = messages[messages.length - 1];
-    const reply = `mock-reply: ${last?.content ?? ''}`;
+    const sys = messages.find((m) => m.role === 'system')?.content || '';
+    // When a system message is present, prefix the echo with [sys:...]
+    // so callers (and especially tests) can verify what the provider
+    // saw in the system slot. No system → byte-identical to the prior
+    // shape so existing assertions stay green.
+    const reply = sys
+      ? `[sys:${String(sys).slice(0, 8000)}]\nmock-reply: ${last?.content ?? ''}`
+      : `mock-reply: ${last?.content ?? ''}`;
     // Honor opts.signal so the chat REPL's Ctrl+C handler (and any
     // other caller) can stop the stream mid-flight. The other concrete
     // providers already do this; the mock should match for symmetry.

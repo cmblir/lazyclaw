@@ -118,7 +118,7 @@ export function compileUntil(pattern) {
  * @param {AbortSignal|undefined} o.signal
  * @returns {Promise<{ iterations: number, stoppedBy: 'max'|'until'|'abort', lastReply: string }>}
  */
-export async function runLoop({ prompt, max, until, messages, sendOnce, persist, onIteration, signal }) {
+export async function runLoop({ prompt, max, until, messages, sendOnce, persist, onIteration, signal, buildSystem }) {
   if (!prompt || !prompt.trim()) {
     throw new LoopError('prompt is required', 'LOOP_NO_PROMPT');
   }
@@ -137,6 +137,21 @@ export async function runLoop({ prompt, max, until, messages, sendOnce, persist,
   while (i < max) {
     if (signal?.aborted) { stoppedBy = 'abort'; break; }
     i++;
+    // Per-iteration system rebuild. The caller decides what `sys` is —
+    // memory.loadCore(), recall results, the chat's prior skill block,
+    // or any combination. Empty / falsy return = remove the system
+    // message. The rebuild runs every iteration so a parallel writer
+    // mutating core.md mid-loop is reflected in the next call.
+    if (buildSystem) {
+      const sys = buildSystem();
+      const sysIdx = messages.findIndex(m => m.role === 'system');
+      if (sys && String(sys).trim()) {
+        if (sysIdx >= 0) messages[sysIdx] = { role: 'system', content: sys };
+        else messages.unshift({ role: 'system', content: sys });
+      } else if (sysIdx >= 0) {
+        messages.splice(sysIdx, 1);
+      }
+    }
     messages.push({ role: 'user', content: prompt });
     let reply;
     try {
