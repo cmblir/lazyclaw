@@ -4076,13 +4076,15 @@ async function cmdGoal(sub, positional, flags = {}) {
   switch (sub) {
     case 'add': {
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw goal add <name> [--desc "..."] [--cron "<spec>"]'); process.exit(2); }
+      if (!name) { console.error('Usage: lazyclaw goal add <name> [--desc "..."] [--cron "<spec>"] [--channel slack:<target>]'); process.exit(2); }
       let g;
+      const channels = flags.channel ? [String(flags.channel)] : [];
       try {
         g = goalsMod.registerGoal({
           name,
           description: flags.desc || '',
           schedule: flags.cron || null,
+          channels,
         }, cfgDir);
       } catch (e) { console.error(e?.message || e); process.exit(2); }
       if (flags.cron) {
@@ -4191,7 +4193,41 @@ async function cmdGoal(sub, positional, flags = {}) {
         process.exit(1);
       }
       goalsMod.appendCheckIn(name, result.lastReply, cfgDir);
-      console.log(JSON.stringify({ ok: true, name, iterations: result.iterations, reply: result.lastReply }));
+      // Fan-out the check-in to every registered channel. We re-read
+      // the goal to capture the freshly-appended checkIn count so the
+      // fan-out body has the canonical timestamp.
+      const refreshed = goalsMod.getGoal(name, cfgDir);
+      const channels = Array.isArray(refreshed?.channels) ? refreshed.channels : [];
+      const slackTargets = channels.filter(c => typeof c === 'string' && c.startsWith('slack:'));
+      const fanoutResults = [];
+      if (slackTargets.length > 0) {
+        // Lazy import so plain non-slack tick paths don't pay the cost.
+        const slackMod = await import('./channels/slack.mjs');
+        let slack;
+        try {
+          slack = new slackMod.SlackChannel({ requireInbound: false });
+          // Validate env BEFORE start() so a missing-secrets environment
+          // does not silently skip — instead the operator sees a clear
+          // warning and tick still succeeds (the check-in is on disk).
+          await slack.start(async () => '', { gate: null });
+        } catch (e) {
+          console.error(`warn: skipping Slack fan-out: ${e?.message || e}`);
+          slack = null;
+        }
+        if (slack) {
+          for (const target of slackTargets) {
+            const channel = target.slice('slack:'.length);
+            try {
+              await slack.send(channel, result.lastReply);
+              fanoutResults.push({ channel: target, ok: true });
+            } catch (e) {
+              fanoutResults.push({ channel: target, ok: false, error: e?.message || String(e) });
+            }
+          }
+          try { await slack.stop(); } catch { /* best-effort */ }
+        }
+      }
+      console.log(JSON.stringify({ ok: true, name, iterations: result.iterations, reply: result.lastReply, fanout: fanoutResults }));
       return;
     }
     case 'switch': {
@@ -4203,6 +4239,29 @@ async function cmdGoal(sub, positional, flags = {}) {
       // pipe it into `lazyclaw chat --session <id>`. The REPL slash form
       // is what mutates state in a live chat.
       console.log(JSON.stringify({ name: g.name, sessionId: g.sessionId, status: g.status }));
+      return;
+    }
+    case 'channel': {
+      const op = positional[0];
+      const name = positional[1];
+      const target = positional[2];
+      if (!op || !name) { console.error('Usage: lazyclaw goal channel <add|remove> <name> [target]'); process.exit(2); }
+      const g = goalsMod.getGoal(name, cfgDir);
+      if (!g) { console.error(`no goal "${name}"`); process.exit(1); }
+      const cur = Array.isArray(g.channels) ? g.channels : [];
+      let next;
+      if (op === 'add') {
+        if (!target) { console.error('Usage: lazyclaw goal channel add <name> <target>'); process.exit(2); }
+        next = Array.from(new Set([...cur, target]));
+      } else if (op === 'remove') {
+        if (!target) { console.error('Usage: lazyclaw goal channel remove <name> <target>'); process.exit(2); }
+        next = cur.filter(t => t !== target);
+      } else {
+        console.error('Usage: lazyclaw goal channel <add|remove> <name> <target>'); process.exit(2);
+        return;
+      }
+      const updated = goalsMod.patchGoal(name, { channels: next }, cfgDir);
+      console.log(JSON.stringify({ name: updated.name, channels: updated.channels }));
       return;
     }
     default:
