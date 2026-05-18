@@ -2746,7 +2746,11 @@ async function cmdChat(flags = {}) {
           if (!name) { process.stdout.write('usage: /goal add <name> [--desc "..."] [--cron "<spec>"]\n'); return true; }
           try {
             const g = goalsMod.registerGoal({ name, description: desc, schedule: cron }, cfgDir);
-            process.stdout.write(`✓ goal ${g.name} added (status: active)\n`);
+            if (cron) {
+              try { await _attachGoalCron(name, cron); }
+              catch (e) { process.stdout.write(`goal warning: cron attach failed (${e?.message || e})\n`); }
+            }
+            process.stdout.write(`✓ goal ${g.name} added (status: active${cron ? `, cron: ${cron}` : ''})\n`);
           } catch (e) { process.stdout.write(`goal error: ${e?.message || e}\n`); }
           return true;
         }
@@ -2768,6 +2772,8 @@ async function cmdChat(flags = {}) {
           if (!name) { process.stdout.write('usage: /goal close <name> [done|abandoned]\n'); return true; }
           try {
             const g = goalsMod.closeGoal(name, outcome, cfgDir);
+            try { await _detachGoalCron(name); }
+            catch (e) { process.stdout.write(`goal warning: cron detach failed (${e?.message || e})\n`); }
             process.stdout.write(`✓ goal ${g.name} closed (status: ${g.status})\n`);
           } catch (e) { process.stdout.write(`goal error: ${e?.message || e}\n`); }
           return true;
@@ -3903,6 +3909,61 @@ async function cmdLoops(sub, positional, flags = {}) {
   }
 }
 
+// Install (or refresh) the system scheduler entry that fires
+// `lazyclaw goal tick <name>` on a schedule. Writes to cfg.cron and to
+// the OS backend (launchd / crontab). Tests set
+// LAZYCLAW_SKIP_CRON_INSTALL=1 to skip the OS-side mutation but keep
+// the config-side wiring so `cron list` still reflects the entry.
+async function _attachGoalCron(name, schedule) {
+  const cron = await import('./cron.mjs');
+  cron.parseCronSpec(schedule); // validate before we touch state
+  const cfg = readConfig();
+  const jobName = `goal-${name}`;
+  const cmd = ['lazyclaw', 'goal', 'tick', name];
+  cron.upsertJob(cfg, jobName, schedule, cmd);
+  writeConfig(cfg);
+  if (process.env.LAZYCLAW_SKIP_CRON_INSTALL) return { jobName, skipped: true };
+  const backend = cron.pickBackend();
+  if (backend === 'launchd') cron.installLaunchdJob(jobName, schedule, cmd);
+  else cron.installCrontabJob(jobName, schedule, cmd);
+  return { jobName, skipped: false };
+}
+
+// Mirror of _attachGoalCron's removal path. Returns true when an entry
+// was actually present; false when the goal had no cron attached
+// (already-clean state, safe to call unconditionally during `close`).
+async function _detachGoalCron(name) {
+  const cron = await import('./cron.mjs');
+  const cfg = readConfig();
+  const jobName = `goal-${name}`;
+  if (!cfg.cron || !cfg.cron[jobName]) return false;
+  cron.removeJob(cfg, jobName);
+  writeConfig(cfg);
+  if (process.env.LAZYCLAW_SKIP_CRON_INSTALL) return true;
+  const backend = cron.pickBackend();
+  try {
+    if (backend === 'launchd') cron.uninstallLaunchdJob(jobName);
+    else cron.uninstallCrontabJob(jobName);
+  } catch { /* best-effort — cron sync recovers */ }
+  return true;
+}
+
+// Builds the prompt the scheduler sends to the LLM on every tick.
+// Surfaces the goal description and the most recent three check-ins so
+// the model can see what it has already proposed before suggesting a
+// next step.
+function _composeTickPrompt(goal) {
+  const parts = [];
+  parts.push(`Goal: ${goal.description || goal.name}`);
+  const recent = (goal.checkIns || []).slice(-3);
+  if (recent.length) {
+    parts.push('Recent check-ins:');
+    for (const c of recent) parts.push(`- ${c.at}: ${c.summary}`);
+  }
+  parts.push("What's the next concrete step?");
+  return parts.join('\n');
+}
+
 // `lazyclaw goal <add|list|show|close|switch|tick|channel> ...`
 //
 // Pure registration in Phase 3 (no cron install, no channel delivery —
@@ -3917,14 +3978,19 @@ async function cmdGoal(sub, positional, flags = {}) {
     case 'add': {
       const name = positional[0];
       if (!name) { console.error('Usage: lazyclaw goal add <name> [--desc "..."] [--cron "<spec>"]'); process.exit(2); }
+      let g;
       try {
-        const g = goalsMod.registerGoal({
+        g = goalsMod.registerGoal({
           name,
           description: flags.desc || '',
           schedule: flags.cron || null,
         }, cfgDir);
-        console.log(JSON.stringify(g, null, 2));
       } catch (e) { console.error(e?.message || e); process.exit(2); }
+      if (flags.cron) {
+        try { await _attachGoalCron(name, String(flags.cron)); }
+        catch (e) { console.error(`error attaching cron: ${e?.message || e}`); process.exit(1); }
+      }
+      console.log(JSON.stringify(g, null, 2));
       return;
     }
     case undefined:
@@ -3945,10 +4011,82 @@ async function cmdGoal(sub, positional, flags = {}) {
       const name = positional[0];
       const outcome = positional[1] || 'done';
       if (!name) { console.error('Usage: lazyclaw goal close <name> [done|abandoned]'); process.exit(2); }
+      let g;
+      try { g = goalsMod.closeGoal(name, outcome, cfgDir); }
+      catch (e) { console.error(e?.message || e); process.exit(1); }
+      // Best-effort cron detach. If the goal had no cron attached this
+      // is a no-op; if it did, both cfg.cron and the OS scheduler are
+      // cleaned in tandem so a follow-up `cron list` is empty.
+      try { await _detachGoalCron(name); }
+      catch (e) { console.error(`warn: cron detach failed: ${e?.message || e}`); }
+      console.log(JSON.stringify(g, null, 2));
+      return;
+    }
+    case 'tick': {
+      // Internal subcommand fired by the cron scheduler (or manually
+      // with --force). Exits 0 silently when the goal is not active so
+      // a stale cron entry doesn't crash the scheduler.
+      const name = positional[0];
+      if (!name) { console.error('Usage: lazyclaw goal tick <name> [--force]'); process.exit(2); }
+      const g = goalsMod.getGoal(name, cfgDir);
+      if (!g) {
+        // No goal file at all — exit 0 silently. The scheduler may be
+        // chasing a deleted goal; we don't want to noisy-log the cron
+        // path. Setting LAZYCLAW_DEBUG=1 surfaces it.
+        if (process.env.LAZYCLAW_DEBUG) console.error(`tick: no goal "${name}"`);
+        return;
+      }
+      if (g.status !== 'active') {
+        if (process.env.LAZYCLAW_DEBUG) console.error(`tick: goal "${name}" is ${g.status}, skipping`);
+        return;
+      }
+      await ensureRegistry();
+      const cfg = readConfig();
+      const provName = flags.provider || cfg.provider || 'mock';
+      const prov = _registryMod.PROVIDERS[provName];
+      if (!prov) { console.error(`unknown provider: ${provName}`); process.exit(2); }
+      const model = flags.model || cfg.model;
+
+      const tickPrompt = _composeTickPrompt(g);
+      const loopEng = await import('./loop-engine.mjs');
+      const sessionsMod = await import('./sessions.mjs');
+      const sessionId = g.sessionId;
+      // Rehydrate prior turns so the model has full context. Tick
+      // appends the user prompt and assistant reply to this session
+      // just like `/loop --max 1` would.
+      const messages = sessionsMod.loadTurns(sessionId, cfgDir).map(t => ({ role: t.role, content: t.content }));
+
+      const sendOnce = async (msgs, signal) => {
+        let acc = '';
+        for await (const chunk of prov.sendMessage(msgs, {
+          apiKey: _resolveAuthKey(cfg, provName),
+          model,
+          signal,
+        })) {
+          acc += chunk;
+        }
+        return acc;
+      };
+      const persist = (role, content) => sessionsMod.appendTurn(sessionId, role, content, cfgDir);
+
+      let result;
       try {
-        const g = goalsMod.closeGoal(name, outcome, cfgDir);
-        console.log(JSON.stringify(g, null, 2));
-      } catch (e) { console.error(e?.message || e); process.exit(1); }
+        result = await loopEng.runLoop({
+          prompt: tickPrompt,
+          max: 1,
+          until: null,
+          messages,
+          sendOnce,
+          persist,
+          onIteration: undefined,
+          signal: undefined,
+        });
+      } catch (e) {
+        console.error(`tick error: ${e?.message || e}`);
+        process.exit(1);
+      }
+      goalsMod.appendCheckIn(name, result.lastReply, cfgDir);
+      console.log(JSON.stringify({ ok: true, name, iterations: result.iterations, reply: result.lastReply }));
       return;
     }
     case 'switch': {
