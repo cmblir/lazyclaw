@@ -10,10 +10,6 @@ One Node CLI that talks to every major LLM provider, runs multi-step workflows a
 
 > Standalone CLI. A companion dashboard, [LazyClaude](https://github.com/cmblir/LazyClaude), wraps the same providers in a web UI — but `lazyclaw` needs nothing from it: `npm i -g lazyclaw` and go.
 
-<p align="center">
-  <img src="docs/screenshots/banner.png" alt="lazyclaw launch banner — ASCII mascot with active provider/model" width="620">
-</p>
-
 Every subcommand at a glance — `lazyclaw --help`:
 
 <img src="docs/screenshots/help.png" alt="lazyclaw --help — full subcommand reference" width="760">
