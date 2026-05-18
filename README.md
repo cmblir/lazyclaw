@@ -10,6 +10,14 @@ One Node CLI that talks to every major LLM provider, runs multi-step workflows a
 
 > Standalone CLI. A companion dashboard, [LazyClaude](https://github.com/cmblir/LazyClaude), wraps the same providers in a web UI — but `lazyclaw` needs nothing from it: `npm i -g lazyclaw` and go.
 
+<p align="center">
+  <img src="docs/screenshots/banner.png" alt="lazyclaw launch banner — ASCII mascot with active provider/model" width="620">
+</p>
+
+Every subcommand at a glance — `lazyclaw --help`:
+
+<img src="docs/screenshots/help.png" alt="lazyclaw --help — full subcommand reference" width="760">
+
 ---
 
 ## Install
@@ -30,6 +38,10 @@ lazyclaw doctor          # validate config + provider registry
 ```
 
 `onboard` writes `~/.lazyclaw/config.json`. Move it with `LAZYCLAW_CONFIG_DIR=/elsewhere`. For automation: `--non-interactive --provider X --model Y [--api-key Z]`.
+
+<img src="docs/screenshots/onboard.png" alt="lazyclaw onboard --non-interactive — writes config.json, prints JSON result" width="760">
+
+<img src="docs/screenshots/doctor.png" alt="lazyclaw doctor — config + provider registry health check" width="760">
 
 ### Subscription mode (no API key)
 
@@ -219,6 +231,8 @@ lazyclaw skills show review
 lazyclaw skills install ./my-skill.md
 lazyclaw skills remove review
 ```
+
+<img src="docs/screenshots/providers.png" alt="lazyclaw providers info anthropic — model list + capabilities" width="760">
 
 ## Workflows (DAG / sequential / persistent)
 
