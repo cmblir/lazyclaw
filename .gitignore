@@ -13,6 +13,12 @@ blob-report/
 # Local runtime state written by the CLI
 .lazyclaw/
 
+# Secrets — never commit .env files (they hold tokens). Use .env.example
+# in the repo and put real values under ~/.lazyclaw/.env on the host.
+.env
+*.env
+!.env.example
+
 # OS / editor metadata
 .DS_Store
 *.swp

@@ -922,6 +922,10 @@ const SUBCOMMANDS = [
   'orchestrator',
   // v3.99.30 — /loop and /goal slash commands (in-session + detached)
   'loop', 'loops', 'goal', 'memory',
+  // v4.0.0 — Slack Socket Mode listener (inbound DM / @-mention)
+  'slack',
+  // v4.1.0 — multi-agent slack system (Phase 9+)
+  'agent', 'team', 'task',
 ];
 
 const SUBCOMMAND_SUBS = {
@@ -941,6 +945,10 @@ const SUBCOMMAND_SUBS = {
   loops:     ['list', 'show', 'kill', 'tail'],
   goal:      ['add', 'list', 'show', 'close', 'switch', 'tick', 'channel'],
   memory:    ['show', 'dream', 'edit'],
+  slack:     ['listen'],
+  agent:     ['add', 'list', 'show', 'edit', 'remove'],
+  team:      ['add', 'list', 'show', 'edit', 'remove'],
+  task:      ['start', 'list', 'show', 'abandon', 'done', 'remove'],
 };
 
 function bashCompletion() {
@@ -2889,6 +2897,101 @@ async function cmdChat(flags = {}) {
         } catch (e) { process.stdout.write(`dream error: ${e?.message || e}\n`); }
         return true;
       }
+      case '/agent': {
+        const rawArg = line.slice('/agent'.length).trim();
+        const agentsMod = await import('./agents.mjs');
+        const loopMod = await import('./loop-engine.mjs');
+        let tokens;
+        try { tokens = loopMod.splitArgs(rawArg); }
+        catch (e) { process.stdout.write(`/agent error: ${e?.message || e}\n`); return true; }
+        const sub = tokens[0];
+        const rest = tokens.slice(1);
+        const aname = rest[0];
+        try {
+          if (!sub || sub === 'list') {
+            const agents = agentsMod.listAgents(cfgDir);
+            if (agents.length === 0) process.stdout.write('no agents registered. /agent add <name> [...] to create.\n');
+            else for (const a of agents) {
+              const provLine = a.model ? `${a.provider}/${a.model}` : a.provider;
+              process.stdout.write(`• ${a.name} — ${a.displayName} — ${provLine} — tools=[${(a.tools || []).join(',')}]\n`);
+            }
+          } else if (sub === 'show') {
+            if (!aname) { process.stdout.write('usage: /agent show <name>\n'); return true; }
+            const a = agentsMod.getAgent(aname, cfgDir);
+            if (!a) process.stdout.write(`no agent "${aname}"\n`);
+            else process.stdout.write(JSON.stringify(a, null, 2) + '\n');
+          } else if (sub === 'add') {
+            if (!aname) { process.stdout.write('usage: /agent add <name> [role text…]\n'); return true; }
+            const roleText = rest.slice(1).join(' ').trim();
+            const a = agentsMod.registerAgent({ name: aname, role: roleText }, cfgDir);
+            process.stdout.write(`✓ added agent ${a.name} (tools=${a.tools.join(',')})\n`);
+          } else if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
+            if (!aname) { process.stdout.write('usage: /agent remove <name>\n'); return true; }
+            agentsMod.removeAgent(aname, cfgDir);
+            process.stdout.write(`✓ removed agent ${aname}\n`);
+          } else {
+            process.stdout.write(`/agent: unknown sub "${sub}" — list|show|add|remove\n`);
+          }
+        } catch (e) {
+          process.stdout.write(`/agent error: ${e?.message || e}\n`);
+        }
+        return true;
+      }
+      case '/team': {
+        const rawArg = line.slice('/team'.length).trim();
+        const teamsMod = await import('./teams.mjs');
+        const loopMod = await import('./loop-engine.mjs');
+        let tokens;
+        try { tokens = loopMod.splitArgs(rawArg); }
+        catch (e) { process.stdout.write(`/team error: ${e?.message || e}\n`); return true; }
+        const sub = tokens[0];
+        const rest = tokens.slice(1);
+        const tname = rest[0];
+        try {
+          if (!sub || sub === 'list') {
+            const teams = teamsMod.listTeams(cfgDir);
+            if (teams.length === 0) process.stdout.write('no teams registered. /team add <name> --agents a,b --lead a [--channel #x]\n');
+            else for (const t of teams) {
+              const chLine = t.slackChannel ? ` — ${t.slackChannel}` : '';
+              process.stdout.write(`• ${t.name} — ${t.displayName} — lead=${t.lead} — agents=[${t.agents.join(',')}]${chLine}\n`);
+            }
+          } else if (sub === 'show') {
+            if (!tname) { process.stdout.write('usage: /team show <name>\n'); return true; }
+            const t = teamsMod.getTeam(tname, cfgDir);
+            if (!t) process.stdout.write(`no team "${tname}"\n`);
+            else process.stdout.write(JSON.stringify(t, null, 2) + '\n');
+          } else if (sub === 'add') {
+            // /team add <name> --agents a,b,c [--lead a] [--channel #x]
+            if (!tname) { process.stdout.write('usage: /team add <name> --agents a,b,c [--lead a] [--channel #x]\n'); return true; }
+            let agentsCsv = null, lead = null, channel = '';
+            for (let i = 1; i < rest.length; i++) {
+              const t = rest[i];
+              if (t === '--agents') agentsCsv = rest[++i] || '';
+              else if (t === '--lead') lead = rest[++i] || null;
+              else if (t === '--channel') channel = rest[++i] || '';
+              else { process.stdout.write(`/team error: unknown token "${t}"\n`); return true; }
+            }
+            if (!agentsCsv) { process.stdout.write('/team add: --agents is required\n'); return true; }
+            const agents = teamsMod.parseListFlag(agentsCsv);
+            const ch = channel ? await teamsMod.resolveSlackChannel(channel, {
+              botToken: process.env.SLACK_BOT_TOKEN || null,
+              apiBase: process.env.SLACK_API_BASE || 'https://slack.com/api',
+              logger: () => {},
+            }) : '';
+            const team = teamsMod.registerTeam({ name: tname, agents, lead, slackChannel: ch }, cfgDir);
+            process.stdout.write(`✓ added team ${team.name} (lead=${team.lead}, agents=${team.agents.join(',')})\n`);
+          } else if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
+            if (!tname) { process.stdout.write('usage: /team remove <name>\n'); return true; }
+            teamsMod.removeTeam(tname, cfgDir);
+            process.stdout.write(`✓ removed team ${tname}\n`);
+          } else {
+            process.stdout.write(`/team: unknown sub "${sub}" — list|show|add|remove\n`);
+          }
+        } catch (e) {
+          process.stdout.write(`/team error: ${e?.message || e}\n`);
+        }
+        return true;
+      }
       case '/exit': {
         return 'EXIT';
       }
@@ -4346,6 +4449,402 @@ async function cmdMemory(sub, positional, flags = {}) {
   }
 }
 
+const AGENT_REG_SUBS = new Set(['add', 'list', 'show', 'edit', 'remove', 'rm', 'delete']);
+const TEAM_SUBS = new Set(['add', 'list', 'show', 'edit', 'remove', 'rm', 'delete']);
+const TASK_SUBS = new Set(['start', 'list', 'show', 'abandon', 'done', 'remove', 'rm', 'delete']);
+
+async function cmdTask(sub, positional, flags = {}) {
+  const tasksMod = await import('./tasks.mjs');
+  const teamsMod = await import('./teams.mjs');
+  const agentsMod = await import('./agents.mjs');
+  const cfgDir = path.dirname(configPath());
+  const idOrFirst = positional[0];
+
+  const emitJson = (obj) => process.stdout.write(JSON.stringify(obj, null, 2) + '\n');
+
+  // Open a thread root in Slack and return its ts (or '' if we deliberately
+  // skipped posting). Caller decides what to do with the ts.
+  const postKickoff = async ({ task, team, leadAgent }) => {
+    if (!task.slackChannel) {
+      process.stderr.write('[task] team has no slackChannel — skipping Slack post\n');
+      return '';
+    }
+    try { _loadDotenvIfAny(cfgDir); } catch { /* best-effort */ }
+    const { SlackChannel } = await import('./channels/slack.mjs');
+    const slack = new SlackChannel({ requireInbound: false });
+    try {
+      await slack.start(async () => '', {});
+    } catch (err) {
+      if (err?.code === 'SLACK_MISSING_ENV') {
+        throw new Error(`SLACK_BOT_TOKEN missing — set it in ${path.join(cfgDir, '.env')} or unset team.slackChannel`);
+      }
+      throw err;
+    }
+    try {
+      const text = tasksMod.buildKickoffMessage({
+        id: task.id,
+        title: task.title,
+        description: task.description,
+        leadDisplayName: leadAgent?.displayName || task.lead,
+        teamDisplayName: team.displayName || team.name,
+      });
+      const res = await slack.send(task.slackChannel, text);
+      return res?.ts || '';
+    } finally {
+      await slack.stop().catch(() => {});
+    }
+  };
+
+  switch (sub) {
+    case undefined:
+    case 'list': {
+      emitJson(tasksMod.listTasks(cfgDir));
+      return;
+    }
+    case 'start': {
+      const teamName = flags.team;
+      const title = flags.title;
+      if (!teamName || !title) {
+        console.error('Usage: lazyclaw task start --team <team> --title "..." [--description "..."] [--lead <agent>]');
+        process.exit(2);
+      }
+      try {
+        const team = teamsMod.getTeam(teamName, cfgDir);
+        if (!team) { console.error(`task start: no team "${teamName}"`); process.exit(2); }
+        const leadName = flags.lead || team.lead;
+        const leadAgent = agentsMod.getAgent(leadName, cfgDir);
+        // Create the task record first (status=pending) so we can roll its
+        // id into the Slack message; then post and patch in the ts.
+        const seeded = tasksMod.registerTask({
+          title,
+          description: flags.description || '',
+          team: teamName,
+          lead: leadName,
+          slackChannel: team.slackChannel,
+          status: 'pending',
+        }, cfgDir);
+        let ts = '';
+        try {
+          ts = await postKickoff({ task: seeded, team, leadAgent });
+        } catch (err) {
+          // Rollback so we don't leave orphan task records when the post fails.
+          try { tasksMod.removeTask(seeded.id, cfgDir); } catch { /* best-effort */ }
+          console.error(`task start: ${err?.message || err}`);
+          process.exit(2);
+        }
+        const turns = ts ? [{ agent: 'system', text: `Task opened by user. Lead: ${leadName}.`, ts }] : [];
+        const finalTask = tasksMod.patchTask(seeded.id, {
+          slackThreadTs: ts,
+          status: ts ? 'running' : 'pending',
+          turns,
+        }, cfgDir);
+        emitJson(finalTask);
+      } catch (err) {
+        console.error(`task start: ${err?.message || err}`);
+        process.exit(2);
+      }
+      return;
+    }
+    case 'show': {
+      if (!idOrFirst) { console.error('Usage: lazyclaw task show <id>'); process.exit(2); }
+      const t = tasksMod.getTask(idOrFirst, cfgDir);
+      if (!t) { console.error(`task show: no task "${idOrFirst}"`); process.exit(2); }
+      emitJson(t);
+      return;
+    }
+    case 'abandon':
+    case 'done': {
+      if (!idOrFirst) { console.error(`Usage: lazyclaw task ${sub} <id>`); process.exit(2); }
+      const target = sub === 'done' ? 'done' : 'abandoned';
+      try {
+        const next = tasksMod.patchTask(idOrFirst, { status: target }, cfgDir);
+        // Best-effort closing post in the original thread so anyone in
+        // the channel sees the resolution. Errors are surfaced via stderr
+        // but do NOT roll back the status change.
+        if (next.slackChannel && next.slackThreadTs) {
+          try {
+            _loadDotenvIfAny(cfgDir);
+            const { SlackChannel } = await import('./channels/slack.mjs');
+            const slack = new SlackChannel({ requireInbound: false });
+            await slack.start(async () => '', {});
+            const threadId = `${next.slackChannel}:${next.slackThreadTs}`;
+            const msg = target === 'done'
+              ? `:white_check_mark: Task *${next.title}* marked done.`
+              : `:no_entry: Task *${next.title}* abandoned.`;
+            await slack.send(threadId, msg);
+            await slack.stop().catch(() => {});
+          } catch (err) {
+            process.stderr.write(`[task] closing post failed: ${err?.message || err}\n`);
+          }
+        }
+        emitJson(next);
+      } catch (err) {
+        console.error(`task ${sub}: ${err?.message || err}`);
+        process.exit(2);
+      }
+      return;
+    }
+    case 'remove':
+    case 'rm':
+    case 'delete': {
+      if (!idOrFirst) { console.error('Usage: lazyclaw task remove <id>'); process.exit(2); }
+      try { emitJson(tasksMod.removeTask(idOrFirst, cfgDir)); }
+      catch (err) { console.error(`task remove: ${err?.message || err}`); process.exit(2); }
+      return;
+    }
+    default:
+      console.error('Usage: lazyclaw task <start|list|show|abandon|done|remove> ...');
+      process.exit(2);
+  }
+}
+
+
+
+async function cmdTeam(sub, positional, flags = {}) {
+  const teamsMod = await import('./teams.mjs');
+  const cfgDir = path.dirname(configPath());
+  const name = positional[0];
+
+  const emitJson = (obj) => process.stdout.write(JSON.stringify(obj, null, 2) + '\n');
+  const resolveChannel = async (raw) => {
+    if (!raw) return '';
+    // .env may have a SLACK_BOT_TOKEN we can use; otherwise pass through.
+    try { _loadDotenvIfAny(cfgDir); } catch { /* best-effort */ }
+    return await teamsMod.resolveSlackChannel(raw, {
+      botToken: process.env.SLACK_BOT_TOKEN || null,
+      apiBase: process.env.SLACK_API_BASE || 'https://slack.com/api',
+      logger: (line) => process.stderr.write(line),
+    });
+  };
+
+  switch (sub) {
+    case undefined:
+    case 'list': {
+      emitJson(teamsMod.listTeams(cfgDir));
+      return;
+    }
+    case 'add': {
+      if (!name) { console.error('Usage: lazyclaw team add <name> --agents a,b,c [--lead X] [--channel #shop|Cxxx] [--display "..."]'); process.exit(2); }
+      const agents = teamsMod.parseListFlag(flags.agents) || [];
+      try {
+        const channel = await resolveChannel(flags.channel || '');
+        const t = teamsMod.registerTeam({
+          name,
+          displayName: flags.display || flags['display-name'],
+          agents,
+          lead: flags.lead || null,
+          slackChannel: channel,
+        }, cfgDir);
+        emitJson(t);
+      } catch (err) {
+        console.error(`team add: ${err?.message || err}`);
+        process.exit(2);
+      }
+      return;
+    }
+    case 'show': {
+      if (!name) { console.error('Usage: lazyclaw team show <name>'); process.exit(2); }
+      const t = teamsMod.getTeam(name, cfgDir);
+      if (!t) { console.error(`team show: no team "${name}"`); process.exit(2); }
+      emitJson(t);
+      return;
+    }
+    case 'edit': {
+      if (!name) { console.error('Usage: lazyclaw team edit <name> [--agents a,b,c] [--lead X] [--channel ...] [--display "..."]'); process.exit(2); }
+      const patch = {};
+      if (flags.display !== undefined)         patch.displayName = String(flags.display);
+      if (flags['display-name'] !== undefined) patch.displayName = String(flags['display-name']);
+      if (flags.agents !== undefined)          patch.agents = teamsMod.parseListFlag(flags.agents);
+      if (flags.lead !== undefined)            patch.lead = String(flags.lead);
+      if (flags.channel !== undefined)         patch.slackChannel = await resolveChannel(flags.channel);
+      if (Object.keys(patch).length === 0) {
+        console.error('team edit: no fields to update');
+        process.exit(2);
+      }
+      try { emitJson(teamsMod.patchTeam(name, patch, cfgDir)); }
+      catch (err) { console.error(`team edit: ${err?.message || err}`); process.exit(2); }
+      return;
+    }
+    case 'remove':
+    case 'rm':
+    case 'delete': {
+      if (!name) { console.error('Usage: lazyclaw team remove <name>'); process.exit(2); }
+      try { emitJson(teamsMod.removeTeam(name, cfgDir)); }
+      catch (err) { console.error(`team remove: ${err?.message || err}`); process.exit(2); }
+      return;
+    }
+    default:
+      console.error('Usage: lazyclaw team <add|list|show|edit|remove> ...');
+      process.exit(2);
+  }
+}
+
+async function cmdAgentRegistry(sub, positional, flags = {}) {
+  const agentsMod = await import('./agents.mjs');
+  const cfgDir = path.dirname(configPath());
+  const name = positional[0];
+
+  const emitJson = (obj) => process.stdout.write(JSON.stringify(obj, null, 2) + '\n');
+
+  switch (sub) {
+    case undefined:
+    case 'list': {
+      emitJson(agentsMod.listAgents(cfgDir));
+      return;
+    }
+    case 'add': {
+      if (!name) { console.error('Usage: lazyclaw agent add <name> [--role "..."] [--provider X] [--model Y] [--display "..."] [--tools bash,read,write,grep] [--tags a,b]'); process.exit(2); }
+      const tools = agentsMod.parseToolsFlag(flags.tools);
+      try {
+        const a = agentsMod.registerAgent({
+          name,
+          displayName: flags.display || flags['display-name'],
+          role: flags.role || '',
+          provider: flags.provider || 'claude-cli',
+          model: flags.model || '',
+          tools: tools === null ? undefined : tools,
+          tags: agentsMod.parseToolsFlag(flags.tags) || [],
+        }, cfgDir);
+        emitJson(a);
+      } catch (err) {
+        console.error(`agent add: ${err?.message || err}`);
+        process.exit(2);
+      }
+      return;
+    }
+    case 'show': {
+      if (!name) { console.error('Usage: lazyclaw agent show <name>'); process.exit(2); }
+      const a = agentsMod.getAgent(name, cfgDir);
+      if (!a) { console.error(`agent show: no agent "${name}"`); process.exit(2); }
+      emitJson(a);
+      return;
+    }
+    case 'edit': {
+      if (!name) { console.error('Usage: lazyclaw agent edit <name> [--role "..."] [--provider X] [--model Y] [--display "..."] [--tools ...]'); process.exit(2); }
+      const patch = {};
+      if (flags.role !== undefined)         patch.role = String(flags.role);
+      if (flags.provider !== undefined)     patch.provider = String(flags.provider);
+      if (flags.model !== undefined)        patch.model = String(flags.model);
+      if (flags.display !== undefined)      patch.displayName = String(flags.display);
+      if (flags['display-name'] !== undefined) patch.displayName = String(flags['display-name']);
+      if (flags.tools !== undefined)        patch.tools = agentsMod.parseToolsFlag(flags.tools);
+      if (flags.tags !== undefined)         patch.tags = agentsMod.parseToolsFlag(flags.tags);
+      if (Object.keys(patch).length === 0) {
+        console.error('agent edit: no fields to update');
+        process.exit(2);
+      }
+      try { emitJson(agentsMod.patchAgent(name, patch, cfgDir)); }
+      catch (err) { console.error(`agent edit: ${err?.message || err}`); process.exit(2); }
+      return;
+    }
+    case 'remove':
+    case 'rm':
+    case 'delete': {
+      if (!name) { console.error('Usage: lazyclaw agent remove <name>'); process.exit(2); }
+      try { emitJson(agentsMod.removeAgent(name, cfgDir)); }
+      catch (err) { console.error(`agent remove: ${err?.message || err}`); process.exit(2); }
+      return;
+    }
+    default:
+      console.error('Usage: lazyclaw agent <add|list|show|edit|remove> ...');
+      process.exit(2);
+  }
+}
+
+// Best-effort .env loader for ~/.lazyclaw/.env. Only sets keys that are
+// not already present in process.env (so a shell-level export wins).
+// Lines starting with '#' are comments; values are taken verbatim and
+// stripped of surrounding double-quotes if present.
+function _loadDotenvIfAny(cfgDir) {
+  const p = path.join(cfgDir, '.env');
+  if (!fs.existsSync(p)) return { path: p, loaded: 0 };
+  let loaded = 0;
+  const raw = fs.readFileSync(p, 'utf8');
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line || line.trimStart().startsWith('#')) continue;
+    const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$/);
+    if (!m) continue;
+    let val = m[2].trim();
+    if (val.length >= 2 && val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
+    if (process.env[m[1]] === undefined) { process.env[m[1]] = val; loaded++; }
+  }
+  return { path: p, loaded };
+}
+
+async function cmdSlack(sub, positional, flags = {}) {
+  if (sub !== 'listen') {
+    console.error('Usage: lazyclaw slack listen [--provider X] [--model Y]');
+    process.exit(2);
+  }
+  await ensureRegistry();
+  const cfg = readConfig();
+  const cfgDir = path.dirname(configPath());
+
+  const envInfo = _loadDotenvIfAny(cfgDir);
+  process.stderr.write(`[slack] .env: ${envInfo.loaded} keys loaded from ${envInfo.path}\n`);
+
+  const provName = flags.provider || cfg.provider || 'mock';
+  const prov = _registryMod.PROVIDERS[provName];
+  if (!prov) { console.error(`unknown provider: ${provName}`); process.exit(2); }
+  const model = flags.model || cfg.model;
+
+  // Per-thread rolling chat history so multi-turn coherence works
+  // without committing to on-disk sessions. Capped at MAX_TURNS to
+  // bound the prompt size.
+  const threadMsgs = new Map();
+  const MAX_TURNS = 20;
+
+  const handler = async ({ threadId, text }) => {
+    const cleaned = String(text || '').replace(/<@[A-Z0-9]+>/g, '').trim();
+    if (!cleaned) return '(empty message)';
+    const msgs = threadMsgs.get(threadId) || [];
+    msgs.push({ role: 'user', content: cleaned });
+    let acc = '';
+    try {
+      for await (const chunk of prov.sendMessage(msgs, {
+        apiKey: _resolveAuthKey(cfg, provName),
+        model,
+      })) acc += chunk;
+    } catch (err) {
+      msgs.pop();
+      const why = err?.message || String(err);
+      process.stderr.write(`[slack] provider error: ${why}\n`);
+      return `(provider error: ${why})`;
+    }
+    msgs.push({ role: 'assistant', content: acc });
+    if (msgs.length > MAX_TURNS) msgs.splice(0, msgs.length - MAX_TURNS);
+    threadMsgs.set(threadId, msgs);
+    return acc || '(empty reply)';
+  };
+
+  const { SlackChannel } = await import('./channels/slack.mjs');
+  const ch = new SlackChannel();
+  process.stderr.write(`[slack] provider=${provName} model=${model || '(default)'}\n`);
+  try {
+    await ch.start(handler);
+    await ch._connectSocketMode({ logger: (line) => process.stderr.write(line) });
+  } catch (err) {
+    if (err?.code === 'SLACK_MISSING_ENV') {
+      console.error(`slack: missing env vars: ${(err.missing || []).join(', ')}`);
+      console.error(`hint: set them in ${path.join(cfgDir, '.env')} (uncomment SLACK_APP_TOKEN / SLACK_SIGNING_SECRET)`);
+    } else {
+      console.error(`slack: ${err?.message || err}`);
+    }
+    process.exit(2);
+  }
+  process.stderr.write(`[slack] listening. Ctrl-C to stop.\n`);
+
+  await new Promise((resolve) => {
+    const onSig = async () => {
+      process.stderr.write(`\n[slack] shutting down…\n`);
+      try { await ch.stop(); } catch { /* best-effort */ }
+      resolve();
+    };
+    process.once('SIGINT', onSig);
+    process.once('SIGTERM', onSig);
+  });
+}
+
 async function cmdSkills(sub, positional, flags = {}) {
   const skillsMod = await import('./skills.mjs');
   const cfgDir = path.dirname(configPath());
@@ -5397,7 +5896,10 @@ async function _dispatchMenuChoice(argv) {
   try {
     switch (sub) {
       case 'chat':         return await cmdChat({});
-      case 'agent':        return await cmdAgent(rest[0] || '-', {});
+      case 'agent':        {
+        if (AGENT_REG_SUBS.has(rest[0])) return await cmdAgentRegistry(rest[0], rest.slice(1), {});
+        return await cmdAgent(rest[0] || '-', {});
+      }
       case 'onboard':      return await cmdOnboard({});
       case 'setup':        return await cmdSetup(undefined, rest, {});
       case 'workspace':    return await cmdWorkspace(rest[0], rest.slice(1), {});
@@ -5410,6 +5912,9 @@ async function _dispatchMenuChoice(argv) {
       case 'loops':        return await cmdLoops(rest[0], rest.slice(1), {});
       case 'goal':         return await cmdGoal(rest[0], rest.slice(1), {});
       case 'memory':       return await cmdMemory(rest[0], rest.slice(1), {});
+      case 'slack':        return await cmdSlack(rest[0], rest.slice(1), {});
+      case 'team':         return await cmdTeam(rest[0], rest.slice(1), {});
+      case 'task':         return await cmdTask(rest[0], rest.slice(1), {});
       case 'auth':         return await cmdAuth(rest[0], rest.slice(1), {});
       case 'pairing':      return await cmdPairing(rest[0], rest.slice(1), {});
       case 'nodes':        return await cmdNodes(rest[0], rest.slice(1), {});
@@ -5954,6 +6459,21 @@ async function main() {
       await cmdMemory(sub, rest.positional.slice(1), rest.flags);
       break;
     }
+    case 'slack': {
+      const sub = rest.positional[0];
+      await cmdSlack(sub, rest.positional.slice(1), rest.flags);
+      break;
+    }
+    case 'team': {
+      const sub = rest.positional[0];
+      await cmdTeam(sub, rest.positional.slice(1), rest.flags);
+      break;
+    }
+    case 'task': {
+      const sub = rest.positional[0];
+      await cmdTask(sub, rest.positional.slice(1), rest.flags);
+      break;
+    }
     case 'setup': {
       await cmdSetup(undefined, rest.positional, rest.flags);
       break;
@@ -5967,8 +6487,12 @@ async function main() {
       break;
     }
     case 'agent': {
-      const prompt = rest.positional[0];
-      await cmdAgent(prompt, rest.flags);
+      const first = rest.positional[0];
+      if (AGENT_REG_SUBS.has(first)) {
+        await cmdAgentRegistry(first, rest.positional.slice(1), rest.flags);
+      } else {
+        await cmdAgent(first, rest.flags);
+      }
       break;
     }
     case 'doctor': {

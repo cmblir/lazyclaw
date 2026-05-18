@@ -8,11 +8,12 @@
 //                                  we add Events API mode (not yet)
 //
 // Outbound (`send(threadId, text)`) only needs the bot token. Inbound
-// arrives via Socket Mode — we surface the entry point as
-// `_simulateInbound(text, threadId)` so tests can drive the same flow
-// without standing up a WebSocket. A future production wiring fills in
-// the real Socket Mode listener and calls `_simulateInbound` (or the
-// equivalent private method) for each event.
+// arrives via Socket Mode — `_connectSocketMode()` opens a WebSocket to
+// Slack's gateway (negotiated by `apps.connections.open`) and dispatches
+// every `events_api` envelope through `_simulateInbound(text, threadId)`.
+// `start()` only validates env so unit tests can drive `_simulateInbound`
+// directly without bringing up a WebSocket; the CLI's `slack listen`
+// subcommand calls `_connectSocketMode()` explicitly after `start()`.
 //
 // SLACK_API_BASE (test-only) overrides the Slack Web API base URL so the
 // Phase 8 spec can point the adapter at a local mock HTTP server.
@@ -130,6 +131,213 @@ export class SlackChannel extends Channel {
       throw new SlackError(`slack send failed: ${json.error || 'unknown'}`, 'SLACK_API_FAIL');
     }
     return json;
+  }
+
+  // Open a Socket Mode WebSocket and route every inbound event through
+  // `_simulateInbound`. Returns when the listener is connected; the
+  // returned object exposes `.close()` for graceful shutdown.
+  //
+  // opts.logger?: (line: string) => void — diagnostic sink (stderr in
+  //   the CLI, no-op in tests).
+  // opts.maxReconnects?: number — cap reconnect attempts (default ∞).
+  async _connectSocketMode({ logger = () => {}, maxReconnects = Infinity } = {}) {
+    validateEnv(this._env, { requireInbound: true });
+    if (typeof globalThis.WebSocket !== 'function') {
+      throw new SlackError(
+        'global WebSocket is not available — Node 22+ required for Socket Mode',
+        'SLACK_NO_WS'
+      );
+    }
+    const apiBase = this._env.apiBase.replace(/\/$/, '');
+    const appToken = this._env.appToken;
+    const seenEnvelopes = new Set();
+    let closed = false;
+    let ws = null;
+    let attempts = 0;
+
+    const openConnection = async () => {
+      const url = `${apiBase}/apps.connections.open`;
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${appToken}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      });
+      if (!res.ok) {
+        throw new SlackError(`apps.connections.open HTTP ${res.status}`, 'SLACK_OPEN_HTTP');
+      }
+      const json = await res.json().catch(() => ({}));
+      if (!json.ok || !json.url) {
+        throw new SlackError(`apps.connections.open failed: ${json.error || 'no url'}`, 'SLACK_OPEN_FAIL');
+      }
+      return json.url;
+    };
+
+    // (channel, ts) dedupe — a single user message can fire both
+    // `message` and `app_mention` events in the same channel. Both
+    // arrive as separate Socket Mode envelopes (different envelope_id),
+    // so the envelope_id-level dedupe upstream doesn't catch them. We
+    // claim the pair on first dispatch and reject the second.
+    const seenMessages = new Map();  // key → expiresAt(ms)
+    const MSG_TTL_MS = 60_000;
+    const claimMessage = (channel, ts) => {
+      const key = `${channel}:${ts}`;
+      const now = Date.now();
+      // Sweep expired entries opportunistically so the map doesn't grow
+      // unbounded over a long-running session.
+      if (seenMessages.size > 256) {
+        for (const [k, exp] of seenMessages) if (exp < now) seenMessages.delete(k);
+      }
+      const exp = seenMessages.get(key);
+      if (exp && exp >= now) return false;
+      seenMessages.set(key, now + MSG_TTL_MS);
+      return true;
+    };
+
+    const dispatchEvent = async (event) => {
+      if (!event || typeof event !== 'object') return;
+      // Skip the bot's own messages so we don't loop on our own replies.
+      if (event.bot_id || event.subtype === 'bot_message') return;
+      if (event.type !== 'app_mention' && event.type !== 'message') return;
+      // For DMs (`im`) channel_type is 'im'; for channel mentions we only
+      // get app_mention events. Either way we have channel + ts.
+      const text = typeof event.text === 'string' ? event.text : '';
+      const channel = event.channel;
+      const sourceTs = event.ts;                       // the message we react to
+      const replyTs = event.thread_ts || event.ts;     // the thread root for replies
+      if (!channel || !sourceTs) return;
+      if (!claimMessage(channel, sourceTs)) {
+        logger(`[slack] duplicate ${event.type} for ${channel}:${sourceTs} — skipping\n`);
+        return;
+      }
+      const threadId = `${channel}:${replyTs}`;
+      logger(`[slack] inbound ${event.type} from ${channel} (${text.length} chars)\n`);
+
+      // Immediate acknowledgement so the user sees the bot picked up the
+      // message before the LLM finishes. Prefer a reaction (no message
+      // spam); fall back to a transient text reply when the workspace
+      // doesn't grant reactions:write.
+      const eyesOk = await this._reaction('add', channel, sourceTs, 'eyes');
+      if (!eyesOk) {
+        logger(`[slack] reactions:write missing — falling back to text ack\n`);
+        try { await this.send(threadId, '_확인해보겠습니다…_'); }
+        catch (err) { logger(`[slack] text ack failed: ${err?.message || err}\n`); }
+      }
+
+      try {
+        await this._simulateInbound(text, threadId);
+        if (eyesOk) {
+          // Swap the "working" reaction for a "done" one so the user can
+          // tell at a glance which messages have been answered.
+          await this._reaction('remove', channel, sourceTs, 'eyes');
+          await this._reaction('add', channel, sourceTs, 'white_check_mark');
+        }
+      } catch (err) {
+        logger(`[slack] handler error: ${err?.message || err}\n`);
+        if (eyesOk) {
+          await this._reaction('remove', channel, sourceTs, 'eyes');
+          await this._reaction('add', channel, sourceTs, 'x');
+        }
+      }
+    };
+
+    const connectOnce = () => new Promise((resolve, reject) => {
+      let wsUrl;
+      openConnection()
+        .then((u) => { wsUrl = u; })
+        .catch(reject)
+        .then(() => {
+          if (!wsUrl) return;
+          logger(`[slack] socket-mode dialing wss gateway\n`);
+          ws = new WebSocket(wsUrl);
+          ws.addEventListener('open', () => {
+            attempts = 0;
+            logger(`[slack] socket-mode connected\n`);
+            resolve();
+          });
+          ws.addEventListener('message', async (ev) => {
+            let frame;
+            try { frame = JSON.parse(typeof ev.data === 'string' ? ev.data : ev.data.toString()); }
+            catch { return; }
+            if (frame.type === 'hello') {
+              logger(`[slack] hello (num_connections=${frame.num_connections || '?'})\n`);
+              return;
+            }
+            if (frame.type === 'disconnect') {
+              logger(`[slack] disconnect requested (reason=${frame.reason || '?'})\n`);
+              try { ws.close(1000); } catch { /* best-effort */ }
+              return;
+            }
+            if (frame.type === 'events_api') {
+              if (frame.envelope_id) {
+                if (seenEnvelopes.has(frame.envelope_id)) return;
+                seenEnvelopes.add(frame.envelope_id);
+                // Bound the dedupe set so it doesn't grow forever.
+                if (seenEnvelopes.size > 1024) {
+                  const trimTo = 512;
+                  const it = seenEnvelopes.values();
+                  while (seenEnvelopes.size > trimTo) seenEnvelopes.delete(it.next().value);
+                }
+                try { ws.send(JSON.stringify({ envelope_id: frame.envelope_id })); }
+                catch (err) { logger(`[slack] ack send failed: ${err?.message || err}\n`); }
+              }
+              const event = frame.payload?.event;
+              await dispatchEvent(event);
+            }
+          });
+          ws.addEventListener('close', () => {
+            logger(`[slack] socket closed\n`);
+            if (closed) return;
+            attempts++;
+            if (attempts > maxReconnects) {
+              logger(`[slack] giving up after ${attempts} reconnect attempts\n`);
+              return;
+            }
+            const backoff = Math.min(30000, 1000 * Math.pow(2, Math.min(attempts, 5)));
+            logger(`[slack] reconnecting in ${backoff}ms (attempt ${attempts})\n`);
+            setTimeout(() => { if (!closed) connectOnce().catch((e) => logger(`[slack] reconnect failed: ${e?.message || e}\n`)); }, backoff);
+          });
+          ws.addEventListener('error', (ev) => {
+            // The 'error' event fires before 'close'; we let 'close' drive
+            // the reconnect so we don't reconnect twice for one failure.
+            logger(`[slack] socket error: ${ev?.message || 'unknown'}\n`);
+          });
+        });
+    });
+
+    await connectOnce();
+    this._socketHandle = {
+      disconnect: async () => {
+        closed = true;
+        try { ws?.close(1000); } catch { /* best-effort */ }
+      },
+    };
+    return this._socketHandle;
+  }
+
+  // Best-effort reaction add / remove. Returns true on success. Silent
+  // false on any failure (missing reactions:write scope, transport
+  // error, …) so callers can chain without noise.
+  async _reaction(action, channel, ts, name) {
+    if (!this._env.botToken || !channel || !ts) return false;
+    const endpoint = action === 'remove' ? 'reactions.remove' : 'reactions.add';
+    const url = `${this._env.apiBase.replace(/\/$/, '')}/${endpoint}`;
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this._env.botToken}`,
+          'Content-Type': 'application/json; charset=utf-8',
+        },
+        body: JSON.stringify({ channel, timestamp: ts, name }),
+      });
+      if (!res.ok) return false;
+      const json = await res.json().catch(() => ({}));
+      return !!json.ok;
+    } catch {
+      return false;
+    }
   }
 
   async stop() {
