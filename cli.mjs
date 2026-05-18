@@ -4451,7 +4451,7 @@ async function cmdMemory(sub, positional, flags = {}) {
 
 const AGENT_REG_SUBS = new Set(['add', 'list', 'show', 'edit', 'remove', 'rm', 'delete']);
 const TEAM_SUBS = new Set(['add', 'list', 'show', 'edit', 'remove', 'rm', 'delete']);
-const TASK_SUBS = new Set(['start', 'list', 'show', 'abandon', 'done', 'remove', 'rm', 'delete']);
+const TASK_SUBS = new Set(['start', 'tick', 'list', 'show', 'abandon', 'done', 'remove', 'rm', 'delete']);
 
 async function cmdTask(sub, positional, flags = {}) {
   const tasksMod = await import('./tasks.mjs');
@@ -4550,6 +4550,56 @@ async function cmdTask(sub, positional, flags = {}) {
       const t = tasksMod.getTask(idOrFirst, cfgDir);
       if (!t) { console.error(`task show: no task "${idOrFirst}"`); process.exit(2); }
       emitJson(t);
+      return;
+    }
+    case 'tick': {
+      const id = idOrFirst;
+      const userMsg = positional.slice(1).join(' ').trim() || flags.message || '';
+      if (!id) { console.error('Usage: lazyclaw task tick <id> [<user message>]'); process.exit(2); }
+      const task = tasksMod.getTask(id, cfgDir);
+      if (!task) { console.error(`task tick: no task "${id}"`); process.exit(2); }
+      const team = teamsMod.getTeam(task.team, cfgDir);
+      if (!team) { console.error(`task tick: team "${task.team}" disappeared`); process.exit(2); }
+      // Load all team agents in one shot — the router needs to dispatch
+      // tool-use turns through each speaker's record.
+      const agentsById = {};
+      for (const name of team.agents) {
+        const rec = agentsMod.getAgent(name, cfgDir);
+        if (!rec) { console.error(`task tick: agent "${name}" disappeared`); process.exit(2); }
+        agentsById[name] = rec;
+      }
+      try { _loadDotenvIfAny(cfgDir); } catch { /* best-effort */ }
+      const router = await import('./mas/mention_router.mjs');
+      // The runner needs a real api key for the agent's provider. We
+      // resolve the LEAD's key here on the assumption that all team
+      // members share a provider (Phase 13 simplification); future
+      // phases will resolve per-agent.
+      const cfg = readConfig();
+      const leadAgent = agentsById[team.lead];
+      const apiKey = _resolveAuthKey(cfg, leadAgent.provider);
+      // Per-provider base-url override. Mostly useful for tests that
+      // point the adapter at a local mock; production users get the
+      // built-in default by leaving these unset.
+      const baseUrl = {
+        anthropic: process.env.LAZYCLAW_ANTHROPIC_BASE_URL,
+        openai:    process.env.LAZYCLAW_OPENAI_BASE_URL,
+        gemini:    process.env.LAZYCLAW_GEMINI_BASE_URL,
+      }[leadAgent.provider] || undefined;
+      try {
+        const result = await router.runTaskTurn({
+          task, team, agentsById,
+          userMessage: userMsg || undefined,
+          configDir: cfgDir,
+          apiKey,
+          baseUrl,
+          logger: (line) => process.stderr.write(line),
+          maxAgentTurns: flags['max-turns'] ? parseInt(flags['max-turns'], 10) : undefined,
+        });
+        emitJson({ id: result.task.id, status: result.task.status, iterations: result.iterations, stoppedBy: result.stoppedBy });
+      } catch (err) {
+        console.error(`task tick: ${err?.message || err}`);
+        process.exit(2);
+      }
       return;
     }
     case 'abandon':
