@@ -857,6 +857,7 @@ const SLASH_COMMANDS = [
   { cmd: '/skill',  help: 'switch active skills: /skill review,style (no arg → clear)' },
   { cmd: '/provider', help: 'switch provider: /provider openai (no arg → print current)' },
   { cmd: '/model',  help: 'switch model: /model gpt-4.1 or anthropic/claude-opus-4-7' },
+  { cmd: '/loop',   help: 'repeat one prompt: /loop "fix lint" [--max N] [--until "<regex>"]' },
   { cmd: '/exit',   help: 'leave the chat' },
 ];
 
@@ -2597,6 +2598,103 @@ async function cmdChat(flags = {}) {
           process.stdout.write(`active skills: ${names.join(', ')}\n`);
         } catch (e) {
           process.stdout.write(`skill error: ${e?.message || e}\n`);
+        }
+        return true;
+      }
+      case '/loop': {
+        // `/loop <prompt> [--max N] [--until "<regex>"]` — repeats one
+        // user prompt against the active provider in the current session.
+        // Default --max 3, hard cap 50. --until short-circuits when its
+        // regex matches the latest assistant turn. Ctrl+C aborts the
+        // current stream AND the whole loop (not just the in-flight
+        // turn). Implementation lives in loop-engine.mjs; here we wire
+        // it to the same provider streaming + buffered-writer used by a
+        // normal user turn.
+        const arg = line.slice('/loop'.length).trim();
+        const loopMod = await import('./loop-engine.mjs');
+        if (!arg) {
+          process.stdout.write(`usage: /loop <prompt> [--max N] [--until "<regex>"]\n`);
+          process.stdout.write(`  default --max ${loopMod.LOOP_MAX_DEFAULT}, ceiling ${loopMod.LOOP_MAX_CEILING}\n`);
+          process.stdout.write(`  session: ${sessionId || '(none — turns will not be persisted)'}\n`);
+          return true;
+        }
+        let parsed;
+        try { parsed = loopMod.parseLoopArgs(arg); }
+        catch (e) { process.stdout.write(`loop error: ${e?.message || e}\n`); return true; }
+        let untilRe = null;
+        try { untilRe = loopMod.compileUntil(parsed.until); }
+        catch (e) { process.stdout.write(`loop error: ${e?.message || e}\n`); return true; }
+
+        // Per-loop AbortController. Ctrl+C aborts the current provider
+        // call (via signal) AND prevents the next iteration (the engine
+        // sees signal.aborted on its loop check). Same handler shape as
+        // the normal-turn path; symmetry keeps `/exit` clean afterwards.
+        const loopAc = new AbortController();
+        const onSigint = () => {
+          loopAc.abort();
+          process.stdout.write('\n^C interrupted — loop aborted\n');
+        };
+        process.on('SIGINT', onSigint);
+
+        const sendOnce = async (msgs, signal) => {
+          let acc = '';
+          let _writeBuf = '';
+          let _writeTimer = null;
+          const _flush = () => {
+            if (_writeBuf) { process.stdout.write(_writeBuf); _writeBuf = ''; }
+            _writeTimer = null;
+          };
+          const _writeChunk = (s) => {
+            _writeBuf += s;
+            if (!_writeTimer) _writeTimer = setTimeout(_flush, 30);
+          };
+          try {
+            for await (const chunk of prov.sendMessage(msgs, {
+              apiKey: _resolveAuthKey(cfg, activeProvName),
+              model: activeModel,
+              sandbox: sandboxSpec,
+              signal,
+              onUsage: accumulateUsage,
+            })) {
+              _writeChunk(chunk);
+              acc += chunk;
+            }
+            if (_writeTimer) clearTimeout(_writeTimer);
+            _flush();
+            process.stdout.write('\n');
+            return acc;
+          } catch (err) {
+            if (_writeTimer) clearTimeout(_writeTimer);
+            _flush();
+            throw err;
+          }
+        };
+
+        if (useTerminal) _ghost.suspend();
+        try {
+          const result = await loopMod.runLoop({
+            prompt: parsed.prompt,
+            max: parsed.max,
+            until: untilRe,
+            messages,
+            sendOnce,
+            persist: (role, content) => persistTurn(role, content),
+            onIteration: ({ i, max }) => {
+              process.stderr.write(`\x1b[2m  ↻ loop iteration ${i}/${max}\x1b[22m\n`);
+            },
+            signal: loopAc.signal,
+          });
+          charsSent += parsed.prompt.length * result.iterations;
+          if (result.stoppedBy === 'until') {
+            process.stderr.write(`\x1b[2m  ✓ loop stopped by --until\x1b[22m\n`);
+          } else if (result.stoppedBy === 'abort') {
+            process.stderr.write(`\x1b[2m  ⊘ loop aborted after ${result.iterations}/${parsed.max} iteration(s)\x1b[22m\n`);
+          }
+        } catch (err) {
+          process.stdout.write(`loop error: ${err?.message || String(err)}\n`);
+        } finally {
+          process.off('SIGINT', onSigint);
+          if (useTerminal) _ghost.resume();
         }
         return true;
       }
