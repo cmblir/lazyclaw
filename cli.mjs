@@ -917,6 +917,8 @@ const SUBCOMMANDS = [
   'setup', 'dashboard',
   // v3.99.22 — multi-agent orchestrator config
   'orchestrator',
+  // v3.99.30 — /loop and /goal slash commands (in-session + detached)
+  'loop', 'loops', 'goal',
 ];
 
 const SUBCOMMAND_SUBS = {
@@ -933,6 +935,8 @@ const SUBCOMMAND_SUBS = {
   workspace: ['list', 'init', 'show', 'remove', 'path'],
   cron:      ['list', 'add', 'remove', 'show', 'sync', 'run'],
   orchestrator: ['status', 'set-planner', 'workers', 'set-max-subtasks', 'clear'],
+  loops:     ['list', 'show', 'kill', 'tail'],
+  goal:      ['add', 'list', 'show', 'close', 'switch', 'tick', 'channel'],
 };
 
 function bashCompletion() {
@@ -3583,6 +3587,221 @@ async function cmdCron(sub, positional, flags = {}) {
   }
 }
 
+// `lazyclaw loop <prompt> [--max N] [--until "<regex>"] [--session ID]
+//                 [--detach] [--provider NAME] [--model NAME]`
+//
+// Without --detach: runs the loop in the foreground using the engine
+// from loop-engine.mjs and streams chunks to stdout (mirrors the REPL
+// /loop UX but with no surrounding chat REPL).
+//
+// With --detach: forks scripts/loop-worker.mjs in its own process group
+// (`detached: true`), prints `{loopId, pid, statePath}` and returns
+// immediately. The worker persists state under `<configDir>/loops/<id>/`.
+async function cmdLoop(prompt, flags = {}) {
+  await ensureRegistry();
+  const cfg = readConfig();
+  const cfgDir = path.dirname(configPath());
+  const loopEng = await import('./loop-engine.mjs');
+  const loopsMod = await import('./loops.mjs');
+
+  if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+    console.error('Usage: lazyclaw loop <prompt> [--max N] [--until "<regex>"] [--session ID] [--detach]');
+    process.exit(2);
+  }
+  const max = flags.max !== undefined ? Number(flags.max) : loopEng.LOOP_MAX_DEFAULT;
+  if (!Number.isInteger(max) || max <= 0) {
+    console.error(`loop: --max must be a positive integer, got "${flags.max}"`);
+    process.exit(2);
+  }
+  if (max > loopEng.LOOP_MAX_CEILING) {
+    console.error(`loop: --max ${max} exceeds ceiling ${loopEng.LOOP_MAX_CEILING} (runaway guard)`);
+    process.exit(2);
+  }
+  let untilRe = null;
+  try { untilRe = loopEng.compileUntil(flags.until); }
+  catch (e) { console.error(`loop: ${e?.message || e}`); process.exit(2); }
+
+  const provName = flags.provider || cfg.provider || 'mock';
+  const prov = _registryMod.PROVIDERS[provName];
+  if (!prov) { console.error(`unknown provider: ${provName}`); process.exit(2); }
+  const model = flags.model || cfg.model;
+
+  const loopId = loopsMod.newLoopId();
+  const requestedSession = flags.session ? String(flags.session) : null;
+  const sessionId = requestedSession || `loop:${loopId}`;
+  const statePath = loopsMod.loopDir(loopId, cfgDir);
+
+  // Seed meta before forking so `loops list` can see the job even if the
+  // worker hasn't reached its first iteration yet.
+  loopsMod.writeMeta(loopId, {
+    prompt,
+    max,
+    until: flags.until || null,
+    sessionId,
+    sessionMode: requestedSession ? 'shared' : 'fresh',
+    provider: provName,
+    model: model || null,
+    status: 'pending',
+    startedAt: new Date().toISOString(),
+    pid: null,
+  }, cfgDir);
+
+  if (flags.detach) {
+    const { spawn } = await import('node:child_process');
+    const here = path.dirname(new URL(import.meta.url).pathname);
+    const worker = path.join(here, 'scripts', 'loop-worker.mjs');
+    const argv = [worker, '--loop-id', loopId, '--prompt', prompt,
+      '--max', String(max), '--provider', provName, '--cfg-dir', cfgDir];
+    if (flags.until) { argv.push('--until', String(flags.until)); }
+    if (requestedSession) { argv.push('--session-existing', requestedSession); }
+    if (model) { argv.push('--model', String(model)); }
+    const child = spawn(process.execPath, argv, {
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir },
+    });
+    child.unref();
+    loopsMod.patchMeta(loopId, { pid: child.pid, pgid: child.pid, status: 'running' }, cfgDir);
+    process.stdout.write(JSON.stringify({ loopId, pid: child.pid, statePath }) + '\n');
+    return;
+  }
+
+  // Foreground path — same engine, streaming chunks live to stdout.
+  const sessionsMod = await import('./sessions.mjs');
+  const messages = requestedSession
+    ? sessionsMod.loadTurns(sessionId, cfgDir).map(t => ({ role: t.role, content: t.content }))
+    : [];
+  loopsMod.patchMeta(loopId, { pid: process.pid, status: 'running' }, cfgDir);
+
+  const ac = new AbortController();
+  const onSig = () => ac.abort();
+  process.on('SIGINT', onSig);
+  process.on('SIGTERM', onSig);
+
+  const sendOnce = async (msgs, signal) => {
+    let acc = '';
+    for await (const chunk of prov.sendMessage(msgs, {
+      apiKey: _resolveAuthKey(cfg, provName),
+      model,
+      signal,
+    })) {
+      process.stdout.write(chunk);
+      acc += chunk;
+    }
+    process.stdout.write('\n');
+    return acc;
+  };
+  const persist = (role, content) => sessionsMod.appendTurn(sessionId, role, content, cfgDir);
+  const onIteration = ({ i, max: m, reply }) => {
+    process.stderr.write(`  ↻ loop iteration ${i}/${m}\n`);
+    loopsMod.appendIteration(loopId, { iteration: i, of: m, bytes: reply.length, preview: reply.slice(0, 200) }, cfgDir);
+  };
+
+  try {
+    const result = await loopEng.runLoop({ prompt, max, until: untilRe, messages, sendOnce, persist, onIteration, signal: ac.signal });
+    const finalStatus = result.stoppedBy === 'abort' ? 'killed' : 'completed';
+    loopsMod.patchMeta(loopId, { status: finalStatus, finishedAt: new Date().toISOString() }, cfgDir);
+    loopsMod.writeResult(loopId, result, cfgDir);
+    process.stdout.write(JSON.stringify({ loopId, ...result }) + '\n');
+  } catch (err) {
+    loopsMod.patchMeta(loopId, { status: 'failed', finishedAt: new Date().toISOString() }, cfgDir);
+    loopsMod.writeResult(loopId, { error: err?.message || String(err) }, cfgDir);
+    console.error(`loop error: ${err?.message || err}`);
+    process.exit(1);
+  } finally {
+    process.off('SIGINT', onSig);
+    process.off('SIGTERM', onSig);
+  }
+}
+
+// Kill registry — `lazyclaw loops kill <id>` SIGTERMs once and SIGKILLs
+// on a second invocation within KILL_ESCALATE_MS. Module-scoped so two
+// rapid invocations of `cmd loops kill <id>` from the same process see
+// each other; for separate processes the worker also handles SIGKILL by
+// the OS, so the escalation is a UX nicety rather than a correctness gate.
+const _killLog = new Map();
+const KILL_ESCALATE_MS = 5000;
+
+async function cmdLoops(sub, positional, flags = {}) {
+  const loopsMod = await import('./loops.mjs');
+  const cfgDir = path.dirname(configPath());
+  switch (sub) {
+    case undefined:
+    case 'list': {
+      const items = loopsMod.listLoops(cfgDir).map(loopsMod.reconcileStatus);
+      console.log(JSON.stringify(items, null, 2));
+      return;
+    }
+    case 'show': {
+      const id = positional[0];
+      if (!id) { console.error('Usage: lazyclaw loops show <id>'); process.exit(2); }
+      const meta = loopsMod.reconcileStatus(loopsMod.readMeta(id, cfgDir));
+      if (!meta) { console.error(`no loop "${id}"`); process.exit(1); }
+      const iterations = loopsMod.readIterations(id, cfgDir);
+      const result = loopsMod.readResult(id, cfgDir);
+      console.log(JSON.stringify({ id, meta, iterations, result }, null, 2));
+      return;
+    }
+    case 'kill': {
+      const id = positional[0];
+      if (!id) { console.error('Usage: lazyclaw loops kill <id>'); process.exit(2); }
+      const meta = loopsMod.readMeta(id, cfgDir);
+      if (!meta) { console.error(`no loop "${id}"`); process.exit(1); }
+      if (!meta.pid) { console.error(`loop "${id}" has no pid`); process.exit(1); }
+      const last = _killLog.get(id) || 0;
+      const now = Date.now();
+      const escalate = (now - last) < KILL_ESCALATE_MS && last > 0;
+      const sig = escalate ? 'SIGKILL' : 'SIGTERM';
+      try { process.kill(meta.pid, sig); }
+      catch (e) {
+        if (e?.code !== 'ESRCH') throw e;
+        // Already gone — reconcile and report.
+        loopsMod.patchMeta(id, { status: 'killed', finishedAt: new Date().toISOString() }, cfgDir);
+        console.log(JSON.stringify({ id, pid: meta.pid, signal: sig, status: 'already_gone' }));
+        return;
+      }
+      _killLog.set(id, now);
+      console.log(JSON.stringify({ id, pid: meta.pid, signal: sig, escalated: escalate }));
+      return;
+    }
+    case 'tail': {
+      const id = positional[0];
+      if (!id) { console.error('Usage: lazyclaw loops tail <id>'); process.exit(2); }
+      const dir = loopsMod.loopDir(id, cfgDir);
+      const logPath = path.join(dir, 'iterations.log');
+      const fs = await import('node:fs');
+      if (!fs.existsSync(dir)) { console.error(`no loop "${id}"`); process.exit(1); }
+      // Print everything already on disk first, then poll for new lines
+      // until the worker exits / status is no longer "running".
+      let offset = 0;
+      if (fs.existsSync(logPath)) {
+        const buf = fs.readFileSync(logPath, 'utf8');
+        process.stdout.write(buf);
+        offset = buf.length;
+      }
+      const pollMs = Number(flags['poll-ms']) || 250;
+      const maxMs = Number(flags['max-wait-ms']) || 0; // 0 = wait indefinitely
+      const startedAt = Date.now();
+      while (true) {
+        await new Promise(r => setTimeout(r, pollMs));
+        let cur = '';
+        try { cur = fs.readFileSync(logPath, 'utf8'); } catch { /* file may briefly not exist */ }
+        if (cur.length > offset) {
+          process.stdout.write(cur.slice(offset));
+          offset = cur.length;
+        }
+        const meta = loopsMod.reconcileStatus(loopsMod.readMeta(id, cfgDir));
+        if (!meta || meta.status !== 'running') break;
+        if (maxMs > 0 && Date.now() - startedAt > maxMs) break;
+      }
+      return;
+    }
+    default:
+      console.error('Usage: lazyclaw loops <list|show|kill|tail> ...');
+      process.exit(2);
+  }
+}
+
 async function cmdSkills(sub, positional, flags = {}) {
   const skillsMod = await import('./skills.mjs');
   const cfgDir = path.dirname(configPath());
@@ -4640,6 +4859,8 @@ async function _dispatchMenuChoice(argv) {
       case 'sessions':     return await cmdSessions(rest[0], rest.slice(1), {});
       case 'providers':    return await cmdProviders(rest[0], rest.slice(1), {});
       case 'cron':         return await cmdCron(rest[0], rest.slice(1), {});
+      case 'loop':         return await cmdLoop(rest[0] || '', {});
+      case 'loops':        return await cmdLoops(rest[0], rest.slice(1), {});
       case 'auth':         return await cmdAuth(rest[0], rest.slice(1), {});
       case 'pairing':      return await cmdPairing(rest[0], rest.slice(1), {});
       case 'nodes':        return await cmdNodes(rest[0], rest.slice(1), {});
@@ -5162,6 +5383,16 @@ async function main() {
     case 'cron': {
       const sub = rest.positional[0];
       await cmdCron(sub, rest.positional.slice(1), rest.flags);
+      break;
+    }
+    case 'loop': {
+      const prompt = rest.positional[0];
+      await cmdLoop(prompt, rest.flags);
+      break;
+    }
+    case 'loops': {
+      const sub = rest.positional[0];
+      await cmdLoops(sub, rest.positional.slice(1), rest.flags);
       break;
     }
     case 'setup': {
