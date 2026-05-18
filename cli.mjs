@@ -858,6 +858,7 @@ const SLASH_COMMANDS = [
   { cmd: '/provider', help: 'switch provider: /provider openai (no arg → print current)' },
   { cmd: '/model',  help: 'switch model: /model gpt-4.1 or anthropic/claude-opus-4-7' },
   { cmd: '/loop',   help: 'repeat one prompt: /loop "fix lint" [--max N] [--until "<regex>"]' },
+  { cmd: '/goal',   help: 'register/switch goal: /goal add NAME [--desc "..."] / /goal NAME / /goal list' },
   { cmd: '/exit',   help: 'leave the chat' },
 ];
 
@@ -2374,7 +2375,12 @@ async function cmdChat(flags = {}) {
   // Persistent session ID. When --session is set we hydrate prior turns from
   // <configDir>/sessions/<id>.jsonl and append every new turn back to it.
   // Without --session, chat is in-memory only (matches phase 4 behavior).
-  const sessionId = flags.session || null;
+  // Mutable so /goal <name> can switch the working context mid-session.
+  let sessionId = flags.session || null;
+  // Currently-active goal name when the user has switched context via
+  // /goal <name>. Tracked so /status can surface it and so future ticks
+  // know which goal to attribute new turns to.
+  let activeGoalName = null;
   const cfgDir = path.dirname(configPath());
   let messages = sessionId
     ? sessionsMod.loadTurns(sessionId, cfgDir).map(t => ({ role: t.role, content: t.content }))
@@ -2700,6 +2706,101 @@ async function cmdChat(flags = {}) {
           process.off('SIGINT', onSigint);
           if (useTerminal) _ghost.resume();
         }
+        return true;
+      }
+      case '/goal': {
+        // /goal                 → list active goals
+        // /goal <name>          → switch chat context to goal:<name>
+        // /goal add <name> [--desc "..."] [--cron "<spec>"]
+        // /goal list            → JSON of all goals
+        // /goal show <name>     → JSON of one
+        // /goal close <name> [done|abandoned]
+        const rawArg = line.slice('/goal'.length).trim();
+        const goalsMod = await import('./goals.mjs');
+        const loopMod = await import('./loop-engine.mjs');
+        if (!rawArg) {
+          const items = goalsMod.listGoals(cfgDir).filter(g => g.status === 'active');
+          if (!items.length) { process.stdout.write('no active goals\n'); }
+          else {
+            for (const g of items) {
+              process.stdout.write(`  ${g.name}${g.description ? ' — ' + g.description : ''}${g.schedule ? ' (cron: ' + g.schedule + ')' : ''}\n`);
+            }
+          }
+          return true;
+        }
+        let tokens;
+        try { tokens = loopMod.splitArgs(rawArg); }
+        catch (e) { process.stdout.write(`goal error: ${e?.message || e}\n`); return true; }
+        const sub = tokens[0];
+        const rest = tokens.slice(1);
+        if (sub === 'add') {
+          let name = null, desc = '', cron = null;
+          for (let i = 0; i < rest.length; i++) {
+            const t = rest[i];
+            if (t === '--desc') desc = rest[++i] || '';
+            else if (t === '--cron') cron = rest[++i] || null;
+            else if (t.startsWith('--')) { process.stdout.write(`goal error: unknown flag ${t}\n`); return true; }
+            else if (!name) name = t;
+            else { process.stdout.write(`goal error: unexpected arg "${t}"\n`); return true; }
+          }
+          if (!name) { process.stdout.write('usage: /goal add <name> [--desc "..."] [--cron "<spec>"]\n'); return true; }
+          try {
+            const g = goalsMod.registerGoal({ name, description: desc, schedule: cron }, cfgDir);
+            process.stdout.write(`✓ goal ${g.name} added (status: active)\n`);
+          } catch (e) { process.stdout.write(`goal error: ${e?.message || e}\n`); }
+          return true;
+        }
+        if (sub === 'list') {
+          process.stdout.write(JSON.stringify(goalsMod.listGoals(cfgDir), null, 2) + '\n');
+          return true;
+        }
+        if (sub === 'show') {
+          const name = rest[0];
+          if (!name) { process.stdout.write('usage: /goal show <name>\n'); return true; }
+          const g = goalsMod.getGoal(name, cfgDir);
+          if (!g) { process.stdout.write(`no goal "${name}"\n`); return true; }
+          process.stdout.write(JSON.stringify(g, null, 2) + '\n');
+          return true;
+        }
+        if (sub === 'close') {
+          const name = rest[0];
+          const outcome = rest[1] || 'done';
+          if (!name) { process.stdout.write('usage: /goal close <name> [done|abandoned]\n'); return true; }
+          try {
+            const g = goalsMod.closeGoal(name, outcome, cfgDir);
+            process.stdout.write(`✓ goal ${g.name} closed (status: ${g.status})\n`);
+          } catch (e) { process.stdout.write(`goal error: ${e?.message || e}\n`); }
+          return true;
+        }
+        // Single-arg branch: switch context to goal:<name>.
+        const goalName = sub;
+        const g = goalsMod.getGoal(goalName, cfgDir);
+        if (!g) {
+          process.stdout.write(`no goal "${goalName}" — try: /goal add ${goalName} --desc "..."\n`);
+          return true;
+        }
+        if (g.status !== 'active') {
+          process.stdout.write(`goal "${goalName}" is ${g.status}; cannot switch\n`);
+          return true;
+        }
+        // Switch: replace the chat's active session id and reload turns
+        // from the goal's session. The provider, model, workspace, and
+        // skill state stay put — only the conversation surface changes.
+        sessionId = g.sessionId;
+        activeGoalName = g.name;
+        const prior = sessionsMod.loadTurns(sessionId, cfgDir);
+        messages = prior.map(t => ({ role: t.role, content: t.content }));
+        // Prepend a one-line goal note to the system message so the
+        // model sees the current objective without us having to mutate
+        // any persistent record on every switch.
+        const sysIdx = messages.findIndex(m => m.role === 'system');
+        const goalNote = `## Goal: ${g.description || g.name}`;
+        if (sysIdx >= 0) {
+          messages[sysIdx] = { role: 'system', content: `${goalNote}\n\n${messages[sysIdx].content}` };
+        } else {
+          messages.unshift({ role: 'system', content: goalNote });
+        }
+        process.stdout.write(`✓ switched to goal: ${g.name} (session: ${sessionId}, ${prior.length} prior turn(s))\n`);
         return true;
       }
       case '/exit': {
@@ -3802,6 +3903,71 @@ async function cmdLoops(sub, positional, flags = {}) {
   }
 }
 
+// `lazyclaw goal <add|list|show|close|switch|tick|channel> ...`
+//
+// Pure registration in Phase 3 (no cron install, no channel delivery —
+// those land in Phase 4 / Phase 8). `switch` is a no-op for the
+// detached CLI surface; it exists for symmetry with the REPL command
+// (where it changes the chat's working session) and writes nothing
+// special when invoked here — the user gets a hint pointing at /goal.
+async function cmdGoal(sub, positional, flags = {}) {
+  const goalsMod = await import('./goals.mjs');
+  const cfgDir = path.dirname(configPath());
+  switch (sub) {
+    case 'add': {
+      const name = positional[0];
+      if (!name) { console.error('Usage: lazyclaw goal add <name> [--desc "..."] [--cron "<spec>"]'); process.exit(2); }
+      try {
+        const g = goalsMod.registerGoal({
+          name,
+          description: flags.desc || '',
+          schedule: flags.cron || null,
+        }, cfgDir);
+        console.log(JSON.stringify(g, null, 2));
+      } catch (e) { console.error(e?.message || e); process.exit(2); }
+      return;
+    }
+    case undefined:
+    case 'list': {
+      const items = goalsMod.listGoals(cfgDir);
+      console.log(JSON.stringify(items, null, 2));
+      return;
+    }
+    case 'show': {
+      const name = positional[0];
+      if (!name) { console.error('Usage: lazyclaw goal show <name>'); process.exit(2); }
+      const g = goalsMod.getGoal(name, cfgDir);
+      if (!g) { console.error(`no goal "${name}"`); process.exit(1); }
+      console.log(JSON.stringify(g, null, 2));
+      return;
+    }
+    case 'close': {
+      const name = positional[0];
+      const outcome = positional[1] || 'done';
+      if (!name) { console.error('Usage: lazyclaw goal close <name> [done|abandoned]'); process.exit(2); }
+      try {
+        const g = goalsMod.closeGoal(name, outcome, cfgDir);
+        console.log(JSON.stringify(g, null, 2));
+      } catch (e) { console.error(e?.message || e); process.exit(1); }
+      return;
+    }
+    case 'switch': {
+      const name = positional[0];
+      if (!name) { console.error('Usage: lazyclaw goal switch <name>'); process.exit(2); }
+      const g = goalsMod.getGoal(name, cfgDir);
+      if (!g) { console.error(`no goal "${name}"`); process.exit(1); }
+      // Non-interactive surface: print the session id so a caller can
+      // pipe it into `lazyclaw chat --session <id>`. The REPL slash form
+      // is what mutates state in a live chat.
+      console.log(JSON.stringify({ name: g.name, sessionId: g.sessionId, status: g.status }));
+      return;
+    }
+    default:
+      console.error('Usage: lazyclaw goal <add|list|show|close|switch> ...');
+      process.exit(2);
+  }
+}
+
 async function cmdSkills(sub, positional, flags = {}) {
   const skillsMod = await import('./skills.mjs');
   const cfgDir = path.dirname(configPath());
@@ -4595,6 +4761,9 @@ const BOOLEAN_FLAGS = new Set([
   'with-turn-count', // sessions list: include turn count per session
   'no-probe',     // providers add: skip the /v1/models reachability probe
   'pick',         // onboard / chat: force the interactive picker even when provider already set
+  'detach',       // loop: fork worker and return immediately
+  'use-memory',   // loop: prepend core memory to each iteration
+  'force',        // goal tick --force: bypass schedule when invoked manually
 ]);
 
 function parseArgs(argv) {
@@ -4861,6 +5030,7 @@ async function _dispatchMenuChoice(argv) {
       case 'cron':         return await cmdCron(rest[0], rest.slice(1), {});
       case 'loop':         return await cmdLoop(rest[0] || '', {});
       case 'loops':        return await cmdLoops(rest[0], rest.slice(1), {});
+      case 'goal':         return await cmdGoal(rest[0], rest.slice(1), {});
       case 'auth':         return await cmdAuth(rest[0], rest.slice(1), {});
       case 'pairing':      return await cmdPairing(rest[0], rest.slice(1), {});
       case 'nodes':        return await cmdNodes(rest[0], rest.slice(1), {});
@@ -5393,6 +5563,11 @@ async function main() {
     case 'loops': {
       const sub = rest.positional[0];
       await cmdLoops(sub, rest.positional.slice(1), rest.flags);
+      break;
+    }
+    case 'goal': {
+      const sub = rest.positional[0];
+      await cmdGoal(sub, rest.positional.slice(1), rest.flags);
       break;
     }
     case 'setup': {
