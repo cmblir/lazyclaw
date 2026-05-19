@@ -4935,7 +4935,15 @@ async function cmdSlack(sub, positional, flags = {}) {
 
   const handler = async ({ threadId, text }) => {
     const cleaned = String(text || '').replace(/<@[A-Z0-9]+>/g, '').trim();
-    if (!cleaned) return '(empty message)';
+    // Phase 19.2: never post a placeholder ("(empty message)" / "(empty
+    // reply)") into the thread — those leaked through as visible noise
+    // when listener self-message echoes happened. Return null and let
+    // _simulateInbound's guard drop the send. Real provider errors
+    // still surface so the operator knows something went wrong.
+    if (!cleaned) {
+      process.stderr.write('[slack] dropping empty inbound (after mention strip)\n');
+      return null;
+    }
     const msgs = threadMsgs.get(threadId) || [];
     msgs.push({ role: 'user', content: cleaned });
     let acc = '';
@@ -4953,7 +4961,11 @@ async function cmdSlack(sub, positional, flags = {}) {
     msgs.push({ role: 'assistant', content: acc });
     if (msgs.length > MAX_TURNS) msgs.splice(0, msgs.length - MAX_TURNS);
     threadMsgs.set(threadId, msgs);
-    return acc || '(empty reply)';
+    if (!acc.trim()) {
+      process.stderr.write('[slack] provider returned empty text — not posting\n');
+      return null;
+    }
+    return acc;
   };
 
   const { SlackChannel } = await import('./channels/slack.mjs');

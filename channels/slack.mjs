@@ -107,7 +107,11 @@ export class SlackChannel extends Channel {
 
   // Called by Socket Mode wiring (or tests) for every inbound message
   // routed to this app. The handler returns the bot's reply; the
-  // adapter posts it back to Slack in the same thread.
+  // adapter posts it back to Slack in the same thread. A null /
+  // empty-string reply skips the send entirely (Phase 19.2) so a
+  // handler that decided to stay silent — e.g. the listener dropping
+  // an empty-after-mention-strip inbound — doesn't leak a "(empty
+  // reply)" placeholder into the channel.
   async _simulateInbound(text, threadId) {
     let reply;
     try {
@@ -120,6 +124,7 @@ export class SlackChannel extends Channel {
       await this.send(threadId, `(error: ${err?.message || err})`);
       return;
     }
+    if (reply == null || (typeof reply === 'string' && reply.trim() === '')) return;
     await this.send(threadId, reply);
   }
 
@@ -289,16 +294,10 @@ export class SlackChannel extends Channel {
       const threadId = `${channel}:${replyTs}`;
       logger(`[slack] inbound ${event.type} from ${channel} (${text.length} chars)\n`);
 
-      // Immediate acknowledgement so the user sees the bot picked up the
-      // message before the LLM finishes. Prefer a reaction (no message
-      // spam); fall back to a transient text reply when the workspace
-      // doesn't grant reactions:write.
-      const eyesOk = await this._reaction('add', channel, sourceTs, 'eyes');
-      if (!eyesOk) {
-        logger(`[slack] reactions:write missing — falling back to text ack\n`);
-        try { await this.send(threadId, '_확인해보겠습니다…_'); }
-        catch (err) { logger(`[slack] text ack failed: ${err?.message || err}\n`); }
-      }
+      // Immediate acknowledgement. _ackInbound is silent when
+      // reactions:write is missing (Phase 19.2 — no more text-ack
+      // spam).
+      const eyesOk = await this._ackInbound(channel, sourceTs, logger);
 
       try {
         await this._simulateInbound(text, threadId);
@@ -389,6 +388,24 @@ export class SlackChannel extends Channel {
       },
     };
     return this._socketHandle;
+  }
+
+  // Mark an inbound message as "being worked on" without spamming the
+  // channel. Tries the :eyes: reaction first (silent UX). When
+  // reactions:write is missing we used to fall back to a text post
+  // ("확인해보겠습니다…") which doubled the noise per turn; Phase 19.2
+  // dropped that fallback so the channel stays clean when the scope
+  // is unavailable. The operator can flip reactions:write on at any
+  // time to bring the visible signal back.
+  //
+  // Exposed as a method (not closure-private in dispatchEvent) so the
+  // listener-noise unit tests can drive it directly.
+  async _ackInbound(channel, sourceTs, logger = () => {}) {
+    const eyesOk = await this._reaction('add', channel, sourceTs, 'eyes');
+    if (!eyesOk) {
+      logger('[slack] reactions:write missing — silent ack only (no text fallback)\n');
+    }
+    return eyesOk;
   }
 
   // Best-effort chat.delete — used by typing-indicator workflows where
