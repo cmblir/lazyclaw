@@ -263,7 +263,10 @@ test.describe('Phase 12b — Anthropic tool-use adapter', () => {
     let err: Error & { code?: string } | null = null;
     try {
       await runAgentTurn({
-        agent: { ...fullAgent, provider: 'claude-cli' },
+        // ollama (and any other chat-only provider) doesn't have a
+        // tool-use adapter yet. claude-cli was added in Phase 19, so
+        // we no longer assert against that name here.
+        agent: { ...fullAgent, provider: 'ollama' },
         userMessage: 'x',
         apiKey: 'k',
       });

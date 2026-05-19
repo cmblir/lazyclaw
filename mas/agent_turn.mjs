@@ -24,6 +24,7 @@ import { listToolSchemas, runTool, ToolError } from './tool_runner.mjs';
 import * as anthropic from '../providers/tool_use/anthropic.mjs';
 import * as openai from '../providers/tool_use/openai.mjs';
 import * as gemini from '../providers/tool_use/gemini.mjs';
+import * as claudeCli from '../providers/tool_use/claude_cli.mjs';
 
 export class AgentTurnError extends Error {
   constructor(message, code) {
@@ -37,9 +38,14 @@ const DEFAULT_MAX_ITERATIONS = 10;
 
 function adapterFor(provider) {
   switch (provider) {
-    case 'anthropic': return { ...anthropic, toolSchemas: anthropic.toAnthropicTools };
-    case 'openai':    return { ...openai,    toolSchemas: openai.toOpenAITools };
-    case 'gemini':    return { ...gemini,    toolSchemas: gemini.toGeminiTools };
+    case 'anthropic':  return { ...anthropic,  toolSchemas: anthropic.toAnthropicTools };
+    case 'openai':     return { ...openai,     toolSchemas: openai.toOpenAITools };
+    case 'gemini':     return { ...gemini,     toolSchemas: gemini.toGeminiTools };
+    // claude-cli runs the tool-use loop INSIDE the binary. Our adapter
+    // resolves every call to kind:'final' so the mention router still
+    // gets a normalised reply, even though no tool_calls envelope is
+    // ever observed.
+    case 'claude-cli': return { ...claudeCli, toolSchemas: (s) => s };
     default:
       throw new AgentTurnError(`provider "${provider}" does not support tool-use yet`, 'PROVIDER_UNSUPPORTED');
   }

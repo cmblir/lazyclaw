@@ -179,9 +179,10 @@ export async function reflectOnce({ agent, task, apiKey, baseUrl, fetchImpl, max
 
 async function pickAdapter(provider) {
   switch (provider) {
-    case 'anthropic': return await import('../providers/tool_use/anthropic.mjs');
-    case 'openai':    return await import('../providers/tool_use/openai.mjs');
-    case 'gemini':    return await import('../providers/tool_use/gemini.mjs');
+    case 'anthropic':  return await import('../providers/tool_use/anthropic.mjs');
+    case 'openai':     return await import('../providers/tool_use/openai.mjs');
+    case 'gemini':     return await import('../providers/tool_use/gemini.mjs');
+    case 'claude-cli': return await import('../providers/tool_use/claude_cli.mjs');
     default:
       throw new AgentMemoryError(`provider "${provider}" does not support reflection`, 'AGENT_MEMORY_NO_PROVIDER');
   }
