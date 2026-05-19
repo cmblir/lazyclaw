@@ -1652,6 +1652,41 @@ export function makeHandler(ctx) {
             return writeJson(res, 404, { error: err?.message || String(err), code: err?.code });
           }
         }
+        case req.method === 'GET' && /^\/agents\/([^/]+)\/memory$/.test(url.pathname): {
+          const name = url.pathname.match(/^\/agents\/([^/]+)\/memory$/)[1];
+          const memMod = await import('./mas/agent_memory.mjs');
+          const text = memMod.readMemory(name);
+          res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8', 'cache-control': 'no-cache' });
+          return res.end(text);
+        }
+        case req.method === 'PUT' && /^\/agents\/([^/]+)\/memory$/.test(url.pathname): {
+          const name = url.pathname.match(/^\/agents\/([^/]+)\/memory$/)[1];
+          const memMod = await import('./mas/agent_memory.mjs');
+          // Read raw text body — content-type defaults to text/markdown
+          // but JSON {"text": "..."} is also accepted for tooling that
+          // prefers structured bodies.
+          let body = '';
+          await new Promise((resolve) => {
+            req.on('data', (c) => { body += c.toString(); });
+            req.on('end', resolve);
+          });
+          let text = body;
+          if (req.headers['content-type']?.includes('application/json')) {
+            try { text = (JSON.parse(body || '{}').text) || ''; } catch { /* leave raw */ }
+          }
+          try {
+            const p = memMod.writeRaw(name, text);
+            return writeJson(res, 200, { path: p, bytes: Buffer.byteLength(text, 'utf8') });
+          } catch (err) {
+            return writeJson(res, 400, { error: err?.message || String(err), code: err?.code });
+          }
+        }
+        case req.method === 'DELETE' && /^\/agents\/([^/]+)\/memory$/.test(url.pathname): {
+          const name = url.pathname.match(/^\/agents\/([^/]+)\/memory$/)[1];
+          const memMod = await import('./mas/agent_memory.mjs');
+          const removed = memMod.clear(name);
+          return writeJson(res, 200, { name, cleared: removed });
+        }
 
         case route === 'GET /teams': {
           const mod = await import('./teams.mjs');

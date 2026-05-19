@@ -4449,7 +4449,7 @@ async function cmdMemory(sub, positional, flags = {}) {
   }
 }
 
-const AGENT_REG_SUBS = new Set(['add', 'list', 'show', 'edit', 'remove', 'rm', 'delete']);
+const AGENT_REG_SUBS = new Set(['add', 'list', 'show', 'edit', 'remove', 'rm', 'delete', 'memory', 'reflect']);
 const TEAM_SUBS = new Set(['add', 'list', 'show', 'edit', 'remove', 'rm', 'delete']);
 const TASK_SUBS = new Set(['start', 'tick', 'list', 'show', 'abandon', 'done', 'transcript', 'remove', 'rm', 'delete']);
 
@@ -4804,8 +4804,88 @@ async function cmdAgentRegistry(sub, positional, flags = {}) {
       catch (err) { console.error(`agent remove: ${err?.message || err}`); process.exit(2); }
       return;
     }
+    case 'memory': {
+      // memory <show|edit|clear> <name>
+      const op = positional[0];
+      const memName = positional[1];
+      if (!op || !memName) {
+        console.error('Usage: lazyclaw agent memory <show|edit|clear> <name>');
+        process.exit(2);
+      }
+      const memMod = await import('./mas/agent_memory.mjs');
+      try {
+        if (op === 'show') {
+          const max = Number.isFinite(+flags['max-chars']) && +flags['max-chars'] > 0 ? +flags['max-chars'] : memMod.DEFAULT_MAX_CHARS;
+          const text = memMod.readMemory(memName, cfgDir, max);
+          if (!text) process.stderr.write(`(no memory for "${memName}")\n`);
+          else process.stdout.write(text + (text.endsWith('\n') ? '' : '\n'));
+        } else if (op === 'edit') {
+          const p = memMod.memoryPath(memName, cfgDir);
+          // Ensure file exists so $EDITOR doesn't start with a missing
+          // file warning.
+          if (!fs.existsSync(p)) {
+            fs.mkdirSync(path.dirname(p), { recursive: true });
+            fs.writeFileSync(p, `# ${memName} — memory\n\n`);
+          }
+          const editor = process.env.EDITOR || 'vi';
+          const { spawn } = await import('node:child_process');
+          await new Promise((resolve) => {
+            const ch = spawn(editor, [p], { stdio: 'inherit' });
+            ch.on('close', () => resolve());
+          });
+          process.stdout.write(`edited ${p}\n`);
+        } else if (op === 'clear') {
+          const removed = memMod.clear(memName, cfgDir);
+          process.stdout.write(removed ? `cleared memory for "${memName}"\n` : `(no memory for "${memName}")\n`);
+        } else {
+          console.error(`Usage: lazyclaw agent memory <show|edit|clear> <name>`);
+          process.exit(2);
+        }
+      } catch (err) {
+        console.error(`agent memory ${op}: ${err?.message || err}`);
+        process.exit(2);
+      }
+      return;
+    }
+    case 'reflect': {
+      const aname = positional[0];
+      const taskId = flags.task || positional[1];
+      if (!aname || !taskId) {
+        console.error('Usage: lazyclaw agent reflect <name> --task <id>');
+        process.exit(2);
+      }
+      const tasksMod = await import('./tasks.mjs');
+      const memMod = await import('./mas/agent_memory.mjs');
+      const a = agentsMod.getAgent(aname, cfgDir);
+      if (!a) { console.error(`agent reflect: no agent "${aname}"`); process.exit(2); }
+      const task = tasksMod.getTask(taskId, cfgDir);
+      if (!task) { console.error(`agent reflect: no task "${taskId}"`); process.exit(2); }
+      try { _loadDotenvIfAny(cfgDir); } catch { /* best-effort */ }
+      const cfg = readConfig();
+      const apiKey = _resolveAuthKey(cfg, a.provider);
+      const baseUrl = {
+        anthropic: process.env.LAZYCLAW_ANTHROPIC_BASE_URL,
+        openai:    process.env.LAZYCLAW_OPENAI_BASE_URL,
+        gemini:    process.env.LAZYCLAW_GEMINI_BASE_URL,
+      }[a.provider] || undefined;
+      try {
+        const body = await memMod.reflectOnce({ agent: a, task, apiKey, baseUrl });
+        if (!body || !body.trim()) {
+          process.stderr.write('reflection returned empty body — nothing to write\n');
+          return;
+        }
+        if (!flags['dry-run']) {
+          memMod.prependEntry(aname, { taskId: task.id, title: task.title, body }, cfgDir);
+        }
+        process.stdout.write(body + (body.endsWith('\n') ? '' : '\n'));
+      } catch (err) {
+        console.error(`agent reflect: ${err?.message || err}`);
+        process.exit(2);
+      }
+      return;
+    }
     default:
-      console.error('Usage: lazyclaw agent <add|list|show|edit|remove> ...');
+      console.error('Usage: lazyclaw agent <add|list|show|edit|remove|memory|reflect> ...');
       process.exit(2);
   }
 }

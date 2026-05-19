@@ -75,6 +75,11 @@ function defaultShape(name) {
     tools: [...DEFAULT_TOOLS],
     tags: [],
     iconEmoji: '',
+    // Phase 18 — agent memory write trigger. 'auto' means the router
+    // fires a reflection LLM call on terminal `done`; 'manual' waits
+    // for `lazyclaw agent reflect`; 'off' disables writes entirely.
+    memoryWrite: 'auto',
+    memoryMaxChars: 12 * 1024,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -88,13 +93,19 @@ function writeAtomic(filePath, obj) {
   fs.renameSync(tmp, filePath);
 }
 
-export function registerAgent({ name, displayName, role = '', provider = 'claude-cli', model = '', tools, tags = [], iconEmoji = '' } = {}, configDir = defaultConfigDir()) {
+const VALID_MEMORY_WRITE = ['auto', 'manual', 'off'];
+
+export function registerAgent({ name, displayName, role = '', provider = 'claude-cli', model = '', tools, tags = [], iconEmoji = '', memoryWrite, memoryMaxChars } = {}, configDir = defaultConfigDir()) {
   ensureValidName(name);
   const p = agentPath(name, configDir);
   if (fs.existsSync(p)) {
     throw new AgentError(`agent "${name}" already exists`, 'AGENT_EXISTS');
   }
   const toolsClean = validateTools(tools ?? DEFAULT_TOOLS);
+  const mw = memoryWrite ?? 'auto';
+  if (!VALID_MEMORY_WRITE.includes(mw)) {
+    throw new AgentError(`memoryWrite must be one of ${VALID_MEMORY_WRITE.join(', ')}`, 'AGENT_BAD_MEMORY_WRITE');
+  }
   const data = {
     ...defaultShape(name),
     displayName: displayName || titleCase(name),
@@ -104,6 +115,8 @@ export function registerAgent({ name, displayName, role = '', provider = 'claude
     tools: toolsClean,
     tags: Array.isArray(tags) ? tags : [],
     iconEmoji: String(iconEmoji || ''),
+    memoryWrite: mw,
+    memoryMaxChars: Number.isFinite(+memoryMaxChars) && +memoryMaxChars > 0 ? +memoryMaxChars : 12 * 1024,
   };
   writeAtomic(p, data);
   return data;
@@ -138,6 +151,9 @@ export function patchAgent(name, patch, configDir = defaultConfigDir()) {
   const next = { ...a, ...patch, updatedAt: new Date().toISOString() };
   if (patch.tools !== undefined) {
     next.tools = validateTools(patch.tools);
+  }
+  if (patch.memoryWrite !== undefined && !VALID_MEMORY_WRITE.includes(patch.memoryWrite)) {
+    throw new AgentError(`memoryWrite must be one of ${VALID_MEMORY_WRITE.join(', ')}`, 'AGENT_BAD_MEMORY_WRITE');
   }
   writeAtomic(agentPath(name, configDir), next);
   return next;

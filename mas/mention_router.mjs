@@ -22,6 +22,7 @@
 import * as agentTurn from './agent_turn.mjs';
 import * as agentsMod from '../agents.mjs';
 import * as tasksMod from '../tasks.mjs';
+import * as agentMemory from './agent_memory.mjs';
 
 export class MentionRouterError extends Error {
   constructor(message, code) {
@@ -73,17 +74,27 @@ export function renderTranscript(turns) {
 }
 
 // Build the per-turn prompt the agent sees. System prompt = agent.role
-// plus team metadata so the model knows who its teammates are and how
-// to terminate; user prompt = task spec + transcript + a tag indicating
-// whose turn this is.
-export function buildTurnContext({ task, team, agent, agentRecord, teammates }) {
+// + memory block (Phase 18) + team metadata so the model knows who its
+// teammates are and how to terminate; user prompt = task spec +
+// transcript + a tag indicating whose turn this is.
+export function buildTurnContext({ task, team, agent, agentRecord, teammates, configDir }) {
   const memberList = teammates.length
     ? teammates.map((a) => `@${a}`).join(', ')
     : '(no other agents in this team)';
   const role = agentRecord.role || '';
+  // Phase 18: per-agent memory block, truncated to the agent's
+  // memoryMaxChars (default 12 KB). When the file is empty/missing the
+  // helper returns '' so the prompt looks exactly like it did before
+  // Phase 18.
+  const memBlock = agentMemory.buildMemoryBlock(
+    agentRecord.name,
+    configDir,
+    Number.isFinite(+agentRecord.memoryMaxChars) ? +agentRecord.memoryMaxChars : agentMemory.DEFAULT_MAX_CHARS,
+  );
   const system = [
     role,
     role && '\n\n---\n',
+    memBlock || null,
     `You are *${agentRecord.displayName || agentRecord.name}* on team "${team.displayName || team.name}".`,
     `Teammates you can mention with @name: ${memberList}.`,
     `When the task is complete, end your message with the marker ${DONE_MARKER}.`,
@@ -180,6 +191,38 @@ async function postTypingPlaceholder({ task, agentRecord, logger = () => {}, sen
   }
 }
 
+// Fire one reflection LLM call per agent that actually spoke during
+// this task. Each successful reflection is prepended to the agent's
+// memory file. Failures are logged but never thrown — a sticky
+// transcript that won't reflect shouldn't poison the user's terminal.
+async function autoReflect({ task, agentsById, apiKey, baseUrl, fetchImpl, configDir, logger = () => {} }) {
+  if (!task || !Array.isArray(task.turns)) return;
+  const participants = new Set();
+  for (const t of task.turns) {
+    if (t.agent && t.agent !== 'user' && t.agent !== 'system') participants.add(t.agent);
+  }
+  for (const name of participants) {
+    const agentRecord = agentsById[name];
+    if (!agentRecord) continue;
+    if (agentRecord.memoryWrite && agentRecord.memoryWrite !== 'auto') continue;
+    try {
+      const body = await agentMemory.reflectOnce({
+        agent: agentRecord,
+        task,
+        apiKey,
+        baseUrl,
+        fetchImpl,
+      });
+      if (body && body.trim()) {
+        agentMemory.prependEntry(name, { taskId: task.id, title: task.title, body }, configDir);
+        logger(`[memory] ${name} reflected on ${task.id}\n`);
+      }
+    } catch (err) {
+      logger(`[memory] reflection failed for ${name}: ${err?.message || err}\n`);
+    }
+  }
+}
+
 async function clearTypingPlaceholder(placeholder, logger) {
   if (!placeholder?.ts || !placeholder?.channel) return;
   const slack = placeholder.sender;
@@ -251,7 +294,7 @@ export async function runTaskTurn({
     }
     iterations++;
     const teammates = team.agents.filter((a) => a !== speaker);
-    const ctx = buildTurnContext({ task: current, team, agent: speaker, agentRecord, teammates });
+    const ctx = buildTurnContext({ task: current, team, agent: speaker, agentRecord, teammates, configDir });
 
     // Post a "thinking…" placeholder so the user sees the bot picked
     // up the turn before the LLM finishes. Cleared right after the
@@ -288,6 +331,16 @@ export async function runTaskTurn({
       current = tasksMod.patchTask(current.id, { status: 'done' }, configDir);
       await postToThread({ task: current, agentRecord: null, text: `:white_check_mark: ${DONE_MARKER} — task closed by *${agentRecord.displayName || speaker}*.`, logger });
       stoppedBy = 'done';
+      // Phase 18: fire one reflection LLM call per participating agent
+      // whose memoryWrite is 'auto'. We pick "participating" off the
+      // task.turns rather than team.agents so an agent who never spoke
+      // doesn't reflect on a task they weren't really in.
+      await autoReflect({
+        task: current,
+        agentsById,
+        apiKey, baseUrl, fetchImpl,
+        configDir, logger,
+      });
       break;
     }
 

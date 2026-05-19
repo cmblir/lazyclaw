@@ -289,6 +289,16 @@ lazyclaw task tick t_20260518_xxxxxx "go" --max-turns 12
 lazyclaw task transcript t_20260518_xxxxxx --format md > thread.md
 lazyclaw task show       t_20260518_xxxxxx
 lazyclaw task done       t_20260518_xxxxxx   # or `abandon` — also posts a closing message
+
+# 6) Agent memory carries lessons forward across tasks (v4.2). The
+#    router auto-fires a ≤6-bullet reflection per participating agent
+#    when a task transitions to done. Manual control:
+lazyclaw agent memory show planner
+lazyclaw agent memory edit planner          # opens $EDITOR
+lazyclaw agent memory clear planner
+lazyclaw agent reflect planner --task t_20260518_xxxxxx
+# Flip auto reflection off per agent: edit ~/.lazyclaw/agents/<name>.json
+# and set "memoryWrite": "off" (other values: "auto" default, "manual").
 ```
 
 Slack inbound (a user pings `@lazyclaw` in a channel, the bot replies)
