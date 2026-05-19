@@ -1,7 +1,7 @@
 {
   "name": "lazyclaw",
-  "version": "4.0.0",
-  "description": "Lazy, elegant terminal CLI for chatting with Claude / OpenAI / Gemini / Ollama and orchestrating multi-step LLM workflows. Banner-on-launch, slash-command ghost autocomplete, persistent sessions, local HTTP gateway.",
+  "version": "4.1.0",
+  "description": "Lazy, elegant terminal CLI for chatting with Claude / OpenAI / Gemini / Ollama, orchestrating multi-step LLM workflows, and running multi-agent Slack teams. Banner-on-launch, slash-command ghost autocomplete, persistent sessions, local HTTP gateway.",
   "keywords": [
     "claude",
     "anthropic",
@@ -53,10 +53,15 @@
     "loops.mjs",
     "goals.mjs",
     "memory.mjs",
+    "agents.mjs",
+    "teams.mjs",
+    "tasks.mjs",
     "channels/",
     "providers/",
     "workflow/",
     "web/",
+    "mas/",
+    "docs/multi-agent.md",
     "scripts/loop-worker.mjs",
     "README.md",
     "LICENSE"

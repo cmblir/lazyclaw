@@ -200,6 +200,13 @@ Slash commands inside the REPL:
 | `/goal close <name> [done\|abandoned]` | Close the goal and uninstall its cron entry |
 | `/memory [core\|recent\|episodic [topic]]` | Show layered memory contents |
 | `/dream` | Consolidate `recent.jsonl` into per-topic `episodic/<topic>.md` files |
+| `/agent` / `/agent list` | List registered multi-agent agents |
+| `/agent show <name>` | Print the agent's JSON record |
+| `/agent add <name> [role text…]` | Register an agent with the default tool whitelist `[bash, read, write, grep]` |
+| `/agent remove <name>` | Delete the agent's record |
+| `/team` / `/team list` | List teams + lead + members + Slack channel |
+| `/team add <name> --agents a,b,c [--lead a] [--channel #x]` | Create a team |
+| `/team remove <name>` | Delete the team |
 | `/usage` | Message count + chars + cumulative token totals |
 | `/new` / `/reset` | Wipe history and start over |
 | `/exit` | Leave the chat REPL (returns to the launcher when chat was opened from it) |
@@ -247,6 +254,66 @@ lazyclaw memory edit core         # open $EDITOR
 For Slack fan-out, set `SLACK_BOT_TOKEN` (xoxb-...) in `~/.lazyclaw/.env`.
 Tokens never appear in goal records or logs. Socket Mode inbound also
 needs `SLACK_APP_TOKEN` (xapp-...) and `SLACK_SIGNING_SECRET`.
+
+## Multi-agent Slack teams (v4.1)
+
+Drive a small team of named agents through a single Slack thread. The
+lead agent receives the user's request, decides who else on the team
+should weigh in, `@mentions` them, and the router runs each mentioned
+agent in turn through the full tool-use loop (bash / read / write /
+grep) before handing control back. The thread terminates when the lead
+emits the literal marker `[[TASK_DONE]]` or the per-task iteration
+budget runs out. Each agent's reply is mirrored into the Slack thread
+under its own persona (`chat:write.customize` makes the username + icon
+match the agent in Slack's UI).
+
+```bash
+# 1) Register agents — system prompt + provider + per-agent tool whitelist
+lazyclaw agent add planner  --role "Project planner"   --provider anthropic --model claude-opus-4-7
+lazyclaw agent add backend  --role "Backend engineer"  --provider anthropic --model claude-opus-4-7
+lazyclaw agent add frontend --role "Frontend engineer" --provider openai    --model gpt-4.1
+lazyclaw agent list
+
+# 2) Group them into a team that talks in a specific Slack channel
+lazyclaw team add shop --agents planner,backend,frontend --lead planner --channel '#shop'
+
+# 3) Open a task — posts a root message into the team's channel, returns
+#    the task id and the Slack thread_ts.
+lazyclaw task start --team shop --title "ship checkout flow" --description "MVP scope"
+
+# 4) Drive one user turn through the mention router. The lead replies,
+#    @mentions teammates, they run tool-use loops, hand back to the lead.
+lazyclaw task tick t_20260518_xxxxxx "go" --max-turns 12
+
+# 5) Inspect the conversation (text, markdown, or raw JSON)
+lazyclaw task transcript t_20260518_xxxxxx --format md > thread.md
+lazyclaw task show       t_20260518_xxxxxx
+lazyclaw task done       t_20260518_xxxxxx   # or `abandon` — also posts a closing message
+```
+
+Slack inbound (a user pings `@lazyclaw` in a channel, the bot replies)
+runs through the Socket Mode listener:
+
+```bash
+lazyclaw slack listen     # foreground; connects, reacts with :eyes:, replies in thread
+```
+
+The CLI is mirrored by daemon HTTP routes (`GET/POST/PATCH/DELETE
+/agents|teams|tasks`, `GET /tasks/<id>/transcript`) and by the
+browser dashboard's Agents / Teams / Tasks tabs:
+
+```bash
+lazyclaw dashboard       # opens http://127.0.0.1:<port>/ in the default browser
+```
+
+Slack app prerequisites — bot token scopes `app_mentions:read`,
+`chat:write`, `chat:write.customize`, `im:history`, `im:read`,
+`im:write`, `channels:history`, `reactions:write`; Socket Mode enabled;
+app token scope `connections:write`; invite the bot into every team
+channel. Tokens live exclusively in `~/.lazyclaw/.env` and never appear
+in agent/team/task records or logs.
+
+For the full data model + phase plan, see `docs/multi-agent.md`.
 
 ## Providers / sessions / skills
 
