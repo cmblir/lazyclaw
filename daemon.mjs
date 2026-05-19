@@ -1605,6 +1605,129 @@ export function makeHandler(ctx) {
             }, m.headers || {});
           }
         }
+        // ──── Multi-agent dashboard surface (Phase 15) ────────────────
+        // Routes share the same JSON-only shape the rest of the daemon
+        // uses. The on-disk state is owned by agents.mjs / teams.mjs /
+        // tasks.mjs; we don't touch the files directly here so the CLI
+        // and the dashboard stay coherent.
+        case route === 'GET /agents': {
+          const mod = await import('./agents.mjs');
+          return writeJson(res, 200, mod.listAgents());
+        }
+        case route === 'POST /agents': {
+          const mod = await import('./agents.mjs');
+          let body;
+          try { body = await readJson(req); }
+          catch (e) { return writeJson(res, 400, { error: e?.message || String(e) }); }
+          try { return writeJson(res, 200, mod.registerAgent(body)); }
+          catch (err) {
+            const code = err?.code === 'AGENT_EXISTS' ? 409 : 400;
+            return writeJson(res, code, { error: err?.message || String(err), code: err?.code });
+          }
+        }
+        case req.method === 'GET' && /^\/agents\/([^/]+)$/.test(url.pathname): {
+          const name = url.pathname.split('/').pop();
+          const mod = await import('./agents.mjs');
+          const a = mod.getAgent(name);
+          if (!a) return writeJson(res, 404, { error: `no agent "${name}"` });
+          return writeJson(res, 200, a);
+        }
+        case req.method === 'PATCH' && /^\/agents\/([^/]+)$/.test(url.pathname): {
+          const name = url.pathname.split('/').pop();
+          const mod = await import('./agents.mjs');
+          let body;
+          try { body = await readJson(req); }
+          catch (e) { return writeJson(res, 400, { error: e?.message || String(e) }); }
+          try { return writeJson(res, 200, mod.patchAgent(name, body)); }
+          catch (err) {
+            const code = err?.code === 'AGENT_NO_AGENT' ? 404 : 400;
+            return writeJson(res, code, { error: err?.message || String(err), code: err?.code });
+          }
+        }
+        case req.method === 'DELETE' && /^\/agents\/([^/]+)$/.test(url.pathname): {
+          const name = url.pathname.split('/').pop();
+          const mod = await import('./agents.mjs');
+          try { return writeJson(res, 200, mod.removeAgent(name)); }
+          catch (err) {
+            return writeJson(res, 404, { error: err?.message || String(err), code: err?.code });
+          }
+        }
+
+        case route === 'GET /teams': {
+          const mod = await import('./teams.mjs');
+          return writeJson(res, 200, mod.listTeams());
+        }
+        case route === 'POST /teams': {
+          const mod = await import('./teams.mjs');
+          let body;
+          try { body = await readJson(req); }
+          catch (e) { return writeJson(res, 400, { error: e?.message || String(e) }); }
+          try { return writeJson(res, 200, mod.registerTeam(body)); }
+          catch (err) {
+            const code = err?.code === 'TEAM_EXISTS' ? 409 : 400;
+            return writeJson(res, code, { error: err?.message || String(err), code: err?.code });
+          }
+        }
+        case req.method === 'GET' && /^\/teams\/([^/]+)$/.test(url.pathname): {
+          const name = url.pathname.split('/').pop();
+          const mod = await import('./teams.mjs');
+          const t = mod.getTeam(name);
+          if (!t) return writeJson(res, 404, { error: `no team "${name}"` });
+          return writeJson(res, 200, t);
+        }
+        case req.method === 'PATCH' && /^\/teams\/([^/]+)$/.test(url.pathname): {
+          const name = url.pathname.split('/').pop();
+          const mod = await import('./teams.mjs');
+          let body;
+          try { body = await readJson(req); }
+          catch (e) { return writeJson(res, 400, { error: e?.message || String(e) }); }
+          try { return writeJson(res, 200, mod.patchTeam(name, body)); }
+          catch (err) {
+            const code = err?.code === 'TEAM_NO_TEAM' ? 404 : 400;
+            return writeJson(res, code, { error: err?.message || String(err), code: err?.code });
+          }
+        }
+        case req.method === 'DELETE' && /^\/teams\/([^/]+)$/.test(url.pathname): {
+          const name = url.pathname.split('/').pop();
+          const mod = await import('./teams.mjs');
+          try { return writeJson(res, 200, mod.removeTeam(name)); }
+          catch (err) {
+            return writeJson(res, 404, { error: err?.message || String(err), code: err?.code });
+          }
+        }
+
+        case route === 'GET /tasks': {
+          const mod = await import('./tasks.mjs');
+          return writeJson(res, 200, mod.listTasks());
+        }
+        case req.method === 'GET' && /^\/tasks\/([^/]+)$/.test(url.pathname): {
+          const id = url.pathname.split('/').pop();
+          const mod = await import('./tasks.mjs');
+          const t = mod.getTask(id);
+          if (!t) return writeJson(res, 404, { error: `no task "${id}"` });
+          return writeJson(res, 200, t);
+        }
+        case req.method === 'DELETE' && /^\/tasks\/([^/]+)$/.test(url.pathname): {
+          const id = url.pathname.split('/').pop();
+          const mod = await import('./tasks.mjs');
+          try { return writeJson(res, 200, mod.removeTask(id)); }
+          catch (err) {
+            return writeJson(res, 404, { error: err?.message || String(err), code: err?.code });
+          }
+        }
+        case req.method === 'POST' && /^\/tasks\/([^/]+)\/(done|abandon)$/.test(url.pathname): {
+          const m = url.pathname.match(/^\/tasks\/([^/]+)\/(done|abandon)$/);
+          const id = m[1];
+          const action = m[2];
+          const mod = await import('./tasks.mjs');
+          try {
+            const next = mod.patchTask(id, { status: action === 'done' ? 'done' : 'abandoned' });
+            return writeJson(res, 200, next);
+          } catch (err) {
+            return writeJson(res, 404, { error: err?.message || String(err), code: err?.code });
+          }
+        }
+
         default:
           return writeJson(res, 404, { error: 'not found', route });
       } /* eslint-disable-line no-fallthrough */

@@ -324,6 +324,9 @@
     <button data-tab="doctor">Doctor</button>
     <button data-tab="config">Config</button>
     <button data-tab="status">Status</button>
+    <button data-tab="agents">Agents</button>
+    <button data-tab="teams">Teams</button>
+    <button data-tab="tasks">Tasks</button>
   </nav>
 
   <main>
@@ -428,6 +431,35 @@
         <summary class="dim" style="cursor:pointer;">Raw JSON</summary>
         <pre id="config-raw"></pre>
       </details>
+    </section>
+
+    <section id="tab-agents">
+      <h2>Agents</h2>
+      <div class="toolbar">
+        <button class="btn" onclick="openAgentModal()">+ New agent</button>
+        <button class="btn btn-secondary" onclick="LOADERS.agents()">Refresh</button>
+        <span class="dim" id="agents-meta"></span>
+      </div>
+      <div id="agents-list"><div class="empty">Loading…</div></div>
+    </section>
+
+    <section id="tab-teams">
+      <h2>Teams</h2>
+      <div class="toolbar">
+        <button class="btn" onclick="openTeamModal()">+ New team</button>
+        <button class="btn btn-secondary" onclick="LOADERS.teams()">Refresh</button>
+        <span class="dim" id="teams-meta"></span>
+      </div>
+      <div id="teams-list"><div class="empty">Loading…</div></div>
+    </section>
+
+    <section id="tab-tasks">
+      <h2>Tasks</h2>
+      <div class="toolbar">
+        <button class="btn btn-secondary" onclick="LOADERS.tasks()">Refresh</button>
+        <span class="dim" id="tasks-meta">Tasks are created via <code>lazyclaw task start</code>.</span>
+      </div>
+      <div id="tasks-list"><div class="empty">Loading…</div></div>
     </section>
   </main>
 
@@ -1349,6 +1381,140 @@
       } catch (e) {
         alert('Delete failed: ' + e.message);
       }
+    }
+
+    // ── Multi-agent loaders (Phase 15) ────────────────────────────
+    // Keep these minimal — list view + prompt-driven create. Phase
+    // 15.1+ can swap the prompts for inline forms once the data model
+    // settles. The point of v0.1 is parity with the CLI, not polish.
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    }
+
+    LOADERS.agents = async function loadAgents() {
+      const root = document.getElementById('agents-list');
+      try {
+        const arr = await api('/agents');
+        document.getElementById('agents-meta').textContent = `${arr.length} agent(s)`;
+        if (arr.length === 0) { root.innerHTML = '<div class="empty">No agents yet — click + New agent to create one.</div>'; return; }
+        root.innerHTML = '<table><thead><tr><th>name</th><th>provider/model</th><th>tools</th><th>role (excerpt)</th><th></th></tr></thead><tbody>'
+          + arr.map((a) => {
+              const provLine = a.model ? `${escapeHtml(a.provider)}/${escapeHtml(a.model)}` : escapeHtml(a.provider);
+              const role = a.role ? (a.role.slice(0, 60) + (a.role.length > 60 ? '…' : '')) : '<span class="dim">(none)</span>';
+              return `<tr>
+                <td><strong>${escapeHtml(a.name)}</strong><br><span class="dim">${escapeHtml(a.displayName || '')}</span></td>
+                <td>${provLine}</td>
+                <td>${(a.tools || []).map((t) => `<code>${escapeHtml(t)}</code>`).join(' ')}</td>
+                <td>${escapeHtml(role)}</td>
+                <td><button class="btn btn-secondary" onclick="deleteAgent('${encodeURIComponent(a.name)}')">Delete</button></td>
+              </tr>`;
+            }).join('')
+          + '</tbody></table>';
+      } catch (e) {
+        root.innerHTML = `<div class="empty">Error: ${escapeHtml(e.message)}</div>`;
+      }
+    };
+
+    async function openAgentModal() {
+      const name = (prompt('Agent name (e.g. planner, backend, frontend):') || '').trim();
+      if (!name) return;
+      const role = prompt('Role / system prompt (optional):') || '';
+      const provider = (prompt('Provider (anthropic / openai / gemini / claude-cli):', 'anthropic') || 'anthropic').trim();
+      const model = (prompt('Model id (blank = provider default):') || '').trim();
+      const toolsRaw = (prompt('Tools (comma-separated):', 'bash,read,write,grep') || '').trim();
+      const tools = toolsRaw ? toolsRaw.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
+      try {
+        await api('/agents', { method: 'POST', body: JSON.stringify({ name, role, provider, model, tools }) });
+        LOADERS.agents();
+      } catch (e) {
+        alert('Create failed: ' + e.message);
+      }
+    }
+
+    async function deleteAgent(encName) {
+      const name = decodeURIComponent(encName);
+      if (!confirm(`Delete agent "${name}"?`)) return;
+      try { await api(`/agents/${encName}`, { method: 'DELETE' }); LOADERS.agents(); }
+      catch (e) { alert('Delete failed: ' + e.message); }
+    }
+
+    LOADERS.teams = async function loadTeams() {
+      const root = document.getElementById('teams-list');
+      try {
+        const arr = await api('/teams');
+        document.getElementById('teams-meta').textContent = `${arr.length} team(s)`;
+        if (arr.length === 0) { root.innerHTML = '<div class="empty">No teams yet — click + New team to create one.</div>'; return; }
+        root.innerHTML = '<table><thead><tr><th>name</th><th>lead</th><th>agents</th><th>slack channel</th><th></th></tr></thead><tbody>'
+          + arr.map((t) => `<tr>
+              <td><strong>${escapeHtml(t.name)}</strong><br><span class="dim">${escapeHtml(t.displayName || '')}</span></td>
+              <td>${escapeHtml(t.lead || '')}</td>
+              <td>${(t.agents || []).map((a) => escapeHtml(a)).join(', ')}</td>
+              <td>${t.slackChannel ? `<code>${escapeHtml(t.slackChannel)}</code>` : '<span class="dim">(none)</span>'}</td>
+              <td><button class="btn btn-secondary" onclick="deleteTeam('${encodeURIComponent(t.name)}')">Delete</button></td>
+            </tr>`).join('')
+          + '</tbody></table>';
+      } catch (e) {
+        root.innerHTML = `<div class="empty">Error: ${escapeHtml(e.message)}</div>`;
+      }
+    };
+
+    async function openTeamModal() {
+      const name = (prompt('Team name (e.g. shop, growth):') || '').trim();
+      if (!name) return;
+      const agentsRaw = (prompt('Agents (comma-separated names):') || '').trim();
+      if (!agentsRaw) return;
+      const agents = agentsRaw.split(',').map((s) => s.trim()).filter(Boolean);
+      const lead = (prompt(`Lead (one of ${agents.join(', ')}):`, agents[0]) || agents[0]).trim();
+      const slackChannel = (prompt('Slack channel (C… id or #name, optional):') || '').trim();
+      try {
+        await api('/teams', { method: 'POST', body: JSON.stringify({ name, agents, lead, slackChannel }) });
+        LOADERS.teams();
+      } catch (e) {
+        alert('Create failed: ' + e.message);
+      }
+    }
+
+    async function deleteTeam(encName) {
+      const name = decodeURIComponent(encName);
+      if (!confirm(`Delete team "${name}"?`)) return;
+      try { await api(`/teams/${encName}`, { method: 'DELETE' }); LOADERS.teams(); }
+      catch (e) { alert('Delete failed: ' + e.message); }
+    }
+
+    LOADERS.tasks = async function loadTasks() {
+      const root = document.getElementById('tasks-list');
+      try {
+        const arr = await api('/tasks');
+        document.getElementById('tasks-meta').textContent = `${arr.length} task(s) (newest first)`;
+        if (arr.length === 0) { root.innerHTML = '<div class="empty">No tasks yet. Run <code>lazyclaw task start --team X --title "..."</code>.</div>'; return; }
+        root.innerHTML = '<table><thead><tr><th>id</th><th>title</th><th>team</th><th>lead</th><th>status</th><th>turns</th><th>opened</th><th></th></tr></thead><tbody>'
+          + arr.map((t) => `<tr>
+              <td><code>${escapeHtml(t.id)}</code></td>
+              <td>${escapeHtml(t.title)}</td>
+              <td>${escapeHtml(t.team)}</td>
+              <td>${escapeHtml(t.lead)}</td>
+              <td><span class="status status-${escapeHtml(t.status)}">${escapeHtml(t.status)}</span></td>
+              <td>${Array.isArray(t.turns) ? t.turns.length : 0}</td>
+              <td><span class="dim">${escapeHtml((t.createdAt || '').slice(0, 19))}</span></td>
+              <td>
+                ${t.status === 'running' || t.status === 'pending'
+                  ? `<button class="btn btn-secondary" onclick="closeTask('${encodeURIComponent(t.id)}','done')">Mark done</button>
+                     <button class="btn btn-secondary" onclick="closeTask('${encodeURIComponent(t.id)}','abandon')">Abandon</button>`
+                  : ''}
+              </td>
+            </tr>`).join('')
+          + '</tbody></table>';
+      } catch (e) {
+        root.innerHTML = `<div class="empty">Error: ${escapeHtml(e.message)}</div>`;
+      }
+    };
+
+    async function closeTask(encId, action) {
+      const id = decodeURIComponent(encId);
+      if (!confirm(`${action === 'done' ? 'Mark done' : 'Abandon'} task ${id}?`)) return;
+      try { await api(`/tasks/${encId}/${action}`, { method: 'POST' }); LOADERS.tasks(); }
+      catch (e) { alert(`${action} failed: ` + e.message); }
     }
 
     // First load = chat tab.
