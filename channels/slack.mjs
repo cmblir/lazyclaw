@@ -100,7 +100,14 @@ export class SlackChannel extends Channel {
   // Translate a target spec like `slack:#deploys` or `slack:U012345` into
   // a Slack `channel` string. Threads are addressed by a `threadId` of
   // shape `<channel>:<thread_ts>` or plain channel/user id.
-  async send(threadId, text) {
+  //
+  // opts (Phase 16):
+  //   username: string  — overrides the bot's display name for this
+  //                       single message (requires chat:write.customize
+  //                       scope on the bot token). Silently no-op when
+  //                       the scope is missing.
+  //   icon_emoji: string — e.g. ":rocket:" — same scope.
+  async send(threadId, text, opts = {}) {
     if (!this._env.botToken) throw new SlackError('cannot send without SLACK_BOT_TOKEN', 'SLACK_NO_TOKEN');
     let channel = threadId, thread_ts;
     if (typeof threadId === 'string' && threadId.includes(':')) {
@@ -114,7 +121,13 @@ export class SlackChannel extends Channel {
       }
     }
     const url = `${this._env.apiBase.replace(/\/$/, '')}/chat.postMessage`;
-    const body = { channel, text: String(text), ...(thread_ts ? { thread_ts } : {}) };
+    const body = {
+      channel,
+      text: String(text),
+      ...(thread_ts ? { thread_ts } : {}),
+      ...(opts && opts.username ? { username: String(opts.username) } : {}),
+      ...(opts && opts.icon_emoji ? { icon_emoji: String(opts.icon_emoji) } : {}),
+    };
     const res = await fetch(url, {
       method: 'POST',
       headers: {
@@ -314,6 +327,29 @@ export class SlackChannel extends Channel {
       },
     };
     return this._socketHandle;
+  }
+
+  // Best-effort chat.delete — used by typing-indicator workflows where
+  // we post a placeholder and want to clean it up. Returns true on
+  // success, silent false otherwise.
+  async deleteMessage(channel, ts) {
+    if (!this._env.botToken || !channel || !ts) return false;
+    const url = `${this._env.apiBase.replace(/\/$/, '')}/chat.delete`;
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this._env.botToken}`,
+          'Content-Type': 'application/json; charset=utf-8',
+        },
+        body: JSON.stringify({ channel, ts }),
+      });
+      if (!res.ok) return false;
+      const json = await res.json().catch(() => ({}));
+      return !!json.ok;
+    } catch {
+      return false;
+    }
   }
 
   // Best-effort reaction add / remove. Returns true on success. Silent

@@ -1700,6 +1700,19 @@ export function makeHandler(ctx) {
           const mod = await import('./tasks.mjs');
           return writeJson(res, 200, mod.listTasks());
         }
+        case req.method === 'GET' && /^\/tasks\/([^/]+)\/transcript$/.test(url.pathname): {
+          const m = url.pathname.match(/^\/tasks\/([^/]+)\/transcript$/);
+          const id = m[1];
+          const mod = await import('./tasks.mjs');
+          const t = mod.getTask(id);
+          if (!t) return writeJson(res, 404, { error: `no task "${id}"` });
+          const fmt = String(url.searchParams.get('format') || 'text');
+          if (fmt === 'json') return writeJson(res, 200, t);
+          const body = mod.formatTranscript(t, fmt);
+          const mime = fmt === 'md' ? 'text/markdown; charset=utf-8' : 'text/plain; charset=utf-8';
+          res.writeHead(200, { 'content-type': mime, 'cache-control': 'no-cache' });
+          return res.end(body);
+        }
         case req.method === 'GET' && /^\/tasks\/([^/]+)$/.test(url.pathname): {
           const id = url.pathname.split('/').pop();
           const mod = await import('./tasks.mjs');

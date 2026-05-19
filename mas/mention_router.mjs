@@ -101,29 +101,92 @@ export function buildTurnContext({ task, team, agent, agentRecord, teammates }) 
 // Post a single message into the task's Slack thread. Best-effort: log
 // + swallow when the bot token is missing or the API call fails so the
 // router doesn't crash mid-task on a transient Slack error.
-async function postToThread({ task, agentRecord, text, logger = () => {} }) {
+//
+// When agentRecord has displayName / iconEmoji, the post is sent under
+// the agent's persona via chat.postMessage's `username` / `icon_emoji`
+// fields (requires the bot's chat:write.customize scope — Slack
+// silently ignores them when the scope is missing). The message text
+// is no longer manually prefixed with the agent name because the
+// custom username already shows it in Slack's UI.
+async function postToThread({ task, agentRecord, text, logger = () => {}, sender }) {
   if (!task.slackChannel || !task.slackThreadTs) return null;
-  const { SlackChannel } = await import('../channels/slack.mjs');
-  const slack = new SlackChannel({ requireInbound: false });
-  try {
-    await slack.start(async () => '', {});
-  } catch (err) {
-    logger(`[router] slack start failed: ${err?.message || err}\n`);
-    return null;
+  let slack = sender;
+  let owned = false;
+  if (!slack) {
+    const { SlackChannel } = await import('../channels/slack.mjs');
+    slack = new SlackChannel({ requireInbound: false });
+    owned = true;
+    try {
+      await slack.start(async () => '', {});
+    } catch (err) {
+      logger(`[router] slack start failed: ${err?.message || err}\n`);
+      return null;
+    }
   }
   const threadId = `${task.slackChannel}:${task.slackThreadTs}`;
-  const prefixed = agentRecord
-    ? `*${agentRecord.displayName || agentRecord.name}*: ${text}`
-    : text;
+  // When we have a real agent persona, push the text under that
+  // persona's username + icon. Otherwise (user message or system note)
+  // fall back to the bot's default identity with no decoration.
+  let body;
+  let sendOpts = {};
+  if (agentRecord) {
+    body = String(text);
+    if (agentRecord.displayName) sendOpts.username = agentRecord.displayName;
+    if (agentRecord.iconEmoji) sendOpts.icon_emoji = agentRecord.iconEmoji;
+  } else {
+    body = String(text);
+  }
   try {
-    const res = await slack.send(threadId, prefixed);
+    const res = await slack.send(threadId, body, sendOpts);
     return res?.ts || null;
   } catch (err) {
     logger(`[router] slack send failed: ${err?.message || err}\n`);
     return null;
   } finally {
-    await slack.stop().catch(() => {});
+    if (owned) await slack.stop().catch(() => {});
   }
+}
+
+// "X is thinking…" placeholder posted into the thread before an agent
+// turn so a human reader knows work is happening. Returns the ts of
+// the placeholder so the caller can delete it once the real reply is
+// in. No-op when Slack isn't wired or the post fails.
+async function postTypingPlaceholder({ task, agentRecord, logger = () => {}, sender }) {
+  if (!task.slackChannel || !task.slackThreadTs) return { ts: null, sender: null };
+  let slack = sender;
+  let owned = false;
+  if (!slack) {
+    const { SlackChannel } = await import('../channels/slack.mjs');
+    slack = new SlackChannel({ requireInbound: false });
+    owned = true;
+    try {
+      await slack.start(async () => '', {});
+    } catch (err) {
+      logger(`[router] slack start failed: ${err?.message || err}\n`);
+      return { ts: null, sender: null };
+    }
+  }
+  const threadId = `${task.slackChannel}:${task.slackThreadTs}`;
+  const sendOpts = {};
+  if (agentRecord?.displayName) sendOpts.username = agentRecord.displayName;
+  if (agentRecord?.iconEmoji)   sendOpts.icon_emoji = agentRecord.iconEmoji;
+  try {
+    const res = await slack.send(threadId, `_:hourglass_flowing_sand: thinking…_`, sendOpts);
+    return { ts: res?.ts || null, sender: owned ? slack : null, channel: task.slackChannel };
+  } catch (err) {
+    logger(`[router] slack typing post failed: ${err?.message || err}\n`);
+    if (owned) await slack.stop().catch(() => {});
+    return { ts: null, sender: null };
+  }
+}
+
+async function clearTypingPlaceholder(placeholder, logger) {
+  if (!placeholder?.ts || !placeholder?.channel) return;
+  const slack = placeholder.sender;
+  if (!slack) return;  // sender wasn't owned by us; skip
+  try { await slack.deleteMessage(placeholder.channel, placeholder.ts); }
+  catch (err) { logger(`[router] slack typing delete failed: ${err?.message || err}\n`); }
+  finally { await slack.stop().catch(() => {}); }
 }
 
 // Run agents in this team until the queue empties or budget runs out.
@@ -190,6 +253,12 @@ export async function runTaskTurn({
     const teammates = team.agents.filter((a) => a !== speaker);
     const ctx = buildTurnContext({ task: current, team, agent: speaker, agentRecord, teammates });
 
+    // Post a "thinking…" placeholder so the user sees the bot picked
+    // up the turn before the LLM finishes. Cleared right after the
+    // real reply lands so we never leave a stale placeholder in the
+    // thread.
+    const typing = await postTypingPlaceholder({ task: current, agentRecord, logger });
+
     let result;
     try {
       result = await agentTurn.runAgentTurn({
@@ -200,10 +269,12 @@ export async function runTaskTurn({
         configDir, cwd, apiKey, fetchImpl, baseUrl, signal,
       });
     } catch (err) {
+      await clearTypingPlaceholder(typing, logger);
       logger(`[router] agent "${speaker}" threw: ${err?.message || err}\n`);
       current = tasksMod.appendTurn(current.id, { agent: speaker, text: `(error: ${err?.message || err})`, ts: new Date().toISOString(), error: true }, configDir);
       continue;
     }
+    await clearTypingPlaceholder(typing, logger);
 
     const replyText = (result.text || '').trim();
     const ts = new Date().toISOString();

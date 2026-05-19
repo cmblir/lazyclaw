@@ -4451,7 +4451,7 @@ async function cmdMemory(sub, positional, flags = {}) {
 
 const AGENT_REG_SUBS = new Set(['add', 'list', 'show', 'edit', 'remove', 'rm', 'delete']);
 const TEAM_SUBS = new Set(['add', 'list', 'show', 'edit', 'remove', 'rm', 'delete']);
-const TASK_SUBS = new Set(['start', 'tick', 'list', 'show', 'abandon', 'done', 'remove', 'rm', 'delete']);
+const TASK_SUBS = new Set(['start', 'tick', 'list', 'show', 'abandon', 'done', 'transcript', 'remove', 'rm', 'delete']);
 
 async function cmdTask(sub, positional, flags = {}) {
   const tasksMod = await import('./tasks.mjs');
@@ -4634,6 +4634,15 @@ async function cmdTask(sub, positional, flags = {}) {
       }
       return;
     }
+    case 'transcript': {
+      if (!idOrFirst) { console.error('Usage: lazyclaw task transcript <id> [--format text|md|json]'); process.exit(2); }
+      const t = tasksMod.getTask(idOrFirst, cfgDir);
+      if (!t) { console.error(`task transcript: no task "${idOrFirst}"`); process.exit(2); }
+      const fmt = String(flags.format || 'text');
+      if (fmt === 'json') { emitJson(t); return; }
+      process.stdout.write(tasksMod.formatTranscript(t, fmt));
+      return;
+    }
     case 'remove':
     case 'rm':
     case 'delete': {
@@ -4643,7 +4652,7 @@ async function cmdTask(sub, positional, flags = {}) {
       return;
     }
     default:
-      console.error('Usage: lazyclaw task <start|list|show|abandon|done|remove> ...');
+      console.error('Usage: lazyclaw task <start|tick|list|show|transcript|abandon|done|remove> ...');
       process.exit(2);
   }
 }

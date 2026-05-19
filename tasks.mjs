@@ -167,6 +167,47 @@ export function removeTask(id, configDir = defaultConfigDir()) {
   return { id, removed: true };
 }
 
+// Render the task's turns into a single string suitable for handing
+// to a human reader. Three formats:
+//   'text' (default) — "[Who]\ntext\n\n[Who]\ntext\n..." plain
+//   'md'             — markdown with H3 per turn, fenced code blocks
+//                      for tool calls when present
+//   'json'           — the raw task record (no projection)
+export function formatTranscript(task, format = 'text') {
+  if (!task || typeof task !== 'object') return '';
+  if (format === 'json') return JSON.stringify(task, null, 2);
+  const head = (format === 'md')
+    ? [
+        `# Task \`${task.id}\` — ${task.title || '(untitled)'}`,
+        task.description ? `\n${task.description}\n` : '',
+        `**Team**: ${task.team}  ·  **Lead**: ${task.lead}  ·  **Status**: ${task.status}`,
+        '',
+        '---',
+        '',
+      ].join('\n')
+    : `Task ${task.id}: ${task.title || '(untitled)'}\n` +
+      `Team: ${task.team} · Lead: ${task.lead} · Status: ${task.status}\n` +
+      '-'.repeat(60) + '\n';
+  const body = (Array.isArray(task.turns) ? task.turns : []).map((t) => {
+    const who = t.agent === 'user' ? 'User' : t.agent === 'system' ? 'System' : t.agent;
+    if (format === 'md') {
+      const parts = [`### ${who}`, ''];
+      if (t.text) parts.push(t.text, '');
+      if (Array.isArray(t.toolCalls) && t.toolCalls.length) {
+        for (const tc of t.toolCalls) {
+          parts.push('```json');
+          parts.push(JSON.stringify({ tool: tc.name, input: tc.input, ok: tc.ok }, null, 2));
+          parts.push('```');
+        }
+        parts.push('');
+      }
+      return parts.join('\n');
+    }
+    return `[${who}]\n${t.text || ''}`;
+  }).join(format === 'md' ? '\n' : '\n\n');
+  return head + body + '\n';
+}
+
 // Build the kickoff message Slack will see as the thread root. Stays
 // template-based for Phase 11 — Phase 13 will replace this with the
 // lead agent's actual first LLM turn.

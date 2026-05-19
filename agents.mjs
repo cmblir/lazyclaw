@@ -74,6 +74,7 @@ function defaultShape(name) {
     model: '',
     tools: [...DEFAULT_TOOLS],
     tags: [],
+    iconEmoji: '',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -87,7 +88,7 @@ function writeAtomic(filePath, obj) {
   fs.renameSync(tmp, filePath);
 }
 
-export function registerAgent({ name, displayName, role = '', provider = 'claude-cli', model = '', tools, tags = [] } = {}, configDir = defaultConfigDir()) {
+export function registerAgent({ name, displayName, role = '', provider = 'claude-cli', model = '', tools, tags = [], iconEmoji = '' } = {}, configDir = defaultConfigDir()) {
   ensureValidName(name);
   const p = agentPath(name, configDir);
   if (fs.existsSync(p)) {
@@ -102,6 +103,7 @@ export function registerAgent({ name, displayName, role = '', provider = 'claude
     model: String(model || ''),
     tools: toolsClean,
     tags: Array.isArray(tags) ? tags : [],
+    iconEmoji: String(iconEmoji || ''),
   };
   writeAtomic(p, data);
   return data;
