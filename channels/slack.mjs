@@ -31,6 +31,32 @@ export class SlackError extends Error {
   }
 }
 
+// Decide whether a Socket Mode event should drive a handler call.
+// Pulled out of dispatchEvent so we can unit-test the filter without
+// standing up a WebSocket. Returns false (= skip) for:
+//   - non-objects / null
+//   - the bot's own message in any of the four wire shapes Slack uses
+//     (legacy bot_id, legacy bot_message subtype, modern bot_profile.id,
+//     or the message.user field matching our cached auth.test user_id —
+//     this last one is the chat:write.customize trap that caused the
+//     v4.2.0 listener-loop)
+//   - non-message-shaped events (we only handle `message` and
+//     `app_mention`)
+//   - empty / whitespace-only text bodies (defense in depth so a
+//     stray blocks-only post can't loop us back into "(empty message)"
+//     fallback)
+export function shouldDispatchEvent(event, { selfUserId = null, selfBotId = null } = {}) {
+  if (!event || typeof event !== 'object') return false;
+  if (event.bot_id || event.subtype === 'bot_message') return false;
+  if (selfUserId && event.user === selfUserId) return false;
+  if (selfBotId && event.bot_id === selfBotId) return false;
+  if (selfBotId && event.bot_profile && event.bot_profile.id === selfBotId) return false;
+  if (event.type !== 'app_mention' && event.type !== 'message') return false;
+  const text = typeof event.text === 'string' ? event.text : '';
+  if (text.trim() === '') return false;
+  return true;
+}
+
 export function readSlackEnv(env = process.env) {
   const out = {
     botToken: env.SLACK_BOT_TOKEN || null,
@@ -187,6 +213,37 @@ export class SlackChannel extends Channel {
       return json.url;
     };
 
+    // Resolve our own identity so dispatchEvent can refuse loops where
+    // the router posted a message with chat:write.customize (Slack
+    // strips bot_id / subtype from those events, so the original
+    // filter missed them and we replied to ourselves). Best-effort —
+    // a failed auth.test leaves the filter relying on the legacy
+    // bot_id / subtype check; better than refusing to start.
+    let selfUserId = null;
+    let selfBotId = null;
+    try {
+      const authUrl = `${apiBase}/auth.test`;
+      const r = await fetch(authUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this._env.botToken}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      });
+      if (r.ok) {
+        const j = await r.json().catch(() => ({}));
+        if (j && j.ok) {
+          selfUserId = j.user_id || null;
+          selfBotId = j.bot_id || null;
+          logger(`[slack] auth.test OK — self user=${selfUserId} bot=${selfBotId}\n`);
+        }
+      }
+    } catch (err) {
+      logger(`[slack] auth.test failed: ${err?.message || err}\n`);
+    }
+    this._selfUserId = selfUserId;
+    this._selfBotId = selfBotId;
+
     // (channel, ts) dedupe — a single user message can fire both
     // `message` and `app_mention` events in the same channel. Both
     // arrive as separate Socket Mode envelopes (different envelope_id),
@@ -209,10 +266,15 @@ export class SlackChannel extends Channel {
     };
 
     const dispatchEvent = async (event) => {
-      if (!event || typeof event !== 'object') return;
-      // Skip the bot's own messages so we don't loop on our own replies.
-      if (event.bot_id || event.subtype === 'bot_message') return;
-      if (event.type !== 'app_mention' && event.type !== 'message') return;
+      if (!shouldDispatchEvent(event, { selfUserId: this._selfUserId, selfBotId: this._selfBotId })) {
+        // shouldDispatchEvent already encodes the "skip the bot's own
+        // chat:write.customize message" trap that caused the v4.2.0
+        // listener loop. Bail before the reaction / handler call.
+        if (event && (event.type === 'message' || event.type === 'app_mention')) {
+          logger(`[slack] skipping ${event.type} from ${event.channel || '?'}:${event.ts || '?'}\n`);
+        }
+        return;
+      }
       // For DMs (`im`) channel_type is 'im'; for channel mentions we only
       // get app_mention events. Either way we have channel + ts.
       const text = typeof event.text === 'string' ? event.text : '';
