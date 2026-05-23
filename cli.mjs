@@ -1484,131 +1484,44 @@ function _attachGhostAutocomplete(rl) {
 // Width-management rule: every inner line is forced through
 // `.padEnd(W)` so a stray width miscount can't punch the right
 // border off the box (which is exactly the bug v3.99.5 shipped:
-// two of the inner lines were 33 cols vs the others' 32, so the
-// ╮ rendered into the next line).
-// v3.99.29 — 8-bit crab mascot (Claude Design crab sheet). Strict
-// 17-wide canvas, 12 rows, so every row aligns in any monospace font.
-// Layout: short eye-stalks (●) at cols 4 & 12, a red carapace dome
-// (╭──╮ … ╰──╯) worn like a hood, an orange face box at cols 4-12
-// with two dot-eyes + a mouth, two yellow legs (┃) below. State →
-// expression: idle 기본 · working 화남(연기) focused+smoke · done
-// 미소 smile+sparkle · error 경고/놀람 shocked+alert. Colour is
-// two-tone (red shell / orange face / yellow legs) — NOT white — so
-// it reads like the pixel sprite even in a plain terminal.
-const _MASCOT_W = 17;
-const _MASCOT_BIG = {
-  idle: [
-    '    ╷       ╷    ',
-    '    ●       ●    ',
-    '  ╭───────────╮  ',
-    '  │           │  ',
-    '  │           │  ',
-    '  ╰───────────╯  ',
-    '    ╭───────╮    ',
-    '    │ ●   ● │    ',
-    '    │  ───  │    ',
-    '    ╰───────╯    ',
-    '     ┃     ┃     ',
-    '     ┗┛   ┗┛     ',
-  ],
-  working: [
-    ' °  ╷       ╷  ° ',
-    '    ●       ●    ',
-    '  ╭───────────╮  ',
-    ' ╱╲│         │╱╲ ',
-    '  │           │  ',
-    '  ╰───────────╯  ',
-    '    ╭───────╮    ',
-    '    │ ─   ─ │    ',
-    '    │  ═══  │    ',
-    '    ╰───────╯    ',
-    '     ┃     ┃     ',
-    '     ┗┛   ┗┛     ',
-  ],
-  done: [
-    ' ✦  ╷       ╷  ✦ ',
-    '    ●       ●    ',
-    '  ╭───────────╮  ',
-    '  │           │  ',
-    '  │           │  ',
-    '  ╰───────────╯  ',
-    '    ╭───────╮    ',
-    '    │ ^   ^ │    ',
-    '    │  ‿‿‿  │    ',
-    '    ╰───────╯    ',
-    '     ┃     ┃     ',
-    '     ┗┛   ┗┛     ',
-  ],
-  error: [
-    ' \\   ╷     ╷   / ',
-    '  !  ●     ●  !  ',
-    '  ╭───────────╮  ',
-    '  │           │  ',
-    '  │           │  ',
-    '  ╰───────────╯  ',
-    '    ╭───────╮    ',
-    '    │ O   O │    ',
-    '    │  ╭─╮  │    ',
-    '    ╰───────╯    ',
-    '     ┃     ┃     ',
-    '     ┗┛   ┗┛     ',
-  ],
-};
-const _MASCOT_TINY = {
-  idle:    ' ●   ● \n(│ ─ │)\n  ┃ ┃  ',
-  working: ' ●   ● \n(│ ═ │)°\n  ┃ ┃  ',
-  done:    ' ^   ^ \n(│ ‿ │)✦\n  ┃ ┃  ',
-  error:   ' O   O \n(│╭╮│)!\n  ┃ ┃  ',
+// v4.2.1 — emoji-based minimal mascot. The previous 8-bit ASCII crab
+// (17-wide × 12-row box-drawing grid with shell-red / face-orange /
+// legs-yellow tinting) didn't read as a crab in many terminal fonts —
+// it looked more like a robot than the "lazy claw" the name promises.
+// We now lean on the native 🦞 glyph plus a per-state suffix so every
+// terminal that can render emoji shows the same thing. State map is
+// preserved so callers (working spinner, loop status, etc.) can still
+// ask for "working" / "done" / "error" variants without reaching into
+// the banner.
+const _MASCOT_EMOJI = {
+  idle:    '🦞',
+  working: '🦞 …',
+  done:    '🦞 ✓',
+  error:   '🦞 ✕',
 };
 
-// Crab palette — true colour. Shell red, face orange, legs yellow.
-// Kept as wrappers so the banner caller can compose rows freely.
-const _MC_RED = (s) => `\x1b[38;2;219;59;43m${s}\x1b[0m`;
-const _MC_ORG = (s) => `\x1b[38;2;239;131;48m${s}\x1b[0m`;
-const _MC_YEL = (s) => `\x1b[38;2;242;169;59m${s}\x1b[0m`;
-
-// Two-tone renderer: rows 6-9 are the orange face box (interior cols
-// 4-12 inked orange, the rest of the row red); rows 10-11 are the
-// yellow legs; everything else is the red carapace. Box-drawing and
-// the accent glyphs are all single BMP code points, so slice() index
-// == visual column and the alignment survives the colour wrap.
 function _renderMascot(state) {
-  const rows = _MASCOT_BIG[state] || _MASCOT_BIG.idle;
-  return rows.map((r, i) => {
-    if (i >= 6 && i <= 9) return _MC_RED(r.slice(0, 4)) + _MC_ORG(r.slice(4, 13)) + _MC_RED(r.slice(13));
-    if (i >= 10) return _MC_YEL(r);
-    return _MC_RED(r);
-  });
+  // Callers (_renderBanner) iterate row-by-row, so we return an array
+  // even though the emoji mascot is a single line.
+  return [_MASCOT_EMOJI[state] || _MASCOT_EMOJI.idle];
 }
 
-// Tiny inline mascot — picked up by chat/agent helpers when they want
-// to flash a one-line status without re-rendering the whole banner.
-// Returns a string; callers add their own newline. Inked crab-red so
-// it stays on-brand wherever it's spliced in.
+// One-line status badge for inline use (loop iteration log, daemon
+// status line, etc.). No colour wrap — the glyph carries the brand.
 function _renderMascotTiny(state) {
-  return _MC_RED(_MASCOT_TINY[state] || _MASCOT_TINY.idle);
+  return _MASCOT_EMOJI[state] || _MASCOT_EMOJI.idle;
 }
 
 function _renderBanner(version) {
   const ink = (s) => `\x1b[38;2;241;234;217m${s}\x1b[0m`;
   const dim = (s) => `\x1b[2m${s}\x1b[0m`;
   const v = String(version || '?.?.?');
-  const left = _renderMascot('idle');
-  const right = [
+  return [
     '',
-    '',
-    '',
-    `   ${ink('lazyclaw')}  ${dim('v' + v)}`,
-    `   ${dim('a sleepy 8-bit')}`,
-    `   ${dim('terminal assistant')}`,
-    '',
-    '',
-    '',
-    '',
-    '',
+    `  🦞  ${ink('lazyclaw')}  ${dim('v' + v)}`,
+    `      ${dim('a sleepy 8-bit terminal assistant')}`,
     '',
   ];
-  return left.map((l, i) => '  ' + l + (right[i] || ''));
 }
 
 function _printChatBanner(activeProvName, activeModel, version) {
