@@ -6012,7 +6012,12 @@ test.describe('Phase 6 — OpenClaw parity', () => {
 
   test('skills install + list + show + remove round-trip', () => {
     const dir = tmpConfigDir();
-    const r1 = runCli(['skills', 'install', 'commit-style', '--from', __filename], dir);
+    // import.meta.url instead of __filename — this spec is ESM and
+    // CommonJS globals aren't defined here. The CLI's `skills install
+    // --from` only needs a real path to copy from, so any file on
+    // disk works; we use this spec file itself.
+    const selfPath = new URL(import.meta.url).pathname;
+    const r1 = runCli(['skills', 'install', 'commit-style', '--from', selfPath], dir);
     expect(r1.status).toBe(0);
     const r2 = runCli(['skills', 'list'], dir);
     const items = JSON.parse(r2.stdout);
