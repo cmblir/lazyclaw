@@ -1544,16 +1544,18 @@ function _renderBanner(version) {
 
 function _printChatBanner(activeProvName, activeModel, version) {
   if (!process.stdout.isTTY) return;
-  const dim = (s) => `\x1b[2m${s}\x1b[0m`;
-  const ok = (s) => `\x1b[32m${s}\x1b[0m`;
+  // Single-hue header: labels dim-orange, values/emphasis full-orange, so the
+  // four caption rows below the box read as part of the same warm badge.
+  const dimOrange = (s) => `\x1b[2m\x1b[38;2;${_ORANGE_RGB}m${s}\x1b[0m`;
+  const orange = _orange;
   const lines = [
     '',
     ..._renderBanner(version),
     '',
-    `  ${dim('provider ·')} ${ok(activeProvName)}`,
-    `  ${dim('model    ·')} ${ok(activeModel || '(default)')}`,
-    `  ${dim('slash    ·')} /help · /model · /provider · /exit`,
-    `  ${dim('hint     ·')} → ${dim('to accept the suggested command,')} Tab ${dim('to cycle')}`,
+    `  ${dimOrange('provider ·')} ${orange(activeProvName)}`,
+    `  ${dimOrange('model    ·')} ${orange(activeModel || '(default)')}`,
+    `  ${dimOrange('slash    ·')} ${orange('/help · /model · /provider · /exit')}`,
+    `  ${dimOrange('hint     ·')} ${orange('→')} ${dimOrange('to accept the suggested command,')} ${orange('Tab')} ${dimOrange('to cycle')}`,
     '',
   ];
   process.stdout.write(lines.join('\n') + '\n');
