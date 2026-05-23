@@ -1484,28 +1484,28 @@ function _attachGhostAutocomplete(rl) {
 // Width-management rule: every inner line is forced through
 // `.padEnd(W)` so a stray width miscount can't punch the right
 // border off the box (which is exactly the bug v3.99.5 shipped:
-// v4.2.2 — restore the original v3.99.11-era banner: a figlet
-// "lazy" wordmark (small font, 4 rows) inside a 30-col rounded box
-// with a "LazyClaw  |__/  v<ver>" caption sharing the last inner row
-// with the descender of the `y`. This is the banner that shipped
-// before the helmet-mascot / 8-bit-crab / emoji detours, and the one
-// the user kept in muscle memory.
+// v4.2.2 — boxed figlet "lazy" wordmark, single-colour orange. The
+// previous mixed-colour banner (helmet-red letter art + ink-beige
+// caption) read as "two banners glued together" because the colour
+// changed mid-box. We use one warm orange (#F08246) for everything —
+// border, letter art, caption — so the eye reads it as one badge.
 //
-// Layout invariant: every inner row is exactly 30 visible cells (no
-// double-width glyphs, all chars are 1 cell in any monospace font),
-// so the right edge `│` always lands in the same column.
+// Letter art is figlet "standard" (6 rows) rather than the v3.99.11
+// "small" (4 rows), because small renders as a pixel mush in most
+// terminal fonts. Standard's strokes are wide enough that the
+// letters read as `l a z y` even at small terminal sizes.
 //
-// _renderMascot / _renderMascotTiny are kept as stubs because the
-// _renderBanner caller still passes a row array around; they no
-// longer drive separate art for working/done/error since the box-
-// banner has no good place to flash those states. The router and
-// loop runners that used to ask for a state-coloured tiny mascot can
-// keep importing the helper; it just returns the wordmark.
+// Layout invariant: every inner row is exactly INNER_W visible cells
+// (no double-width glyphs, all chars are 1 cell in any monospace
+// font), so the right edge `│` always lands in the same column.
+//
+// _renderMascot / _renderMascotTiny are kept as stubs so any leftover
+// caller doesn't crash; no state-coloured art is produced any more.
+
+const _ORANGE_RGB = '241;130;70';  // #F18246
+function _orange(s) { return `\x1b[38;2;${_ORANGE_RGB}m${s}\x1b[0m`; }
 
 function _renderMascot() {
-  // Banner builds its own art; this stub exists so any leftover
-  // caller doesn't crash. One element so .map() and length checks
-  // behave like the legacy shape.
   return ['lazyclaw'];
 }
 
@@ -1513,24 +1513,32 @@ function _renderMascotTiny() {
   return 'lazyclaw';
 }
 
+// figlet "standard" "lazy", trimmed of leading blank line. Each row
+// is left-padded by two spaces inside the box, and every row is then
+// padded to INNER_W cells.
+const _LAZY_STANDARD = [
+  ' _                  ',
+  '| | __ _ _____   _  ',
+  '| |/ _` |_  / | | | ',
+  '| | (_| |/ /| |_| | ',
+  '|_|\\__,_/___|\\__, | ',
+  '             |___/  ',
+];
+
+const _INNER_W = 32;  // 2 left pad + 20 letter art + caption headroom
+
 function _renderBanner(version) {
-  const helmet = (s) => `\x1b[38;2;195;61;42m${s}\x1b[0m`;
-  const ink = (s) => `\x1b[38;2;241;234;217m${s}\x1b[0m`;
   const v = String(version || '?.?.?');
-  // Caption shares the final inner row with the `|__/` descender of
-  // the `y` from figlet-small, exactly like the v3.99.11 screenshot.
-  const cap = `  LazyClaw  |__/  v${v}`.padEnd(30, ' ').slice(0, 30);
-  const top = '╭' + '─'.repeat(30) + '╮';
-  const bot = '╰' + '─'.repeat(30) + '╯';
-  const wrap = (inner) => helmet('│') + inner + helmet('│');
+  const cap = `  LazyClaw  v${v}`;
+  const padInner = (s) => '  ' + s.padEnd(_INNER_W - 2, ' ');
+  const wrap = (inner) => _orange('│') + _orange(inner) + _orange('│');
+  const top = _orange('╭' + '─'.repeat(_INNER_W) + '╮');
+  const bot = _orange('╰' + '─'.repeat(_INNER_W) + '╯');
   return [
-    helmet(top),
-    wrap(helmet('   _                          ')),
-    wrap(helmet('  | |__ _ _____  _ _          ')),
-    wrap(helmet(`  | / _\` |_ / || | '_|        `)),
-    wrap(helmet(`  |_\\__,_/__\\_, |_|           `)),
-    wrap(ink(cap)),
-    helmet(bot),
+    top,
+    ..._LAZY_STANDARD.map((row) => wrap(padInner(row))),
+    wrap(padInner(cap)),
+    bot,
   ];
 }
 
