@@ -1484,43 +1484,53 @@ function _attachGhostAutocomplete(rl) {
 // Width-management rule: every inner line is forced through
 // `.padEnd(W)` so a stray width miscount can't punch the right
 // border off the box (which is exactly the bug v3.99.5 shipped:
-// v4.2.1 — emoji-based minimal mascot. The previous 8-bit ASCII crab
-// (17-wide × 12-row box-drawing grid with shell-red / face-orange /
-// legs-yellow tinting) didn't read as a crab in many terminal fonts —
-// it looked more like a robot than the "lazy claw" the name promises.
-// We now lean on the native 🦞 glyph plus a per-state suffix so every
-// terminal that can render emoji shows the same thing. State map is
-// preserved so callers (working spinner, loop status, etc.) can still
-// ask for "working" / "done" / "error" variants without reaching into
-// the banner.
-const _MASCOT_EMOJI = {
-  idle:    '🦞',
-  working: '🦞 …',
-  done:    '🦞 ✓',
-  error:   '🦞 ✕',
-};
+// v4.2.2 — restore the original v3.99.11-era banner: a figlet
+// "lazy" wordmark (small font, 4 rows) inside a 30-col rounded box
+// with a "LazyClaw  |__/  v<ver>" caption sharing the last inner row
+// with the descender of the `y`. This is the banner that shipped
+// before the helmet-mascot / 8-bit-crab / emoji detours, and the one
+// the user kept in muscle memory.
+//
+// Layout invariant: every inner row is exactly 30 visible cells (no
+// double-width glyphs, all chars are 1 cell in any monospace font),
+// so the right edge `│` always lands in the same column.
+//
+// _renderMascot / _renderMascotTiny are kept as stubs because the
+// _renderBanner caller still passes a row array around; they no
+// longer drive separate art for working/done/error since the box-
+// banner has no good place to flash those states. The router and
+// loop runners that used to ask for a state-coloured tiny mascot can
+// keep importing the helper; it just returns the wordmark.
 
-function _renderMascot(state) {
-  // Callers (_renderBanner) iterate row-by-row, so we return an array
-  // even though the emoji mascot is a single line.
-  return [_MASCOT_EMOJI[state] || _MASCOT_EMOJI.idle];
+function _renderMascot() {
+  // Banner builds its own art; this stub exists so any leftover
+  // caller doesn't crash. One element so .map() and length checks
+  // behave like the legacy shape.
+  return ['lazyclaw'];
 }
 
-// One-line status badge for inline use (loop iteration log, daemon
-// status line, etc.). No colour wrap — the glyph carries the brand.
-function _renderMascotTiny(state) {
-  return _MASCOT_EMOJI[state] || _MASCOT_EMOJI.idle;
+function _renderMascotTiny() {
+  return 'lazyclaw';
 }
 
 function _renderBanner(version) {
+  const helmet = (s) => `\x1b[38;2;195;61;42m${s}\x1b[0m`;
   const ink = (s) => `\x1b[38;2;241;234;217m${s}\x1b[0m`;
-  const dim = (s) => `\x1b[2m${s}\x1b[0m`;
   const v = String(version || '?.?.?');
+  // Caption shares the final inner row with the `|__/` descender of
+  // the `y` from figlet-small, exactly like the v3.99.11 screenshot.
+  const cap = `  LazyClaw  |__/  v${v}`.padEnd(30, ' ').slice(0, 30);
+  const top = '╭' + '─'.repeat(30) + '╮';
+  const bot = '╰' + '─'.repeat(30) + '╯';
+  const wrap = (inner) => helmet('│') + inner + helmet('│');
   return [
-    '',
-    `  🦞  ${ink('lazyclaw')}  ${dim('v' + v)}`,
-    `      ${dim('a sleepy 8-bit terminal assistant')}`,
-    '',
+    helmet(top),
+    wrap(helmet('   _                          ')),
+    wrap(helmet('  | |__ _ _____  _ _          ')),
+    wrap(helmet(`  | / _\` |_ / || | '_|        `)),
+    wrap(helmet(`  |_\\__,_/__\\_, |_|           `)),
+    wrap(ink(cap)),
+    helmet(bot),
   ];
 }
 
