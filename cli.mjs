@@ -950,7 +950,7 @@ const SUBCOMMAND_SUBS = {
   completion: ['bash', 'zsh'],
   auth:      ['list', 'add', 'remove', 'use', 'rotate'],
   pairing:   ['list', 'add', 'remove'],
-  nodes:     ['list', 'register', 'remove'],
+  nodes:     ['list', 'register', 'remove', 'pending', 'approve', 'revoke', 'devices'],
   message:   ['list', 'add', 'remove', 'send'],
   workspace: ['list', 'init', 'show', 'remove', 'path'],
   cron:      ['list', 'add', 'remove', 'show', 'sync', 'run'],
@@ -3591,8 +3591,51 @@ async function cmdNodes(sub, positional, flags = {}) {
       console.log(JSON.stringify({ ok: true, removed: id }));
       return;
     }
+    // Device-gateway pairing (Phase 27) — distinct from the config-based
+    // `nodes register` table above. These drive the Ed25519 PairingStore
+    // a companion node authenticates against via `lazyclaw daemon`.
+    case 'pending': {
+      const { PairingStore } = await import('./gateway/device_auth.mjs');
+      const store = new PairingStore(path.dirname(configPath()));
+      console.log(JSON.stringify(store.pending(), null, 2));
+      return;
+    }
+    case 'devices': {
+      const { PairingStore } = await import('./gateway/device_auth.mjs');
+      const store = new PairingStore(path.dirname(configPath()));
+      console.log(JSON.stringify(store.devicesList(), null, 2));
+      return;
+    }
+    case 'approve': {
+      const requestId = positional[0];
+      if (!requestId) {
+        console.error('Usage: lazyclaw nodes approve <requestId>   (see `lazyclaw nodes pending`)');
+        process.exit(2);
+      }
+      const { PairingStore } = await import('./gateway/device_auth.mjs');
+      const store = new PairingStore(path.dirname(configPath()));
+      try {
+        const { deviceId } = store.approve(requestId);
+        // The token is intentionally NOT printed — the device receives its
+        // rotated token on its next /gateway/connect, so it never has to
+        // pass through a terminal / shell history.
+        console.log(JSON.stringify({ ok: true, approved: requestId, deviceId, note: 'device receives its token on next /gateway/connect' }));
+      } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }
+      return;
+    }
+    case 'revoke': {
+      const deviceId = positional[0];
+      if (!deviceId) {
+        console.error('Usage: lazyclaw nodes revoke <deviceId>');
+        process.exit(2);
+      }
+      const { PairingStore } = await import('./gateway/device_auth.mjs');
+      const store = new PairingStore(path.dirname(configPath()));
+      console.log(JSON.stringify(store.revoke(deviceId)));
+      return;
+    }
     default:
-      console.error('Usage: lazyclaw nodes <list|register|remove> ...');
+      console.error('Usage: lazyclaw nodes <list|register|remove|pending|approve <requestId>|revoke <deviceId>|devices> ...');
       process.exit(2);
   }
 }

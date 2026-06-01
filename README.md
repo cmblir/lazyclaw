@@ -448,6 +448,43 @@ lazyclaw daemon --rate-limit 60 --log info    # 60 req/min/IP, JSON access logs
 lazyclaw daemon --once                        # serve a single request, then exit
 ```
 
+### Device gateway — companion nodes (v4.3)
+
+A companion node (a future mobile/menu-bar app, or just `curl`)
+authenticates to the daemon with per-device Ed25519 keys, gated by
+explicit operator approval — the OpenClaw gateway model, realised over
+HTTP + SSE (no extra dependency). The daemon stays loopback-bound;
+expose it remotely only behind a tunnel (Tailscale / Cloudflare) + TLS,
+and set `--auth-token` for the non-gateway routes.
+
+Handshake (all under `/gateway/`, which has its own device-auth so it
+sits outside the daemon's shared `--auth-token` gate):
+
+1. `POST /gateway/connect/challenge` → `{ nonce, ts }` (single-use, time-boxed).
+2. `POST /gateway/connect` with `{ payload, signature, publicKey, nonce }`
+   — the node signs the canonical payload with its Ed25519 key. The
+   gateway verifies the signature, **binds the key to the claimed device
+   id**, enforces nonce single-use (anti-replay) and freshness. An
+   unapproved device gets `403 { status: 'pending', requestId }`; an
+   approved one gets its rotated bearer `token`.
+3. Operator approves out-of-band:
+
+```bash
+lazyclaw nodes pending                 # list pending pairing requests
+lazyclaw nodes approve <requestId>     # mint + rotate the device token (never printed)
+lazyclaw nodes devices                 # approved devices (token masked)
+lazyclaw nodes revoke <deviceId>       # drop a device's approval + token
+```
+
+4. The node reconnects → receives its `token`, then calls authenticated
+   routes with `Authorization: Bearer <token>` + `x-device-id: <id>`:
+   `GET /gateway/whoami` and `GET /gateway/events` (an SSE push stream;
+   event producers such as remote tool-call approval are a later pass).
+
+Tokens are stored owner-only (`0600`) under
+`~/.lazyclaw/gateway/devices.json`, compared in constant time, and
+rotated on every re-approval.
+
 ## Cost rate cards
 
 ```bash

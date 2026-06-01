@@ -21,6 +21,8 @@ import { withFallback } from './providers/fallback.mjs';
 import { withResponseCache } from './providers/cache.mjs';
 import { costFromUsage, RATE_CARD_SHAPE } from './providers/rates.mjs';
 import { composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill } from './skills.mjs';
+import { ChallengeRegistry } from './gateway/device_auth.mjs';
+import { createGateway } from './gateway/http_gateway.mjs';
 import { TokenBucketLimiter } from './ratelimit.mjs';
 import { createLogger } from './logger.mjs';
 import { summarizeState, listSessions as listWorkflowSessions, loadStateFile as loadWorkflowState, aggregateNodeStats } from './workflow/summary.mjs';
@@ -321,6 +323,11 @@ export function makeHandler(ctx) {
     costsByCurrency: /** @type {Record<string, number>} */({}),
     tokensTotal: { inputTokens: 0, outputTokens: 0 },
   };
+  // Device gateway (Phase 27). The ChallengeRegistry is a per-process
+  // singleton: a challenge minted by one request is consumed by a later
+  // one, so it must outlive a single call.
+  const gwConfigDir = typeof ctx.sessionsDirGetter === 'function' ? ctx.sessionsDirGetter() : undefined;
+  const gateway = createGateway({ configDir: gwConfigDir, challengeRegistry: new ChallengeRegistry() });
   return async function handler(req, res) {
     // Capture method+path before any handler logic runs; req.url survives
     // the response but capturing now keeps the log line stable even if a
@@ -360,6 +367,31 @@ export function makeHandler(ctx) {
       // can't even probe whether a token is required.
       if (!isOriginAllowed(req, allowedOrigins, allowLoopback)) {
         return writeJson(res, 403, { error: 'forbidden origin' });
+      }
+      // Device gateway (Phase 27) — routed BEFORE the shared auth-token
+      // gate. Companion-node auth is the gateway's own Ed25519 device-auth
+      // (challenge/sign/approve + bearer token); the only unauthenticated
+      // route, /gateway/connect/challenge, returns nothing but a random
+      // nonce. The bypass decision uses the NORMALIZED pathname (the same
+      // one the gateway routes on) so a dot-segment path like
+      // `/gateway/../sessions` can't skip the auth-token gate — it
+      // normalizes to `/sessions`, fails this prefix test, and falls
+      // through to the protected handler. When the limiter is enabled,
+      // gateway traffic uses its own key namespace so an unauthenticated
+      // flood can't drain the authenticated user's per-IP budget.
+      let gwPath = '';
+      try { gwPath = new URL(req.url || '/', 'http://localhost').pathname; } catch { gwPath = ''; }
+      if (gwPath.startsWith('/gateway/')) {
+        if (limiter) {
+          const key = 'gw:' + (req.socket?.remoteAddress || 'no-socket');
+          const verdict = limiter.consume(key);
+          if (!verdict.allowed) {
+            metrics.rateLimitDenied += 1;
+            const retrySeconds = Math.max(1, Math.ceil(verdict.retryAfterMs / 1000));
+            return writeJson(res, 429, { error: 'rate limit exceeded', retryAfterMs: verdict.retryAfterMs }, { 'retry-after': String(retrySeconds) });
+          }
+        }
+        return await gateway.handle(req, res, { readBody: readTextBody });
       }
       // Authentication gate — when authToken is set, every request must
       // present `Authorization: Bearer <token>`. This is opt-in because

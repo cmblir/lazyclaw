@@ -135,20 +135,45 @@ export class ChallengeRegistry {
   /**
    * @param {{ maxSkewMs?: number }} [opts]
    */
-  constructor({ maxSkewMs = DEFAULT_MAX_SKEW_MS } = {}) {
+  constructor({ maxSkewMs = DEFAULT_MAX_SKEW_MS, maxPending = 10000, sweepEvery = 256 } = {}) {
     this.maxSkewMs = maxSkewMs;
+    this.maxPending = maxPending;
+    this.sweepEvery = sweepEvery;
+    this._sinceSweep = 0;
     /** @type {Map<string, number>} nonce -> mint ts (epoch ms) */
     this._pending = new Map();
   }
 
   /**
    * Mint and register a fresh challenge. Identical shape to createChallenge().
+   * The ledger is self-healing: stale nonces (older than ±maxSkewMs, which
+   * can never be consumed anyway) are swept opportunistically, and a hard
+   * cap evicts the oldest so an unauthenticated flood of un-redeemed
+   * challenges can never grow memory without bound.
    * @returns {{ nonce: string, ts: number }}
    */
   create() {
     const challenge = createChallenge();
     this._pending.set(challenge.nonce, challenge.ts);
+    if (++this._sinceSweep >= this.sweepEvery) {
+      this._sinceSweep = 0;
+      this._sweep(challenge.ts);
+    }
+    // Hard cap — evict oldest (Map preserves insertion order) until within
+    // bound. O(1) amortized per create under a sustained flood.
+    while (this._pending.size > this.maxPending) {
+      const oldest = this._pending.keys().next().value;
+      if (oldest === undefined) break;
+      this._pending.delete(oldest);
+    }
     return challenge;
+  }
+
+  // Drop entries that can no longer verify (outside ±maxSkewMs of nowMs).
+  _sweep(nowMs) {
+    for (const [nonce, ts] of this._pending) {
+      if (Math.abs(nowMs - ts) > this.maxSkewMs) this._pending.delete(nonce);
+    }
   }
 
   /**
@@ -333,8 +358,9 @@ export function verifyConnect({
     // Derive the canonical device id from the SAME key we just verified with,
     // so Gate 2 can bind it to the payload's claimed identity.
     derivedDeviceId = deviceIdFromPublicKey(keyObj);
-  } catch (err) {
-    return { ok: false, reason: `signature verify failed: ${err?.message || err}` };
+  } catch {
+    // Generic reason — don't reflect node:crypto internals to the caller.
+    return { ok: false, reason: 'signature verification failed' };
   }
   if (!sigOk) {
     return { ok: false, reason: 'bad signature' };
@@ -385,6 +411,21 @@ function freshRequestId() {
 // pre-existing file/dir keeps its old (possibly looser) mode otherwise.
 const DEVICES_DIR_MODE = 0o700;
 const DEVICES_FILE_MODE = 0o600;
+
+// Bounds on the pending-requests table (an unauthenticated attacker minting
+// fresh keypairs could otherwise grow it without limit).
+const PENDING_TTL_MS = 24 * 60 * 60 * 1000;   // 24h
+const MAX_PENDING_REQUESTS = 1000;
+
+// Thrown when the pending-requests ceiling is hit. The caller (gateway
+// connect handler) maps this to a 429 rather than a 500.
+export class PairingCapError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'PairingCapError';
+    this.code = 'PAIRING_CAP';
+  }
+}
 
 function writeAtomic(filePath, obj) {
   const dir = path.dirname(filePath);
@@ -444,6 +485,19 @@ export class PairingStore {
     writeAtomic(this.path, this._data);
   }
 
+  // Drop pending requests older than the TTL. Approved/other-status records
+  // are kept (they are the device roster, not the abuse surface). Mutates
+  // _data in place; the caller persists.
+  _prunePending() {
+    const cutoff = Date.now() - PENDING_TTL_MS;
+    for (const [id, r] of Object.entries(this._data.requests)) {
+      if (r && r.status === 'pending') {
+        const created = Date.parse(r.createdAt || '') || 0;
+        if (created < cutoff) delete this._data.requests[id];
+      }
+    }
+  }
+
   /**
    * Record a pairing request for a device. Returns a pending receipt.
    * NEVER returns a token — approval is a separate, explicit step.
@@ -454,6 +508,15 @@ export class PairingStore {
   requestPairing({ deviceId, platform = '', label = '' } = {}) {
     if (!deviceId || typeof deviceId !== 'string') {
       throw new Error('requestPairing requires a deviceId');
+    }
+    // Bound the on-disk requests table: age out stale pending requests, then
+    // refuse once a hard ceiling is hit. Without this, an attacker minting a
+    // fresh keypair (hence a fresh deviceId) per connect could grow
+    // devices.json without bound (each unapproved connect persists a row).
+    this._prunePending();
+    const pendingCount = Object.values(this._data.requests).filter((r) => r && r.status === 'pending').length;
+    if (pendingCount >= MAX_PENDING_REQUESTS) {
+      throw new PairingCapError(`too many pending pairing requests (cap ${MAX_PENDING_REQUESTS}); approve or wait for expiry`);
     }
     const requestId = freshRequestId();
     this._data.requests[requestId] = {
@@ -559,5 +622,43 @@ export class PairingStore {
     delete this._data.devices[deviceId];
     this._persist();
     return { deviceId, revoked: existed };
+  }
+
+  /**
+   * All pending pairing requests (awaiting an explicit approve()), newest
+   * first. Tokens are never part of a request record, so this is safe to
+   * surface in a CLI listing.
+   * @returns {Array<{requestId,deviceId,platform,label,status,createdAt}>}
+   */
+  pending() {
+    return Object.values(this._data.requests)
+      .filter((r) => r && r.status === 'pending')
+      .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  }
+
+  /**
+   * The existing pending request for a device, or null. Lets the connect
+   * handler avoid piling up a fresh request on every unapproved reconnect.
+   * @param {string} deviceId
+   * @returns {object|null}
+   */
+  pendingForDevice(deviceId) {
+    return Object.values(this._data.requests)
+      .find((r) => r && r.status === 'pending' && r.deviceId === deviceId) || null;
+  }
+
+  /**
+   * Approved devices with the token MASKED — for a CLI/dashboard listing
+   * that must never echo a live bearer token.
+   * @returns {Array<{deviceId,platform,label,approvedAt,tokenMasked}>}
+   */
+  devicesList() {
+    return Object.values(this._data.devices).map((d) => ({
+      deviceId: d.deviceId,
+      platform: d.platform || '',
+      label: d.label || '',
+      approvedAt: d.approvedAt || '',
+      tokenMasked: d.token ? `${String(d.token).slice(0, 6)}…${String(d.token).slice(-4)}` : '',
+    }));
   }
 }
