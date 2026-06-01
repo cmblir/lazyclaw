@@ -70,6 +70,7 @@ export async function runAgentTurn({
   apiKey,
   maxIterations = DEFAULT_MAX_ITERATIONS,
   signal,
+  approve,
 } = {}) {
   if (!agent) throw new AgentTurnError('agent is required', 'NO_AGENT');
   const adapter = adapterFor(agent.provider);
@@ -118,7 +119,7 @@ export async function runAgentTurn({
       try {
         result = await runTool({
           agent, tool: call.name, args: call.input,
-          taskId, configDir, cwd,
+          taskId, configDir, cwd, approve,
         });
         if (result && result.ok === false) ok = false;
       } catch (err) {

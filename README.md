@@ -374,6 +374,33 @@ lazyclaw telegram listen --provider anthropic --model claude-opus-4-7
 The `pairing` allowlist doubles as the Telegram sender allowlist, so
 only paired ids get a reply.
 
+### Matrix + generic inbound (v4.3)
+
+The same pattern extends to **Matrix** over the client-server `/sync`
+long-poll (no SDK):
+
+```bash
+printf 'MATRIX_HOMESERVER=https://matrix.org\nMATRIX_ACCESS_TOKEN=...\nMATRIX_USER_ID=@you:matrix.org\n' >> ~/.lazyclaw/.env
+lazyclaw matrix listen                        # pairing allowlist = @user:server ids
+```
+
+For any platform lazyclaw doesn't natively speak (Discord DMs, WhatsApp,
+Signal, Email — each needs a heavy SDK or external binary), run your own
+relay and forward messages to the **generic inbound webhook** on the
+daemon — no extra dependency in lazyclaw:
+
+```bash
+curl -s localhost:<port>/inbound -H 'content-type: application/json' \
+  -d '{"text":"hi from anywhere","senderId":"123","threadId":"discord:42"}'
+# → { "reply": "...", "threadId": "discord:42" }
+```
+
+`/inbound` runs the active provider and is auth-token-gated; when a
+`pairing` allowlist exists, `senderId` must be on it. Native adapters
+(Telegram, Matrix, Slack) all implement the same `channels/base.mjs`
+contract, so an SDK-backed channel can be dropped in later behind an
+explicit dependency review.
+
 The CLI is mirrored by daemon HTTP routes (`GET/POST/PATCH/DELETE
 /agents|teams|tasks`, `GET /tasks/<id>/transcript`) and by the
 browser dashboard's Agents / Teams / Tasks tabs:
@@ -478,8 +505,23 @@ lazyclaw nodes revoke <deviceId>       # drop a device's approval + token
 
 4. The node reconnects → receives its `token`, then calls authenticated
    routes with `Authorization: Bearer <token>` + `x-device-id: <id>`:
-   `GET /gateway/whoami` and `GET /gateway/events` (an SSE push stream;
-   event producers such as remote tool-call approval are a later pass).
+   `GET /gateway/whoami` and `GET /gateway/events` (an SSE push stream).
+
+**Remote tool-call approval (SSE event producer).** A trusted local
+caller requests human approval for a sensitive action; the paired device
+approves it from anywhere:
+
+```text
+POST /exec/request {tool,args,summary}   ← auth-token-gated (local/operator)
+   → broadcasts `exec.approval.requested` over /gateway/events
+   → device POSTs /gateway/exec/resolve {id, decision:"approve"}  (device-authed)
+   → the request long-poll resolves { approved, by }  (or denied on timeout)
+```
+
+The MAS tool-use loop accepts an `approve` hook (`runTaskTurn` →
+`runAgentTurn` → `runTool`) that gates the sensitive tools (`bash`,
+`write`) on exactly this decision; read-only tools run ungated. Pending
+approvals are bounded and the summary shown to the device is redacted.
 
 Tokens are stored owner-only (`0600`) under
 `~/.lazyclaw/gateway/devices.json`, compared in constant time, and

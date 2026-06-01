@@ -314,6 +314,7 @@ export async function runTaskTurn({
   logger = () => {},
   maxAgentTurns = DEFAULT_MAX_AGENT_TURNS,
   signal,
+  approve,
 } = {}) {
   if (!task || !team || !agentsById) {
     throw new MentionRouterError('task, team, agentsById are required', 'ROUTER_BAD_INPUT');
@@ -372,7 +373,7 @@ export async function runTaskTurn({
         userMessage: ctx.user,
         history: [],
         taskId: current.id,
-        configDir, cwd, apiKey, fetchImpl, baseUrl, signal,
+        configDir, cwd, apiKey, fetchImpl, baseUrl, signal, approve,
       });
     } catch (err) {
       await clearTypingPlaceholder(typing, logger);

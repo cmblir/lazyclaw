@@ -937,6 +937,8 @@ const SUBCOMMANDS = [
   'slack',
   // v4.3.0 — Telegram long-poll listener (zero-install mobile control)
   'telegram',
+  // v4.3.0 — Matrix /sync long-poll listener
+  'matrix',
   // v4.1.0 — multi-agent slack system (Phase 9+)
   'agent', 'team', 'task',
 ];
@@ -960,6 +962,7 @@ const SUBCOMMAND_SUBS = {
   memory:    ['show', 'dream', 'edit'],
   slack:     ['listen'],
   telegram:  ['listen'],
+  matrix:    ['listen'],
   agent:     ['add', 'list', 'show', 'edit', 'remove'],
   team:      ['add', 'list', 'show', 'edit', 'remove'],
   task:      ['start', 'list', 'show', 'abandon', 'done', 'remove'],
@@ -4570,6 +4573,33 @@ async function cmdTask(sub, positional, flags = {}) {
       // Per-provider base-url override (tests point this at a local mock;
       // production leaves it unset for the built-in default).
       const baseUrl = _resolveBaseUrl(leadAgent.provider);
+      // --approve-url turns on remote human-in-the-loop approval for the
+      // sensitive tools (bash/write): each such call long-polls a running
+      // daemon's `POST /exec/request`, which broadcasts to paired devices
+      // over the gateway SSE and resolves when one approves. Fail-closed —
+      // any endpoint error denies the call. Omit the flag → ungated (the
+      // historical behavior).
+      let approve;
+      if (flags['approve-url']) {
+        const approveUrl = String(flags['approve-url']).replace(/\/$/, '');
+        const approveToken = flags['approve-token'] ? String(flags['approve-token']) : '';
+        const approveTimeoutMs = flags['approve-timeout'] ? parseInt(flags['approve-timeout'], 10) : 120000;
+        approve = async ({ tool, args, agent }) => {
+          const summary = `${tool}: ${typeof args === 'object' ? JSON.stringify(args) : String(args)}`.slice(0, 400);
+          try {
+            const r = await fetch(`${approveUrl}/exec/request`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json', ...(approveToken ? { authorization: `Bearer ${approveToken}` } : {}) },
+              body: JSON.stringify({ tool, agentId: agent, summary, timeoutMs: approveTimeoutMs }),
+            });
+            if (!r.ok) return { approved: false, reason: `approval endpoint HTTP ${r.status}` };
+            const j = await r.json();
+            return { approved: !!j.approved, reason: j.reason || (j.approved ? 'approved' : 'denied') };
+          } catch (err) {
+            return { approved: false, reason: `approval request failed: ${err?.message || err}` };
+          }
+        };
+      }
       try {
         const result = await router.runTaskTurn({
           task, team, agentsById,
@@ -4579,6 +4609,7 @@ async function cmdTask(sub, positional, flags = {}) {
           baseUrl,
           logger: (line) => process.stderr.write(line),
           maxAgentTurns: flags['max-turns'] ? parseInt(flags['max-turns'], 10) : undefined,
+          approve,
         });
         emitJson({ id: result.task.id, status: result.task.status, iterations: result.iterations, stoppedBy: result.stoppedBy });
       } catch (err) {
@@ -5096,6 +5127,83 @@ async function cmdTelegram(sub, positional, flags = {}) {
   await new Promise((resolve) => {
     const onSig = async () => {
       process.stderr.write(`\n[telegram] shutting down…\n`);
+      try { await ch.stop(); } catch { /* best-effort */ }
+      resolve();
+    };
+    process.once('SIGINT', onSig);
+    process.once('SIGTERM', onSig);
+  });
+}
+
+// `lazyclaw matrix listen` — Matrix inbound over the client-server API's
+// long-poll /sync (no SDK). Mirrors `telegram listen`. Set MATRIX_HOMESERVER
+// + MATRIX_ACCESS_TOKEN (+ MATRIX_USER_ID for self-filtering) in ~/.lazyclaw/.env.
+async function cmdMatrix(sub, positional, flags = {}) {
+  if (sub !== 'listen') {
+    console.error('Usage: lazyclaw matrix listen [--provider X] [--model Y]\n  Long-polls the Matrix /sync API. Set MATRIX_HOMESERVER + MATRIX_ACCESS_TOKEN (+ MATRIX_USER_ID) in ~/.lazyclaw/.env.\n  Restrict who can talk to it with `lazyclaw pairing add <@user:server>`.');
+    process.exit(2);
+  }
+  await ensureRegistry();
+  const cfg = readConfig();
+  const cfgDir = path.dirname(configPath());
+
+  const envInfo = _loadDotenvIfAny(cfgDir);
+  process.stderr.write(`[matrix] .env: ${envInfo.loaded} keys loaded from ${envInfo.path}\n`);
+
+  const provName = flags.provider || cfg.provider || 'mock';
+  const prov = _registryMod.PROVIDERS[provName];
+  if (!prov) { console.error(`unknown provider: ${provName}`); process.exit(2); }
+  const model = flags.model || cfg.model;
+
+  const threadMsgs = new Map();
+  const MAX_TURNS = 20;
+  const handler = async ({ threadId, text }) => {
+    const cleaned = String(text || '').trim();
+    if (!cleaned) { process.stderr.write('[matrix] dropping empty inbound\n'); return null; }
+    const msgs = threadMsgs.get(threadId) || [];
+    msgs.push({ role: 'user', content: cleaned });
+    let acc = '';
+    try {
+      for await (const chunk of prov.sendMessage(msgs, { apiKey: _resolveAuthKey(cfg, provName), model })) acc += chunk;
+    } catch (err) {
+      msgs.pop();
+      const why = err?.message || String(err);
+      process.stderr.write(`[matrix] provider error: ${why}\n`);
+      return `(provider error: ${why})`;
+    }
+    msgs.push({ role: 'assistant', content: acc });
+    if (msgs.length > MAX_TURNS) msgs.splice(0, msgs.length - MAX_TURNS);
+    threadMsgs.set(threadId, msgs);
+    if (!acc.trim()) { process.stderr.write('[matrix] provider returned empty text — not posting\n'); return null; }
+    return acc;
+  };
+
+  const allowlist = (cfg.pairing || []).map((p) => String(p.id));
+  const { MatrixChannel } = await import('./channels/matrix.mjs');
+  let ch;
+  try {
+    ch = new MatrixChannel({ allowlist: allowlist.length ? allowlist : null });
+  } catch (err) {
+    console.error(`matrix: ${err?.message || err}`);
+    process.exit(2);
+  }
+  process.stderr.write(`[matrix] provider=${provName} model=${model || '(default)'} allowlist=${allowlist.length || 'open'}\n`);
+  try {
+    await ch.start(handler, { poll: true, logger: (line) => process.stderr.write(line) });
+  } catch (err) {
+    if (err?.code === 'MATRIX_MISSING_TOKEN' || err?.code === 'MATRIX_MISSING_HOMESERVER') {
+      console.error(`matrix: ${err.message}`);
+      console.error(`hint: set MATRIX_HOMESERVER and MATRIX_ACCESS_TOKEN in ${path.join(cfgDir, '.env')}`);
+    } else {
+      console.error(`matrix: ${err?.message || err}`);
+    }
+    process.exit(2);
+  }
+  process.stderr.write(`[matrix] listening. Ctrl-C to stop.\n`);
+
+  await new Promise((resolve) => {
+    const onSig = async () => {
+      process.stderr.write(`\n[matrix] shutting down…\n`);
       try { await ch.stop(); } catch { /* best-effort */ }
       resolve();
     };
@@ -6189,6 +6297,7 @@ async function _dispatchMenuChoice(argv) {
       case 'memory':       return await cmdMemory(rest[0], rest.slice(1), {});
       case 'slack':        return await cmdSlack(rest[0], rest.slice(1), {});
       case 'telegram':     return await cmdTelegram(rest[0], rest.slice(1), {});
+      case 'matrix':       return await cmdMatrix(rest[0], rest.slice(1), {});
       case 'team':         return await cmdTeam(rest[0], rest.slice(1), {});
       case 'task':         return await cmdTask(rest[0], rest.slice(1), {});
       case 'auth':         return await cmdAuth(rest[0], rest.slice(1), {});
@@ -6743,6 +6852,11 @@ async function main() {
     case 'telegram': {
       const sub = rest.positional[0];
       await cmdTelegram(sub, rest.positional.slice(1), rest.flags);
+      break;
+    }
+    case 'matrix': {
+      const sub = rest.positional[0];
+      await cmdMatrix(sub, rest.positional.slice(1), rest.flags);
       break;
     }
     case 'team': {

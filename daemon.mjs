@@ -327,7 +327,7 @@ export function makeHandler(ctx) {
   // singleton: a challenge minted by one request is consumed by a later
   // one, so it must outlive a single call.
   const gwConfigDir = typeof ctx.sessionsDirGetter === 'function' ? ctx.sessionsDirGetter() : undefined;
-  const gateway = createGateway({ configDir: gwConfigDir, challengeRegistry: new ChallengeRegistry() });
+  const gateway = createGateway({ configDir: gwConfigDir, challengeRegistry: new ChallengeRegistry(), heartbeatMs: 25000 });
   return async function handler(req, res) {
     // Capture method+path before any handler logic runs; req.url survives
     // the response but capturing now keeps the log line stable even if a
@@ -462,6 +462,26 @@ export function makeHandler(ctx) {
         }
         case route === 'GET /version':
           return writeJson(res, 200, { version: ctx.version(), nodeVersion: process.version, platform: `${process.platform}-${process.arch}` });
+        case route === 'POST /exec/request': {
+          // Remote exec-approval bridge. This route is AUTH-TOKEN-GATED
+          // (above), so only the trusted local operator/CLI can REQUEST an
+          // approval; a paired mobile device RESOLVES it over the gateway
+          // (POST /gateway/exec/resolve). The route long-polls: it awaits
+          // the device's decision (or the approval's timeout) and returns
+          // { approved, by, reason }.
+          let body;
+          try { body = await readJson(req); }
+          catch (e) { return writeJson(res, 400, { error: `invalid JSON body: ${e.message}` }); }
+          if (!body || typeof body.tool !== 'string' || !body.tool) {
+            return writeJson(res, 400, { error: 'tool is required' });
+          }
+          const { promise } = gateway.requestApproval(
+            { tool: body.tool, args: body.args, agentId: body.agentId, summary: body.summary },
+            { timeoutMs: Number.isFinite(+body.timeoutMs) ? +body.timeoutMs : undefined },
+          );
+          const result = await promise;
+          return writeJson(res, 200, result);
+        }
         case route === 'GET /health':
           // Conventional liveness check — always 200 if the process
           // is alive enough to hit the route. No config inspection
@@ -1517,6 +1537,52 @@ export function makeHandler(ctx) {
               ...(err?.retryAfterMs ? { retryAfterMs: err.retryAfterMs } : {}),
             }, m.headers || {});
           }
+        }
+        case route === 'POST /inbound': {
+          // Generic inbound bridge — a stable, channel-agnostic relay
+          // target so ANY platform (a Discord/WhatsApp/etc. bot the user
+          // runs elsewhere) can forward a message in and get one reply,
+          // without lazyclaw shipping that platform's SDK. Auth-token
+          // gated like every non-gateway route; additionally pairing-gated
+          // on senderId when a pairing allowlist is configured.
+          const breach = checkCostCap(metrics, costCap);
+          if (breach) return writeJson(res, 402, { error: 'cost cap exceeded', currency: breach.currency, spent: breach.spent, cap: breach.cap });
+          let body;
+          try { body = await readJson(req); }
+          catch (e) { return writeJson(res, 400, { error: `invalid JSON body: ${e.message}` }); }
+          const text = typeof body.text === 'string' ? body.text.trim() : '';
+          if (!text) return writeJson(res, 400, { error: 'text is required' });
+          const cfg = ctx.readConfig();
+          // Pairing gate: when the operator has paired any senders, the
+          // relay must identify an allowlisted senderId.
+          const allow = Array.isArray(cfg.pairing) ? cfg.pairing.map((p) => String(p && p.id)) : [];
+          if (allow.length > 0) {
+            const sender = String(body.senderId || '');
+            if (!sender || !allow.includes(sender)) return writeJson(res, 403, { error: 'sender not paired' });
+          }
+          const provName = body.provider || cfg.provider || 'mock';
+          const resolved = resolveProvider(body, provName, cachedByName, logger);
+          if (resolved.error) return writeJson(res, 400, { error: resolved.error });
+          let acc = '';
+          let inboundUsage = null;
+          try {
+            for await (const chunk of resolved.provider.sendMessage(
+              [{ role: 'user', content: text }],
+              { apiKey: cfg['api-key'], model: body.model || cfg.model, onUsage: (u) => { inboundUsage = u; } },
+            )) acc += chunk;
+          } catch (err) {
+            const m = statusForProviderError(err);
+            return writeJson(res, m.status, { error: err?.message || String(err), code: err?.code || null }, m.headers || {});
+          }
+          // Feed the running spend total so the cost cap can actually trip
+          // on /inbound traffic (mirrors POST /agent / POST /chat).
+          if (inboundUsage && cfg.rates) {
+            try {
+              const c = costFromUsage({ provider: provName, model: body.model || cfg.model, usage: inboundUsage }, cfg.rates);
+              if (c) accumulateMetricsFromCost(metrics, inboundUsage, c);
+            } catch { /* cost is best-effort; never block a reply on it */ }
+          }
+          return writeJson(res, 200, { reply: acc, threadId: body.threadId || null });
         }
         case route === 'POST /agent': {
           const breach = checkCostCap(metrics, costCap);

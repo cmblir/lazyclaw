@@ -18,6 +18,8 @@
 export function redactSecrets(text) {
   return String(text ?? '')
     .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[REDACTED PRIVATE KEY]')
+    // Inline credentials in a URL: scheme://user:password@host → redact the password.
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/[^/\s:@]+):[^/\s@]+@/gi, '$1:[REDACTED]@')
     .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, '[REDACTED]')
     .replace(/\b(?:gh[opsu]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/g, '[REDACTED]')
     .replace(/\bxox[abprs]-[A-Za-z0-9-]{8,}/g, '[REDACTED]')

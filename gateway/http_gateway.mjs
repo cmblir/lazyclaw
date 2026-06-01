@@ -28,11 +28,13 @@
 // `auth-token` gate: device-auth is their own gate, and the only
 // unauthenticated route (challenge) returns nothing but a random nonce.
 
+import crypto from 'node:crypto';
 import {
   PairingStore,
   deviceIdFromPublicKey,
   verifyConnect,
 } from './device_auth.mjs';
+import { redactSecrets } from '../mas/redact.mjs';
 
 // Matches the daemon's readTextBody cap (1 MiB) so the Content-Length
 // pre-check and the stream reader agree on the limit.
@@ -55,7 +57,7 @@ function bearerToken(req) {
  * is consumed by a later one, so it must outlive a single call. `nowFn`
  * is injected for deterministic tests.
  */
-export function createGateway({ configDir, challengeRegistry, nowFn = Date.now } = {}) {
+export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, heartbeatMs = 0 } = {}) {
   if (!challengeRegistry) throw new Error('createGateway requires a challengeRegistry');
   // Each entry: { res, deviceId }. Bounded globally and per-device so an
   // authenticated device can't exhaust sockets/fds with open streams.
@@ -72,6 +74,73 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now }
   // performed by the CLI in another process is visible to the daemon
   // without a restart.
   const store = () => new PairingStore(configDir);
+
+  // ── exec-approval producer ───────────────────────────────────────
+  // A trusted in-process caller (the daemon's POST /exec/request, which
+  // sits behind the daemon auth-token gate) calls requestApproval(); that
+  // broadcasts `exec.approval.requested` to every subscribed device and
+  // returns a Promise that settles when a device POSTs
+  // /gateway/exec/resolve (or on timeout). This is the remote
+  // human-in-the-loop gate for sensitive tool calls.
+  const approvals = new Map(); // id -> { detail, resolveFn, timer, createdAt }
+  const MAX_APPROVALS = 256;
+  const APPROVAL_TTL_MS = 5 * 60 * 1000;
+
+  // What the device is shown about a pending approval. Args may carry
+  // secrets (e.g. a bash command with a token), so the summary is redacted
+  // and capped before it leaves the process.
+  function approvalView(detail = {}) {
+    const summary = redactSecrets(String(detail.summary ?? detail.args ?? '')).slice(0, 500);
+    return { tool: detail.tool || '', agentId: detail.agentId || '', summary };
+  }
+
+  function requestApproval(detail = {}, { timeoutMs = APPROVAL_TTL_MS } = {}) {
+    // Bound the table — deny-and-evict the oldest pending if we're full so
+    // an approval flood can't grow memory without limit.
+    if (approvals.size >= MAX_APPROVALS) {
+      const oldest = approvals.keys().next().value;
+      if (oldest !== undefined) resolveApproval(oldest, false, 'system:capacity');
+    }
+    const id = 'ap_' + crypto.randomBytes(9).toString('hex');
+    let resolveFn;
+    const promise = new Promise((r) => { resolveFn = r; });
+    // Clamp both ends: a caller can't pin an HTTP socket + entry for an
+    // arbitrary (e.g. multi-day) duration, nor poll faster than 1s.
+    const ttl = Math.min(APPROVAL_TTL_MS, Math.max(1000, timeoutMs || APPROVAL_TTL_MS));
+    const timer = setTimeout(() => {
+      if (approvals.has(id)) {
+        approvals.delete(id);
+        resolveFn({ id, approved: false, reason: 'timeout' });
+        broadcast('exec.approval.resolved', { id, approved: false, reason: 'timeout' });
+      }
+    }, ttl);
+    if (typeof timer.unref === 'function') timer.unref();
+    approvals.set(id, { detail, resolveFn, timer, createdAt: nowFn() });
+    broadcast('exec.approval.requested', { id, ...approvalView(detail) });
+    return { id, promise };
+  }
+
+  // Trust model: every APPROVED device is uniformly trusted — any of them
+  // may resolve any pending approval and list pending ids. There is no
+  // per-device scoping by design (a paired device is an operator surface).
+  // Approval ids are unguessable (crypto.randomBytes), so only an
+  // already-trusted, authenticated device can act. If you pair a
+  // lower-trust device, revoke it (`lazyclaw nodes revoke`) rather than
+  // relying on approval scoping.
+  function resolveApproval(id, decision, by = '') {
+    const a = approvals.get(id);
+    if (!a) return { ok: false, reason: 'unknown or already resolved' };
+    clearTimeout(a.timer);
+    approvals.delete(id);
+    const approved = decision === true || decision === 'approve' || decision === 'allow';
+    a.resolveFn({ id, approved, by, reason: approved ? 'approved' : 'denied' });
+    broadcast('exec.approval.resolved', { id, approved, by });
+    return { ok: true, id, approved };
+  }
+
+  function pendingApprovals() {
+    return [...approvals.entries()].map(([id, a]) => ({ id, createdAt: a.createdAt, ...approvalView(a.detail) }));
+  }
 
   async function readJsonBody(req, readBody) {
     let raw;
@@ -165,6 +234,24 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now }
       return writeJson(res, 200, { ok: true, deviceId: ident.deviceId });
     }
 
+    // ── exec approval: device resolves a pending request ─────────
+    if (m === 'POST' && p === '/gateway/exec/resolve') {
+      const ident = authDevice(req);
+      if (!ident) return writeJson(res, 401, { ok: false, reason: 'invalid device token' });
+      const body = await readJsonBody(req, readBody);
+      if (body && body.__tooLarge) return writeJson(res, 413, { ok: false, reason: 'request body too large' });
+      if (!body || !body.id) return writeJson(res, 400, { ok: false, reason: 'id and decision are required' });
+      const r = resolveApproval(body.id, body.decision, ident.deviceId);
+      return writeJson(res, r.ok ? 200 : 404, r);
+    }
+
+    // ── exec approval: device lists what's awaiting a decision ───
+    if (m === 'GET' && p === '/gateway/exec/pending') {
+      const ident = authDevice(req);
+      if (!ident) return writeJson(res, 401, { ok: false, reason: 'invalid device token' });
+      return writeJson(res, 200, { pending: pendingApprovals() });
+    }
+
     // ── events (SSE, token-authenticated) ────────────────────────
     if (m === 'GET' && p === '/gateway/events') {
       const ident = authDevice(req);
@@ -202,5 +289,16 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now }
     return sseClients.size;
   }
 
-  return { handle, broadcast, sseClients };
+  // Optional keep-alive: periodic `tick` event so SSE proxies don't idle
+  // out the stream and subscribers can prove the channel is live. Opt-in
+  // (heartbeatMs>0) and unref'd so it never holds the process open or
+  // leaks in unit tests that don't ask for it.
+  let heartbeat = null;
+  if (heartbeatMs > 0) {
+    heartbeat = setInterval(() => { broadcast('tick', { ts: nowFn() }); }, heartbeatMs);
+    if (typeof heartbeat.unref === 'function') heartbeat.unref();
+  }
+  function close() { if (heartbeat) { clearInterval(heartbeat); heartbeat = null; } }
+
+  return { handle, broadcast, sseClients, requestApproval, resolveApproval, pendingApprovals, close };
 }
