@@ -22,9 +22,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const FILES = [
-  { name: 'AGENTS.md', heading: 'AGENTS — what to do' },
-  { name: 'SOUL.md',   heading: 'SOUL — how to behave' },
-  { name: 'TOOLS.md',  heading: 'TOOLS — what is available' },
+  { name: 'AGENTS.md',    heading: 'AGENTS — what to do' },
+  { name: 'SOUL.md',      heading: 'SOUL — how to behave' },
+  { name: 'TOOLS.md',     heading: 'TOOLS — what is available' },
+  { name: 'HEARTBEAT.md', heading: 'HEARTBEAT — proactive routines' },
 ];
 
 export function workspaceRoot(cfgDir) {
@@ -109,6 +110,20 @@ What the assistant can reach for, and how to invoke each one.
 - \`lazyclaw agent ...\` — one-shot LLM call
 
 Add project-specific tools below.
+`,
+    'HEARTBEAT.md':
+`# Heartbeat
+
+Proactive routines the assistant runs on a schedule — the things it
+should do WITHOUT being asked. Wire each to a real trigger with
+\`lazyclaw cron add <name> --schedule "<cron>"\` (or a goal's --cron).
+
+- Every morning: summarise overnight changes and post to #standup.
+- Hourly: check the deploy queue; alert on a stuck job.
+- When idle: review recently-used skills (\`lazyclaw skills curate\`).
+
+Keep routines reversible and cheap; a heartbeat that mutates state
+should ask first or operate on a dry-run by default.
 `,
   };
   for (const [name, body] of Object.entries(stubs)) {

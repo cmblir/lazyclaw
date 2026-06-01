@@ -935,6 +935,8 @@ const SUBCOMMANDS = [
   'loop', 'loops', 'goal', 'memory',
   // v4.0.0 — Slack Socket Mode listener (inbound DM / @-mention)
   'slack',
+  // v4.3.0 — Telegram long-poll listener (zero-install mobile control)
+  'telegram',
   // v4.1.0 — multi-agent slack system (Phase 9+)
   'agent', 'team', 'task',
 ];
@@ -942,7 +944,7 @@ const SUBCOMMANDS = [
 const SUBCOMMAND_SUBS = {
   config:    ['get', 'set', 'list', 'delete', 'unset', 'path', 'edit', 'validate'],
   sessions:  ['list', 'show', 'clear', 'export', 'search'],
-  skills:    ['list', 'show', 'install', 'remove', 'search'],
+  skills:    ['list', 'show', 'install', 'remove', 'search', 'curate', 'classify'],
   providers: ['list', 'info', 'test', 'add', 'remove', 'models'],
   rates:     ['list', 'set', 'delete', 'shape', 'validate', 'copy'],
   completion: ['bash', 'zsh'],
@@ -957,6 +959,7 @@ const SUBCOMMAND_SUBS = {
   goal:      ['add', 'list', 'show', 'close', 'switch', 'tick', 'channel'],
   memory:    ['show', 'dream', 'edit'],
   slack:     ['listen'],
+  telegram:  ['listen'],
   agent:     ['add', 'list', 'show', 'edit', 'remove'],
   team:      ['add', 'list', 'show', 'edit', 'remove'],
   task:      ['start', 'list', 'show', 'abandon', 'done', 'remove'],
@@ -4976,6 +4979,88 @@ async function cmdSlack(sub, positional, flags = {}) {
   });
 }
 
+// `lazyclaw telegram listen` — zero-install mobile control surface.
+// Long-polls the Telegram Bot API (no public URL / webhook needed) and
+// pipes each inbound message through the active provider, replying in
+// the same chat. Mirrors `slack listen`. Access is gated by the existing
+// `pairing` allowlist (Telegram numeric user ids); an empty allowlist
+// means "reply to anyone who can reach the bot".
+async function cmdTelegram(sub, positional, flags = {}) {
+  if (sub !== 'listen') {
+    console.error('Usage: lazyclaw telegram listen [--provider X] [--model Y]\n  Long-polls the Telegram Bot API. Set TELEGRAM_BOT_TOKEN in ~/.lazyclaw/.env.\n  Restrict who can talk to it with `lazyclaw pairing add <telegram-user-id>`.');
+    process.exit(2);
+  }
+  await ensureRegistry();
+  const cfg = readConfig();
+  const cfgDir = path.dirname(configPath());
+
+  const envInfo = _loadDotenvIfAny(cfgDir);
+  process.stderr.write(`[telegram] .env: ${envInfo.loaded} keys loaded from ${envInfo.path}\n`);
+
+  const provName = flags.provider || cfg.provider || 'mock';
+  const prov = _registryMod.PROVIDERS[provName];
+  if (!prov) { console.error(`unknown provider: ${provName}`); process.exit(2); }
+  const model = flags.model || cfg.model;
+
+  const threadMsgs = new Map();
+  const MAX_TURNS = 20;
+
+  const handler = async ({ threadId, text }) => {
+    const cleaned = String(text || '').trim();
+    if (!cleaned) { process.stderr.write('[telegram] dropping empty inbound\n'); return null; }
+    const msgs = threadMsgs.get(threadId) || [];
+    msgs.push({ role: 'user', content: cleaned });
+    let acc = '';
+    try {
+      for await (const chunk of prov.sendMessage(msgs, { apiKey: _resolveAuthKey(cfg, provName), model })) acc += chunk;
+    } catch (err) {
+      msgs.pop();
+      const why = err?.message || String(err);
+      process.stderr.write(`[telegram] provider error: ${why}\n`);
+      return `(provider error: ${why})`;
+    }
+    msgs.push({ role: 'assistant', content: acc });
+    if (msgs.length > MAX_TURNS) msgs.splice(0, msgs.length - MAX_TURNS);
+    threadMsgs.set(threadId, msgs);
+    if (!acc.trim()) { process.stderr.write('[telegram] provider returned empty text — not posting\n'); return null; }
+    return acc;
+  };
+
+  // The pairing allowlist doubles as the Telegram sender allowlist.
+  const allowlist = (cfg.pairing || []).map((p) => String(p.id));
+  const { TelegramChannel } = await import('./channels/telegram.mjs');
+  let ch;
+  try {
+    ch = new TelegramChannel({ allowlist: allowlist.length ? allowlist : null });
+  } catch (err) {
+    console.error(`telegram: ${err?.message || err}`);
+    process.exit(2);
+  }
+  process.stderr.write(`[telegram] provider=${provName} model=${model || '(default)'} allowlist=${allowlist.length || 'open'}\n`);
+  try {
+    await ch.start(handler, { poll: true, logger: (line) => process.stderr.write(line) });
+  } catch (err) {
+    if (err?.code === 'TELEGRAM_MISSING_TOKEN') {
+      console.error('telegram: TELEGRAM_BOT_TOKEN not set');
+      console.error(`hint: add TELEGRAM_BOT_TOKEN=... to ${path.join(cfgDir, '.env')}`);
+    } else {
+      console.error(`telegram: ${err?.message || err}`);
+    }
+    process.exit(2);
+  }
+  process.stderr.write(`[telegram] listening. Ctrl-C to stop.\n`);
+
+  await new Promise((resolve) => {
+    const onSig = async () => {
+      process.stderr.write(`\n[telegram] shutting down…\n`);
+      try { await ch.stop(); } catch { /* best-effort */ }
+      resolve();
+    };
+    process.once('SIGINT', onSig);
+    process.once('SIGTERM', onSig);
+  });
+}
+
 async function cmdSkills(sub, positional, flags = {}) {
   const skillsMod = await import('./skills.mjs');
   const cfgDir = path.dirname(configPath());
@@ -5167,8 +5252,24 @@ async function cmdSkills(sub, positional, flags = {}) {
       console.log(JSON.stringify({ query, regex: useRegex, matches }, null, 2));
       return;
     }
+    case 'curate': {
+      // Lifecycle sweep: agent-authored skills unused >90d move into
+      // skills/.archive/ (recoverable). Human-authored skills are never
+      // moved. The real clock is injected here; the module stays pure.
+      const curator = await import('./skills_curator.mjs');
+      const r = curator.curate(cfgDir, Date.now());
+      console.log(JSON.stringify(r, null, 2));
+      return;
+    }
+    case 'classify': {
+      const name = positional[0];
+      if (!name) { console.error('Usage: lazyclaw skills classify <name>'); process.exit(2); }
+      const curator = await import('./skills_curator.mjs');
+      console.log(JSON.stringify({ name, state: curator.classify(name, cfgDir, Date.now()), usage: curator.usageOf(name, cfgDir) }, null, 2));
+      return;
+    }
     default:
-      console.error('Usage: lazyclaw skills <list|show <name>|install <name> [--from path]|remove <name>|search <query> [--regex]>');
+      console.error('Usage: lazyclaw skills <list|show <name>|install <name> [--from path]|remove <name>|search <query> [--regex]|curate|classify <name>>');
       process.exit(2);
   }
 }
@@ -6044,6 +6145,7 @@ async function _dispatchMenuChoice(argv) {
       case 'goal':         return await cmdGoal(rest[0], rest.slice(1), {});
       case 'memory':       return await cmdMemory(rest[0], rest.slice(1), {});
       case 'slack':        return await cmdSlack(rest[0], rest.slice(1), {});
+      case 'telegram':     return await cmdTelegram(rest[0], rest.slice(1), {});
       case 'team':         return await cmdTeam(rest[0], rest.slice(1), {});
       case 'task':         return await cmdTask(rest[0], rest.slice(1), {});
       case 'auth':         return await cmdAuth(rest[0], rest.slice(1), {});
@@ -6593,6 +6695,11 @@ async function main() {
     case 'slack': {
       const sub = rest.positional[0];
       await cmdSlack(sub, rest.positional.slice(1), rest.flags);
+      break;
+    }
+    case 'telegram': {
+      const sub = rest.positional[0];
+      await cmdTelegram(sub, rest.positional.slice(1), rest.flags);
       break;
     }
     case 'team': {

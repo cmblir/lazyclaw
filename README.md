@@ -352,6 +352,28 @@ runs through the Socket Mode listener:
 lazyclaw slack listen     # foreground; connects, reacts with :eyes:, replies in thread
 ```
 
+### Telegram — zero-install mobile control (v4.3)
+
+Control lazyclaw from your phone with no app to install and no public
+URL: the Telegram listener long-polls the Bot API (works behind NAT),
+pipes each inbound message through the active provider, and replies in
+the same chat. Push notifications are handled by Telegram itself.
+
+```bash
+# 1) Create a bot with @BotFather, then store its token:
+echo 'TELEGRAM_BOT_TOKEN=123456:ABC...' >> ~/.lazyclaw/.env
+
+# 2) (recommended) restrict who can drive it — your Telegram numeric user id:
+lazyclaw pairing add 987654321
+
+# 3) Listen. Foreground; Ctrl-C to stop. An empty pairing allowlist
+#    means "reply to anyone who messages the bot".
+lazyclaw telegram listen --provider anthropic --model claude-opus-4-7
+```
+
+The `pairing` allowlist doubles as the Telegram sender allowlist, so
+only paired ids get a reply.
+
 The CLI is mirrored by daemon HTTP routes (`GET/POST/PATCH/DELETE
 /agents|teams|tasks`, `GET /tasks/<id>/transcript`) and by the
 browser dashboard's Agents / Teams / Tasks tabs:
@@ -386,7 +408,17 @@ lazyclaw skills list                          # markdown skill bundles
 lazyclaw skills show review
 lazyclaw skills install ./my-skill.md
 lazyclaw skills remove review
+
+lazyclaw skills classify deploy-flow          # active | stale (30d) | archived (90d)
+lazyclaw skills curate                        # archive agent skills unused >90d → skills/.archive/
 ```
+
+`skills curate` is the lifecycle sweep for self-improving skills:
+agent-authored skills that haven't been recalled (`skill_view`) in 90
+days move to `skills/.archive/` (recoverable); human-authored skills are
+never touched. Pair it with a `HEARTBEAT.md` routine (see
+`lazyclaw workspace init`, which now scaffolds AGENTS / SOUL / TOOLS /
+**HEARTBEAT**) and `lazyclaw cron` to run it on a schedule.
 
 <img src="docs/screenshots/providers.png" alt="lazyclaw providers info anthropic — model list + capabilities" width="760">
 

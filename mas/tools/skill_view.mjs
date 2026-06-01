@@ -30,6 +30,12 @@ export async function exec(args, { configDir } = {}) {
   const name = args.name.trim();
   try {
     const content = skills.loadSkill(name, configDir);
+    // Record the recall so the curator can age out never-used skills.
+    // Best-effort: a usage-write hiccup must never fail the tool call.
+    try {
+      const curator = await import('../../skills_curator.mjs');
+      curator.recordUsage(name, configDir, Date.now());
+    } catch { /* non-fatal */ }
     return { ok: true, name, content };
   } catch (err) {
     return { ok: false, error: `skill_view: ${err?.message || err}` };
