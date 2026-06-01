@@ -55,12 +55,12 @@ test.describe('Phase 9 — agent registry', () => {
       role: 'Project planner',
       provider: 'claude-cli',
       model: 'claude-opus-4-7',
-      tools: ['bash', 'read', 'write', 'grep'],
+      tools: ['bash', 'read', 'write', 'grep', 'skill_view'],
       version: 1,
     });
     const onDisk = JSON.parse(fs.readFileSync(path.join(cfg, 'agents', 'planner.json'), 'utf8'));
     expect(onDisk.name).toBe('planner');
-    expect(onDisk.tools).toEqual(['bash', 'read', 'write', 'grep']);
+    expect(onDisk.tools).toEqual(['bash', 'read', 'write', 'grep', 'skill_view']);
   });
 
   test('agent add rejects an unknown tool name', async () => {

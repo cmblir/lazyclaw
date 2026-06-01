@@ -12,6 +12,7 @@ import * as bashTool from './tools/bash.mjs';
 import * as readTool from './tools/read.mjs';
 import * as writeTool from './tools/write.mjs';
 import * as grepTool from './tools/grep.mjs';
+import * as skillViewTool from './tools/skill_view.mjs';
 import * as audit from './audit.mjs';
 
 export class ToolError extends Error {
@@ -27,6 +28,7 @@ const TOOLS = {
   read: readTool,
   write: writeTool,
   grep: grepTool,
+  skill_view: skillViewTool,
 };
 
 const NOT_IMPLEMENTED_TOOLS = ['web_search', 'web_fetch', 'slack_post'];
@@ -78,7 +80,7 @@ export async function runTool({ agent, tool, args, taskId, configDir, cwd } = {}
   }
   let result;
   try {
-    result = await impl.exec(args || {}, { cwd: cwd || process.cwd() });
+    result = await impl.exec(args || {}, { cwd: cwd || process.cwd(), configDir });
   } catch (err) {
     result = { ok: false, error: `${tool} threw: ${err?.message || err}` };
   }

@@ -85,7 +85,7 @@ test.describe('Phase 15 — dashboard daemon routes', () => {
       });
       expect(create.status).toBe(200);
       expect(create.body.name).toBe('planner');
-      expect(create.body.tools).toEqual(['bash', 'read', 'write', 'grep']);
+      expect(create.body.tools).toEqual(['bash', 'read', 'write', 'grep', 'skill_view']);
 
       const list = await api(d, '/agents');
       expect(list.body.map((a: { name: string }) => a.name)).toEqual(['planner']);

@@ -301,6 +301,50 @@ lazyclaw agent reflect planner --task t_20260518_xxxxxx
 # and set "memoryWrite": "off" (other values: "auto" default, "manual").
 ```
 
+### Self-improving skills (v4.3)
+
+Reflection writes free-text *lessons* to an agent's memory. A **skill**
+goes further: it distils a finished task into a reusable, structured
+`SKILL.md` (`## When to Use` / `## Procedure` / `## Pitfalls` /
+`## Verification`) that any future agent can load. This is the Hermes
+self-improving-skill pattern — synthesise once, recall forever.
+
+```bash
+# Synthesise a skill from a finished task. Mirrors `agent reflect`:
+# one LLM call over the transcript → a SKILL.md installed into
+# ~/.lazyclaw/skills/<name>.md (frontmatter created_by: agent).
+lazyclaw agent skill-synth planner --task t_20260518_xxxxxx
+lazyclaw agent skill-synth planner --task t_20260518_xxxxxx --dry-run  # print, don't write
+
+# Opt an agent into AUTOMATIC synthesis on task done (default is manual):
+lazyclaw agent add researcher --skill-write auto   # auto | manual (default) | off
+```
+
+**Recall is progressive-disclosure.** Every agent turn gets a compact
+*index* of installed skills (name + one-line summary) injected into its
+system prompt — cheap, a line per skill. The agent pulls a full skill
+body on demand with the built-in read-only **`skill_view`** tool, so
+skill bodies never bloat the prompt until they're actually needed.
+`skill_view` ships in the default tool whitelist, so newly-created
+agents recall skills out of the box; older agents pick it up via
+`lazyclaw agent edit <name> --tools bash,read,write,grep,skill_view`.
+
+`skill-synth` defaults to `manual` (you run the command, or pass
+`--dry-run` to review first) because a synthesised skill feeds every
+future agent's prompt — keep it opt-in until you trust an agent's
+output. Flip the trigger any time with
+`lazyclaw agent edit <name> --skill-write auto|manual|off`.
+
+Auto-synthesis is defended for the cases where it runs unattended:
+secret-shaped tokens (`sk-…`, `ghp_…`, `AKIA…`, bearer tokens,
+`*_KEY=…`, PEM blocks) are redacted from both the transcript sent to
+the model and the saved skill; synthesised bodies are size-capped and
+the `[[TASK_DONE]]` marker is neutralised; and a synthesised skill
+**never overwrites a human-authored skill** — on a name collision it
+takes the next free `name-N` slug, only ever overwriting (and
+version-bumping) its own prior output. Skill bodies are framed to the
+model as untrusted reference, not instructions.
+
 Slack inbound (a user pings `@lazyclaw` in a channel, the bot replies)
 runs through the Socket Mode listener:
 

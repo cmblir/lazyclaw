@@ -27,7 +27,7 @@ test.describe('Phase 12a — tool runner', () => {
     const { runner } = await load();
     const schemas = runner.listToolSchemas() as Array<{ name: string; parameters: { type: string } }>;
     const names = schemas.map((s) => s.name).sort();
-    expect(names).toEqual(['bash', 'grep', 'read', 'write']);
+    expect(names).toEqual(['bash', 'grep', 'read', 'skill_view', 'write']);
     for (const s of schemas) {
       expect(s.parameters.type).toBe('object');
     }

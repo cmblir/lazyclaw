@@ -38,24 +38,79 @@ export function listSkills(configDir = defaultConfigDir()) {
     .map(name => {
       const full = path.join(dir, name);
       const stat = fs.statSync(full);
-      const head = readFirstLine(full);
+      let content = '';
+      try { content = fs.readFileSync(full, 'utf8'); } catch { /* unreadable → empty */ }
+      const { meta, body } = parseFrontmatter(content);
+      // Prefer the agent-/author-supplied frontmatter description; fall
+      // back to the first markdown heading for legacy frontmatter-less
+      // skills so the index still reads sensibly.
+      const summary = (meta.description || firstHeading(body) || '').slice(0, 120);
       return {
         name: name.slice(0, -SKILL_EXT.length),
         path: full,
         bytes: stat.size,
         mtimeMs: stat.mtimeMs,
-        summary: head.replace(/^#+\s*/, '').slice(0, 120),
+        summary,
+        description: meta.description || '',
+        createdBy: meta.created_by || '',
+        version: meta.version || '',
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function readFirstLine(p) {
-  try {
-    const buf = fs.readFileSync(p, 'utf8');
-    const nl = buf.indexOf('\n');
-    return nl < 0 ? buf : buf.slice(0, nl);
-  } catch { return ''; }
+// Parse a leading YAML frontmatter block (--- … ---). Only the flat
+// `key: value` shape skills use is supported — no nested YAML — which
+// keeps us dependency-free. Returns { meta, body }; when no frontmatter
+// is present meta is {} and body is the untouched content.
+export function parseFrontmatter(content) {
+  const text = String(content ?? '');
+  if (!text.startsWith('---')) return { meta: {}, body: text };
+  // The opening fence must be its own line.
+  const afterOpen = text.slice(3);
+  if (!/^\r?\n/.test(afterOpen)) return { meta: {}, body: text };
+  const closeRe = /\r?\n---[ \t]*(?:\r?\n|$)/;
+  const m = closeRe.exec(afterOpen);
+  if (!m) return { meta: {}, body: text };
+  const block = afterOpen.slice(0, m.index);
+  // Drop blank lines between the closing fence and the first body line
+  // so callers can rely on body starting at real content.
+  const body = afterOpen.slice(m.index + m[0].length).replace(/^(?:\r?\n)+/, '');
+  const meta = {};
+  for (const line of block.split(/\r?\n/)) {
+    const mm = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(line.trim());
+    if (!mm) continue;
+    let val = mm[2].trim();
+    if (val.length >= 2 && val.startsWith('"') && val.endsWith('"')) {
+      // Symmetric with skill_synth's escapeYaml double-quote escaping.
+      val = val.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+    } else if (val.length >= 2 && val.startsWith("'") && val.endsWith("'")) {
+      val = val.slice(1, -1);
+    }
+    meta[mm[1]] = val;
+  }
+  return { meta, body };
+}
+
+function firstHeading(body) {
+  for (const line of String(body || '').split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t) continue;
+    return t.replace(/^#+\s*/, '');
+  }
+  return '';
+}
+
+// Compact "Level 0" recall index: one `- <name>: <summary>` line per
+// installed skill, sorted by name. Returns '' when no skills exist so
+// callers can inject it conditionally. This is what gets dropped into
+// the system prompt so the model knows which skills exist without
+// paying for their full bodies (progressive disclosure — the model
+// pulls a full skill on demand via the skill_view tool).
+export function skillsIndex(configDir = defaultConfigDir()) {
+  const skills = listSkills(configDir);
+  if (!skills.length) return '';
+  return skills.map((s) => `- ${s.name}: ${s.summary}`.trimEnd()).join('\n');
 }
 
 export function loadSkill(name, configDir = defaultConfigDir()) {
@@ -74,6 +129,44 @@ export function installSkill(name, content, configDir = defaultConfigDir()) {
 export function removeSkill(name, configDir = defaultConfigDir()) {
   const p = skillPath(name, configDir);
   if (fs.existsSync(p)) fs.unlinkSync(p);
+}
+
+export function skillExists(name, configDir = defaultConfigDir()) {
+  try { return fs.existsSync(skillPath(name, configDir)); }
+  catch { return false; }
+}
+
+// Read the integer `version` from a skill's frontmatter (0 when the
+// skill is missing or carries no version).
+export function skillVersion(name, configDir = defaultConfigDir()) {
+  try {
+    const { meta } = parseFrontmatter(fs.readFileSync(skillPath(name, configDir), 'utf8'));
+    return parseInt(meta.version, 10) || 0;
+  } catch { return 0; }
+}
+
+// Reserve a target name for an agent-synthesised skill that NEVER
+// clobbers a human-authored skill. If the slug is free, use it. If a
+// skill with that slug already exists AND it was itself agent-authored
+// (created_by: agent), reuse it — that's the self-improvement update
+// path. Otherwise the slug belongs to a human/curated skill, so we
+// append a numeric suffix and try again. This is the security boundary
+// that stops LLM-chosen slugs from overwriting trusted skills.
+export function reserveSynthName(name, configDir = defaultConfigDir()) {
+  const base = (name && String(name).trim()) || 'skill';
+  let candidate = base;
+  for (let i = 1; i < 1000; i++) {
+    let p;
+    try { p = skillPath(candidate, configDir); }
+    catch { return base; }
+    if (!fs.existsSync(p)) return candidate;
+    let createdBy = '';
+    try { createdBy = parseFrontmatter(fs.readFileSync(p, 'utf8')).meta.created_by || ''; }
+    catch { /* unreadable → treat as occupied */ }
+    if (createdBy === 'agent') return candidate;   // overwrite our own = improve
+    candidate = `${base}-${i}`;
+  }
+  return candidate;
 }
 
 /**

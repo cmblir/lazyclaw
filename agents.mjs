@@ -19,8 +19,8 @@ import { ensureValidName as cronEnsureValidName } from './cron.mjs';
 
 const AGENTS_DIRNAME = 'agents';
 
-export const DEFAULT_TOOLS = ['bash', 'read', 'write', 'grep'];
-export const ALL_TOOLS = ['bash', 'read', 'write', 'grep', 'web_search', 'web_fetch', 'slack_post'];
+export const DEFAULT_TOOLS = ['bash', 'read', 'write', 'grep', 'skill_view'];
+export const ALL_TOOLS = ['bash', 'read', 'write', 'grep', 'skill_view', 'web_search', 'web_fetch', 'slack_post'];
 
 export class AgentError extends Error {
   constructor(message, code) {
@@ -80,6 +80,13 @@ function defaultShape(name) {
     // for `lazyclaw agent reflect`; 'off' disables writes entirely.
     memoryWrite: 'auto',
     memoryMaxChars: 12 * 1024,
+    // Phase 20 — self-improving skill synthesis trigger. 'manual'
+    // (default) means a skill is only written when the user runs
+    // `lazyclaw agent skill-synth`; 'auto' fires synthesis on terminal
+    // `done` alongside reflection; 'off' disables it. Defaults to
+    // 'manual' (unlike memoryWrite) because a synthesised SKILL.md
+    // feeds every future agent's prompt, so we keep it opt-in.
+    skillWrite: 'manual',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -94,8 +101,9 @@ function writeAtomic(filePath, obj) {
 }
 
 const VALID_MEMORY_WRITE = ['auto', 'manual', 'off'];
+const VALID_SKILL_WRITE = ['auto', 'manual', 'off'];
 
-export function registerAgent({ name, displayName, role = '', provider = 'claude-cli', model = '', tools, tags = [], iconEmoji = '', memoryWrite, memoryMaxChars } = {}, configDir = defaultConfigDir()) {
+export function registerAgent({ name, displayName, role = '', provider = 'claude-cli', model = '', tools, tags = [], iconEmoji = '', memoryWrite, memoryMaxChars, skillWrite } = {}, configDir = defaultConfigDir()) {
   ensureValidName(name);
   const p = agentPath(name, configDir);
   if (fs.existsSync(p)) {
@@ -105,6 +113,10 @@ export function registerAgent({ name, displayName, role = '', provider = 'claude
   const mw = memoryWrite ?? 'auto';
   if (!VALID_MEMORY_WRITE.includes(mw)) {
     throw new AgentError(`memoryWrite must be one of ${VALID_MEMORY_WRITE.join(', ')}`, 'AGENT_BAD_MEMORY_WRITE');
+  }
+  const sw = skillWrite ?? 'manual';
+  if (!VALID_SKILL_WRITE.includes(sw)) {
+    throw new AgentError(`skillWrite must be one of ${VALID_SKILL_WRITE.join(', ')}`, 'AGENT_BAD_SKILL_WRITE');
   }
   const data = {
     ...defaultShape(name),
@@ -117,6 +129,7 @@ export function registerAgent({ name, displayName, role = '', provider = 'claude
     iconEmoji: String(iconEmoji || ''),
     memoryWrite: mw,
     memoryMaxChars: Number.isFinite(+memoryMaxChars) && +memoryMaxChars > 0 ? +memoryMaxChars : 12 * 1024,
+    skillWrite: sw,
   };
   writeAtomic(p, data);
   return data;
@@ -154,6 +167,9 @@ export function patchAgent(name, patch, configDir = defaultConfigDir()) {
   }
   if (patch.memoryWrite !== undefined && !VALID_MEMORY_WRITE.includes(patch.memoryWrite)) {
     throw new AgentError(`memoryWrite must be one of ${VALID_MEMORY_WRITE.join(', ')}`, 'AGENT_BAD_MEMORY_WRITE');
+  }
+  if (patch.skillWrite !== undefined && !VALID_SKILL_WRITE.includes(patch.skillWrite)) {
+    throw new AgentError(`skillWrite must be one of ${VALID_SKILL_WRITE.join(', ')}`, 'AGENT_BAD_SKILL_WRITE');
   }
   writeAtomic(agentPath(name, configDir), next);
   return next;
