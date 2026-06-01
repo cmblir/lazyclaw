@@ -44,6 +44,11 @@ async function loadRunner() {
   return await import(url) as typeof import('../mas/tool_runner.mjs');
 }
 
+async function loadRedact() {
+  const url = pathToFileURL(path.join(REPO_ROOT, 'mas', 'redact.mjs')).href;
+  return await import(url) as typeof import('../mas/redact.mjs');
+}
+
 function runCliAsync(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}): Promise<{ status: number | null, stdout: string, stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
@@ -487,5 +492,73 @@ test.describe('Phase 20H — review hardening', () => {
     const { meta } = skills.parseFrontmatter(doc);
     expect(meta.description).toBe(desc);
     expect(meta.description).not.toContain('\\"');
+  });
+});
+
+test.describe('Phase 20I — name + escapeYaml injection hardening', () => {
+  // Finding #1 — installSynthesized must slugify the caller-supplied name so a
+  // newline/colon-laden name cannot inject a frontmatter key or smuggle a
+  // newline into the on-disk filename.
+  test('installSynthesized slugifies a newline/colon-laden name (no injected key, safe filename)', async () => {
+    const cfg = tmpDir('p20i-inject');
+    const synth = await loadSynth();
+    const skills = await loadSkills();
+
+    const evil = 'ok\nmalicious_key: pwned';
+    const r = synth.installSynthesized(
+      { name: evil, description: 'd', body: '## When to Use\nx\n', sourceTask: 't_inj' },
+      cfg,
+    );
+
+    // The reserved skill name is a clean slug — no newline, colon, or space.
+    expect(r.skill).toBe('ok-malicious-key-pwned');
+    expect(r.skill).not.toMatch(/[\n:\s]/);
+
+    // The on-disk filename carries no embedded newline.
+    expect(r.path).not.toContain('\n');
+    expect(path.basename(r.path)).toBe('ok-malicious-key-pwned.md');
+
+    // The frontmatter exposes exactly the expected keys — the injected
+    // `malicious_key` did NOT become a parsed frontmatter key.
+    const { meta } = skills.parseFrontmatter(skills.loadSkill(r.skill, cfg));
+    expect(meta.malicious_key).toBeUndefined();
+    expect(meta.name).toBe('ok-malicious-key-pwned');
+  });
+
+  // Finding #1 (assembleSkillDoc layer) — even called directly with a raw name,
+  // assembleSkillDoc must strip control chars from the rendered name so no
+  // newline survives into the frontmatter.
+  test('assembleSkillDoc strips control chars from the rendered name', async () => {
+    const synth = await loadSynth();
+    const skills = await loadSkills();
+    const doc = synth.assembleSkillDoc({ name: 'ok\nmalicious_key: pwned', body: '## When to Use\nx\n' });
+    const { meta } = skills.parseFrontmatter(doc);
+    expect(meta.malicious_key).toBeUndefined();
+    expect(meta.name).not.toContain('\n');
+  });
+
+  // Finding #3 — escapeYaml must neutralise embedded newlines so a multi-line
+  // description value cannot inject a frontmatter key via assembleSkillDoc.
+  test('escapeYaml strips embedded newlines so a multi-line description cannot inject a key', async () => {
+    const synth = await loadSynth();
+    const skills = await loadSkills();
+    const desc = 'legit summary\ninjected_key: pwned';
+    const doc = synth.assembleSkillDoc({ name: 'safe', description: desc, body: '## When to Use\nx\n' });
+    const { meta } = skills.parseFrontmatter(doc);
+    expect(meta.injected_key).toBeUndefined();
+    expect(meta.description).not.toContain('\n');
+  });
+});
+
+test.describe('Phase 20J — shared redact module', () => {
+  test('mas/redact.mjs exports redactSecrets and skill_synth re-exports the same implementation', async () => {
+    const redact = await loadRedact();
+    const synth = await loadSynth();
+    expect(typeof redact.redactSecrets).toBe('function');
+    const sample = 'token sk-live1234567890abcdef end';
+    // Both surfaces redact identically (skill_synth must delegate to the shared module).
+    expect(redact.redactSecrets(sample)).toBe(synth.redactSecrets(sample));
+    expect(redact.redactSecrets(sample)).not.toContain('sk-live1234567890abcdef');
+    expect(redact.redactSecrets(sample)).toContain('[REDACTED]');
   });
 });

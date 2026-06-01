@@ -16,6 +16,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
+import { runTextCompletion } from './provider_adapters.mjs';
+import { redactSecrets, neutralizeRoleLabels } from './redact.mjs';
+
 export const DEFAULT_MAX_CHARS = 12 * 1024;
 const AGENTS_MEM_DIR = path.join('memory', 'agents');
 
@@ -53,6 +56,11 @@ export function readMemory(name, configDir = defaultConfigDir(), maxChars = DEFA
     let cut = raw.slice(0, maxChars);
     const lastBlank = cut.lastIndexOf('\n\n');
     if (lastBlank > maxChars * 0.6) cut = cut.slice(0, lastBlank);
+    // Drop a trailing lone high-surrogate (U+D800..U+DBFF) left behind
+    // when the slice landed in the middle of a surrogate pair, so the
+    // returned string is never invalid UTF-16.
+    const lastUnit = cut.charCodeAt(cut.length - 1);
+    if (lastUnit >= 0xd800 && lastUnit <= 0xdbff) cut = cut.slice(0, -1);
     return cut + '\n\n…[older entries truncated]\n';
   } catch {
     return '';
@@ -135,19 +143,28 @@ export function buildMemoryBlock(name, configDir = defaultConfigDir(), maxChars 
 // to the on-disk file (auto mode) or surface it to the user (manual
 // command). Throws on hard failure; the router catches and logs.
 //
-// We use the agent's own provider via the existing tool-use callOnce
-// adapters because they are already wired up with apiKey/baseUrl
-// passthrough. No tools are advertised — reflection is pure text.
+// We use the agent's own provider via the shared no-tools text
+// completion (mas/provider_adapters.mjs), which is already wired for
+// apiKey/baseUrl passthrough. No tools are advertised — reflection is
+// pure text. This module owns the reflection-specific transcript +
+// prompt; the call mechanics are shared with skill synthesis.
 export async function reflectOnce({ agent, task, apiKey, baseUrl, fetchImpl, maxBullets = 6 } = {}) {
   if (!agent || !task) throw new AgentMemoryError('agent and task are required', 'AGENT_MEMORY_BAD_INPUT');
-  const adapter = await pickAdapter(agent.provider);
 
-  const transcript = (Array.isArray(task.turns) ? task.turns : [])
-    .map((t) => {
-      const who = t.agent === 'user' ? 'User' : t.agent === 'system' ? 'System' : t.agent;
-      return `[${who}] ${t.text || ''}`;
-    })
-    .join('\n\n') || '(no turns)';
+  // Redact secrets from the transcript BEFORE it leaves for the model,
+  // so a token pasted into a task turn never reaches the LLM. Symmetric
+  // with skill_synth.synthesizeSkill, which already redacts its
+  // transcript; both share mas/redact.mjs.
+  const transcript = redactSecrets(
+    (Array.isArray(task.turns) ? task.turns : [])
+      .map((t) => {
+        const who = t.agent === 'user' ? 'User' : t.agent === 'system' ? 'System' : t.agent;
+        // Defang any forged role label inside the (model-controlled) body
+        // so a turn can't inject its own [System]/[User] authority line.
+        return `[${who}] ${neutralizeRoleLabels(t.text || '')}`;
+      })
+      .join('\n\n') || '(no turns)',
+  );
 
   const userMessage =
     `You just finished task "${task.title || '(untitled)'}" (id ${task.id}). Here is the full transcript:\n\n` +
@@ -157,33 +174,17 @@ export async function reflectOnce({ agent, task, apiKey, baseUrl, fetchImpl, max
     `gotchas, teammate preferences. Do NOT repeat generic advice. Do NOT exceed ${maxBullets} ` +
     `bullets. Reply with the bullets only — no headers, no preamble.`;
 
-  const initialUser = adapter.initialUserMessage
-    ? adapter.initialUserMessage(userMessage)
-    : { role: 'user', content: userMessage };
-
-  const resp = await adapter.callOnce({
-    messages: [initialUser],
-    tools: [],
+  const text = await runTextCompletion({
+    provider: agent.provider,
     model: agent.model,
-    apiKey,
     system: agent.role || '',
+    userMessage,
+    apiKey,
     baseUrl,
     fetchImpl,
   });
-  if (resp.kind !== 'final') {
-    throw new AgentMemoryError(`reflection expected text reply, got ${resp.kind}`, 'AGENT_MEMORY_NO_TEXT');
-  }
-  const text = (resp.text || '').trim();
-  return text;
-}
-
-async function pickAdapter(provider) {
-  switch (provider) {
-    case 'anthropic':  return await import('../providers/tool_use/anthropic.mjs');
-    case 'openai':     return await import('../providers/tool_use/openai.mjs');
-    case 'gemini':     return await import('../providers/tool_use/gemini.mjs');
-    case 'claude-cli': return await import('../providers/tool_use/claude_cli.mjs');
-    default:
-      throw new AgentMemoryError(`provider "${provider}" does not support reflection`, 'AGENT_MEMORY_NO_PROVIDER');
-  }
+  // Redact again on the way back: the model may echo a secret it saw in
+  // the transcript, and this body is persisted via prependEntry and
+  // replayed into every future system prompt.
+  return redactSecrets(text).trim();
 }

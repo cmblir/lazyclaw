@@ -16,25 +16,17 @@
 // free-text lessons.
 
 import * as skills from '../skills.mjs';
+import { runTextCompletion } from './provider_adapters.mjs';
+import { redactSecrets, neutralizeRoleLabels } from './redact.mjs';
 
 const SECTION_RE = /^#{1,6}\s+/;
 const MAX_NAME_LEN = 48;
 const MAX_BODY_BYTES = 8 * 1024;
 
-// Redact common secret shapes so a token that appeared in a task
-// transcript never gets distilled into a durable skill file (which is
-// then re-injected into every future agent's prompt). Mirrors the
-// audit log's posture of not persisting raw sensitive I/O.
-export function redactSecrets(text) {
-  return String(text ?? '')
-    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[REDACTED PRIVATE KEY]')
-    .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, '[REDACTED]')
-    .replace(/\bghp_[A-Za-z0-9]{20,}/g, '[REDACTED]')
-    .replace(/\bxox[abprs]-[A-Za-z0-9-]{8,}/g, '[REDACTED]')
-    .replace(/\bAKIA[0-9A-Z]{12,}/g, '[REDACTED]')
-    .replace(/\b[Bb]earer\s+[A-Za-z0-9._-]{8,}/g, 'Bearer [REDACTED]')
-    .replace(/\b([A-Z][A-Z0-9_]{2,}_(?:KEY|TOKEN|SECRET|PASSWORD))\s*=\s*\S+/g, '$1=[REDACTED]');
-}
+// Re-export the shared secret redactor (mas/redact.mjs) so existing
+// callers of skill_synth.redactSecrets keep working while the single
+// implementation is shared with agent_memory.reflectOnce.
+export { redactSecrets };
 
 // Sanitise an agent-authored skill body before it is persisted and
 // later loaded into other agents' context: redact secrets, neutralise
@@ -121,7 +113,7 @@ export function assembleSkillDoc({ name, description = '', createdBy = 'agent', 
   const date = (ts instanceof Date ? ts : new Date(ts)).toISOString().slice(0, 10);
   const fm = [
     '---',
-    `name: ${name}`,
+    `name: ${escapeYaml(stripControl(name))}`,
     `description: ${escapeYaml(description)}`,
     `version: ${version}`,
     `created_by: ${createdBy}`,
@@ -131,10 +123,20 @@ export function assembleSkillDoc({ name, description = '', createdBy = 'agent', 
   return `${fm.join('\n')}\n${String(body).trim()}\n`;
 }
 
+// Drop control characters (incl. newlines) from a single-line frontmatter
+// value so an embedded \n can't break out of its key into an injected one.
+function stripControl(v) {
+  return String(v ?? '').replace(/[\u0000-\u001f\u007f]/g, '');
+}
+
 // Quote a value only when it contains characters our flat parser would
 // otherwise choke on (a leading special char or an embedded colon).
+// Control characters (including newlines) are stripped first: a quoted
+// multi-line value still injects a frontmatter key because the parser
+// splits on physical lines, so the only safe move is to flatten to a
+// single line before deciding whether to quote.
 function escapeYaml(v) {
-  const s = String(v ?? '');
+  const s = stripControl(v);
   if (s === '') return '';
   if (/[:#]/.test(s) || /^[\s'">|&*!%@`-]/.test(s)) return `"${s.replace(/"/g, '\\"')}"`;
   return s;
@@ -157,7 +159,6 @@ export class SkillSynthError extends Error {
 // fixed section layout instead of free-text lessons.
 export async function synthesizeSkill({ agent, task, apiKey, baseUrl, fetchImpl } = {}) {
   if (!agent || !task) throw new SkillSynthError('agent and task are required', 'SKILL_SYNTH_BAD_INPUT');
-  const adapter = await pickAdapter(agent.provider);
 
   // Redact secrets from the transcript BEFORE it leaves for the model,
   // so a token pasted into the task never reaches the LLM or the file.
@@ -165,7 +166,9 @@ export async function synthesizeSkill({ agent, task, apiKey, baseUrl, fetchImpl 
     (Array.isArray(task.turns) ? task.turns : [])
       .map((t) => {
         const who = t.agent === 'user' ? 'User' : t.agent === 'system' ? 'System' : t.agent;
-        return `[${who}] ${t.text || ''}`;
+        // Defang any forged role label inside the (model-controlled) body
+        // so a turn can't inject its own [System]/[User] authority line.
+        return `[${who}] ${neutralizeRoleLabels(t.text || '')}`;
       })
       .join('\n\n') || '(no turns)'
   );
@@ -183,23 +186,15 @@ export async function synthesizeSkill({ agent, task, apiKey, baseUrl, fetchImpl 
     `## Verification\n<how to confirm the task actually succeeded>\n\n` +
     `Be concrete and specific to what happened. If the task was too trivial to be worth a reusable skill, reply with the single word NONE.`;
 
-  const initialUser = adapter.initialUserMessage
-    ? adapter.initialUserMessage(userMessage)
-    : { role: 'user', content: userMessage };
-
-  const resp = await adapter.callOnce({
-    messages: [initialUser],
-    tools: [],
+  const text = (await runTextCompletion({
+    provider: agent.provider,
     model: agent.model,
-    apiKey,
     system: agent.role || '',
+    userMessage,
+    apiKey,
     baseUrl,
     fetchImpl,
-  });
-  if (resp.kind !== 'final') {
-    throw new SkillSynthError(`synthesis expected text reply, got ${resp.kind}`, 'SKILL_SYNTH_NO_TEXT');
-  }
-  const text = (resp.text || '').trim();
+  })).trim();
   if (!text || /^none\b/i.test(text)) return null;
 
   const parsed = parseSynthOutput(text);
@@ -216,7 +211,11 @@ export async function synthesizeSkill({ agent, task, apiKey, baseUrl, fetchImpl 
 // re-sanitised here too so a direct caller (CLI/router) can't bypass
 // the redaction + cap. Returns { skill, path, version }.
 export function installSynthesized({ name, description = '', body = '', sourceTask = '', createdBy = 'agent' } = {}, configDir, ts = new Date()) {
-  const finalName = skills.reserveSynthName(name, configDir);
+  // Slugify BEFORE reserving the name so a direct caller (CLI/router)
+  // can't smuggle a newline/colon into the filename or inject a second
+  // frontmatter key. parseSynthOutput already slugifies, but this path
+  // is also reachable directly with an arbitrary name.
+  const finalName = skills.reserveSynthName(slugifySkill(name), configDir);
   const overwritingOwn = skills.skillExists(finalName, configDir);
   const version = overwritingOwn ? skills.skillVersion(finalName, configDir) + 1 : 1;
   const doc = assembleSkillDoc({
@@ -230,15 +229,4 @@ export function installSynthesized({ name, description = '', body = '', sourceTa
   });
   const p = skills.installSkill(finalName, doc, configDir);
   return { skill: finalName, path: p, version };
-}
-
-async function pickAdapter(provider) {
-  switch (provider) {
-    case 'anthropic':  return await import('../providers/tool_use/anthropic.mjs');
-    case 'openai':     return await import('../providers/tool_use/openai.mjs');
-    case 'gemini':     return await import('../providers/tool_use/gemini.mjs');
-    case 'claude-cli': return await import('../providers/tool_use/claude_cli.mjs');
-    default:
-      throw new SkillSynthError(`provider "${provider}" does not support skill synthesis`, 'SKILL_SYNTH_NO_PROVIDER');
-  }
 }

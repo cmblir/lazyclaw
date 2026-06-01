@@ -107,6 +107,10 @@ async function loadMem() {
   return await import(url) as typeof import('../mas/agent_memory.mjs');
 }
 
+function anthropicTextReply(id: string, text: string): Response {
+  return { json: { id, type: 'message', role: 'assistant', content: [{ type: 'text', text }], stop_reason: 'end_turn' } };
+}
+
 test.describe('Phase 18 — agent memory', () => {
   test('registerAgent stores memoryWrite default "auto" and a 12 KB cap', async () => {
     const cfg = tmpDir('p18-defaults');
@@ -286,6 +290,69 @@ test.describe('Phase 18 — agent memory', () => {
     const mod = await loadMem();
     expect(mod.readMemory('planner', cfg)).toContain('explicit lesson');
     await mock.close();
+  });
+
+  // Finding #2 — reflectOnce must redact secrets both on the way OUT (the prompt
+  // sent to the LLM) and on the way BACK (the body the caller persists into
+  // every future system prompt). A token pasted into a transcript must never
+  // reach the model nor land on disk.
+  test('reflectOnce redacts a sk- token from both the outgoing prompt and the returned body', async () => {
+    const mock = await startMockAnthropic();
+    // The model echoes the secret back in its reflection bullets.
+    mock.queue.push(anthropicTextReply('m1', '- remember the key sk-live1234567890abcdef\n- another lesson'));
+    const mod = await loadMem();
+
+    const agent = { name: 'planner', provider: 'anthropic', model: 'm', role: 'r' };
+    const task = { id: 't_sec', title: 'leaky', turns: [{ agent: 'user', text: 'my key is sk-live1234567890abcdef keep it' }] };
+    const body = await mod.reflectOnce({ agent, task, apiKey: 'sk-test', baseUrl: mock.baseUrl });
+
+    // Outgoing prompt to the model must not carry the transcript secret verbatim.
+    const sent = JSON.stringify(mock.posts[0].body);
+    expect(sent).not.toContain('sk-live1234567890abcdef');
+    // Returned body (which the router persists) must not carry the echoed secret.
+    expect(body).not.toContain('sk-live1234567890abcdef');
+    expect(body).toContain('[REDACTED]');
+    await mock.close();
+  });
+
+  // Finding #2 (end-to-end) — the persisted memory file must not contain the
+  // secret either, since prependEntry writes the reflectOnce body to disk.
+  test('a sk- token never lands in the stored memory file', async () => {
+    const mock = await startMockAnthropic();
+    mock.queue.push(anthropicTextReply('m1', '- the secret was sk-live1234567890abcdef'));
+    const mod = await loadMem();
+    const cfg = tmpDir('p18-redact-store');
+
+    const agent = { name: 'planner', provider: 'anthropic', model: 'm', role: 'r' };
+    const task = { id: 't_store', title: 'leak', turns: [{ agent: 'user', text: 'use sk-live1234567890abcdef' }] };
+    const body = await mod.reflectOnce({ agent, task, apiKey: 'sk-test', baseUrl: mock.baseUrl });
+    mod.prependEntry('planner', { taskId: task.id, title: task.title, body }, cfg);
+
+    const stored = fs.readFileSync(mod.memoryPath('planner', cfg), 'utf8');
+    expect(stored).not.toContain('sk-live1234567890abcdef');
+    expect(stored).toContain('[REDACTED]');
+    await mock.close();
+  });
+
+  // Finding #4 — truncation must not leave a lone high-surrogate. We build a
+  // body whose byte/char budget lands the cut exactly on a surrogate pair so a
+  // naive slice would orphan the leading half.
+  test('readMemory truncation never leaves a lone high-surrogate', async () => {
+    const cfg = tmpDir('p18-surrogate');
+    const mod = await loadMem();
+    // Filler with no paragraph break near the cut, then an emoji (a surrogate
+    // pair) positioned so the slice boundary splits it.
+    const filler = 'a'.repeat(99);          // 99 chars, no '\n\n'
+    const emoji = '\u{1F600}';              // 😀 = two UTF-16 code units
+    const raw = filler + emoji + 'tail';    // boundary at maxChars=100 splits the pair
+    mod.writeRaw('planner', raw, cfg);
+
+    const cut = mod.readMemory('planner', cfg, 100);
+    // No unpaired high-surrogate (\uD800-\uDBFF) may survive at the cut.
+    const lastReal = cut.replace(/\n\n…\[older entries truncated\]\n$/, '');
+    expect(/[\uD800-\uDBFF]$/.test(lastReal)).toBe(false);
+    // The lone high-surrogate is dropped, not preserved as a broken char.
+    expect(lastReal.endsWith(filler)).toBe(true);
   });
 
   test('daemon GET/PUT/DELETE /agents/<name>/memory round-trips a markdown body', async () => {
