@@ -31,9 +31,10 @@
     "lazyclaw": "cli.mjs"
   },
   "scripts": {
-    "test": "playwright test",
+    "test": "node --test tests/phaseC-*.test.mjs && playwright test",
     "test:bench": "node scripts/bench-providers.mjs",
-    "migrate:v5": "node scripts/migrate-v5.mjs"
+    "migrate:v5": "node scripts/migrate-v5.mjs",
+    "build:splash": "node scripts/build-splash.mjs"
   },
   "files": [
     "cli.mjs",
@@ -73,7 +74,10 @@
     "node": ">=18"
   },
   "dependencies": {
-    "better-sqlite3": "^11.10.0"
+    "better-sqlite3": "^11.10.0",
+    "ink": "^5.0.1",
+    "string-width": "^7.2.0",
+    "chalk": "^5.3.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
