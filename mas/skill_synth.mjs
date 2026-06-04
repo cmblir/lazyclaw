@@ -108,21 +108,67 @@ export function parseSynthOutput(text) {
 }
 
 // Build a complete SKILL.md: a flat-YAML frontmatter block followed by
-// the skill body. The frontmatter shape round-trips through
+// the skill body. v5: adds trained_by / trained_on_model / trajectory_ref /
+// confidence / cross_cli_tested (array) / anti_pattern (boolean) and a
+// group fallback. The frontmatter shape round-trips through
 // skills.parseFrontmatter(). `ts` is injected (not read from the clock)
 // so the output is deterministic and testable.
-export function assembleSkillDoc({ name, description = '', createdBy = 'agent', sourceTask = '', body = '', version = 1, ts = new Date() } = {}) {
+export function assembleSkillDoc({
+  name,
+  description = '',
+  createdBy = 'agent',
+  sourceTask = '',
+  body = '',
+  version = 1,
+  ts = new Date(),
+  // v5 additions:
+  trainedBy = null,
+  trainedOnModel = null,
+  trajectoryRef = null,
+  confidence = null,
+  crossCliTested = null,   // array of {provider, model, outcome, tested_at}
+  outcome = 'done',         // 'done' | 'failed' | 'abandoned'  (spec §0.1 C1)
+  group = null,
+} = {}) {
   const date = (ts instanceof Date ? ts : new Date(ts)).toISOString().slice(0, 10);
+  const isAntiPattern = outcome === 'failed';
+  const finalGroup = group || (isAntiPattern ? 'anti-pattern' : deriveGroup(name));
   const fm = [
     '---',
     `name: ${escapeYaml(stripControl(name))}`,
     `description: ${escapeYaml(description)}`,
     `version: ${version}`,
+    `group: ${escapeYaml(finalGroup)}`,
     `created_by: ${createdBy}`,
   ];
   if (sourceTask) fm.push(`source_task: ${sourceTask}`);
-  fm.push(`created_at: ${date}`, '---', '');
+  fm.push(`created_at: ${date}`);
+  if (trainedBy) fm.push(`trained_by: ${escapeYaml(trainedBy)}`);
+  if (trainedOnModel) fm.push(`trained_on_model: ${escapeYaml(trainedOnModel)}`);
+  if (trajectoryRef) fm.push(`trajectory_ref: ${escapeYaml(trajectoryRef)}`);
+  if (confidence !== null && confidence !== undefined) {
+    fm.push(`confidence: ${Number(confidence).toFixed(2)}`);
+  }
+  if (isAntiPattern) fm.push(`anti_pattern: true`);
+  if (Array.isArray(crossCliTested) && crossCliTested.length) {
+    fm.push('cross_cli_tested:');
+    for (const t of crossCliTested) {
+      fm.push(`  - provider: ${escapeYaml(t.provider || '')}`);
+      if (t.model) fm.push(`    model: ${escapeYaml(t.model)}`);
+      if (t.outcome) fm.push(`    outcome: ${escapeYaml(t.outcome)}`);
+      if (t.tested_at) fm.push(`    tested_at: ${escapeYaml(t.tested_at)}`);
+    }
+  }
+  fm.push('---', '');
   return `${fm.join('\n')}\n${String(body).trim()}\n`;
+}
+
+// Canonical fallback (spec §0.1 C5): filename hyphen prefix → 'legacy'.
+function deriveGroup(name) {
+  const s = String(name || '');
+  const dash = s.indexOf('-');
+  if (dash > 0) return s.slice(0, dash);
+  return 'legacy';
 }
 
 // Drop control characters (incl. newlines) from a single-line frontmatter
@@ -159,23 +205,64 @@ export class SkillSynthError extends Error {
 // completion with no tools advertised, the agent's own role as the
 // system prompt. The difference is the ASK — a reusable skill in a
 // fixed section layout instead of free-text lessons.
-export async function synthesizeSkill({ agent, task, apiKey, baseUrl, fetchImpl } = {}) {
+export async function synthesizeSkill({
+  agent, task, apiKey, baseUrl, fetchImpl,
+  outcome = 'done',
+  trainedBy = null,
+  trainedOnModel = null,
+  trajectoryRef = null,
+  confidence = null,
+  crossCliTested = null,
+} = {}) {
   if (!agent || !task) throw new SkillSynthError('agent and task are required', 'SKILL_SYNTH_BAD_INPUT');
+  if (outcome !== 'done' && outcome !== 'failed' && outcome !== 'abandoned') {
+    throw new SkillSynthError(`bad outcome "${outcome}"`, 'SKILL_SYNTH_BAD_OUTCOME');
+  }
 
-  // Redact secrets from the transcript BEFORE it leaves for the model,
-  // so a token pasted into the task never reaches the LLM or the file.
   const transcript = redactSecrets(
     (Array.isArray(task.turns) ? task.turns : [])
       .map((t) => {
         const who = t.agent === 'user' ? 'User' : t.agent === 'system' ? 'System' : t.agent;
-        // Defang any forged role label inside the (model-controlled) body
-        // so a turn can't inject its own [System]/[User] authority line.
         return `[${who}] ${neutralizeRoleLabels(t.text || '')}`;
       })
       .join('\n\n') || '(no turns)'
   );
 
-  const userMessage =
+  const userMessage = outcome === 'failed'
+    ? buildAntiPatternPrompt(task, transcript)
+    : buildSkillPrompt(task, transcript);
+
+  const text = (await runTextCompletion({
+    provider: agent.provider,
+    model: agent.model,
+    system: agent.role || '',
+    userMessage,
+    apiKey, baseUrl, fetchImpl,
+  })).trim();
+  if (!text || /^none\b/i.test(text)) return null;
+
+  const parsed = parseSynthOutput(text);
+  const description = sanitizeDescription(parsed.description);
+  const body = sanitizeSkillBody(parsed.body);
+  if (!body.trim()) return null;
+  const doc = assembleSkillDoc({
+    name: parsed.name,
+    description,
+    createdBy: 'agent',
+    sourceTask: task.id,
+    body,
+    outcome,
+    trainedBy,
+    trainedOnModel,
+    trajectoryRef,
+    confidence,
+    crossCliTested,
+  });
+  return { name: parsed.name, description, body, doc, sourceTask: task.id, outcome };
+}
+
+function buildSkillPrompt(task, transcript) {
+  return (
     `You just finished task "${task.title || '(untitled)'}" (id ${task.id}). Here is the full transcript:\n\n` +
     transcript +
     `\n\nDistil this into a REUSABLE skill that a future agent could load to handle a similar task faster. ` +
@@ -186,25 +273,23 @@ export async function synthesizeSkill({ agent, task, apiKey, baseUrl, fetchImpl 
     `## Procedure\n<numbered, concrete steps — real file paths / commands where known>\n\n` +
     `## Pitfalls\n<gotchas and dead-ends you hit, so next time they're avoided>\n\n` +
     `## Verification\n<how to confirm the task actually succeeded>\n\n` +
-    `Be concrete and specific to what happened. If the task was too trivial to be worth a reusable skill, reply with the single word NONE.`;
+    `Be concrete and specific to what happened. If the task was too trivial to be worth a reusable skill, reply with the single word NONE.`
+  );
+}
 
-  const text = (await runTextCompletion({
-    provider: agent.provider,
-    model: agent.model,
-    system: agent.role || '',
-    userMessage,
-    apiKey,
-    baseUrl,
-    fetchImpl,
-  })).trim();
-  if (!text || /^none\b/i.test(text)) return null;
-
-  const parsed = parseSynthOutput(text);
-  const description = sanitizeDescription(parsed.description);
-  const body = sanitizeSkillBody(parsed.body);
-  if (!body.trim()) return null;
-  const doc = assembleSkillDoc({ name: parsed.name, description, createdBy: 'agent', sourceTask: task.id, body });
-  return { name: parsed.name, description, body, doc, sourceTask: task.id };
+function buildAntiPatternPrompt(task, transcript) {
+  return (
+    `Task "${task.title || '(untitled)'}" (id ${task.id}) FAILED. Transcript:\n\n` +
+    transcript +
+    `\n\nDistil this into an ANTI-PATTERN note that a future agent will read and avoid. ` +
+    `Reply in EXACTLY this format and nothing else:\n\n` +
+    `name: <short kebab-case anti-pattern name, prefixed with "avoid-">\n` +
+    `description: <one line, ≤ 120 chars, describing the failure mode to avoid>\n\n` +
+    `## What Failed\n<concrete description of what was attempted and how it broke>\n\n` +
+    `## Why\n<root cause, with file paths or error messages where known>\n\n` +
+    `## Avoid\n<the rule the next agent should follow instead>\n\n` +
+    `Be specific. If the failure was too transient to generalise, reply with the single word NONE.`
+  );
 }
 
 // Install a synthesised skill without ever clobbering a human-authored
