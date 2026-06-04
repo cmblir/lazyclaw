@@ -35,6 +35,11 @@ const BUILTINS = [
   adaptLegacy(skillViewTool, { category: 'learning', sensitive: false }),
 ];
 
+import { TOOL as editTool }  from './edit.mjs';
+import { TOOL as patchTool } from './patch.mjs';
+
+BUILTINS.push(editTool, patchTool);
+
 // Mutable; new groups (Tasks 2-14) push here; MCP client (Task 15) also pushes.
 const TOOLS = new Map();
 for (const t of BUILTINS) TOOLS.set(t.name, t);
