@@ -685,10 +685,10 @@ function cmdConfigSet(key, value) {
 function applyOnboardConfig(currentCfg, flags) {
   // Honors the OpenClaw-style unified provider/model string ("anthropic/claude-opus-4-7")
   // by splitting it, but explicit --provider always wins.
-  const { parseProviderModel } = require_registry_sync();
+  const { parseSlashProviderModel } = require_registry_sync();
   const next = { ...currentCfg };
   if (flags.model) {
-    const parsed = parseProviderModel(flags.model);
+    const parsed = parseSlashProviderModel(flags.model);
     if (parsed.provider && !flags.provider) next.provider = parsed.provider;
     next.model = parsed.model || flags.model;
   }
@@ -2481,8 +2481,8 @@ async function cmdChat(flags = {}) {
         }
         // Honor unified provider/model: `/model anthropic/claude-opus-4-7`
         // splits and switches both.
-        const { parseProviderModel } = _registryMod;
-        const parsed = parseProviderModel(arg);
+        const { parseSlashProviderModel } = _registryMod;
+        const parsed = parseSlashProviderModel(arg);
         if (parsed.provider) {
           const next = lookupProv(parsed.provider);
           if (!next) {
@@ -5963,8 +5963,13 @@ async function cmdSessions(sub, positional, flags = {}) {
 
 function cmdConfigGet(key) {
   const cfg = readConfig();
-  if (key) console.log(JSON.stringify({ key, value: cfg[key] ?? null }));
-  else console.log(JSON.stringify(cfg));
+  if (!key) { console.log(JSON.stringify(cfg)); return; }
+  let value = cfg;
+  for (const seg of String(key).split('.')) {
+    if (value && typeof value === 'object' && seg in value) value = value[seg];
+    else { value = null; break; }
+  }
+  console.log(JSON.stringify({ key, value }));
 }
 
 // Structural integrity check across the whole config. Distinct from
