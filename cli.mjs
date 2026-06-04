@@ -4,6 +4,8 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
+// Phase G: defaultConfigDir for personality subcommand (spec §9, decision C7).
+import { defaultConfigDir as _persDefaultCfg } from './memory.mjs';
 
 async function loadEngine() {
   return import('./workflow/persistent.mjs');
@@ -639,6 +641,66 @@ async function cmdResume(sessionId, file, opts = {}) {
   }
 }
 
+// --- Phase G: personality subcommand (spec §9, decision C7) -------------
+async function cmdPersonality(sub, a, b) {
+  const cfgDir = process.env.LAZYCLAW_CONFIG_DIR || _persDefaultCfg();
+  const dir = path.join(cfgDir, 'personalities');
+  fs.mkdirSync(dir, { recursive: true });
+
+  if (!sub || sub === 'list') {
+    const names = fs.existsSync(dir)
+      ? fs.readdirSync(dir).filter(f => f.endsWith('.md')).map(f => f.slice(0, -3))
+      : [];
+    if (!names.length) { console.log('No personalities installed'); return 0; }
+    for (const n of names.sort()) console.log(n);
+    return 0;
+  }
+
+  if (sub === 'show') {
+    if (!a) { console.error('Usage: lazyclaw personality show <name>'); return 2; }
+    const p = path.join(dir, `${a}.md`);
+    if (!fs.existsSync(p)) { console.error(`personality not found: ${a}`); return 1; }
+    process.stdout.write(fs.readFileSync(p, 'utf8'));
+    return 0;
+  }
+
+  if (sub === 'install') {
+    if (!a || !b) { console.error('Usage: lazyclaw personality install <name> <file>'); return 2; }
+    const dst = path.join(dir, `${a}.md`);
+    if (fs.existsSync(dst)) { console.error(`personality already installed: ${a}`); return 1; }
+    if (!fs.existsSync(b)) { console.error(`source file not found: ${b}`); return 1; }
+    fs.writeFileSync(dst, fs.readFileSync(b, 'utf8'));
+    console.log(`installed ${a}`);
+    return 0;
+  }
+
+  if (sub === 'remove') {
+    if (!a) { console.error('Usage: lazyclaw personality remove <name>'); return 2; }
+    const p = path.join(dir, `${a}.md`);
+    if (!fs.existsSync(p)) { console.error(`personality not installed: ${a}`); return 1; }
+    fs.unlinkSync(p);
+    console.log(`removed ${a}`);
+    return 0;
+  }
+
+  if (sub === 'use') {
+    if (!a) { console.error('Usage: lazyclaw personality use <name>'); return 2; }
+    const p = path.join(dir, `${a}.md`);
+    if (!fs.existsSync(p)) { console.error(`personality not installed: ${a}`); return 1; }
+    const cfgPath = path.join(cfgDir, 'config.json');
+    let cfg = {};
+    try { cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch {}
+    cfg.persona = { ...(cfg.persona || {}), personality: a };
+    fs.mkdirSync(cfgDir, { recursive: true });
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+    console.log(`active personality: ${a}`);
+    return 0;
+  }
+
+  console.error(`Unknown personality subcommand: ${sub}`);
+  return 2;
+}
+
 async function cmdConfigEdit() {
   // Open config.json in $EDITOR (or sensible default), then validate
   // the result before letting the user walk away believing the edit
@@ -941,6 +1003,8 @@ const SUBCOMMANDS = [
   'matrix',
   // v4.1.0 — multi-agent slack system (Phase 9+)
   'agent', 'team', 'task',
+  // v5.0 Phase G — persona compose + cross-tool import (spec §9, §10)
+  'personality', 'migrate', 'hermes', 'openclaw',
 ];
 
 const SUBCOMMAND_SUBS = {
@@ -2940,6 +3004,13 @@ async function cmdChat(flags = {}) {
         } catch (e) {
           process.stdout.write(`/team error: ${e?.message || e}\n`);
         }
+        return true;
+      }
+      case '/personality': {
+        // Phase G: thin slash wrapper over cmdPersonality.
+        const tail = line.slice('/personality'.length).trim();
+        const parts = tail.split(/\s+/).filter(Boolean);
+        await cmdPersonality(parts[0] || 'list', parts[1], parts[2]);
         return true;
       }
       case '/exit': {
@@ -6330,6 +6401,8 @@ async function _dispatchMenuChoice(argv) {
       case 'inspect':      return await cmdInspect(rest[0], {});
       case 'export':       return await cmdExport({});
       case 'version':      return await cmdVersion();
+      // Phase G — persona compose subcommand (spec §9, decision C7).
+      case 'personality':  return await cmdPersonality(rest[0], rest[1], rest[2]);
       // help <cmd> is the safe fallback for commands that need real
       // arguments (run / resume / clear / validate / graph / daemon /
       // import / completion). Print the usage so the user can re-launch
@@ -6766,18 +6839,75 @@ async function main() {
       }
       break;
     }
+    case 'personality': {
+      // Phase G: persona compose subcommand (spec §9, decision C7).
+      process.exit(await cmdPersonality(rest.positional[0], rest.positional[1], rest.positional[2]));
+      break;
+    }
     case 'migrate': {
-      // Phase A: v4 → v5 migration. Currently only `v5` is recognised;
-      // future phases may layer additional targets (e.g. `migrate skills`).
+      // Phase A baseline accepts `lazyclaw migrate v5`; Phase G adds the
+      // bare `lazyclaw migrate` and `lazyclaw migrate rollback` forms.
       const target = rest.positional[0];
-      if (target !== 'v5') {
-        console.error('usage: lazyclaw migrate v5');
+      if (target === 'rollback') {
+        const mod = await import('./scripts/migrate-v5.mjs');
+        try {
+          const { restoredFrom } = mod.rollback();
+          console.log(`rolled back from ${restoredFrom}`);
+          process.exit(0);
+        } catch (e) {
+          console.error(`migrate failed: ${e.message}`);
+          process.exit(1);
+        }
+        break;
+      }
+      const mod = await import('./scripts/migrate-v5.mjs');
+      // `migrate v5` keeps the Phase-A behaviour (verbose JSON); the
+      // bare `migrate` form uses the Phase-G human summary.
+      if (target === 'v5') {
+        const r = await mod.migrateV5();
+        console.log(JSON.stringify(r, null, 2));
+        process.exit(r.ok ? 0 : 1);
+      }
+      try {
+        const { backupDir } = mod.migrate();
+        console.log(`migrated; backup at ${backupDir}`);
+        process.exit(0);
+      } catch (e) {
+        console.error(`migrate failed: ${e.message}`);
+        process.exit(1);
+      }
+      break;
+    }
+    case 'hermes': {
+      // Phase G: import a Hermes Agent install (spec §10).
+      if (rest.positional[0] !== 'import') {
+        console.error('Usage: lazyclaw hermes import [--from <dir>]');
         process.exit(2);
       }
-      const { migrateV5 } = await import('./scripts/migrate-v5.mjs');
-      const r = await migrateV5();
-      console.log(JSON.stringify(r, null, 2));
-      process.exit(r.ok ? 0 : 1);
+      const from = rest.flags.from;
+      const mod = await import('./scripts/hermes-import.mjs');
+      try {
+        const { src, dst, counts } = mod.importHermes({ from });
+        console.log(`hermes import: ${src} → ${dst}`);
+        console.log(`  skills: ${counts.skills}  skins: ${counts.skins}`);
+        process.exit(0);
+      } catch (e) { console.error(`hermes import failed: ${e.message}`); process.exit(1); }
+      break;
+    }
+    case 'openclaw': {
+      // Phase G: import an OpenClaw install (spec §10).
+      if (rest.positional[0] !== 'import') {
+        console.error('Usage: lazyclaw openclaw import [--from <dir>]');
+        process.exit(2);
+      }
+      const from = rest.flags.from;
+      const mod = await import('./scripts/openclaw-import.mjs');
+      try {
+        const { src, dst, counts } = mod.importOpenclaw({ from });
+        console.log(`openclaw import: ${src} → ${dst}  skills:${counts.skills}`);
+        process.exit(0);
+      } catch (e) { console.error(`openclaw import failed: ${e.message}`); process.exit(1); }
+      break;
     }
     case 'chat': {
       await cmdChat(rest.flags);
