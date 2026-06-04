@@ -1,0 +1,8 @@
+{
+  "provider": "openai",
+  "model": "gpt-5",
+  "orchestrator": {
+    "planner": "claude_cli:opus",
+    "workers": ["claude_cli:sonnet", "codex_cli:gpt-5-codex"]
+  }
+}

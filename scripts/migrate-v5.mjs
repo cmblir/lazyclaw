@@ -176,6 +176,158 @@ export async function migrateV5(opts = {}) {
   };
 }
 
+// --- Phase G: full v4→v5 migration (spec §1.7, §10) ---------------------
+// Phase A's migrateV5() keeps its original behaviour (backup inside
+// cfgDir, rebuild index). Phase G adds a parallel migrate()/rollback()
+// pair the user-facing CLI calls. Differences from Phase A:
+//   * Backup goes to `<cfgDir>.v4.backup/<ISO-ts>/` (peer dir, not under
+//     cfgDir) so rollback can wipe + restore cleanly.
+//   * Config rewrites add `orchestrator → orchestra` (C3, §3.9) and
+//     `sandbox: "docker"` string → `sandbox: {backend: "docker"}` object
+//     (C8) on top of the trainer auto default (C9).
+//   * Skill frontmatter gains `confidence: 0.5` alongside the C4/C5
+//     fields Phase A already injects.
+//   * `personalities/`, `memory/`, `workspaces/` directories are
+//     created so the Phase-G CLI surfaces work right after migration.
+
+function isoTs() {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
+function copyTree(src, dst) {
+  fs.mkdirSync(dst, { recursive: true });
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const s = path.join(src, entry.name);
+    const d = path.join(dst, entry.name);
+    if (entry.isDirectory()) copyTree(s, d);
+    else fs.copyFileSync(s, d);
+  }
+}
+
+function removeTree(p) {
+  if (!fs.existsSync(p)) return;
+  const st = fs.lstatSync(p);
+  if (!st.isDirectory()) { fs.unlinkSync(p); return; }
+  for (const entry of fs.readdirSync(p, { withFileTypes: true })) {
+    const c = path.join(p, entry.name);
+    if (entry.isDirectory()) removeTree(c);
+    else fs.unlinkSync(c);
+  }
+  fs.rmdirSync(p);
+}
+
+function backupSnapshot(cfgDir) {
+  const root = `${cfgDir}.v4.backup`;
+  fs.mkdirSync(root, { recursive: true });
+  const dst = path.join(root, isoTs());
+  copyTree(cfgDir, dst);
+  return dst;
+}
+
+function rewriteConfigPhaseG(cfgDir) {
+  const p = path.join(cfgDir, 'config.json');
+  if (!fs.existsSync(p)) return;
+  let cfg;
+  try { cfg = JSON.parse(fs.readFileSync(p, 'utf8')); }
+  catch (e) { throw new Error(`migrate: config.json is not valid JSON: ${e.message}`); }
+
+  // orchestrator → orchestra (C3 + spec §3.9)
+  if (cfg.orchestrator && !cfg.orchestra) {
+    cfg.orchestra = cfg.orchestrator;
+    delete cfg.orchestrator;
+  }
+
+  // sandbox: "docker" → sandbox: { backend: "docker" } (C8)
+  if (typeof cfg.sandbox === 'string') {
+    cfg.sandbox = { backend: cfg.sandbox };
+  }
+
+  // Default trainer (auto) when absent (C9)
+  if (!cfg.trainer) {
+    cfg.trainer = { provider: 'auto', schedule: 'nightly' };
+  }
+
+  fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
+}
+
+function upgradeSkillPhaseG(filePath) {
+  const raw = fs.readFileSync(filePath, 'utf8');
+  // Frontmatter detection mirrors skills.mjs::parseFrontmatter
+  if (!raw.startsWith('---\n') && !raw.startsWith('---\r\n')) return;
+  const after = raw.slice(4);
+  const closeRe = /\r?\n---[ \t]*(?:\r?\n|$)/;
+  const m = closeRe.exec(after);
+  if (!m) return;
+  const block = after.slice(0, m.index);
+  const body = after.slice(m.index + m[0].length);
+  const keys = {};
+  for (const line of block.split(/\r?\n/)) {
+    const kv = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(line.trim());
+    if (kv) keys[kv[1]] = kv[2];
+  }
+
+  const fname = path.basename(filePath, '.md');
+  const hyphenPrefix = fname.includes('-') ? fname.split('-')[0] : null;
+
+  let mutated = false;
+  if (!keys.group) {
+    keys.group = hyphenPrefix || 'legacy';                  // C5
+    mutated = true;
+  }
+  if (!keys.confidence) { keys.confidence = '0.5'; mutated = true; }
+  if (!keys.trained_by) { keys.trained_by = 'legacy'; mutated = true; }   // C4
+
+  if (!mutated) return;
+  // Emit in a stable order: keep originals first, append new ones.
+  const orderedKeys = [];
+  for (const line of block.split(/\r?\n/)) {
+    const kv = /^([A-Za-z0-9_-]+)\s*:/.exec(line.trim());
+    if (kv && !orderedKeys.includes(kv[1])) orderedKeys.push(kv[1]);
+  }
+  for (const k of ['group', 'confidence', 'trained_by']) {
+    if (!orderedKeys.includes(k)) orderedKeys.push(k);
+  }
+  const newBlock = orderedKeys.map(k => `${k}: ${keys[k]}`).join('\n');
+  fs.writeFileSync(filePath, `---\n${newBlock}\n---\n${body}`);
+}
+
+function upgradeAllSkillsPhaseG(cfgDir) {
+  const dir = path.join(cfgDir, 'skills');
+  if (!fs.existsSync(dir)) return;
+  for (const f of fs.readdirSync(dir)) {
+    if (f.endsWith('.md')) upgradeSkillPhaseG(path.join(dir, f));
+  }
+}
+
+function ensureDirs(cfgDir) {
+  fs.mkdirSync(path.join(cfgDir, 'personalities'), { recursive: true });   // C7
+  fs.mkdirSync(path.join(cfgDir, 'memory'), { recursive: true });
+  fs.mkdirSync(path.join(cfgDir, 'workspaces'), { recursive: true });
+}
+
+export function migrate({ cfgDir } = {}) {
+  const dir = cfgDir || defaultConfigDir();
+  if (!fs.existsSync(dir)) throw new Error(`config dir not found: ${dir}`);
+  const backupDir = backupSnapshot(dir);
+  rewriteConfigPhaseG(dir);
+  upgradeAllSkillsPhaseG(dir);
+  ensureDirs(dir);
+  return { backupDir };
+}
+
+export function rollback({ cfgDir } = {}) {
+  const dir = cfgDir || defaultConfigDir();
+  const root = `${dir}.v4.backup`;
+  if (!fs.existsSync(root)) throw new Error(`no backup found at ${root}`);
+  const stamps = fs.readdirSync(root).sort();
+  if (!stamps.length) throw new Error(`no backup snapshots in ${root}`);
+  const latest = path.join(root, stamps[stamps.length - 1]);
+  // Wipe the current cfgDir contents, restore the latest snapshot.
+  for (const entry of fs.readdirSync(dir)) removeTree(path.join(dir, entry));
+  copyTree(latest, dir);
+  return { restoredFrom: latest };
+}
+
 // CLI entry — `npm run migrate:v5` or `node scripts/migrate-v5.mjs`.
 if (import.meta.url === `file://${process.argv[1]}`) {
   migrateV5().then(r => {
