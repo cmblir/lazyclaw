@@ -36,9 +36,10 @@ function shortCwd(cwd) {
 
 function toolRow({ category, sensitive, verbs }) {
   const label = sensitive ? `(sensitive) ${category}` : category;
+  const labelWidth = sensitive ? 20 : 9;
   const tail = verbs.slice(0, 6).join(' · ');
   const more = verbs.length > 6 ? ` (${verbs.length - 6} more)` : '';
-  return `${fit(label, 9)}${tail}${more}`;
+  return `${fit(label, labelWidth)}${tail}${more}`;
 }
 
 function skillRow({ group, names }) {
