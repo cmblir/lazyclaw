@@ -37,8 +37,10 @@ const BUILTINS = [
 
 import { TOOL as editTool }  from './edit.mjs';
 import { TOOL as patchTool } from './patch.mjs';
+import { TOOL as recallTool } from './recall.mjs';
 
 BUILTINS.push(editTool, patchTool);
+BUILTINS.push(recallTool);
 
 // Mutable; new groups (Tasks 2-14) push here; MCP client (Task 15) also pushes.
 const TOOLS = new Map();
