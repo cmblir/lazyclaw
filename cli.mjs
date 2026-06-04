@@ -4,6 +4,8 @@ import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
+// sandbox subcommands — list/test/add/use (Phase D).
+import { resolveSandbox, listBackends } from './sandbox/index.mjs';
 
 async function loadEngine() {
   return import('./workflow/persistent.mjs');
@@ -925,6 +927,8 @@ const SUBCOMMANDS = [
   'daemon', 'version', 'completion', 'help',
   'export', 'import',
   'rates',
+  // v5.0 — sandbox 6-backend (Phase D)
+  'sandbox',
   // OpenClaw-parity subsurfaces (v3.93–v3.98)
   'auth', 'pairing', 'nodes', 'message', 'workspace', 'browse', 'cron',
   // v3.99.6 — multi-step setup wizard + lazyclaw-only dashboard
@@ -949,6 +953,7 @@ const SUBCOMMAND_SUBS = {
   skills:    ['list', 'show', 'install', 'remove', 'search', 'curate', 'classify'],
   providers: ['list', 'info', 'test', 'add', 'remove', 'models'],
   rates:     ['list', 'set', 'delete', 'shape', 'validate', 'copy'],
+  sandbox:   ['list', 'test', 'add', 'use'],
   completion: ['bash', 'zsh'],
   auth:      ['list', 'add', 'remove', 'use', 'rotate'],
   pairing:   ['list', 'add', 'remove'],
@@ -1214,6 +1219,7 @@ const HELP_DETAILS = {
   export: 'Usage: lazyclaw export [--include-secrets] [--include-sessions] > bundle.json\n  --include-secrets keeps the raw api-key in the bundle (default redacts it).\n  --include-sessions adds full turn content (default keeps metadata only).',
   import: 'Usage: lazyclaw import [--from <path>] [--overwrite-skills] [--no-overwrite-config] [--import-sessions]\n  Reads JSON from stdin (or --from <path>). Sessions are NEVER overwritten.\n  Redacted api-keys (***REDACTED***) are dropped, never written.',
   rates: 'Usage: lazyclaw rates <list [--filter <substr>] [--limit <N>] | set <provider/model> --input <N> --output <N> [--cache-read <N>] [--cache-create <N>] [--currency USD] | delete <key> | shape | validate | copy <src> <dst> [--force]>\n  Rates are per million tokens. costFromUsage uses cfg.rates to compute the cost block in /usage and body.cost.\n  `list` accepts --filter (case-insensitive key substring) and --limit (post-filter cap), same shape sessions/skills/workflows lists use.\n  `shape` prints the reference template (zero-filled) you can copy into config.\n  `validate` checks the cfg.rates shape: required fields, non-negative numbers, known providers (warn-only).\n  `copy` clones an existing card to a new key (use when a new model launches at the same price as an old one).',
+  sandbox: 'Usage: lazyclaw sandbox <list|test|add|use> [args]\n  list             show 6 backends (local, docker, ssh, singularity, modal, daytona)\n  test <kind>      run echo through the backend (or argv-shape check for remote)\n  add <name> --kind <kind> [--image|--host|--user|--workspace|--app|--confiner ...]\n  use <profile>    set the profile as cfg.sandbox.default',
   auth: 'Usage: lazyclaw auth <list <provider> | add <provider> <key> [--label <name>] | remove <provider> <label> | use <provider> <label> | rotate <provider>>\n  Multiple keys per provider for rate-limit rotation. The active label is sent on every chat / agent call.\n  `rotate` advances the cursor to the next label; pair with a 429 hook for auto-failover.',
   pairing: 'Usage: lazyclaw pairing <list | add <id> [--label <name>] | remove <id>>\n  Sender allowlist for the messaging surface. Inbound senders not on this list are rejected.\n  Sender ids are opaque per-channel: Slack member id, Discord user id, phone number for SMS, etc.',
   nodes: 'Usage: lazyclaw nodes <list | register <id> [--platform macos|ios|android|web|cli] [--label <name>] | remove <id>>\n  Companion device registration table. CLI only — the actual mobile / menu-bar apps are out of scope here.\n  Platform is free-form lower-case; future surfaces (iOS / Android nodes) authenticate against the daemon using these ids.',
@@ -5961,6 +5967,109 @@ async function cmdSessions(sub, positional, flags = {}) {
   }
 }
 
+// sandbox subcommands — list/test/add/use (Phase D).
+async function cmdSandbox(args, flags = {}) {
+  const sub = args[0];
+
+  if (!sub || sub === 'list') {
+    for (const kind of listBackends()) process.stdout.write(`${kind}\n`);
+    return 0;
+  }
+
+  if (sub === 'test') {
+    const name = args[1];
+    if (!name) { process.stderr.write('usage: lazyclaw sandbox test <kind|profile>\n'); return 2; }
+    const cfg = _sandboxLoadConfigOrEmpty();
+    // If `name` looks like a known kind, route to that kind. If it
+    // is not a known kind AND not a profile in cfg, treat as an
+    // unknown identifier and report SANDBOX_BAD_KIND.
+    const isKind = listBackends().includes(name);
+    const profile = cfg.sandbox && cfg.sandbox.profiles && cfg.sandbox.profiles[name];
+    if (!isKind && !profile) {
+      process.stderr.write(`SANDBOX_BAD_KIND: unknown sandbox kind or profile "${name}"\n`);
+      return 1;
+    }
+    let sb;
+    try {
+      const synthCfg = isKind
+        ? { sandbox: { default: name, ...cfg.sandbox } }
+        : cfg;
+      sb = resolveSandbox(synthCfg);
+    } catch (e) {
+      process.stderr.write(`${e.code || 'SANDBOX_ERR'}: ${e.message}\n`); return 1;
+    }
+    if (sb.spec.kind !== 'local' && sb.spec.kind !== 'docker') {
+      // Remote/serverless backends just construct argv in unit tests;
+      // we report "shape-ok" without actually executing.
+      process.stdout.write(`ok ${sb.spec.kind} (argv-shape)\n`);
+      return 0;
+    }
+    const sess = await sb.open();
+    try {
+      const r = await sess.exec(['echo', 'lazyclaw-sandbox-test']);
+      if (r.code !== 0 || !/lazyclaw-sandbox-test/.test(r.stdout)) {
+        process.stderr.write(`fail ${name}: exit=${r.code} stdout=${r.stdout}\n`); return 1;
+      }
+      process.stdout.write(`ok ${name}\n`);
+      return 0;
+    } finally { await sess.close(); }
+  }
+
+  if (sub === 'add') {
+    const name = args[1];
+    if (!name) { process.stderr.write('usage: lazyclaw sandbox add <name> --kind <kind> [...]\n'); return 2; }
+    const opts = {};
+    if (flags.kind) opts.kind = flags.kind;
+    if (flags.image) opts.image = flags.image;
+    if (flags.host) opts.host = flags.host;
+    if (flags.user) opts.user = flags.user;
+    if (flags.workspace) opts.workspace = flags.workspace;
+    if (flags.app) opts.app = flags.app;
+    if (flags.confiner) opts.confiner = flags.confiner;
+    if (!listBackends().includes(opts.kind)) {
+      process.stderr.write(`unknown kind "${opts.kind}"\n`); return 1;
+    }
+    const cfg = _sandboxLoadConfigOrEmpty();
+    cfg.sandbox = cfg.sandbox || {};
+    cfg.sandbox.profiles = cfg.sandbox.profiles || {};
+    cfg.sandbox.profiles[name] = opts;
+    _sandboxSaveConfig(cfg);
+    process.stdout.write(`added profile ${name} (${opts.kind})\n`);
+    return 0;
+  }
+
+  if (sub === 'use') {
+    const name = args[1];
+    if (!name) { process.stderr.write('usage: lazyclaw sandbox use <profile>\n'); return 2; }
+    const cfg = _sandboxLoadConfigOrEmpty();
+    const prof = cfg.sandbox && cfg.sandbox.profiles && cfg.sandbox.profiles[name];
+    if (!prof) { process.stderr.write(`no profile "${name}"\n`); return 1; }
+    cfg.sandbox = cfg.sandbox || {};
+    cfg.sandbox.default = prof.kind;
+    cfg.sandbox[prof.kind] = { ...(cfg.sandbox[prof.kind] || {}), ...prof, kind: undefined };
+    delete cfg.sandbox[prof.kind].kind;
+    _sandboxSaveConfig(cfg);
+    process.stdout.write(`using profile ${name} (${prof.kind})\n`);
+    return 0;
+  }
+
+  process.stderr.write(`unknown subcommand "${sub}". Try: list | test | add | use\n`);
+  return 2;
+}
+
+function _sandboxLoadConfigOrEmpty() {
+  const p = process.env.LAZYCLAW_CONFIG || configPath();
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch { return {}; }
+}
+
+function _sandboxSaveConfig(cfg) {
+  const p = process.env.LAZYCLAW_CONFIG || configPath();
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
+}
+
 function cmdConfigGet(key) {
   const cfg = readConfig();
   if (!key) { console.log(JSON.stringify(cfg)); return; }
@@ -6806,6 +6915,10 @@ async function main() {
     case 'rates': {
       const sub = rest.positional[0];
       await cmdRates(sub, rest.positional.slice(1), rest.flags);
+      break;
+    }
+    case 'sandbox': {
+      process.exit(await cmdSandbox(rest.positional, rest.flags));
       break;
     }
     case 'auth': {
