@@ -13,7 +13,6 @@ import * as bashTool from './bash.mjs';
 import * as readTool from './read.mjs';
 import * as writeTool from './write.mjs';
 import * as grepTool from './grep.mjs';
-import * as skillViewTool from './skill_view.mjs';
 
 function adaptLegacy(mod, { category, sensitive }) {
   return {
@@ -32,15 +31,16 @@ const BUILTINS = [
   adaptLegacy(readTool,      { category: 'fs',   sensitive: false }),
   adaptLegacy(writeTool,     { category: 'fs',   sensitive: true  }),
   adaptLegacy(grepTool,      { category: 'fs',   sensitive: false }),
-  adaptLegacy(skillViewTool, { category: 'learning', sensitive: false }),
 ];
 
 import { TOOL as editTool }  from './edit.mjs';
 import { TOOL as patchTool } from './patch.mjs';
 import { TOOL as recallTool } from './recall.mjs';
+import { TOOLS as learningTools } from './learning.mjs';
 
 BUILTINS.push(editTool, patchTool);
 BUILTINS.push(recallTool);
+for (const t of learningTools) BUILTINS.push(t);
 
 // Mutable; new groups (Tasks 2-14) push here; MCP client (Task 15) also pushes.
 const TOOLS = new Map();
