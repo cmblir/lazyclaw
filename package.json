@@ -66,6 +66,9 @@
     "gateway/",
     "docs/multi-agent.md",
     "scripts/loop-worker.mjs",
+    "scripts/migrate-v5.mjs",
+    "scripts/hermes-import.mjs",
+    "scripts/openclaw-import.mjs",
     "README.md",
     "LICENSE"
   ],
