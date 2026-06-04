@@ -1,0 +1,9 @@
+{
+  "name": "@lazyclaw/channel-voice",
+  "version": "0.1.0",
+  "description": "Voice memo channel for lazyclaw v5 (transcribe-only; TTS deferred to v5.1).",
+  "type": "module",
+  "main": "index.mjs",
+  "files": ["index.mjs"],
+  "peerDependencies": { "lazyclaw": ">=5.0.0" }
+}
