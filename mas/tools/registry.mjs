@@ -41,6 +41,7 @@ import { TOOLS as webTools } from './web.mjs';
 import { TOOLS as osTools } from './os.mjs';
 import { TOOLS as codingTools } from './coding.mjs';
 import { TOOLS as gitGroupTools } from './git.mjs';
+import { TOOLS as schedTools } from './scheduling.mjs';
 
 BUILTINS.push(editTool, patchTool);
 BUILTINS.push(recallTool);
@@ -49,6 +50,7 @@ for (const t of webTools) BUILTINS.push(t);
 for (const t of osTools) BUILTINS.push(t);
 for (const t of codingTools) BUILTINS.push(t);
 for (const t of gitGroupTools) BUILTINS.push(t);
+for (const t of schedTools) BUILTINS.push(t);
 
 // Mutable; new groups (Tasks 2-14) push here; MCP client (Task 15) also pushes.
 const TOOLS = new Map();
