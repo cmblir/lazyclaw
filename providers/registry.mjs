@@ -61,6 +61,61 @@ export { anthropicProvider, openaiProvider, ollamaProvider, geminiProvider, clau
 export { makeOpenAICompatProvider, fetchOpenAICompatModels };
 export { makeOrchestratorProvider };
 
+// ─── Phase A: trainer resolver (spec §2.3, §2.4, canonical C3/C9) ───
+//
+// resolveTrainer(cfg, opts) returns { provider, model } for synthesis /
+// reflection calls — split from the chat provider so users can route
+// learning to a cheap model or to a CLI-subscription worker.
+//
+// Rules:
+//   - cfg.trainer omitted → mirror chat (v4 compat).
+//   - cfg.trainer.provider === 'auto' → claude-cli when Pro/Max
+//     session detected, else mirror chat (canonical decision C9).
+//   - opts.useFallback → parse cfg.trainer.fallback ('provider:model')
+//     and use it; missing pieces inherit from chat.
+//   - All identifiers MUST be kebab-case in user-facing config (C3).
+
+export function parseProviderModel(spec) {
+  const s = String(spec || '');
+  const i = s.indexOf(':');
+  if (i < 0) return { provider: s || null, model: null };
+  return { provider: s.slice(0, i) || null, model: s.slice(i + 1) || null };
+}
+
+function _defaultDetectClaudeCli() {
+  // Phase A stub: real Pro/Max session detection arrives in Phase B
+  // (it requires reading the claude-cli OAuth token cache). Until
+  // then, treat presence of CLAUDE_CODE_OAUTH_TOKEN as a positive
+  // signal so users can opt-in explicitly.
+  return Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN);
+}
+
+export function resolveTrainer(cfg, opts = {}) {
+  const chatProvider = cfg && cfg.provider;
+  const chatModel = cfg && cfg.model;
+  const t = cfg && cfg.trainer;
+
+  if (!t || !t.provider) {
+    return { provider: chatProvider, model: chatModel };
+  }
+
+  if (opts.useFallback && t.fallback) {
+    const { provider, model } = parseProviderModel(t.fallback);
+    return {
+      provider: provider || chatProvider,
+      model: model || chatModel,
+    };
+  }
+
+  if (t.provider === 'auto') {
+    const detect = opts.detectClaudeCli || _defaultDetectClaudeCli;
+    if (detect()) return { provider: 'claude-cli', model: t.model || chatModel };
+    return { provider: chatProvider, model: t.model || chatModel };
+  }
+
+  return { provider: t.provider, model: t.model || chatModel };
+}
+
 // Built-in OpenAI-compatible vendors. Same wire format → one factory call
 // each. The picker treats these like first-class providers so users don't
 // have to walk through "+ Add a custom endpoint" for the popular ones.
@@ -431,10 +486,15 @@ export function resolveBuiltinEnvKey(provider) {
  * Split a unified "provider/model" string (OpenClaw style:
  * "anthropic/claude-opus-4-7"). Also accepts a bare model id and returns
  * provider=null so callers can fall back to a separately-stored provider.
+ *
+ * Renamed from `parseProviderModel` in v5.0 to free that name for the
+ * trainer fallback parser (which uses ':' as the separator — see spec
+ * §2.4). Callers that still need the slash form should import this.
+ *
  * @param {string} s
  * @returns {{ provider: string|null, model: string }}
  */
-export function parseProviderModel(s) {
+export function parseSlashProviderModel(s) {
   if (!s || typeof s !== 'string') return { provider: null, model: '' };
   const slash = s.indexOf('/');
   if (slash > 0) {

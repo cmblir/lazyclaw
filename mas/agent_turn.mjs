@@ -25,6 +25,7 @@ import * as anthropic from '../providers/tool_use/anthropic.mjs';
 import * as openai from '../providers/tool_use/openai.mjs';
 import * as gemini from '../providers/tool_use/gemini.mjs';
 import * as claudeCli from '../providers/tool_use/claude_cli.mjs';
+import { put as _trajPut } from './trajectory_store.mjs';
 
 export class AgentTurnError extends Error {
   constructor(message, code) {
@@ -71,6 +72,7 @@ export async function runAgentTurn({
   maxIterations = DEFAULT_MAX_ITERATIONS,
   signal,
   approve,
+  trajectoryRef,
 } = {}) {
   if (!agent) throw new AgentTurnError('agent is required', 'NO_AGENT');
   const adapter = adapterFor(agent.provider);
@@ -92,6 +94,29 @@ export async function runAgentTurn({
   const toolCalls = [];
   let iterations = 0;
   let lastText = '';
+  if (trajectoryRef && !trajectoryRef.startedAt) trajectoryRef.startedAt = Date.now();
+
+  const _maybePersistTrajectory = async (outcome) => {
+    if (!trajectoryRef) return;
+    try {
+      await _trajPut({
+        taskId, agentName: agent.name || 'agent',
+        workerProvider: agent.provider, workerModel: agent.model,
+        startedAt: trajectoryRef.startedAt || Date.now(),
+        endedAt: Date.now(),
+        systemPrompt: agent.role || '',
+        userMessages: userMessage ? [String(userMessage)] : [],
+        turns: toolCalls.map((c, i) => ({
+          turnIdx: i, role: 'tool', content: '',
+          toolCalls: [{ name: c.name, args: c.input, result: JSON.stringify(c.result), success: c.ok, durationMs: 0 }],
+        })).concat(lastText ? [{
+          turnIdx: toolCalls.length, role: 'assistant', content: lastText, toolCalls: [],
+        }] : []),
+        finalAnswer: lastText,
+        outcome,
+      }, { configDir });
+    } catch { /* trajectory failure must not break the agent turn */ }
+  };
 
   while (iterations < maxIterations) {
     if (signal?.aborted) return { text: lastText, iterations, stoppedBy: 'abort', toolCalls };
@@ -103,6 +128,7 @@ export async function runAgentTurn({
     if (resp.text) lastText = resp.text;
 
     if (resp.kind === 'final') {
+      await _maybePersistTrajectory('done');
       return { text: resp.text || '', iterations, stoppedBy: 'final', toolCalls };
     }
 
@@ -140,9 +166,11 @@ export async function runAgentTurn({
     // model so it can recover. Only an extraordinary error (e.g. the
     // provider returned a malformed envelope) bails out here.
     if (toolErrored && process.env.LAZYCLAW_TOOL_STRICT === '1') {
+      await _maybePersistTrajectory('failed');
       return { text: lastText, iterations, stoppedBy: 'tool_error', toolCalls };
     }
   }
 
+  await _maybePersistTrajectory('abandoned');
   return { text: lastText, iterations, stoppedBy: 'budget', toolCalls };
 }
