@@ -18,6 +18,8 @@
 import * as skills from '../skills.mjs';
 import { runTextCompletion } from './provider_adapters.mjs';
 import { redactSecrets, neutralizeRoleLabels } from './redact.mjs';
+import { indexSkill as _indexSkill } from './index_db.mjs';
+import { parseFrontmatter } from '../skills.mjs';
 
 const SECTION_RE = /^#{1,6}\s+/;
 const MAX_NAME_LEN = 48;
@@ -228,5 +230,17 @@ export function installSynthesized({ name, description = '', body = '', sourceTa
     ts,
   });
   const p = skills.installSkill(finalName, doc, configDir);
+  // Phase A: FTS5 mirror (spec §4.4). Group fallback per canonical C5.
+  try {
+    const { meta, body: skillBody } = parseFrontmatter(doc);
+    const group = meta.group
+      || (finalName.includes('-') ? finalName.split('-')[0] : 'legacy');
+    _indexSkill({
+      skill_name: finalName,
+      trained_by: meta.trained_by || createdBy === 'agent' ? 'agent' : 'user',
+      group_name: group,
+      content: skillBody,
+    }, configDir);
+  } catch { /* swallow */ }
   return { skill: finalName, path: p, version };
 }

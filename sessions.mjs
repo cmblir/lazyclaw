@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { appendRecent as _memoryAppendRecent } from './memory.mjs';
+import { indexSessionTurn as _indexSessionTurn } from './mas/index_db.mjs';
 
 const SESSIONS_DIRNAME = 'sessions';
 
@@ -73,12 +74,30 @@ export function appendTurn(id, role, content, configDir = defaultConfigDir()) {
   }
   const p = sessionPath(id, configDir);
   fs.mkdirSync(path.dirname(p), { recursive: true });
-  const line = JSON.stringify({ role, content: String(content ?? ''), ts: Date.now() }) + '\n';
+  const ts = Date.now();
+  const line = JSON.stringify({ role, content: String(content ?? ''), ts }) + '\n';
+  // Compute turn_idx BEFORE the append so the index row aligns with the
+  // JSONL row about to land on disk.
+  let turnIdx = 0;
+  try {
+    if (fs.existsSync(p)) {
+      const existing = fs.readFileSync(p, 'utf8');
+      turnIdx = existing ? existing.split('\n').filter(Boolean).length : 0;
+    }
+  } catch { /* ignore — turn_idx defaults to 0 */ }
   fs.appendFileSync(p, line);
   // Write-through to the memory recency log. Best-effort; failures
   // never propagate up — a missing or broken memory store must not
   // break the session-write path.
   _memoryAppendRecent(id, role, content, configDir);
+  // Phase A: FTS5 mirror (spec §4.4). Errors are swallowed inside
+  // indexSessionTurn but we wrap again here so a missing module (e.g.
+  // index_db not present in a tree shaped before Phase A) can't break
+  // this hot path either.
+  try {
+    _indexSessionTurn({ session_id: id, turn_idx: turnIdx, role, ts,
+      content: String(content ?? '') }, configDir);
+  } catch { /* swallow */ }
 }
 
 export function clearSession(id, configDir = defaultConfigDir()) {

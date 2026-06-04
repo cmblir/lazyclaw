@@ -17,6 +17,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { redactSecrets } from './redact.mjs';
+import { indexTrajectory as _indexTrajectory } from './index_db.mjs';
 
 export const OUTCOME_ENUM = Object.freeze(['done', 'failed', 'abandoned']);
 
@@ -119,6 +120,21 @@ export async function put(record, opts = {}) {
   const file = recordPath(configDir, bucket, id);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(stored) + '\n');
+  // Phase A: FTS5 mirror (spec §4.4). Content is the concatenation of
+  // the final answer plus every turn's textual content so a single
+  // recall() can surface trajectories by either signal.
+  try {
+    const ftsContent = [
+      stored.finalAnswer || '',
+      ...(stored.turns || []).map(t => String(t.content || '')),
+    ].filter(Boolean).join('\n');
+    _indexTrajectory({
+      trajectory_id: id,
+      agent: stored.agentName || '',
+      outcome: stored.outcome,
+      content: ftsContent,
+    }, configDir);
+  } catch { /* swallow */ }
   cachePush(id, stored);
   return stored;
 }

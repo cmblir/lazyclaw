@@ -177,25 +177,41 @@ export function indexMemory(row, configDir = defaultConfigDir()) {
   }
 }
 
+// FTS5 query parser treats `-` as unary NOT and `:` as a column filter, so
+// raw user phrases like "write-through" turn into a NOT op against a
+// non-existent column. Strip FTS5 operators down to whitespace before the
+// MATCH so a bareword recall behaves like content search. Quoted phrases
+// from the caller are left alone (one or more `"` survives).
+function sanitizeFtsQuery(q) {
+  const s = String(q ?? '').trim();
+  if (!s) return s;
+  // Preserve quoted phrases verbatim; rewrite only unquoted runs.
+  if (/["()*^]/.test(s)) return s;
+  return s.replace(/[-:+]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 export function recall(query, opts = {}) {
   const t0 = process.hrtime.bigint();
   const configDir = opts.configDir || defaultConfigDir();
   const scope = opts.scope || ['sessions', 'skills', 'trajectories', 'memories'];
   const k = Math.min(Math.max(Number(opts.k) || 10, 1), 50);
   const s = _stmts(configDir);
+  const safeQuery = sanitizeFtsQuery(query);
   const hits = [];
   for (const sc of scope) {
     const stmt = s.queries[sc];
     if (!stmt) continue;
     try {
-      const rows = stmt.all(query, k);
+      const rows = stmt.all(safeQuery, k);
       for (const r of rows) {
         const { scope: sc2, bm25, snippet, ...metadata } = r;
         hits.push({ scope: sc2, rank: hits.length, bm25, snippet, metadata });
       }
     } catch (e) {
       // FTS5 MATCH syntax errors are caller mistakes; skip silently.
-      if (!/syntax error/i.test(e.message)) throw e;
+      // "no such column" arises from the FTS5 column-filter syntax when
+      // a stray colon/operator survives sanitisation — also benign.
+      if (!/syntax error|no such column/i.test(e.message)) throw e;
     }
   }
   hits.sort((a, b) => a.bm25 - b.bm25);
