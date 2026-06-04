@@ -2944,6 +2944,46 @@ async function cmdChat(flags = {}) {
         }
         return true;
       }
+      case '/handoff': {
+        // /handoff <target-channel> <externalId> [--note=...] — migrates the
+        // active thread (bound to replState.channel / replState.externalId)
+        // to a new channel and posts transition stubs on both sides. In the
+        // local-only chat REPL there is no bound channel, so we surface a
+        // clear error and stay in the REPL (acceptance test §F).
+        const parts = line.trim().split(/\s+/).slice(1);
+        if (parts.length < 2) {
+          process.stderr.write('usage: /handoff <target-channel> <externalId> [--note=...]\n');
+          return true;
+        }
+        const target = parts[0];
+        const externalId = parts[1];
+        const note = (parts.find(p => p.startsWith('--note=')) || '').slice(7);
+        try {
+          const { openThreads } = await import('./channels/threads.mjs');
+          const { runHandoff } = await import('./channels/handoff.mjs');
+          const threads = openThreads(cfgDir);
+          const replState = globalThis.__lazyclawReplState || {};
+          const cur = replState.channel && replState.externalId
+            ? threads.findByExternal(replState.channel, replState.externalId)
+            : null;
+          if (!cur) {
+            process.stderr.write(
+              `handoff: no thread bound to ${replState.channel || '(none)'}:${replState.externalId || '(none)'}\n`,
+            );
+            return true;
+          }
+          const next = await runHandoff({
+            threads, channels: replState.channels || {},
+            threadId: cur.threadId, target, externalId, note,
+          });
+          process.stdout.write(`handoff -> ${next.channel}:${next.externalId} (session ${next.sessionId})\n`);
+          replState.channel = next.channel;
+          replState.externalId = next.externalId;
+        } catch (e) {
+          process.stderr.write(`handoff failed: ${e.code || 'ERR'}: ${e.message}\n`);
+        }
+        return true;
+      }
       case '/exit': {
         return 'EXIT';
       }
