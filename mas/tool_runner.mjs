@@ -13,6 +13,7 @@ import * as readTool from './tools/read.mjs';
 import * as writeTool from './tools/write.mjs';
 import * as grepTool from './tools/grep.mjs';
 import * as skillViewTool from './tools/skill_view.mjs';
+import * as recallTool from './tools/recall.mjs';
 import * as audit from './audit.mjs';
 
 export class ToolError extends Error {
@@ -29,6 +30,7 @@ const TOOLS = {
   write: writeTool,
   grep: grepTool,
   skill_view: skillViewTool,
+  recall: recallTool,
 };
 
 const NOT_IMPLEMENTED_TOOLS = ['web_search', 'web_fetch', 'slack_post'];
