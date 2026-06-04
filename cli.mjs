@@ -6766,6 +6766,19 @@ async function main() {
       }
       break;
     }
+    case 'migrate': {
+      // Phase A: v4 → v5 migration. Currently only `v5` is recognised;
+      // future phases may layer additional targets (e.g. `migrate skills`).
+      const target = rest.positional[0];
+      if (target !== 'v5') {
+        console.error('usage: lazyclaw migrate v5');
+        process.exit(2);
+      }
+      const { migrateV5 } = await import('./scripts/migrate-v5.mjs');
+      const r = await migrateV5();
+      console.log(JSON.stringify(r, null, 2));
+      process.exit(r.ok ? 0 : 1);
+    }
     case 'chat': {
       await cmdChat(rest.flags);
       break;
