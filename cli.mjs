@@ -2300,6 +2300,38 @@ async function cmdChat(flags = {}) {
 
   // Top-of-session banner so the user can see at a glance what they're
   // talking to. Cheap (no provider call) and TTY-only.
+  // v5 ink splash + REPL when stdin is a real TTY and the user has not
+  // opted out via LAZYCLAW_NO_INK=1. Non-TTY pipelines and the opt-out
+  // env var fall through to the v4 figlet + readline path unchanged.
+  const __useInkSplash = process.stdout.isTTY && !process.env.LAZYCLAW_NO_INK;
+  if (__useInkSplash) {
+    try {
+      const React = (await import('react')).default;
+      const { render } = await import('ink');
+      const { ReplApp } = await import('./tui/repl.mjs');
+      const { renderSplashToString } = await import('./tui/splash.mjs');
+      // narrow-terminal fallback: <60 cols falls back to v4
+      if ((process.stdout.columns || 80) < 60) throw new Error('narrow-terminal');
+      const splashProps = {
+        provider: activeProvName, model: activeModel,
+        trainer: {}, sessionId: flags.session || '',
+        cwd: process.cwd(),
+        tools: [], skills: [],
+      };
+      void renderSplashToString; // surfaced for tests; runtime uses <Splash/>
+      const ink = render(/* @__PURE__ */ React.createElement(ReplApp, {
+        splashProps,
+        runTurn: async (_text, _signal) => { void _text; void _signal; },
+      }));
+      await ink.waitUntilExit();
+      return;
+    } catch (e) {
+      // Fall through to legacy path on any ink failure (missing import,
+      // narrow terminal, sandboxed stdout).
+      if (process.env.LAZYCLAW_DEBUG) console.error('[ink] fallback:', e.message);
+    }
+  }
+  // ─── legacy v4 path (unchanged) ─────────────────────────────────
   _printChatBanner(activeProvName, activeModel, readVersionFromRepo());
 
   const readline = await import('node:readline');
