@@ -17,6 +17,9 @@ export class SandboxError extends Error {
     this.name = 'SandboxError';
     this.code = code || 'SANDBOX_ERR';
   }
+  toString() {
+    return `${this.name}[${this.code}]: ${this.message}`;
+  }
 }
 
 export class Sandbox {
