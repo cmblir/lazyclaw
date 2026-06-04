@@ -32,7 +32,8 @@
   },
   "scripts": {
     "test": "playwright test",
-    "test:bench": "node scripts/bench-providers.mjs"
+    "test:bench": "node scripts/bench-providers.mjs",
+    "migrate:v5": "node scripts/migrate-v5.mjs"
   },
   "files": [
     "cli.mjs",
@@ -70,6 +71,9 @@
   ],
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
