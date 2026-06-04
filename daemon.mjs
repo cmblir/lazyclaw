@@ -28,6 +28,7 @@ import { createLogger } from './logger.mjs';
 import { summarizeState, listSessions as listWorkflowSessions, loadStateFile as loadWorkflowState, aggregateNodeStats } from './workflow/summary.mjs';
 import { validateConfig } from './config-validate.mjs';
 import { validateRates } from './rates-validate.mjs';
+import * as nudge from './mas/nudge.mjs';
 
 // Resolve the provider for a request. Composes opt-in wrappers in this
 // order (innermost first):
@@ -328,6 +329,18 @@ export function makeHandler(ctx) {
   // one, so it must outlive a single call.
   const gwConfigDir = typeof ctx.sessionsDirGetter === 'function' ? ctx.sessionsDirGetter() : undefined;
   const gateway = createGateway({ configDir: gwConfigDir, challengeRegistry: new ChallengeRegistry(), heartbeatMs: 25000 });
+  // Phase B nudge loop — scans recent.jsonl every 5 min and pushes
+  // nudge.suggest_skill onto the SSE bus so the curator can prompt.
+  const _nudgeLoop = nudge.startNudgeLoop({
+    configDir: gwConfigDir,
+    emit: (event) => {
+      try { gateway.broadcast?.('nudge.suggest_skill', event); }
+      catch (err) { logger?.warn?.('nudge_emit_failed', { err: err.message }); }
+    },
+    logger,
+  });
+  process.on('SIGTERM', () => { _nudgeLoop.stop(); });
+  process.on('SIGINT', () => { _nudgeLoop.stop(); });
   return async function handler(req, res) {
     // Capture method+path before any handler logic runs; req.url survives
     // the response but capturing now keeps the log line stable even if a
