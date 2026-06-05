@@ -1780,7 +1780,7 @@
               <div class="name" style="margin-left:8px;">${escHtml(String(label))}</div>
               <div class="dim row-actions">bm25 ${Number(h.bm25 || 0).toFixed(2)}</div>
             </div>
-            <div class="dim" style="margin-top:6px;font-size:12px;">${h.snippet || ''}</div>
+            <div class="dim" style="margin-top:6px;font-size:12px;">${escHtml(h.snippet || '').replace(/&lt;mark&gt;/g,'<mark>').replace(/&lt;\/mark&gt;/g,'</mark>')}</div>
           </div>`;
         }).join('');
       } catch (e) {
