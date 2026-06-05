@@ -4,6 +4,15 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.0.8] — 2026-06-05
+
+### Changed
+
+- **New wordmark** — operator-supplied 13×120 "Larry 3D" style ASCII
+  art `LAZYCLAW`, replacing the 6×67 ANSI Shadow wordmark from 5.0.6.
+  Single-tone orange retained. Wider terminal required for clean
+  render (≥124 cols); narrow terminals see the wordmark wrap.
+
 ## [5.0.7] — 2026-06-05
 
 ### Fixed

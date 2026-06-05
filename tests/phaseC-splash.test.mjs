@@ -25,10 +25,11 @@ test('splash renders without throwing', () => {
   assert.ok(typeof out === 'string' && out.length > 0);
 });
 
-test('every rendered line fits within 110 columns (Hermes-style hero width)', () => {
-  const out = renderSplashToString(fixture, { columns: 110 });
+test('every rendered line fits within terminal width (Hermes-style hero)', () => {
+  const TW = 140;
+  const out = renderSplashToString(fixture, { columns: TW });
   for (const [i, line] of out.split('\n').entries()) {
-    assert.ok(stringWidth(line) <= 110, `line ${i} width=${stringWidth(line)}`);
+    assert.ok(stringWidth(line) <= TW, `line ${i} width=${stringWidth(line)} > ${TW}`);
   }
 });
 
