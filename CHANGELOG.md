@@ -4,6 +4,23 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.0.9] — 2026-06-05
+
+### Added
+
+- **Wordmark gradient**. The Larry 3D `LAZYCLAW` is now rendered with
+  a 4-stop warm-orange palette (`#FFD580` → `#FFB347` → `#E08020` →
+  `#A05010`), top rows brightest, bottom rows shadow-dark. Same
+  gradient applies in the chat splash and the launcher.
+- **Subcommands section** in the chat splash. All 40+ lazyclaw
+  subcommands are now grouped (core / workflow / config / state /
+  runtime / channels / v5 / utility) and listed inside the panel
+  alongside Available Tools and Available Skills.
+- **Hermes-style bottom separator + status bar**. The splash ends
+  with a horizontal rule, a one-line status bar
+  (`provider · model | ctx -- | [progress] | 0s`), and another rule
+  before the prompt cursor.
+
 ## [5.0.8] — 2026-06-05
 
 ### Changed

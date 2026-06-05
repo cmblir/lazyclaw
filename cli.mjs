@@ -1658,7 +1658,17 @@ async function _renderV5Banner(version) {
   if (!a) return _renderBanner(version); // missing tarball asset → v4 figlet
   const v = String(version || '?.?.?');
   const rows = [];
-  for (const r of a.wordmark.rows) rows.push(_orange('  ' + r));
+  const palette = a.wordmark.palette || [];
+  const gradient = a.wordmark.gradient || [];
+  function tint(idx, s) {
+    const hex = palette[idx] || '#FFB347';
+    const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+    if (!m) return _orange(s);
+    const [, r, g, b] = m;
+    const R = parseInt(r, 16), G = parseInt(g, 16), B = parseInt(b, 16);
+    return `\x1b[38;2;${R};${G};${B}m${s}\x1b[0m`;
+  }
+  a.wordmark.rows.forEach((r, i) => rows.push(tint(gradient[i] ?? 1, '  ' + r)));
   rows.push('');
   for (const r of a.banner.rows) rows.push(_orange('  ' + r));
   rows.push(_orange('  ' + `lazyclaw v${v}`));
