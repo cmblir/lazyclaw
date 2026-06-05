@@ -26,7 +26,7 @@ Every subcommand at a glance — `lazyclaw --help`:
 
 ```bash
 npm install -g lazyclaw
-lazyclaw version
+lazyclaw version          # → { "version": "5.0.0", "nodeVersion": "...", "platform": "..." }
 ```
 
 Requires **Node 18+**. Works on macOS / Linux / WSL. Windows native PowerShell mostly works but the ghost-text + ANSI banner are TTY-gated and may fall back to plain prompts.
@@ -176,7 +176,7 @@ What you see on launch (TTY only):
   │  | |__ _ _____  _ _          │
   │  | / _` |_ / || | '_|         │
   │  |_\__,_/__\_, |_|            │
-  │  LazyClaw  |__/  3.99.11     │
+  │  LazyClaw  |__/  5.0.0       │
   ╰──────────────────────────────╯
 
   provider · anthropic
