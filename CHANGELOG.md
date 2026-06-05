@@ -4,6 +4,47 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.3.0] — 2026-06-05
+
+Splash, REPL, and slash popup get a proper narrow-terminal pass. The
+launcher no longer truncates verb lists with ellipsis at narrow widths;
+the chat REPL sticks the editor to the bottom; the slash-command popup
+becomes its own component with a tested catalog.
+
+### Added
+
+- `tui/slash_commands.mjs` — single-source-of-truth slash catalog
+  (`/help`, `/exit`, `/model`, `/memory`, `/handoff`, etc.).
+- `tui/slash_popup.mjs` — extracted slash-suggestion popup component
+  consumed by the editor and REPL.
+- `tui/splash.mjs` — narrow-tier renderer with bordered panel, full
+  braille sloth banner, and wrapped (never truncated) verb lists.
+- `runTurnFactory(writeFn)` in `tui/repl.mjs` — additive turn runner
+  used by the new sticky-bottom layout; legacy `runTurn` prop on the
+  pre-v5.3 REPL callsite still works via fallback.
+- New v5.3 test suites covering splash narrow rendering, REPL layout,
+  and slash-popup behavior (33 new tests, 368/368 total passing).
+
+### Changed
+
+- `tui/splash.mjs` — narrow tier (`cols ≤ 89`) now wraps long verb
+  rows with indented continuations instead of truncating with `…`.
+  The apple row keeps `apple-notes · apple-reminders · findmy ·
+  imessage · calendar` intact on every tested width.
+- `tui/repl.mjs` — sticky-bottom layout: Static scrollback → live
+  region → SlashPopup → StatusBar → Editor (last sibling pins to the
+  bottom of the terminal).
+- `tui/editor.mjs` — receives `slashSuggestions`,
+  `slashSelectedIndex`, `onSlashMove`, `onSlashDismiss`; Esc with an
+  open popup clears the buffer.
+
+### Verified
+
+- All three verifier reports pass (splash, REPL, slash popup).
+- Full test sweep: 368 pass, 0 fail, 0 skip.
+- Non-TTY fallback (`LAZYCLAW_NO_INK=1`) still streams headless
+  planner output to stdout.
+
 ## [5.2.0] — 2026-06-05
 
 Closes the learning loop and the Anthropic token bill. Audit found 12

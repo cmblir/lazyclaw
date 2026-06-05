@@ -2,6 +2,14 @@
 //
 // Pure-functional core (makeEditorState, applyKey) so it is testable
 // without ink stdin. The React component <Editor/> wraps useInput().
+//
+// v5.4: slash-popup integration. When the parent passes a non-empty
+// `slashSuggestions` array, ↑/↓ move the popup selection (instead of
+// scrolling history) and Tab/Enter fill the buffer with the highlighted
+// command WITHOUT submitting it (Anthropic's recent UX rule: first
+// Enter fills, second Enter runs). Esc clears the buffer + dismisses.
+// All popup-aware branches are guarded by `slashOpen` so legacy callers
+// see the pre-v5.4 behavior verbatim.
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { theme } from './theme.mjs';
@@ -63,11 +71,83 @@ export function applyKey(state, evt) {
   return next;
 }
 
-export function Editor({ history, onSubmit }) {
+// Pure helper used by the slash-popup branch in <Editor/>. Replaces the
+// editor buffer with `${cmd} ` (note trailing space so the user can keep
+// typing args without an extra keystroke). Does NOT submit.
+export function fillSlashCommand(state, cmd) {
+  const filled = cmd.endsWith(' ') ? cmd : cmd + ' ';
+  return {
+    ...state,
+    buffer: filled,
+    cursor: filled.length,
+    lastSubmit: null,
+    lastWasPaste: false,
+  };
+}
+
+export function Editor({
+  history,
+  onSubmit,
+  onEscape,
+  onBufferChange,
+  // v5.4 slash-popup wiring (all optional — pre-v5.4 callers pass none):
+  slashSuggestions,      // Array<{cmd,help}> | null
+  slashSelectedIndex,    // number
+  onSlashMove,           // (delta: -1 | +1) => void
+  onSlashDismiss,        // () => void
+}) {
   const [state, setState] = useState(() => makeEditorState({ history }));
+  const slashOpen = Array.isArray(slashSuggestions) && slashSuggestions.length > 0;
+
   useInput((input, key) => {
+    // ─── Slash-popup keyboard contract (highest priority when open) ──
+    if (slashOpen) {
+      // Esc: clear the buffer and dismiss the popup. The host's onEscape
+      // is NOT called in this branch — Esc here is a popup gesture, not
+      // a turn-abort. (Outside of popup mode Esc still aborts streaming.)
+      if (key.escape) {
+        const cleared = { ...state, buffer: '', cursor: 0, lastSubmit: null, lastWasPaste: false };
+        setState(cleared);
+        if (onBufferChange) {
+          try { onBufferChange(''); } catch {}
+        }
+        if (onSlashDismiss) onSlashDismiss();
+        return;
+      }
+      // ↑/↓ navigate the popup instead of history.
+      if (key.upArrow) {
+        if (onSlashMove) onSlashMove(-1);
+        return;
+      }
+      if (key.downArrow) {
+        if (onSlashMove) onSlashMove(+1);
+        return;
+      }
+      // Tab / Enter — fill the buffer with the highlighted command.
+      // First Enter fills, second Enter runs (matches Anthropic's UX).
+      if (key.tab || key.return) {
+        const safeIdx = Math.max(0, Math.min(slashSuggestions.length - 1, slashSelectedIndex || 0));
+        const picked = slashSuggestions[safeIdx];
+        if (picked) {
+          const next = fillSlashCommand(state, picked.cmd);
+          setState(next);
+          if (onBufferChange) {
+            try { onBufferChange(next.buffer); } catch {}
+          }
+        }
+        return;
+      }
+      // Anything else (printable, backspace) falls through to applyKey.
+    }
+
+    // Esc: forward to host (ReplApp uses this to abort an in-flight turn).
+    // Do not mutate the buffer — the user may want to keep typing.
+    if (key.escape) { if (onEscape) onEscape(); return; }
     const next = applyKey(state, { input, key });
     setState(next);
+    if (onBufferChange) {
+      try { onBufferChange(next.buffer); } catch { /* observer is best-effort */ }
+    }
   });
   useEffect(() => {
     if (state.lastSubmit !== null && onSubmit) onSubmit(state.lastSubmit);

@@ -108,25 +108,25 @@ test('MEDIUM tier at cols=100 drops wordmark but keeps panel + sloth, wraps not 
   }
 });
 
-test('NARROW tier at cols=80 drops sloth/panel and truncates verb lists', () => {
+test('NARROW tier at cols=80 keeps sloth (stacked) + panel and WRAPS verb lists (no truncation)', () => {
   const out = renderSplashToString(responsiveFixture, { columns: 80 });
   assert.ok(!out.includes('_____'), 'wordmark must be absent at NARROW tier');
-  // No panel border characters.
-  assert.ok(!out.includes('╭'), 'top panel border must be absent at NARROW tier');
-  assert.ok(!out.includes('╰'), 'bottom panel border must be absent at NARROW tier');
+  // Panel border characters PRESENT in the new stacked-NARROW layout.
+  assert.ok(out.includes('╭'), 'top panel border must be present at NARROW tier');
+  assert.ok(out.includes('╰'), 'bottom panel border must be present at NARROW tier');
   // Section headers present.
   assert.match(out, /Subcommands/);
   assert.match(out, /Available Tools/);
   assert.match(out, /Available Skills/);
-  // At least one truncation marker (Crush-style).
-  assert.ok(out.includes('…'), 'NARROW tier must truncate at least one overflowing row');
+  // No truncation marker — narrow tier wraps verbs across rows instead.
+  assert.ok(!out.includes('…'), 'NARROW tier must wrap verbs, not truncate with ellipsis');
   for (const [i, line] of out.split('\n').entries()) {
     assert.ok(stringWidth(line) <= 80, `NARROW line ${i} width=${stringWidth(line)} > 80`);
   }
 });
 
-test('MINIMAL tier at cols=50 emits headline + provider + cwd + /help only', () => {
-  const out = renderSplashToString(responsiveFixture, { columns: 50 });
+test('MINIMAL tier at cols=44 emits headline + provider + cwd + /help only', () => {
+  const out = renderSplashToString(responsiveFixture, { columns: 44 });
   assert.match(out, /lazyclaw 5\.0\.9/);
   assert.match(out, /claude-cli/);
   assert.match(out, /\/help/);
@@ -136,7 +136,7 @@ test('MINIMAL tier at cols=50 emits headline + provider + cwd + /help only', () 
   const lines = out.split('\n');
   assert.ok(lines.length < 8, `MINIMAL must be compact, got ${lines.length} lines`);
   for (const [i, line] of lines.entries()) {
-    assert.ok(stringWidth(line) <= 50, `MINIMAL line ${i} width=${stringWidth(line)} > 50`);
+    assert.ok(stringWidth(line) <= 44, `MINIMAL line ${i} width=${stringWidth(line)} > 44`);
   }
 });
 
@@ -151,15 +151,15 @@ test('tier boundaries are exact', () => {
   // cols=90 → MEDIUM (panel present)
   assert.ok(renderSplashToString(responsiveFixture, { columns: 90 }).includes('╭'),
     'cols=90 must keep panel border (MEDIUM tier)');
-  // cols=89 → NARROW (no panel)
+  // cols=89 → NARROW (panel still present, sloth stacked)
   const at89 = renderSplashToString(responsiveFixture, { columns: 89 });
-  assert.ok(!at89.includes('╭'), 'cols=89 must drop panel border (NARROW tier)');
+  assert.ok(at89.includes('╭'), 'cols=89 must keep panel border (NARROW tier, stacked)');
   assert.match(at89, /Subcommands/);
-  // cols=60 → NARROW (sections present)
-  assert.match(renderSplashToString(responsiveFixture, { columns: 60 }), /Subcommands/);
-  // cols=59 → MINIMAL (sections absent)
-  const at59 = renderSplashToString(responsiveFixture, { columns: 59 });
-  assert.ok(!at59.includes('Subcommands'), 'cols=59 must drop sections (MINIMAL tier)');
+  // cols=45 → NARROW (sections present)
+  assert.match(renderSplashToString(responsiveFixture, { columns: 45 }), /Subcommands/);
+  // cols=44 → MINIMAL (sections absent)
+  const at44 = renderSplashToString(responsiveFixture, { columns: 44 });
+  assert.ok(!at44.includes('Subcommands'), 'cols=44 must drop sections (MINIMAL tier)');
 });
 
 test('no row exceeds requested width at every breakpoint', () => {
