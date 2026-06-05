@@ -161,16 +161,10 @@ function renderWide(props, cols) {
   lines.push('');
   lines.push(`${LMARGIN}Welcome to lazyclaw. Type your message or /help for commands.`);
   lines.push(`${LMARGIN}+ Tip: trainer learns from your Claude Pro subscription at $0.`);
-  lines.push('');
-
-  // 5) status bar (Hermes-style separator)
-  const sep = '─'.repeat(PANEL_W);
-  lines.push(LMARGIN + sep);
-  const ctx = props.ctxUsed != null && props.ctxTotal != null
-    ? `[${'░'.repeat(20)}] ${props.ctxUsed}/${props.ctxTotal}`
-    : `[${'░'.repeat(20)}] --`;
-  lines.push(`${LMARGIN} ${provider} · ${model} | ctx -- | ${ctx} | 0s`);
-  lines.push(LMARGIN + sep);
+  // v5.4.3 — the baked-in status row that used to live here duplicated
+  // ReplApp's real <StatusBar/> (tui/repl.mjs:476). Removing it cuts 4
+  // rows from the splash AND eliminates the visible overlap the user
+  // saw on /help in alt-buffer mode.
 
   return lines;
 }
@@ -251,16 +245,7 @@ function renderMedium(props, cols) {
   lines.push('');
   lines.push(`${LMARGIN}Welcome to lazyclaw. Type your message or /help for commands.`);
   lines.push(`${LMARGIN}+ Tip: trainer learns from your Claude Pro subscription at $0.`);
-  lines.push('');
-
-  // 5) status bar
-  const sep = '─'.repeat(PANEL_W);
-  lines.push(LMARGIN + sep);
-  const ctx = props.ctxUsed != null && props.ctxTotal != null
-    ? `[${'░'.repeat(20)}] ${props.ctxUsed}/${props.ctxTotal}`
-    : `[${'░'.repeat(20)}] --`;
-  lines.push(`${LMARGIN} ${provider} · ${model} | ctx -- | ${ctx} | 0s`);
-  lines.push(LMARGIN + sep);
+  // v5.4.3 — baked-in status row removed; ReplApp renders the real one.
 
   return lines;
 }
@@ -342,13 +327,7 @@ function renderNarrow(props, cols) {
   if (sessionId) lines.push(fit(`${LMARGIN}Session: ${sessionId}`, cols).trimEnd());
   lines.push('');
   lines.push(fit(`${LMARGIN}Welcome to lazyclaw. /help for commands.`, cols).trimEnd());
-  lines.push('');
-
-  // 7) compact status — single line, no separator dashes.
-  const ctx = props.ctxUsed != null && props.ctxTotal != null
-    ? `${props.ctxUsed}/${props.ctxTotal}`
-    : '--';
-  lines.push(fit(`${LMARGIN}${provider} · ${model} · ctx ${ctx}`, cols).trimEnd());
+  // v5.4.3 — baked-in status row removed; ReplApp renders the real one.
 
   return lines;
 }

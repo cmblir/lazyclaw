@@ -169,9 +169,9 @@ test('ReplApp alt-buffer branch does NOT use <Static/> for scrollback (v5.4.2)',
   // map scrollback to ScrollbackItem directly. Pin via a structural regex
   // that matches the alt-buffer arm: `altEnabled\n? ...flexGrow: 1...
   // state.scrollback.map(`.
-  const altArm = /altEnabled[\s\S]{0,800}?state\.scrollback\.map\(/;
+  const altArm = /altEnabled[\s\S]{0,1400}?\.scrollback[\s\S]{0,400}?\.map\(/;
   assert.ok(altArm.test(src),
-    'alt-buffer arm must render state.scrollback via .map(ScrollbackItem)');
+    'alt-buffer arm must render scrollback via .map(ScrollbackItem)');
   // And it must NOT contain a <Static items=...> call between the
   // altEnabled ternary and the closing live-region paren.
   const altRegion = src.match(/altEnabled[\s\S]*?(?=: React\.createElement\(\s*Static)/);

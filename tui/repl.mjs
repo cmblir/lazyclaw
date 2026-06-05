@@ -38,6 +38,7 @@ import { Splash, renderSplashToString } from './splash.mjs';
 import { Editor } from './editor.mjs';
 import { SlashPopup, filterSlashCommands } from './slash_popup.mjs';
 import { SLASH_COMMANDS } from './slash_commands.mjs';
+import { ModalPicker, filterModalItems } from './modal_picker.mjs';
 import { theme } from './theme.mjs';
 
 // ─── Alt-buffer mount (DEC 1049) ─────────────────────────────────────────
@@ -187,7 +188,7 @@ export function consumeNextTurnFirstMessage(state) {
 //   - runTurnFactory(writeFn) → runTurn(text, signal)   (sticky layout)
 //   - runTurn(text, signal)                              (legacy, stdout)
 // Legacy mode is preserved verbatim for the existing cli.mjs callsite.
-export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, onSlashCommand, statusInfo }) {
+export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, onSlashCommand, statusInfo, pickerRef }) {
   // statusInfo lets the host supply provider/model/ctx to the StatusBar
   // independently of splashProps. Needed for the alt-buffer hand-off
   // where splashProps is pre-printed to the primary buffer (not the
@@ -356,7 +357,88 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
   const _exactOnly =
     filtered.length === 1 &&
     (filtered[0].cmd === bufferPeek || filtered[0].cmd === _bufTrimmed);
+
+  // ─── Modal picker state (v5.4.3) ───────────────────────────────────
+  // openPicker(opts) → Promise<id|null>. Stores the resolver on `modal`
+  // so confirm/cancel/unmount can settle it. The Editor intercepts
+  // Up/Down/Enter/Esc/Backspace/printable when modalOpen is true and
+  // routes them as host callbacks below; chat buffer and onSubmit are
+  // untouched while a picker is up.
+  const [modal, setModal] = useState(null);
+  const [modalIdx, setModalIdx] = useState(0);
+  const [modalQuery, setModalQuery] = useState('');
+  const modalView = useMemo(
+    () => (modal ? filterModalItems(modalQuery, modal.items) : []),
+    [modal, modalQuery],
+  );
+  const modalRef = useRef(null);
+  modalRef.current = modal;
+  const closeModal = useCallback((picked) => {
+    const m = modalRef.current;
+    setModal(null);
+    setModalIdx(0);
+    setModalQuery('');
+    if (m && typeof m.resolve === 'function') {
+      try { m.resolve(picked); } catch { /* swallow */ }
+    }
+  }, []);
+  const openPicker = useCallback((opts = {}) => {
+    return new Promise((resolve) => {
+      setModalIdx(Number.isFinite(opts.defaultIdx) ? opts.defaultIdx : 0);
+      setModalQuery('');
+      setModal({
+        kind: opts.kind || 'generic',
+        title: opts.title || 'select',
+        subtitle: opts.subtitle || '',
+        items: Array.isArray(opts.items) ? opts.items : [],
+        searchable: opts.searchable !== false,
+        resolve,
+      });
+    });
+  }, []);
+  // Expose openPicker via the host-supplied ref so cli.mjs can inject
+  // it into the slash dispatcher's ctx.
+  useEffect(() => {
+    if (pickerRef && typeof pickerRef === 'object') {
+      pickerRef.current = { openPicker };
+    }
+    return () => {
+      if (pickerRef && typeof pickerRef === 'object') {
+        pickerRef.current = null;
+      }
+      // If the app unmounts while a picker is open, resolve(null) so
+      // the awaiting dispatcher promise doesn't hang the next /command.
+      const m = modalRef.current;
+      if (m && typeof m.resolve === 'function') {
+        try { m.resolve(null); } catch { /* swallow */ }
+      }
+    };
+  }, [pickerRef, openPicker]);
+
+  const onModalMove = useCallback((delta) => {
+    setModalIdx((i) => {
+      const max = Math.max(0, modalView.length - 1);
+      const n = i + delta;
+      if (n < 0) return 0;
+      if (n > max) return max;
+      return n;
+    });
+  }, [modalView.length]);
+  const onModalConfirm = useCallback(() => {
+    const picked = modalView[modalIdx];
+    closeModal(picked ? picked.id : null);
+  }, [modalView, modalIdx, closeModal]);
+  const onModalCancel = useCallback(() => { closeModal(null); }, [closeModal]);
+  const onModalQuery = useCallback((next) => {
+    setModalQuery(next || '');
+    setModalIdx(0);
+  }, []);
+  const modalOpen = !!modal;
+
+  // Slash popup is suppressed whenever a modal picker is active so the
+  // overlays don't stack.
   const showSlashPopup =
+    !modalOpen &&
     bufferPeek.startsWith('/') && filtered.length > 0 && !_exactOnly;
 
   // Outer column height: pinned to rows-1 in alt-buffer mode so the
@@ -385,7 +467,16 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
         ? React.createElement(
             Box,
             { flexDirection: 'column', flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
-            state.scrollback.map((item) =>
+            // v5.4.3 — once any user/assistant turn has been committed,
+            // drop the splash from the visible scrollback. Inside the
+            // alt-buffer canvas the splash cannot scroll off naturally
+            // (no native scrollback), so leaving it visible pushes the
+            // newest content past the StatusBar+Editor on tall outputs
+            // like /help. The splash still flashes on first mount.
+            (state.scrollback.length > 1
+              ? state.scrollback.filter((it) => it.kind !== 'splash')
+              : state.scrollback
+            ).map((item) =>
               React.createElement(ScrollbackItem, { key: item.id, item })
             ),
             // Live region — partial assistant stream (inside the scroll
@@ -420,6 +511,19 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
             selectedIndex: selectedSuggestion,
           })
         : null,
+      // 3b) Modal picker (v5.4.3) — flex sibling above StatusBar, only
+      //     visible while ReplApp's `modal` state is set. Suppresses the
+      //     slash popup so the overlays don't stack.
+      modalOpen
+        ? React.createElement(ModalPicker, {
+            title: modal.title,
+            subtitle: modal.subtitle,
+            items: modalView,
+            selectedIndex: modalIdx,
+            query: modalQuery,
+            searchable: modal.searchable,
+          })
+        : null,
       // 4) Status bar (sticky, single row above input). flexShrink:0 so
       //    it isn't squeezed when the scrollback grows.
       React.createElement(StatusBar, {
@@ -443,6 +547,20 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
           slashSelectedIndex: selectedSuggestion,
           onSlashMove: handleSlashMove,
           onSlashDismiss: handleSlashDismiss,
+          // v5.4.3 — modal picker key contract. When modalOpen the
+          // Editor swallows all keys (no buffer mutation, no submit).
+          modalOpen,
+          modalQuery,
+          onModalMove,
+          onModalConfirm,
+          onModalCancel,
+          onModalQuery,
+          // v5.4.3 — when alt-buffer is on, Editor moves the terminal
+          // cursor back inside its content row after each render so
+          // macOS Hangul / Japanese / Chinese IMEs draw their pre-edit
+          // overlay where the user is actually typing instead of on
+          // the row below the editor box. Opt-out via env.
+          altEnabled,
         })
       )
     )
