@@ -217,6 +217,49 @@ export function Editor({
   }, [state.lastSubmit]);
 
   const lines = state.buffer.split('\n');
+  // Manual cell-aware wrapping. Ink's <Text wrap="wrap"> uses wrap-ansi,
+  // which IS string-width aware, but the box's width:'100%' resolves
+  // against ink-testing-library's stdout shim (and some real terminals
+  // when columns is reset by SIGWINCH late) at 100 cols regardless of
+  // the actual viewport — so wide CJK buffers visibly bleed past the
+  // box right edge in narrow terminals. Pre-wrap to the actual cell
+  // budget so Ink never has to guess.
+  const TERM = Math.max(20, process.stdout.columns || 80);
+  // Box overhead: 1 border + 1 padX on each side = 4 cells; first row
+  // also reserves PROMPT_WIDTH; continuation rows reserve CONTINUATION_WIDTH.
+  function wrapToBudget(text, firstBudget, contBudget) {
+    if (!text) return [''];
+    const out = [];
+    let line = '';
+    let lineW = 0;
+    let budget = firstBudget;
+    for (const ch of text) {
+      const w = stringWidth(ch);
+      if (lineW + w > budget) {
+        out.push(line);
+        line = ch;
+        lineW = w;
+        budget = contBudget;
+      } else {
+        line += ch;
+        lineW += w;
+      }
+    }
+    out.push(line);
+    return out;
+  }
+  const innerCells = Math.max(8, TERM - 4); // 2 border + 2 padX
+  const renderedLines = [];
+  for (let li = 0; li < lines.length; li++) {
+    const wrapped = wrapToBudget(lines[li], innerCells - PROMPT_WIDTH, innerCells - CONTINUATION_WIDTH);
+    for (let wi = 0; wi < wrapped.length; wi++) {
+      const isFirstLogical = li === 0 && wi === 0;
+      renderedLines.push({
+        prefix: isFirstLogical ? theme.accent(PROMPT_PREFIX) : CONTINUATION_GUTTER,
+        text: wrapped[wi],
+      });
+    }
+  }
   return React.createElement(
     Box,
     {
@@ -225,17 +268,12 @@ export function Editor({
       paddingX: 1,
       flexDirection: 'column',
       flexShrink: 0,
-      // Pin to full terminal width. Ink's wrap-ansi (which is
-      // string-width aware) then has the correct cell budget for
-      // wrapping long CJK buffers — fixes the right-edge truncation
-      // perceived on Hangul / Han input. See `displayWidth`/
-      // `cursorDisplayCol` above for the public width helpers.
-      width: '100%',
+      width: TERM,
     },
-    lines.map((ln, i) => React.createElement(
+    renderedLines.map((row, i) => React.createElement(
       Text,
-      { key: i },
-      i === 0 ? theme.accent(PROMPT_PREFIX) + ln : CONTINUATION_GUTTER + ln,
+      { key: i, wrap: 'truncate' },
+      row.prefix + row.text,
     )),
   );
 }

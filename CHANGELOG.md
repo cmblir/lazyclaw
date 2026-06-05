@@ -4,6 +4,40 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.3.3] — 2026-06-06
+
+### Fixed
+
+- **CJK editor box overflow (real fix).** v5.3.2 claimed to fix
+  Hangul/Han width but only updated the `displayWidth` helper — the
+  actual Ink `<Box width="100%">` mount still let long Korean buffers
+  bleed past the right border in real terminals. The editor now
+  pre-wraps the buffer to an explicit cell budget (`process.stdout.columns
+  - 4`) using `string-width` per codepoint and sets `Box width =
+  TERM` directly, so the box border closes correctly at every tested
+  width (60 / 80 / 100 / 120 / 140 cols). New visual-render test
+  suite `tests/v533-editor-cjk-render.test.mjs` mounts the actual
+  Editor via `ink-testing-library` and asserts no line overflows.
+- Added `ink-testing-library` to devDependencies so v5.3.3-style
+  render tests can run in CI.
+
+### Note
+
+v5.3.2 was tagged + published but did not actually resolve the CJK
+overflow it claimed; users on 5.3.2 should upgrade to 5.3.3.
+
+## [5.3.2] — 2026-06-06
+
+### Fixed
+
+- Default chat provider in fresh onboard is now a concrete provider
+  (`claude-cli` etc.) instead of the `orchestrator` meta-provider.
+- When `cfg.orchestrator` is undefined, the orchestrator provider
+  now truly single-shots to the configured chat provider instead of
+  running a Planning/Subtask decomposition for simple questions.
+- `displayWidth` helper added to `tui/editor.mjs` (cell-aware width
+  math) — but see v5.3.3 above for the real visual fix.
+
 ## [5.3.1] — 2026-06-05
 
 Patch release covering three v5.3.0 follow-up bugs reported right after
