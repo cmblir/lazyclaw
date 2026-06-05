@@ -4,6 +4,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A518-blue.svg)](https://nodejs.org/)
 
+> **v5.0 GA** — separate `trainer` provider for $0 learning on
+> Claude Pro/Max, FTS5 cross-CLI recall, persona 7-layer compose,
+> 6-backend sandbox. See [`docs/migration-v4-to-v5.md`](./docs/migration-v4-to-v5.md).
+>
+> 한국어 안내: [`README.ko.md`](./README.ko.md).
+
 **A lazy, elegant terminal CLI for Claude / OpenAI / Gemini / Ollama.**
 
 One Node CLI that talks to every major LLM provider, runs multi-step workflows as a DAG, exposes a local HTTP gateway, and ships with the niceties you actually want at the prompt: an ASCII banner on launch, Cursor-style slash-command ghost autocomplete (right-arrow accepts), persistent chat sessions, and cost rate cards.
