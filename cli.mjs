@@ -1011,6 +1011,8 @@ const SUBCOMMANDS = [
   'agent', 'team', 'task',
   // v5.0 Phase G — persona compose + cross-tool import (spec §9, §10)
   'personality', 'migrate', 'hermes', 'openclaw',
+  // v5.0 Phase H1 — trajectory exporter (spec §2.7)
+  'trajectories',
 ];
 
 const SUBCOMMAND_SUBS = {
@@ -1037,6 +1039,7 @@ const SUBCOMMAND_SUBS = {
   agent:     ['add', 'list', 'show', 'edit', 'remove'],
   team:      ['add', 'list', 'show', 'edit', 'remove'],
   task:      ['start', 'list', 'show', 'abandon', 'done', 'remove'],
+  trajectories: ['export'],
 };
 
 function bashCompletion() {
@@ -7090,6 +7093,35 @@ async function main() {
         console.log(`openclaw import: ${src} → ${dst}  skills:${counts.skills}`);
         process.exit(0);
       } catch (e) { console.error(`openclaw import failed: ${e.message}`); process.exit(1); }
+      break;
+    }
+    case 'trajectories': {
+      // Phase H1: read-only trajectory exporter (spec §2.7).
+      // Usage: lazyclaw trajectories export --format <atropos|axolotl|openai-ft|jsonl>
+      //          [--since 7d] [--filter "outcome=done"] [--out ./dir]
+      if (rest.positional[0] !== 'export') {
+        console.error('Usage: lazyclaw trajectories export --format <atropos|axolotl|openai-ft|jsonl> [--since 7d] [--filter "outcome=done"] [--out <dir>]');
+        process.exit(2);
+      }
+      const mod = await import('./mas/trajectory_export.mjs');
+      const format = rest.flags.format || 'jsonl';
+      if (!mod.FORMATS.includes(format)) {
+        console.error(`trajectories export: unknown format "${format}" — choose ${mod.FORMATS.join('|')}`);
+        process.exit(2);
+      }
+      try {
+        const r = await mod.exportTrajectories({
+          format,
+          since: rest.flags.since,
+          filter: mod.parseFilterArg(rest.flags.filter),
+          outDir: rest.flags.out,
+        });
+        console.log(`exported ${r.count} trajectories (${r.format}) → ${r.outFile}`);
+        process.exit(0);
+      } catch (e) {
+        console.error(`trajectories export failed: ${e.message}`);
+        process.exit(1);
+      }
       break;
     }
     case 'chat': {
