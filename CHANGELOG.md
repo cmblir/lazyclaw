@@ -4,6 +4,18 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.0.5] — 2026-06-05
+
+### Fixed
+
+- **Hero banner now reads as a sloth, not negative space.** The 5.0.4
+  chafa render used `--invert`, which mapped the sloth itself to gaps
+  and the pillow background to dense `⣿`. In a real terminal that
+  inverted to a featureless humanoid silhouette. Replaced with the
+  operator-curated 48×35 braille rendering of the same source photo
+  with the inversion removed — sloth body, head, and arms now show as
+  ink instead of cutouts.
+
 ## [5.0.4] — 2026-06-05
 
 ### Changed
