@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.0.3] — 2026-06-05
+
+### Changed
+
+- **Chat splash sloth banner**. The Phase C placeholder (chafa output
+  of a featureless silhouette PNG) is replaced with a hand-drawn 24×12
+  sleepy sloth: ears, closed eyes, mouth, Zzz inside body, claws, and
+  the project label. Reads as a creature; the rasterised conversion
+  did not. Still 24 East-Asian-Width cells per row to keep the splash
+  gutter math intact (`tests/phaseC-build-splash.test.mjs` unchanged
+  and passing).
+- **No-arg launcher wordmark**. `lazyclaw` (no subcommand) now opens
+  with a 6-row ANSI Shadow "LAZYCLAW" wordmark in box-drawing +
+  half-block glyphs (67 cols, single-tone orange). Replaces the v5.0.1
+  caption-on-sloth experiment which was visually weak at launcher
+  width. Set `LAZYCLAW_LEGACY_MENU=1` to fall back to the v4 figlet
+  box; the arrow-key menu beneath is unchanged.
+
 ## [5.0.2] — 2026-06-05
 
 ### Fixed

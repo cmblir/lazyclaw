@@ -1634,31 +1634,28 @@ function _renderBanner(version) {
   ];
 }
 
-// v5 sloth banner — shared with the ink splash (tui/splash.mjs).
-// Single-tone orange like _renderBanner so the no-arg launcher and the
-// chat splash share a visual identity. Opt out with LAZYCLAW_LEGACY_MENU=1
-// to fall back to the boxed figlet variant above.
-let _v5BannerRowsCache = null;
-async function _renderV5Banner(version) {
-  if (!_v5BannerRowsCache) {
-    try {
-      const { banner } = await import('./tui/banner.generated.mjs');
-      _v5BannerRowsCache = banner.rows;
-    } catch {
-      _v5BannerRowsCache = null;
-    }
-  }
-  if (!_v5BannerRowsCache) return _renderBanner(version);
+// v5 wordmark banner — ANSI Shadow style "LAZYCLAW" rendered in box-drawing
+// + half-block glyphs at 67 cols x 6 rows. Wider than the chat splash gutter
+// because the no-arg launcher has the full terminal width to work with.
+// Single-tone orange. Opt out with LAZYCLAW_LEGACY_MENU=1 to fall back to
+// the boxed figlet variant above.
+const _V5_WORDMARK = [
+  "  ██╗      █████╗ ███████╗██╗   ██╗ ██████╗██╗      █████╗ ██╗    ██╗",
+  "  ██║     ██╔══██╗╚══███╔╝╚██╗ ██╔╝██╔════╝██║     ██╔══██╗██║    ██║",
+  "  ██║     ███████║  ███╔╝  ╚████╔╝ ██║     ██║     ███████║██║ █╗ ██║",
+  "  ██║     ██╔══██║ ███╔╝    ╚██╔╝  ██║     ██║     ██╔══██║██║███╗██║",
+  "  ███████╗██║  ██║███████╗   ██║   ╚██████╗███████╗██║  ██║╚███╔███╔╝",
+  "  ╚══════╝╚═╝  ╚═╝╚══════╝   ╚═╝    ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝ ",
+];
+
+function _renderV5Banner(version) {
   const v = String(version || '?.?.?');
-  return _v5BannerRowsCache.map((row, i) => {
-    if (i === 8) {
-      // Caption row — overlay "lazyclaw v<version>" centered on the 24-wide art
-      const cap = `lazyclaw  v${v}`;
-      const pad = Math.max(0, Math.floor((24 - cap.length) / 2));
-      return _orange(' '.repeat(pad) + cap + ' '.repeat(24 - pad - cap.length));
-    }
-    return _orange(row);
-  });
+  const wmCols = 69; // width of _V5_WORDMARK rows including leading "  "
+  const versionLine = `  v${v}`;
+  return [
+    ..._V5_WORDMARK.map(_orange),
+    _orange(versionLine.padEnd(wmCols)),
+  ];
 }
 
 function _printChatBanner(activeProvName, activeModel, version) {
@@ -6749,7 +6746,7 @@ async function cmdLauncher() {
     const useLegacyBanner = !!process.env.LAZYCLAW_LEGACY_MENU;
     const bannerRowsCached = useLegacyBanner
       ? _renderBanner(readVersionFromRepo())
-      : await _renderV5Banner(readVersionFromRepo());
+      : _renderV5Banner(readVersionFromRepo());
     const draw = () => {
       process.stdout.write('\x1b[?25l\x1b[2J\x1b[H'); // hide cursor + clear
       bannerRowsCached.forEach((l) => process.stdout.write(l + '\n'));
