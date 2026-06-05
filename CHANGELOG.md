@@ -4,6 +4,42 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.4.0] — 2026-06-06
+
+### Added
+
+- **Alt-buffer fullscreen Ink mount**. `tui/repl.mjs` now wraps the
+  ReplApp in a `FullScreen` component that writes `\x1b[?1049h` on
+  mount (saves cursor + switches to alt screen) and `\x1b[?1049l` on
+  unmount via the React useEffect cleanup. Signal handlers for exit /
+  SIGINT / SIGTERM / SIGHUP restore the primary buffer if the process
+  dies rudely. Korean IME pre-edit composition now lands inside the
+  Ink editor box because the cursor lives at the editor's last row in
+  the alt buffer — no more bleed onto a separate stdout line below
+  the rendered frame.
+- **All 24 slash commands wired** in the sticky-bottom REPL. New
+  module `tui/slash_dispatcher.mjs` ports every command from the v4
+  cli.mjs readline handler (`/help · /status · /version · /new ·
+  /reset · /usage · /skills · /skill · /tools · /provider · /model ·
+  /trainer · /personality · /loop · /goal · /memory · /recall ·
+  /dream · /agent · /team · /task · /handoff · /exit · /quit`).
+  `/exit` and `/quit` return an EXIT sentinel; everything else
+  streams output through the scrollback writeFn so it shows up in
+  the Ink chat history.
+- 51 new tests across `tests/v54-altbuffer.test.mjs` and
+  `tests/v54-slash-dispatcher.test.mjs` exercising every command +
+  alt-buffer escape emission. 457 total tests pass (was 406).
+
+### Notes
+
+- Interactive sub-pickers (provider/model picker, personality
+  picker) are still readline-coupled in cli.mjs. In the Ink branch
+  they print a hint asking the user to pass an arg form
+  (`/provider openai` etc) or to fall back to `LAZYCLAW_NO_INK=1`
+  for the legacy menu. Ink overlay pickers land in v5.5.
+- `LAZYCLAW_NO_ALT=1` opts out of alt-buffer (kept the legacy inline
+  render path for users on dumb terminals or tmux-without-alt-screen).
+
 ## [5.3.3] — 2026-06-06
 
 ### Fixed

@@ -29,12 +29,65 @@
 //     sticky layout; ReplApp injects writeFn → scrollback.
 //
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Box, Static, Text, useApp } from 'ink';
+import { Box, Static, Text, useApp, useStdout } from 'ink';
 import { Splash, renderSplashToString } from './splash.mjs';
 import { Editor } from './editor.mjs';
 import { SlashPopup, filterSlashCommands } from './slash_popup.mjs';
 import { SLASH_COMMANDS } from './slash_commands.mjs';
 import { theme } from './theme.mjs';
+
+// ─── Alt-buffer mount (DEC 1049) ─────────────────────────────────────────
+//
+// Wraps the React tree with mount/unmount side-effects that enable the
+// terminal alternate screen buffer. Three-layer cleanup so the user never
+// gets stranded on the alt canvas:
+//   1. React unmount → useEffect return-fn writes \x1b[?1049l
+//   2. Rude shutdown (SIGINT/SIGTERM/SIGHUP/'exit') → same escape via
+//      process-level listeners that we install + remove on unmount.
+//   3. cursor-visible safety on unmount (\x1b[?25h) in case anything
+//      below us turned it off.
+//
+// We deliberately do NOT install an uncaughtException handler — Ink
+// already installs one and re-throws; ours would swallow the stack
+// trace (violates §1 Truthfulness / no silent catch).
+//
+// `enabled` is false for non-TTY pipelines, CI, ink-testing-library, and
+// the LAZYCLAW_NO_ALT escape hatch. When false this is a pass-through —
+// no escape sequences leak into stdout.
+export const ALT_BUFFER_ENTER = '\x1b[?1049h';
+export const ALT_BUFFER_LEAVE = '\x1b[?1049l';
+export const CURSOR_VISIBLE   = '\x1b[?25h';
+
+export function FullScreen({ enabled, children }) {
+  useEffect(() => {
+    if (!enabled) return undefined;
+    // Mount: enter alternate screen buffer.
+    try { process.stdout.write(ALT_BUFFER_ENTER); } catch { /* swallow — stdout closed */ }
+
+    // Rude-shutdown listeners. Each writes 1049l + cursor-visible so the
+    // terminal is restored even if React never gets a chance to unmount
+    // (e.g. parent process kills us with SIGTERM).
+    const restore = () => {
+      try { process.stdout.write(ALT_BUFFER_LEAVE + CURSOR_VISIBLE); } catch {}
+    };
+    const onExit = () => { restore(); };
+    const onSignal = () => { restore(); };
+    process.once('exit', onExit);
+    process.once('SIGINT', onSignal);
+    process.once('SIGTERM', onSignal);
+    process.once('SIGHUP', onSignal);
+
+    return () => {
+      // React unmount: restore primary buffer.
+      restore();
+      process.removeListener('exit', onExit);
+      process.removeListener('SIGINT', onSignal);
+      process.removeListener('SIGTERM', onSignal);
+      process.removeListener('SIGHUP', onSignal);
+    };
+  }, [enabled]);
+  return children;
+}
 
 // ─── Pure state ──────────────────────────────────────────────────────────
 //
@@ -130,7 +183,13 @@ export function consumeNextTurnFirstMessage(state) {
 //   - runTurnFactory(writeFn) → runTurn(text, signal)   (sticky layout)
 //   - runTurn(text, signal)                              (legacy, stdout)
 // Legacy mode is preserved verbatim for the existing cli.mjs callsite.
-export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, onSlashCommand }) {
+export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, onSlashCommand, statusInfo }) {
+  // statusInfo lets the host supply provider/model/ctx to the StatusBar
+  // independently of splashProps. Needed for the alt-buffer hand-off
+  // where splashProps is pre-printed to the primary buffer (not the
+  // alt canvas) and nulled out here to suppress the in-tree Static
+  // splash item — but the StatusBar still needs provider/model strings.
+  const _status = statusInfo || splashProps || {};
   // Splash is rendered ONCE as scrollback[0] via <Static>. Build it lazily
   // so SSR-style imports without a TTY don't crash on process.stdout.
   const splashItemRef = useRef(null);
@@ -141,6 +200,28 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
   }
   const [state, setState] = useState(() => makeReplState({ splashItem: splashItemRef.current }));
   const { exit } = useApp();
+
+  // Alt-buffer eligibility — TTY only, opt-out via LAZYCLAW_NO_ALT=1.
+  // Captured in a ref so the value is stable across renders (it cannot
+  // change at runtime; isTTY + env are read once on mount).
+  const altEnabledRef = useRef(null);
+  if (altEnabledRef.current === null) {
+    altEnabledRef.current = !!(process.stdout && process.stdout.isTTY) && !process.env.LAZYCLAW_NO_ALT;
+  }
+  const altEnabled = altEnabledRef.current;
+
+  // Pin the outer column height to rows-1 in alt-buffer mode so Ink's
+  // sticky-bottom Editor actually pins. Non-alt mode keeps the legacy
+  // content-sized layout so existing tests + non-TTY fallbacks behave
+  // identically. Listen for SIGWINCH-driven resize events.
+  const { stdout } = useStdout();
+  const [rows, setRows] = useState(() => (stdout && stdout.rows) || 24);
+  useEffect(() => {
+    if (!stdout) return undefined;
+    const onResize = () => setRows((stdout.rows) || 24);
+    stdout.on('resize', onResize);
+    return () => { stdout.off('resize', onResize); };
+  }, [stdout]);
 
   // writeFn for run_turn: route chunks into React state instead of stdout.
   // Only used when runTurnFactory is provided; the legacy `runTurn` prop
@@ -274,51 +355,89 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
   const showSlashPopup =
     bufferPeek.startsWith('/') && filtered.length > 0 && !_exactOnly;
 
+  // Outer column height: pinned to rows-1 in alt-buffer mode so the
+  // Editor truly sticks to the bottom. Non-alt keeps content-sized layout
+  // (legacy behavior — required for existing snapshot tests + non-TTY).
+  const outerHeight = altEnabled ? Math.max(1, rows - 1) : undefined;
+
   return React.createElement(
-    Box,
-    { flexDirection: 'column' },
-    // 1) Scrollback (write-once via Ink Static)
+    FullScreen,
+    { enabled: altEnabled },
     React.createElement(
-      Static,
-      { items: state.scrollback },
-      (item) => React.createElement(ScrollbackItem, { key: item.id, item })
-    ),
-    // 2) Live region — partial assistant stream
-    state.liveAssistant
-      ? React.createElement(
-          Box,
-          { flexDirection: 'column' },
-          React.createElement(Text, { color: theme.fg }, state.liveAssistant)
-        )
-      : null,
-    // 3) Slash popup — flex sibling above the StatusBar; Ink can't
-    //    absolutely position so this is the "just above input" pattern.
-    showSlashPopup
-      ? React.createElement(SlashPopup, {
-          buffer: bufferPeek,
-          commands: filtered,
-          selectedIndex: selectedSuggestion,
+      Box,
+      { flexDirection: 'column', height: outerHeight },
+      // 1) Scrollback (write-once via Ink Static).
+      //    In alt-buffer mode the Static lives inside a flex-grow inner
+      //    Box so it absorbs slack rather than pushing the editor out of
+      //    the viewport. In legacy mode it stays sibling-flat so the
+      //    structural test (Editor must be last sibling) still passes.
+      altEnabled
+        ? React.createElement(
+            Box,
+            { flexDirection: 'column', flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
+            React.createElement(
+              Static,
+              { items: state.scrollback },
+              (item) => React.createElement(ScrollbackItem, { key: item.id, item })
+            ),
+            // Live region — partial assistant stream (inside the scroll
+            // region so it grows naturally above the status bar).
+            state.liveAssistant
+              ? React.createElement(
+                  Box,
+                  { flexDirection: 'column' },
+                  React.createElement(Text, { color: theme.fg }, state.liveAssistant)
+                )
+              : null,
+          )
+        : React.createElement(
+            Static,
+            { items: state.scrollback },
+            (item) => React.createElement(ScrollbackItem, { key: item.id, item })
+          ),
+      // Live region (legacy path only — alt path already rendered it inside the inner Box).
+      !altEnabled && state.liveAssistant
+        ? React.createElement(
+            Box,
+            { flexDirection: 'column' },
+            React.createElement(Text, { color: theme.fg }, state.liveAssistant)
+          )
+        : null,
+      // 3) Slash popup — flex sibling above the StatusBar; Ink can't
+      //    absolutely position so this is the "just above input" pattern.
+      showSlashPopup
+        ? React.createElement(SlashPopup, {
+            buffer: bufferPeek,
+            commands: filtered,
+            selectedIndex: selectedSuggestion,
+          })
+        : null,
+      // 4) Status bar (sticky, single row above input). flexShrink:0 so
+      //    it isn't squeezed when the scrollback grows.
+      React.createElement(StatusBar, {
+        provider: _status.provider,
+        model: _status.model,
+        streaming: state.streaming,
+        ctxUsed: _status.ctxUsed,
+        ctxTotal: _status.ctxTotal,
+      }),
+      // 5) Editor — sticky bottom, content-sized. Wrapped in a flexShrink:0
+      //    Box so Yoga doesn't squeeze the input row when scrollback fills.
+      React.createElement(
+        Box,
+        { flexShrink: 0, flexDirection: 'column' },
+        React.createElement(Editor, {
+          history: state.history,
+          onSubmit: handleSubmit,
+          onEscape: onEscapeKey,
+          onBufferChange: handleBufferChange,
+          slashSuggestions: showSlashPopup ? filtered : null,
+          slashSelectedIndex: selectedSuggestion,
+          onSlashMove: handleSlashMove,
+          onSlashDismiss: handleSlashDismiss,
         })
-      : null,
-    // 4) Status bar (sticky, single row above input)
-    React.createElement(StatusBar, {
-      provider: splashProps && splashProps.provider,
-      model: splashProps && splashProps.model,
-      streaming: state.streaming,
-      ctxUsed: splashProps && splashProps.ctxUsed,
-      ctxTotal: splashProps && splashProps.ctxTotal,
-    }),
-    // 5) Editor — sticky bottom, content-sized
-    React.createElement(Editor, {
-      history: state.history,
-      onSubmit: handleSubmit,
-      onEscape: onEscapeKey,
-      onBufferChange: handleBufferChange,
-      slashSuggestions: showSlashPopup ? filtered : null,
-      slashSelectedIndex: selectedSuggestion,
-      onSlashMove: handleSlashMove,
-      onSlashDismiss: handleSlashDismiss,
-    })
+      )
+    )
   );
 }
 

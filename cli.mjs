@@ -14,6 +14,10 @@ import { applyChatWindow as _applyChatWindow, CHAT_WINDOW_TURNS, CHAT_WINDOW_TOK
 // v5 Group C (C7) — shared chat-turn streaming closure. Single source
 // of truth for both the ink REPL path and the legacy readline path.
 import { makeRunTurn as _chatRunTurnFactory } from './tui/run_turn.mjs';
+// v5.4: full slash-command dispatcher (24 commands) for the Ink branch.
+// Lifted from the legacy handleSlash so the Ink REPL stops shipping the
+// "not yet wired" placeholder.
+import { dispatchSlash as _dispatchSlash, parseSlashLine as _parseSlashLine } from './tui/slash_dispatcher.mjs';
 
 async function loadEngine() {
   return import('./workflow/persistent.mjs');
@@ -2646,19 +2650,37 @@ async function cmdChat(flags = {}) {
           }).catch(() => {});
         } catch { /* swallow */ }
       };
+      // v5.4: chars-sent counter for the Ink chat path. Mirrors the legacy
+      // path's `charsSent` so /usage in Ink reports the same number.
+      let _inkCharsSent = 0;
       const _inkCtx = {
         cfg,
         cfgDir: _inkCfgDir,
         sandboxSpec: _inkSandboxSpec,
         syntheticChatSessionId: _inkSyntheticChatSessionId,
+        version: readVersionFromRepo(),
+        registryMod: _registryMod,
+        sessionsMod,
+        // Pre-imported so dispatcher avoids a dynamic import per /skill call.
+        skillsMod,
         getMessages: () => _inkMessages,
+        setMessages: (next) => { _inkMessages = Array.isArray(next) ? next : []; },
         getProv: () => prov,
+        setProv: (next) => { prov = next; },
         getActiveProvName: () => activeProvName,
+        setActiveProvName: (name) => { activeProvName = name; },
         getActiveModel: () => activeModel,
+        setActiveModel: (name) => { activeModel = name; },
         getSessionId: () => _inkSessionId,
+        setSessionId: (id) => { _inkSessionId = id; },
+        getCharsSent: () => _inkCharsSent,
+        setCharsSent: (n) => { _inkCharsSent = Number(n) || 0; },
+        getRunningUsage: () => _inkRunningUsage,
+        setRunningUsage: (u) => { _inkRunningUsage = u; },
         persistTurn: _inkPersistTurn,
         accumulateUsage: _inkAccumulateUsage,
         resolveAuthKey: (providerName) => _resolveAuthKey(cfg, providerName),
+        onCharsSent: (n) => { _inkCharsSent += Number(n) || 0; },
       };
       // v5.0.10: write streamed chunks straight to process.stdout. Ink
       // owns the screen, so interleaved stdout writes can produce some
@@ -2669,54 +2691,34 @@ async function cmdChat(flags = {}) {
         ctx: _inkCtx,
         writeFn: (chunk) => process.stdout.write(chunk),
       });
-      // Minimal slash dispatcher for the Ink branch. Covers the read-only
-      // info commands so the user sees something useful instead of having
-      // their slash command sent to the model as a prompt. /exit + /quit
-      // are intercepted inside ReplApp before this fires. Returning a
-      // string causes ReplApp to render the result into scrollback.
-      //
-      // The full set of mutating commands (/model, /provider, /skill,
-      // /personality, ...) still lives in the legacy readline path and
-      // remains accessible via LAZYCLAW_NO_INK=1. Wiring those through
-      // the Ink branch is a follow-up; today we at least stop sending
-      // them as prompts.
+      // v5.4: full slash-command dispatch via tui/slash_dispatcher.mjs.
+      // Dispatcher returns a string (rendered to scrollback by ReplApp),
+      // 'EXIT' (caller unmounts), or void (streamed via write). /exit and
+      // /quit are also intercepted earlier inside ReplApp.handleSubmit so
+      // either path terminates cleanly.
       const _inkSlashHandler = async (line) => {
-        const cmd = line.split(/\s+/)[0];
-        switch (cmd) {
-          case '/help': {
-            const lines = ['slash commands:'];
-            for (const c of SLASH_COMMANDS) lines.push(`  ${c.cmd.padEnd(14)} — ${c.help}`);
-            return lines.join('\n') + '\n';
-          }
-          case '/status': {
-            const out = {
-              provider: activeProvName,
-              model: activeModel,
-              keyMasked: _registryMod.maskApiKey(cfg['api-key']),
-              messageCount: _inkMessages.length,
-            };
-            return JSON.stringify(out) + '\n';
-          }
-          case '/version': {
-            return `lazyclaw ${readVersionFromRepo()} (node ${process.version}, ${process.platform})\n`;
-          }
-          case '/exit':
-          case '/quit':
-            // ReplApp intercepts these before onSlashCommand fires, but
-            // return EXIT defensively in case that contract ever changes.
-            return 'EXIT';
-          default:
-            // Mutating commands still require the legacy readline path.
-            // Telling the user explicitly beats silently sending the
-            // slash text to the model as a prompt.
-            return `${cmd} is not yet wired into the ink REPL — set LAZYCLAW_NO_INK=1 and restart to use it.\n`;
-        }
+        const { cmd, args } = _parseSlashLine(line);
+        return _dispatchSlash(cmd, args, _inkCtx, (chunk) => {
+          try { process.stdout.write(chunk); } catch { /* swallow */ }
+        });
       };
+      // v5.4 alt-buffer splash hand-off — when the alt-screen will mount,
+      // pre-print the splash to the PRIMARY buffer so it survives in the
+      // user's normal scrollback after chat exit (mirrors Claude CLI /
+      // opencode behavior). The Static splash item would otherwise live
+      // only inside the alt canvas and disappear on unmount. When alt is
+      // disabled (non-TTY pipelines, LAZYCLAW_NO_ALT), keep the legacy
+      // in-tree splash so the pre-existing visual is unchanged.
+      const _altWillMount = !!process.stdout.isTTY && !process.env.LAZYCLAW_NO_ALT;
+      if (_altWillMount) {
+        try { process.stdout.write(renderSplashToString(splashProps) + '\n'); } catch { /* swallow */ }
+      }
       const ink = render(/* @__PURE__ */ React.createElement(ReplApp, {
-        splashProps,
+        splashProps: _altWillMount ? null : splashProps,
+        statusInfo: { provider: activeProvName, model: activeModel },
         runTurn: _inkRunTurn,
         onSlashCommand: _inkSlashHandler,
-      }));
+      }), { exitOnCtrlC: true, patchConsole: true });
       await ink.waitUntilExit();
       return;
     } catch (e) {
