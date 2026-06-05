@@ -4,6 +4,36 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.3.1] — 2026-06-05
+
+Patch release covering three v5.3.0 follow-up bugs reported right after
+ship: `/exit` no longer hanging the REPL, the editor frame no longer
+absorbing rapid keypresses, and the narrow-tier splash panel rendering
+in the correct amber tone.
+
+### Fixed
+
+- `/exit` (and `/quit`) now reliably unmount the Ink app. The slash
+  dispatcher recognizes trailing-whitespace variants, and the host
+  normalizes the command before routing so the editor's "fill on Tab"
+  path no longer produces a stuck process. (`tui/editor.mjs`,
+  `tui/repl.mjs`, `cli.mjs`)
+- Editor input no longer blocks under bursty keystrokes: the input
+  handler no longer awaits inside the synchronous keypress path, and
+  the editor frame uses `theme.border` consistently so re-renders stay
+  cheap. (`tui/editor.mjs`, `tui/theme.mjs`)
+- Narrow-tier splash (`cols ≤ 89`) now paints the bordered panel and
+  sloth banner in `theme.fg` (amber `#FFB347`) instead of the terminal
+  default, matching the WIDE tier. (`tui/splash.mjs`)
+
+### Verified
+
+- `tests/v53-*.test.mjs`: 58/58 pass (0 fail, 0 skip) in 2.4s.
+- Full sweep across phaseA/B/C/E/F/G/H + sandbox + v52 + v53:
+  387/387 pass in ~4.1s.
+- `echo "/exit" | node cli.mjs chat` exits clean in ~3.1s (well under
+  the 5s budget) — no hang.
+
 ## [5.3.0] — 2026-06-05
 
 Splash, REPL, and slash popup get a proper narrow-terminal pass. The

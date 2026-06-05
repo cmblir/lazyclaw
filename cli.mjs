@@ -2634,9 +2634,53 @@ async function cmdChat(flags = {}) {
         ctx: _inkCtx,
         writeFn: (chunk) => process.stdout.write(chunk),
       });
+      // Minimal slash dispatcher for the Ink branch. Covers the read-only
+      // info commands so the user sees something useful instead of having
+      // their slash command sent to the model as a prompt. /exit + /quit
+      // are intercepted inside ReplApp before this fires. Returning a
+      // string causes ReplApp to render the result into scrollback.
+      //
+      // The full set of mutating commands (/model, /provider, /skill,
+      // /personality, ...) still lives in the legacy readline path and
+      // remains accessible via LAZYCLAW_NO_INK=1. Wiring those through
+      // the Ink branch is a follow-up; today we at least stop sending
+      // them as prompts.
+      const _inkSlashHandler = async (line) => {
+        const cmd = line.split(/\s+/)[0];
+        switch (cmd) {
+          case '/help': {
+            const lines = ['slash commands:'];
+            for (const c of SLASH_COMMANDS) lines.push(`  ${c.cmd.padEnd(14)} — ${c.help}`);
+            return lines.join('\n') + '\n';
+          }
+          case '/status': {
+            const out = {
+              provider: activeProvName,
+              model: activeModel,
+              keyMasked: _registryMod.maskApiKey(cfg['api-key']),
+              messageCount: _inkMessages.length,
+            };
+            return JSON.stringify(out) + '\n';
+          }
+          case '/version': {
+            return `lazyclaw ${readVersionFromRepo()} (node ${process.version}, ${process.platform})\n`;
+          }
+          case '/exit':
+          case '/quit':
+            // ReplApp intercepts these before onSlashCommand fires, but
+            // return EXIT defensively in case that contract ever changes.
+            return 'EXIT';
+          default:
+            // Mutating commands still require the legacy readline path.
+            // Telling the user explicitly beats silently sending the
+            // slash text to the model as a prompt.
+            return `${cmd} is not yet wired into the ink REPL — set LAZYCLAW_NO_INK=1 and restart to use it.\n`;
+        }
+      };
       const ink = render(/* @__PURE__ */ React.createElement(ReplApp, {
         splashProps,
         runTurn: _inkRunTurn,
+        onSlashCommand: _inkSlashHandler,
       }));
       await ink.waitUntilExit();
       return;

@@ -10,6 +10,13 @@
 // Enter fills, second Enter runs). Esc clears the buffer + dismisses.
 // All popup-aware branches are guarded by `slashOpen` so legacy callers
 // see the pre-v5.4 behavior verbatim.
+//
+// v5.5: <Editor/> now renders inside a round-bordered Box — the
+// Claude-CLI-style input frame. The border uses `theme.border` (a
+// muted gray) so the accent `›` and sloth gutter stay the dominant
+// amber notes. The box auto-fills the available terminal width via
+// Ink's flex defaults and grows vertically as the buffer wraps onto
+// new lines (Shift+Enter).
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { theme } from './theme.mjs';
@@ -125,17 +132,29 @@ export function Editor({
       }
       // Tab / Enter — fill the buffer with the highlighted command.
       // First Enter fills, second Enter runs (matches Anthropic's UX).
+      // Exception: if the buffer already exactly matches the picked
+      // command (with or without a trailing space), there is nothing left
+      // to autocomplete. For Enter, fall through to the normal submit
+      // path so /exit, /quit, /help etc. fire on a single Enter. For Tab
+      // on an exact match, no-op.
       if (key.tab || key.return) {
         const safeIdx = Math.max(0, Math.min(slashSuggestions.length - 1, slashSelectedIndex || 0));
         const picked = slashSuggestions[safeIdx];
-        if (picked) {
-          const next = fillSlashCommand(state, picked.cmd);
-          setState(next);
-          if (onBufferChange) {
-            try { onBufferChange(next.buffer); } catch {}
+        const bufTrim = state.buffer.replace(/\s+$/, '');
+        const alreadyExact = !!picked && (state.buffer === picked.cmd || bufTrim === picked.cmd);
+        if (alreadyExact) {
+          if (key.tab) return; // no completion to make
+          // key.return on exact match → fall through to applyKey/submit.
+        } else {
+          if (picked) {
+            const next = fillSlashCommand(state, picked.cmd);
+            setState(next);
+            if (onBufferChange) {
+              try { onBufferChange(next.buffer); } catch {}
+            }
           }
+          return;
         }
-        return;
       }
       // Anything else (printable, backspace) falls through to applyKey.
     }
@@ -156,7 +175,17 @@ export function Editor({
   const lines = state.buffer.split('\n');
   return React.createElement(
     Box,
-    { flexDirection: 'column' },
-    lines.map((ln, i) => React.createElement(Text, { key: i }, i === 0 ? theme.accent('› ') + ln : '  ' + ln))
+    {
+      borderStyle: 'round',
+      borderColor: theme.border,
+      paddingX: 1,
+      flexDirection: 'column',
+      flexShrink: 0,
+    },
+    lines.map((ln, i) => React.createElement(
+      Text,
+      { key: i },
+      i === 0 ? theme.accent('› ') + ln : '  ' + ln,
+    )),
   );
 }

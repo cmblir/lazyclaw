@@ -382,14 +382,55 @@ export function Splash(props) {
   const palette = wordmark.palette;
   const gradient = wordmark.gradient;
   const showWordmark = cols >= WORDMARK_BREAKPOINT;
+  // Sloth banner is emitted at the TOP of NARROW output (45..89) only when
+  // it fits inside the terminal width — see renderNarrow() guard.
+  const showSlothNarrow =
+    cols >= NARROW_BREAKPOINT && cols < MEDIUM_BREAKPOINT &&
+    cols >= banner.width + LMARGIN.length * 2;
+
+  // Per-tier sloth row range [start, end). MEDIUM interleaves the sloth
+  // inside panel rows, so it gets colored via the border regex below — no
+  // dedicated band is needed for that tier.
+  let slothStart = -1, slothEnd = -1;
+  if (showWordmark) {
+    slothStart = wordmark.height + 1 + 1; // wordmark + blank + panel-top
+    slothEnd   = slothStart + banner.height;
+  } else if (showSlothNarrow) {
+    slothStart = 0; // sloth is the first thing emitted
+    slothEnd   = banner.height;
+  }
+
+  // Section headers / summary / compact headline on NARROW that should be
+  // amber to match the WIDE wordmark accent. Matched by exact content.
+  const ACCENT_HEADERS = new Set(['Subcommands', 'Available Tools', 'Available Skills']);
+  // Panel border / status separator glyphs (leading box-drawing after
+  // optional whitespace). Catches ╭ ╰ │ as well as ─ separators.
+  const BORDER_RE = /^\s*[╭╰│├┤┬┴┼─╮╯]/;
+  // NARROW compact headline (e.g. "  lazyclaw 5.3.0").
+  const HEADLINE_RE = /^\s*lazyclaw\s+\S/;
+  // NARROW summary line ("N subcmds · M tools · K skills · /help" or its
+  // wrapped variant). Also catches "/help for commands".
+  const SUMMARY_RE = /(subcmds\s+·|tools\s+·\s+\d+\s+skills|\/help\s+for\s+commands)/;
 
   return React.createElement(
     Box,
     { flexDirection: 'column' },
     lines.map((line, i) => {
       let color;
-      if (showWordmark && i < wordmark.height) color = palette[gradient[i] ?? 1];
-      else if (showWordmark && i < wordmark.height + 1 + 1 + banner.height) color = theme.fg;
+      const trimmed = line.trim();
+      if (showWordmark && i < wordmark.height) {
+        color = palette[gradient[i] ?? 1]; // wordmark gradient
+      } else if (i >= slothStart && i < slothEnd) {
+        color = theme.fg; // sloth band — any tier that stacks the sloth
+      } else if (BORDER_RE.test(line)) {
+        color = theme.fg; // panel borders + status separators
+      } else if (ACCENT_HEADERS.has(trimmed)) {
+        color = theme.fg; // section headers
+      } else if (!showWordmark && HEADLINE_RE.test(line) && /\d/.test(line)) {
+        color = theme.fg; // narrow/medium compact headline ("lazyclaw 5.x.y")
+      } else if (!showWordmark && SUMMARY_RE.test(line)) {
+        color = theme.fg; // narrow/medium summary line
+      }
       return React.createElement(Text, { key: i, color }, line);
     })
   );

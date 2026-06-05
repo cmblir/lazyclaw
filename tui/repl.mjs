@@ -130,7 +130,7 @@ export function consumeNextTurnFirstMessage(state) {
 //   - runTurnFactory(writeFn) → runTurn(text, signal)   (sticky layout)
 //   - runTurn(text, signal)                              (legacy, stdout)
 // Legacy mode is preserved verbatim for the existing cli.mjs callsite.
-export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands }) {
+export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, onSlashCommand }) {
   // Splash is rendered ONCE as scrollback[0] via <Static>. Build it lazily
   // so SSR-style imports without a TTY don't crash on process.stdout.
   const splashItemRef = useRef(null);
@@ -163,18 +163,46 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands })
   }
 
   const handleSubmit = useCallback(async (text) => {
-    if (text === '/exit' || text === '/quit') { exit(); return; }
+    // Normalize trailing whitespace so '/exit ' (left over from a popup
+    // fill) is treated identically to '/exit'. Empty input → no-op.
+    const trimmed = (text || '').replace(/\s+$/, '');
+    if (!trimmed) return;
+    // /exit + /quit unmount the Ink app. Done inline so the popup path
+    // and the no-popup path both terminate cleanly.
+    if (trimmed === '/exit' || trimmed === '/quit') { exit(); return; }
+    // Other slash commands: hand off to the host's slash dispatcher
+    // (cli.mjs handleSlash) when one is provided. The host returns a
+    // string (or void) which we append to scrollback as an assistant
+    // turn so the user sees the result inline. If no dispatcher is
+    // wired, fall through to runTurn (legacy behavior).
+    if (trimmed.startsWith('/') && typeof onSlashCommand === 'function') {
+      const controller = new AbortController();
+      setState((s) => onUserInput(s, { text: trimmed, controller }));
+      try {
+        const result = await onSlashCommand(trimmed);
+        if (result === 'EXIT') { exit(); return; }
+        if (typeof result === 'string' && result.length > 0) {
+          setState((s) => onStreamChunk(s, { chunk: result }));
+        }
+        setState((s) => onTurnComplete(s, { reason: 'done' }));
+      } catch (err) {
+        setState((s) => onTurnComplete(s, {
+          reason: err && err.name === 'AbortError' ? 'aborted' : 'error',
+        }));
+      }
+      return;
+    }
     const controller = new AbortController();
-    setState((s) => onUserInput(s, { text, controller }));
+    setState((s) => onUserInput(s, { text: trimmed, controller }));
     try {
-      await runTurnRef.current(text, controller.signal);
+      await runTurnRef.current(trimmed, controller.signal);
       setState((s) => onTurnComplete(s, { reason: 'done' }));
     } catch (err) {
       setState((s) => onTurnComplete(s, {
         reason: err && err.name === 'AbortError' ? 'aborted' : 'error',
       }));
     }
-  }, [exit]);
+  }, [exit, onSlashCommand]);
 
   // Auto-submit queued mid-stream-interrupt message (spec §5.8). Read
   // state.nextTurnFirstMessage so the effect re-fires when promoted.
@@ -234,7 +262,17 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands })
     setSelectedSuggestion(0);
   }, []);
 
-  const showSlashPopup = bufferPeek.startsWith('/') && filtered.length > 0;
+  // Hide the popup when the buffer already exactly matches the only
+  // remaining suggestion (with or without a trailing space). Otherwise
+  // the popup intercepts Enter and the fully-typed command (e.g.
+  // '/exit') never reaches handleSubmit. Belt-and-suspenders with the
+  // editor-side fall-through in tui/editor.mjs.
+  const _bufTrimmed = bufferPeek.replace(/\s+$/, '');
+  const _exactOnly =
+    filtered.length === 1 &&
+    (filtered[0].cmd === bufferPeek || filtered[0].cmd === _bufTrimmed);
+  const showSlashPopup =
+    bufferPeek.startsWith('/') && filtered.length > 0 && !_exactOnly;
 
   return React.createElement(
     Box,
