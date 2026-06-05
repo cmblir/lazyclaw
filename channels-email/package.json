@@ -1,0 +1,14 @@
+{
+  "name": "@lazyclaw/channel-email",
+  "version": "0.1.0",
+  "description": "Email channel plugin for lazyclaw v5 (IMAP IDLE + SMTP).",
+  "type": "module",
+  "main": "index.mjs",
+  "files": ["index.mjs"],
+  "peerDependencies": { "lazyclaw": ">=5.0.0" },
+  "dependencies": {
+    "node-imap": "^0.9.6",
+    "nodemailer": "^6.9.14",
+    "mailparser": "^3.7.0"
+  }
+}

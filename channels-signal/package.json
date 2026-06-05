@@ -1,0 +1,9 @@
+{
+  "name": "@lazyclaw/channel-signal",
+  "version": "0.1.0",
+  "description": "Signal channel plugin for lazyclaw v5 (signal-cli wrapper).",
+  "type": "module",
+  "main": "index.mjs",
+  "files": ["index.mjs"],
+  "peerDependencies": { "lazyclaw": ">=5.0.0" }
+}

@@ -943,6 +943,8 @@ const SUBCOMMANDS = [
   'telegram',
   // v4.3.0 — Matrix /sync long-poll listener
   'matrix',
+  // v5.0 — channels plugin loader (Phase F)
+  'channels',
   // v4.1.0 — multi-agent slack system (Phase 9+)
   'agent', 'team', 'task',
 ];
@@ -2945,6 +2947,46 @@ async function cmdChat(flags = {}) {
           }
         } catch (e) {
           process.stdout.write(`/team error: ${e?.message || e}\n`);
+        }
+        return true;
+      }
+      case '/handoff': {
+        // /handoff <target-channel> <externalId> [--note=...] — migrates the
+        // active thread (bound to replState.channel / replState.externalId)
+        // to a new channel and posts transition stubs on both sides. In the
+        // local-only chat REPL there is no bound channel, so we surface a
+        // clear error and stay in the REPL (acceptance test §F).
+        const parts = line.trim().split(/\s+/).slice(1);
+        if (parts.length < 2) {
+          process.stderr.write('usage: /handoff <target-channel> <externalId> [--note=...]\n');
+          return true;
+        }
+        const target = parts[0];
+        const externalId = parts[1];
+        const note = (parts.find(p => p.startsWith('--note=')) || '').slice(7);
+        try {
+          const { openThreads } = await import('./channels/threads.mjs');
+          const { runHandoff } = await import('./channels/handoff.mjs');
+          const threads = openThreads(cfgDir);
+          const replState = globalThis.__lazyclawReplState || {};
+          const cur = replState.channel && replState.externalId
+            ? threads.findByExternal(replState.channel, replState.externalId)
+            : null;
+          if (!cur) {
+            process.stderr.write(
+              `handoff: no thread bound to ${replState.channel || '(none)'}:${replState.externalId || '(none)'}\n`,
+            );
+            return true;
+          }
+          const next = await runHandoff({
+            threads, channels: replState.channels || {},
+            threadId: cur.threadId, target, externalId, note,
+          });
+          process.stdout.write(`handoff -> ${next.channel}:${next.externalId} (session ${next.sessionId})\n`);
+          replState.channel = next.channel;
+          replState.externalId = next.externalId;
+        } catch (e) {
+          process.stderr.write(`handoff failed: ${e.code || 'ERR'}: ${e.message}\n`);
         }
         return true;
       }
@@ -7006,6 +7048,31 @@ async function main() {
     }
     case 'dashboard': {
       await cmdDashboard(rest.flags);
+      break;
+    }
+    case 'channels': {
+      const sub = (rest.positional[0] || 'list').toLowerCase();
+      const { createLoader, listInstalled } = await import('./channels/loader.mjs');
+      const cfgDir = path.dirname(configPath());
+      const loader = createLoader({ configDir: cfgDir });
+      if (sub === 'install') {
+        const name = rest.positional[1];
+        if (!name) { process.stderr.write('usage: lazyclaw channels install <@lazyclaw/channel-name>\n'); process.exit(2); }
+        const info = await loader.install(name);
+        process.stdout.write(`installed ${info.name}@${info.version}\n`);
+        break;
+      }
+      if (sub === 'remove' || sub === 'uninstall') {
+        const name = rest.positional[1];
+        if (!name) { process.stderr.write('usage: lazyclaw channels remove <@lazyclaw/channel-name>\n'); process.exit(2); }
+        await loader.remove(name);
+        process.stdout.write(`removed ${name}\n`);
+        break;
+      }
+      // list
+      const rows = listInstalled(cfgDir);
+      if (!rows.length) { process.stdout.write('no channel plugins installed\n'); break; }
+      for (const r of rows) process.stdout.write(`${r.name}\t${r.version}\n`);
       break;
     }
     case 'daemon': {

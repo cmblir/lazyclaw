@@ -1,0 +1,13 @@
+{
+  "name": "@lazyclaw/channel-whatsapp",
+  "version": "0.1.0",
+  "description": "WhatsApp channel plugin for lazyclaw v5 (whatsapp-web.js).",
+  "type": "module",
+  "main": "index.mjs",
+  "files": ["index.mjs"],
+  "peerDependencies": { "lazyclaw": ">=5.0.0" },
+  "dependencies": {
+    "whatsapp-web.js": "^1.23.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
