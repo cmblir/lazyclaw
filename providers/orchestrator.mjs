@@ -124,18 +124,33 @@ export function makeOrchestratorProvider(opts = {}) {
       const fallbackSpec = cfg.provider && cfg.provider !== 'orchestrator'
         ? `${cfg.provider}${cfg.model ? ':' + cfg.model : ''}`
         : 'claude-cli';
-      // First-run hint when cfg.orchestrator is missing entirely. The
-      // fallback path below still works (planner = cfg.provider, single
-      // worker = same), but the user almost certainly meant to opt in
-      // explicitly — surface the shortest valid CLI to set it up.
-      if (!cfg.orchestrator) {
-        yield `> orchestrator: \`cfg.orchestrator\` is not set. Defaulting to a single-agent chain on \`${fallbackSpec}\`.\n` +
-          `> Configure properly:  \`lazyclaw orchestrator set-planner ${fallbackSpec}\` then  \`lazyclaw orchestrator workers add <provider:model>\` (one per agent).\n\n`;
+      // Unconfigured-orchestrator path (v5.3.2 fix): when cfg.orchestrator
+      // is missing OR has no workers configured, the multi-agent pipeline
+      // is unjustified — there is no second backend to delegate to. The
+      // previous behaviour printed a "single-agent chain" banner and then
+      // still ran Plan → Execute(N) → Synthesis against the same backend,
+      // turning a trivial question into a 4-subtask decomposition. That
+      // violates §1 truthfulness (the banner promised a single chain) and
+      // the user's stated intent. Do a real passthrough instead.
+      const hasWorkers = Array.isArray(o.workers) && o.workers.length > 0;
+      if (!cfg.orchestrator || !hasWorkers) {
+        const direct = _lookupProvider(fallbackSpec);
+        if (!direct || direct.name === 'orchestrator') {
+          yield `⚠ orchestrator: not configured and fallback provider \`${fallbackSpec}\` is not registered. ` +
+            `Set \`cfg.orchestrator.planner\` + \`cfg.orchestrator.workers\`, or set \`cfg.provider\` to a real backend.\n`;
+          return;
+        }
+        yield `> Orchestrator not configured — using single-shot \`${direct.name}${direct.model ? ':' + direct.model : ''}\`. ` +
+          `Run \`lazyclaw orchestrator set-planner ${fallbackSpec}\` then \`lazyclaw orchestrator workers add <provider:model>\` to enable multi-agent.\n\n`;
+        for await (const chunk of direct.prov.sendMessage(messages, {
+          apiKey: keyResolver(cfg, direct.name),
+          model: direct.model || undefined,
+          signal: callerOpts.signal,
+        })) yield String(chunk);
+        return;
       }
       const plannerSpec = String(o.planner || fallbackSpec);
-      const workerSpecs = Array.isArray(o.workers) && o.workers.length
-        ? o.workers.map(String)
-        : [plannerSpec];
+      const workerSpecs = o.workers.map(String);
       const maxSubtasks = Number.isFinite(o.maxSubtasks) && o.maxSubtasks > 0 ? Math.min(10, o.maxSubtasks) : 5;
 
       const planner = _lookupProvider(plannerSpec);

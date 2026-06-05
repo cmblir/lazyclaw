@@ -853,6 +853,7 @@ async function cmdDoctor() {
   await ensureRegistry();
   const cfg = readConfig();
   const issues = [];
+  const warnings = [];
   if (!cfg.provider) issues.push('config.provider is missing — run `lazyclaw onboard`');
   // Only flag a missing api-key when the picked provider actually
   // requires one. claude-cli / ollama / mock all run keylessly, so the
@@ -863,6 +864,27 @@ async function cmdDoctor() {
   }
   if (cfg.provider && !PROVIDERS_HAS(_registryMod.PROVIDERS, cfg.provider)) {
     issues.push(`unknown provider "${cfg.provider}" — registered: ${Object.keys(_registryMod.PROVIDERS).join(', ')}`);
+  }
+  // v5.3.2 soft-migration — pre-5.3.2 wizards could write
+  // `provider: 'orchestrator'` even when the user never configured the
+  // orchestrator section (planner / workers). On those installs the
+  // first chat turn dies with an opaque "orchestrator not configured"
+  // error. Surface a warning + the fix hint, but never auto-rewrite
+  // cfg.json — the user might have legitimately picked orchestrator
+  // and just hasn't finished setup yet.
+  if (cfg.provider === 'orchestrator') {
+    const orch = cfg.orchestrator;
+    const configured = orch && typeof orch === 'object'
+      && typeof orch.planner === 'string' && orch.planner
+      && Array.isArray(orch.workers) && orch.workers.length > 0;
+    if (!configured) {
+      warnings.push(
+        'config.provider is "orchestrator" but cfg.orchestrator is missing/empty. '
+        + 'Pre-v5.3.2 setup wizards could leave you in this half-configured state. '
+        + 'Either finish orchestrator setup (`lazyclaw orchestrator set-planner …` + `lazyclaw orchestrator workers add …`) '
+        + 'or switch to a single concrete provider: `lazyclaw config set provider claude-cli`.'
+      );
+    }
   }
   // C12 — MinGit / Windows safety net. mas/tools/git.mjs shells out to
   // `git`; on a stripped Windows PATH (no Git-for-Windows installed) or
@@ -957,6 +979,7 @@ async function cmdDoctor() {
     nodeVersion: process.version,
     platform: `${process.platform}-${process.arch}`,
     issues,
+    warnings,
     knownProviders: Object.keys(_registryMod.PROVIDERS),
     workflows,
     git: gitInfo,
@@ -1941,7 +1964,15 @@ function _providerFamilies() {
     mock: { label: 'Mock', desc: 'offline echo, only useful for testing', tag: '\x1b[38;5;245m[test]\x1b[0m', members: [] },
   };
   for (const name of all) {
+    // v5.3.2 — orchestrator is strictly opt-in. It's still registered so
+    // `lazyclaw orchestrator …` and explicit `--provider orchestrator`
+    // keep working, but the setup wizard must never land on it as a
+    // default. Previously a fresh user picking "CLI/Local" got
+    // orchestrator bucketed alongside claude-cli/ollama and could end
+    // up with `{ provider: 'orchestrator', model: 'orchestrator' }`
+    // written to cfg.json.
     if (name === 'mock') buckets.mock.members.push(name);
+    else if (name === 'orchestrator') continue;
     else if ((info[name] || {}).requiresApiKey) buckets.api.members.push(name);
     else buckets.cli.members.push(name);
   }
@@ -1975,7 +2006,11 @@ async function _pickProviderInteractive() {
       };
       process.stdin.on('data', onData);
     });
-    return { provider: ans || providers[0], model: null };
+    // v5.3.2 — non-TTY fallback used to be `providers[0]`, which was
+    // whatever happened to be first in the registry (currently
+    // anthropic). Pin to claude-cli to match the interactive onboard
+    // hint at cmdOnboard (the keyless subscription path).
+    return { provider: ans || 'claude-cli', model: null };
   }
 
   // ── Step 1 — auth family ──────────────────────────────────────
@@ -2070,17 +2105,13 @@ async function _pickProviderInteractive() {
     provider = picked;
   }
 
-  // ── Step 3 — model (or, for composite providers, a config wizard) ───
-  // The orchestrator (and any future composite provider) has no model
-  // of its own — it dispatches to other providers. Step 3 routes
-  // through a custom wizard instead of the standard model picker.
-  const providerMeta = (_registryMod.PROVIDER_INFO || {})[provider.id] || {};
-  if (providerMeta.composite || provider.id === 'orchestrator') {
-    const result = await _setupOrchestratorInteractive();
-    if (result === 'CANCEL') return null;
-    if (result === 'BACK')   return _pickProviderInteractive();
-    return { provider: provider.id, model: 'orchestrator' };
-  }
+  // ── Step 3 — model picker ────────────────────────────────────────
+  // v5.3.2 — the setup wizard no longer surfaces composite providers
+  // (orchestrator is filtered out of _providerFamilies above), so this
+  // step is just the regular model picker. The orchestrator wizard
+  // (_setupOrchestratorInteractive) stays reachable via the dedicated
+  // `lazyclaw orchestrator …` subcommand and an explicit
+  // `--provider orchestrator` invocation.
   const picked = await _pickModelInteractive(provider.id, {
     titlePrefix: 'LazyClaw setup — Step 3 of 3:',
     onBack: 'restart',
@@ -2471,7 +2502,11 @@ async function cmdChat(flags = {}) {
       if (picked.model) activeModel = picked.model;
     }
   }
-  if (!activeProvName) activeProvName = 'mock';
+  // v5.3.2 — last-resort safety net used to fall through to 'mock' (the
+  // offline echo provider), which silently degraded a wiped config into
+  // garbage replies. Default to claude-cli so the user lands on the
+  // keyless subscription path instead.
+  if (!activeProvName) activeProvName = 'claude-cli';
   let prov = lookupProv(activeProvName);
   if (!prov) { console.error(`unknown provider: ${activeProvName}`); process.exit(2); }
 

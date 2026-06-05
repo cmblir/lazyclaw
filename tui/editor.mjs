@@ -17,9 +17,53 @@
 // amber notes. The box auto-fills the available terminal width via
 // Ink's flex defaults and grows vertically as the buffer wraps onto
 // new lines (Shift+Enter).
+//
+// v5.3.2: CJK / wide-character correctness. `string.length` returns the
+// UTF-16 code-unit count, which is wrong for column math — a Hangul or
+// Han glyph occupies 2 terminal cells but reports `.length === 1`. We
+// keep `state.cursor` in codepoint-index units (so `buffer.slice(0,
+// cursor)`, Backspace, and history recall still work), but expose all
+// display-column math through the `displayWidth()` helper and the
+// derived `cursorDisplayCol` field. The render also pins the Box to
+// `width: '100%'` so Ink's wrap-ansi (already string-width aware) gets
+// the full terminal budget — fixes the perceived right-edge truncation
+// on long Korean buffers.
 import React, { useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
+import stringWidth from 'string-width';
 import { theme } from './theme.mjs';
+
+// The accent prompt (`› `) prepended to the first rendered line. Its
+// display width matters for any caller that wants to know the usable
+// inner width of the editor box. Defined once so the value stays in
+// sync if the prompt glyph ever changes.
+export const PROMPT_PREFIX = '› ';
+export const PROMPT_WIDTH = stringWidth(PROMPT_PREFIX);
+export const CONTINUATION_GUTTER = '  ';
+export const CONTINUATION_WIDTH = stringWidth(CONTINUATION_GUTTER);
+
+// Public helper: display width of a buffer (or any substring of it),
+// counting wide chars (CJK, fullwidth, most emoji) as 2 cells and
+// ignoring ANSI escapes. Use this — never `.length` — for column math.
+export function displayWidth(text) {
+  if (!text) return 0;
+  return stringWidth(String(text));
+}
+
+// Display column of the caret given a state. Counts wide chars as 2.
+// On the first rendered line this is offset by PROMPT_WIDTH; on
+// continuation lines (after a Shift+Enter) it is offset by
+// CONTINUATION_WIDTH. Callers that only need the in-buffer column can
+// pass `{ withPrefix: false }`.
+export function cursorDisplayCol(state, { withPrefix = true } = {}) {
+  const before = String(state.buffer || '').slice(0, state.cursor || 0);
+  const newlineIdx = before.lastIndexOf('\n');
+  const lineSlice = newlineIdx === -1 ? before : before.slice(newlineIdx + 1);
+  const inLine = stringWidth(lineSlice);
+  if (!withPrefix) return inLine;
+  const prefix = newlineIdx === -1 ? PROMPT_WIDTH : CONTINUATION_WIDTH;
+  return prefix + inLine;
+}
 
 export function makeEditorState({ history = [] } = {}) {
   return {
@@ -181,11 +225,17 @@ export function Editor({
       paddingX: 1,
       flexDirection: 'column',
       flexShrink: 0,
+      // Pin to full terminal width. Ink's wrap-ansi (which is
+      // string-width aware) then has the correct cell budget for
+      // wrapping long CJK buffers — fixes the right-edge truncation
+      // perceived on Hangul / Han input. See `displayWidth`/
+      // `cursorDisplayCol` above for the public width helpers.
+      width: '100%',
     },
     lines.map((ln, i) => React.createElement(
       Text,
       { key: i },
-      i === 0 ? theme.accent('› ') + ln : '  ' + ln,
+      i === 0 ? theme.accent(PROMPT_PREFIX) + ln : CONTINUATION_GUTTER + ln,
     )),
   );
 }
