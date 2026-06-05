@@ -2702,19 +2702,12 @@ async function cmdChat(flags = {}) {
           try { process.stdout.write(chunk); } catch { /* swallow */ }
         });
       };
-      // v5.4 alt-buffer splash hand-off — when the alt-screen will mount,
-      // pre-print the splash to the PRIMARY buffer so it survives in the
-      // user's normal scrollback after chat exit (mirrors Claude CLI /
-      // opencode behavior). The Static splash item would otherwise live
-      // only inside the alt canvas and disappear on unmount. When alt is
-      // disabled (non-TTY pipelines, LAZYCLAW_NO_ALT), keep the legacy
-      // in-tree splash so the pre-existing visual is unchanged.
-      const _altWillMount = !!process.stdout.isTTY && !process.env.LAZYCLAW_NO_ALT;
-      if (_altWillMount) {
-        try { process.stdout.write(renderSplashToString(splashProps) + '\n'); } catch { /* swallow */ }
-      }
+      // v5.4.1: splash renders INSIDE the alt-buffer (not pre-printed to
+      // primary). The v5.4.0 pre-print made the screen go blank during
+      // chat because alt-buffer cleared it on enter. Splash lives in the
+      // Static scrollback now regardless of alt-buffer state.
       const ink = render(/* @__PURE__ */ React.createElement(ReplApp, {
-        splashProps: _altWillMount ? null : splashProps,
+        splashProps,
         statusInfo: { provider: activeProvName, model: activeModel },
         runTurn: _inkRunTurn,
         onSlashCommand: _inkSlashHandler,

@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.4.1] — 2026-06-06
+
+### Fixed
+
+- **v5.4.0 blank-screen bug.** v5.4.0 pre-printed the splash to the
+  PRIMARY terminal buffer before entering the alt-buffer; on enter the
+  alt-buffer cleared, leaving an empty viewport above the status bar
+  and editor. v5.4.1 renders the splash INSIDE the alt-buffer (via
+  the existing Static scrollback) so the user sees the wordmark +
+  sloth + subcommands catalog as soon as the chat REPL mounts.
+- Verified by PTY-capturing `node cli.mjs chat` in a real terminal:
+  alt-buffer enter (`\x1b[?1049h`) emits, splash + panel render
+  inside the alt-buffer, status bar pins to bottom.
+
 ## [5.4.0] — 2026-06-06
 
 ### Added
