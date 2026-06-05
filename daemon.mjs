@@ -20,7 +20,10 @@ import { withRateLimitRetry } from './providers/retry.mjs';
 import { withFallback } from './providers/fallback.mjs';
 import { withResponseCache } from './providers/cache.mjs';
 import { costFromUsage, RATE_CARD_SHAPE } from './providers/rates.mjs';
-import { composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill } from './skills.mjs';
+import { composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, defaultConfigDir as skillsDefaultConfigDir } from './skills.mjs';
+import * as indexDb from './mas/index_db.mjs';
+import * as skillSynth from './mas/skill_synth.mjs';
+import { listBackends as sandboxListBackends } from './sandbox/index.mjs';
 import { ChallengeRegistry } from './gateway/device_auth.mjs';
 import { createGateway } from './gateway/http_gateway.mjs';
 import { TokenBucketLimiter } from './ratelimit.mjs';
@@ -331,11 +334,22 @@ export function makeHandler(ctx) {
   const gateway = createGateway({ configDir: gwConfigDir, challengeRegistry: new ChallengeRegistry(), heartbeatMs: 25000 });
   // Phase B nudge loop — scans recent.jsonl every 5 min and pushes
   // nudge.suggest_skill onto the SSE bus so the curator can prompt.
+  // v5 dashboard polls GET /skills/suggestions; we also keep a small
+  // ring buffer here so the UI can fetch the most recent N without
+  // having to subscribe to the SSE bus.
+  const SUGG_RING_MAX = 50;
+  const nudgeSuggestionsRing = [];
   const _nudgeLoop = nudge.startNudgeLoop({
     configDir: gwConfigDir,
     emit: (event) => {
       try { gateway.broadcast?.('nudge.suggest_skill', event); }
       catch (err) { logger?.warn?.('nudge_emit_failed', { err: err.message }); }
+      try {
+        nudgeSuggestionsRing.unshift(event);
+        if (nudgeSuggestionsRing.length > SUGG_RING_MAX) {
+          nudgeSuggestionsRing.length = SUGG_RING_MAX;
+        }
+      } catch { /* ignore */ }
     },
     logger,
   });
@@ -843,10 +857,38 @@ export function makeHandler(ctx) {
         }
         case route === 'GET /status': {
           const cfg = ctx.readConfig();
+          // v5: surface a one-line summary of trainer / index / sandbox so
+          // the dashboard banner doesn't need three more round-trips.
+          const trainerCfg = (cfg.trainer && typeof cfg.trainer === 'object') ? cfg.trainer : {};
+          const sandboxBackend = (cfg.sandbox && typeof cfg.sandbox === 'object' && cfg.sandbox.default) || 'local';
+          let indexRows = null;
+          try {
+            const db = indexDb.openIndex(gwConfigDir, { runIntegrityCheck: false });
+            const r = db.prepare(
+              "SELECT (SELECT COUNT(*) FROM fts_sessions) + (SELECT COUNT(*) FROM fts_skills) " +
+              " + (SELECT COUNT(*) FROM fts_trajectories) + (SELECT COUNT(*) FROM fts_memories) AS n"
+            ).get();
+            indexRows = r && typeof r.n === 'number' ? r.n : null;
+          } catch { /* index may not exist yet */ }
+          // Migration backup path is conventionally <configDir>/backup-v4/.
+          let migrateBackup = null;
+          try {
+            const p = nodePath.join(gwConfigDir || skillsDefaultConfigDir(), 'backup-v4');
+            if (fs.existsSync(p)) migrateBackup = p;
+          } catch { /* ignore */ }
           return writeJson(res, 200, {
             provider: cfg.provider || null,
             model: cfg.model || null,
             keyMasked: maskApiKey(cfg['api-key']),
+            v5: {
+              trainer: {
+                provider: trainerCfg.provider || null,
+                model: trainerCfg.model || null,
+              },
+              sandboxBackend,
+              indexRows,
+              migrateBackup,
+            },
           });
         }
         case route === 'GET /config/validate': {
@@ -945,6 +987,28 @@ export function makeHandler(ctx) {
           if (cfg.provider && !Object.prototype.hasOwnProperty.call(PROVIDERS, cfg.provider)) {
             issues.push(`unknown provider "${cfg.provider}"`);
           }
+          // v5: FTS5 index integrity. Failure here is degraded-not-fatal —
+          // surfaced as an issue but doesn't take the daemon down.
+          let indexBlock = null;
+          try {
+            const integ = indexDb.integrityCheck(gwConfigDir);
+            const db = indexDb.openIndex(gwConfigDir, { runIntegrityCheck: false });
+            const rowCounts = {};
+            for (const t of ['fts_sessions', 'fts_skills', 'fts_trajectories', 'fts_memories']) {
+              try { rowCounts[t] = db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n; }
+              catch { rowCounts[t] = null; }
+            }
+            indexBlock = {
+              ok: !!integ.ok,
+              result: integ.result || null,
+              rowCounts,
+              lastRebuiltAt: ctx.indexLastRebuiltAt || null,
+            };
+            if (!integ.ok) issues.push(`FTS5 index integrity_check returned ${integ.result}`);
+          } catch (e) {
+            indexBlock = { ok: false, error: e?.message || String(e), rowCounts: {}, lastRebuiltAt: null };
+            issues.push(`FTS5 index unavailable: ${e?.message || e}`);
+          }
           const ok = issues.length === 0;
           return writeJson(res, ok ? 200 : 503, {
             ok,
@@ -955,6 +1019,7 @@ export function makeHandler(ctx) {
             platform: `${process.platform}-${process.arch}`,
             issues,
             knownProviders: Object.keys(PROVIDERS),
+            index: indexBlock,
             timestamp: new Date().toISOString(),
           });
         }
@@ -984,11 +1049,41 @@ export function makeHandler(ctx) {
             return writeJson(res, 400, { error: `invalid sortBy: ${sortBy} (expected: mtime, turn-count, bytes, id)` });
           }
           const withCount = url.searchParams.get('withTurnCount') === 'true' || sortBy === 'turn-count';
+          // v5: surface trainerHandled / agentName / trajectoryId per row.
+          // Source: the last turn's metadata if persisted; otherwise null.
+          // We're surgical here — we read the metadata only when withTurnCount
+          // is already paying the load cost, OR when the dashboard explicitly
+          // asks via ?withV5=true. Keeps the default GET /sessions cheap.
+          const withV5 = url.searchParams.get('withV5') === 'true' || withCount;
           let out = list.map(s => {
             const base = { id: s.id, bytes: s.bytes, mtime: new Date(s.mtimeMs).toISOString(), _mtimeMs: s.mtimeMs };
             if (withCount) {
               try { base.turnCount = ctx.sessionsMod.loadTurns(s.id, cfgDir).length; }
               catch { base.turnCount = null; }
+            }
+            if (withV5) {
+              try {
+                const turns = ctx.sessionsMod.loadTurns(s.id, cfgDir);
+                // Newest turn carries the freshest annotations. Fall back to
+                // any earlier turn that has the field set so a long session
+                // doesn't drop its trainer/agent attribution.
+                let trainerHandled = false;
+                let trainedBy = null;
+                let agentName = null;
+                let trajectoryId = null;
+                for (let i = turns.length - 1; i >= 0; i--) {
+                  const t = turns[i] || {};
+                  if (!trajectoryId && t.trajectoryId) trajectoryId = String(t.trajectoryId);
+                  if (!agentName && t.agent) agentName = String(t.agent);
+                  if (!trainedBy && t.trainedBy) { trainedBy = String(t.trainedBy); trainerHandled = true; }
+                  if (t.trainerHandled) trainerHandled = true;
+                  if (trajectoryId && agentName && trainedBy) break;
+                }
+                base.trainerHandled = !!trainerHandled;
+                base.trainedBy = trainedBy;
+                base.agentName = agentName;
+                base.trajectoryId = trajectoryId;
+              } catch { /* missing metadata is non-fatal */ }
             }
             return base;
           });
@@ -1301,9 +1396,99 @@ export function makeHandler(ctx) {
             const n = parseInt(limitStr, 10);
             if (Number.isFinite(n) && n > 0) items = items.slice(0, n);
           }
-          return writeJson(res, 200, items.map(s => ({
-            name: s.name, bytes: s.bytes, summary: s.summary,
-          })));
+          // v5: include frontmatter fields the dashboard renders as badges.
+          // listSkills() currently only surfaces name/summary/etc., so we
+          // re-parse the body once per skill to extract trained_by /
+          // confidence / cross_cli_tested / group. Cheap (markdown files,
+          // already cached by the OS).
+          const out = items.map((s) => {
+            let meta = {};
+            try {
+              const body = loadSkill(s.name, cfgDir);
+              meta = parseFrontmatter(body).meta || {};
+            } catch { /* unreadable → empty meta */ }
+            const xcli = meta.cross_cli_tested;
+            return {
+              name: s.name,
+              bytes: s.bytes,
+              summary: s.summary,
+              description: meta.description || s.description || '',
+              group: meta.group || '',
+              trained_by: meta.trained_by || (meta.created_by === 'agent' ? 'agent' : ''),
+              confidence: meta.confidence !== undefined && meta.confidence !== ''
+                ? Number(meta.confidence)
+                : null,
+              cross_cli_tested: xcli === 'true' || xcli === true ? true
+                : (Array.isArray(xcli) ? xcli : null),
+              version: meta.version || s.version || '',
+              created_by: meta.created_by || '',
+            };
+          });
+          return writeJson(res, 200, out);
+        }
+        case route === 'GET /skills/suggestions': {
+          // Ring buffer of nudge.suggest_skill events. Dashboard polls this
+          // since the SSE bus is deferred to v5.1.
+          return writeJson(res, 200, { suggestions: nudgeSuggestionsRing.slice(0, 20) });
+        }
+        case route === 'POST /skills/synth': {
+          // Body: { sessionId: '<id>' [, outcome] [, trainedBy] [, model] }
+          // Runs mas/skill_synth.synthesizeSkill against the named session.
+          // We assemble a minimal agent stub from cfg.provider/model and an
+          // empty role — the synth pipeline expects an agent object, but
+          // most callers will want "use my default provider".
+          let body;
+          try { body = await readJson(req); }
+          catch (e) { return writeJson(res, 400, { error: e?.message || String(e) }); }
+          const sessionId = body && String(body.sessionId || '').trim();
+          if (!sessionId) return writeJson(res, 400, { error: 'sessionId is required' });
+          const cfg = ctx.readConfig();
+          const provider = body.provider || cfg.provider;
+          const model = body.model || cfg.model;
+          if (!provider) return writeJson(res, 400, { error: 'no provider configured — set cfg.provider or pass body.provider' });
+          // Pull the session turns and build a minimal task shape.
+          let turns;
+          try { turns = ctx.sessionsMod.loadTurns(sessionId, gwConfigDir); }
+          catch (e) { return writeJson(res, 404, { error: `session not found: ${sessionId}` }); }
+          if (!Array.isArray(turns) || turns.length === 0) {
+            return writeJson(res, 400, { error: `session "${sessionId}" has no turns` });
+          }
+          const task = {
+            id: sessionId,
+            title: turns[0]?.content?.slice(0, 80) || sessionId,
+            turns: turns.map((t) => ({
+              agent: t.role === 'user' ? 'user' : (t.role === 'system' ? 'system' : 'assistant'),
+              text: String(t.content || ''),
+            })),
+          };
+          const agent = { provider, model, role: '' };
+          try {
+            const apiKey = cfg['api-key'] || null;
+            const result = await skillSynth.synthesizeSkill({
+              agent, task, apiKey,
+              outcome: body.outcome || 'done',
+              trainedBy: body.trainedBy || null,
+              trainedOnModel: model || null,
+            });
+            if (!result) return writeJson(res, 200, { ok: false, message: 'synth produced no skill (model returned NONE)' });
+            // Mirror the CLI synth flow: installSynthesized() handles slug
+            // reservation, agent-overwrite protection, and FTS5 mirror.
+            const install = skillSynth.installSynthesized({
+              name: result.name,
+              description: result.description,
+              body: result.body,
+              sourceTask: sessionId,
+              createdBy: 'agent',
+            }, gwConfigDir);
+            return writeJson(res, 200, {
+              ok: true,
+              name: install?.skill || result.name,
+              description: result.description,
+              path: install?.path || null,
+            });
+          } catch (e) {
+            return writeJson(res, 500, { error: e?.message || String(e), code: e?.code });
+          }
         }
         case route === 'GET /skills/search': {
           // Mirror of `lazyclaw skills search`. ?q=<query> required;
@@ -1884,6 +2069,194 @@ export function makeHandler(ctx) {
             return writeJson(res, 200, next);
           } catch (err) {
             return writeJson(res, 404, { error: err?.message || String(err), code: err?.code });
+          }
+        }
+
+        // ── v5 dashboard surfaces ────────────────────────────────────
+        case route === 'GET /trainer/status': {
+          // Reads cfg.trainer.{provider, model, schedule, budget, recipe}
+          // and reports last-run state from <configDir>/trainer-state.json
+          // if present. No standalone trainer module yet; this is a thin
+          // config-surface endpoint the dashboard reads at refresh.
+          const cfg = ctx.readConfig();
+          const t = (cfg.trainer && typeof cfg.trainer === 'object') ? cfg.trainer : {};
+          let lastRunAt = null, callsToday = null;
+          try {
+            const statePath = nodePath.join(gwConfigDir || skillsDefaultConfigDir(), 'trainer-state.json');
+            if (fs.existsSync(statePath)) {
+              const st = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+              lastRunAt = st?.lastRunAt || null;
+              // callsToday: count entries whose ts is within the current
+              // UTC day. State writer is the (future) trainer; reader
+              // tolerates absence.
+              const today = new Date().toISOString().slice(0, 10);
+              if (Array.isArray(st?.calls)) {
+                callsToday = st.calls.filter((c) => String(c.ts || '').startsWith(today)).length;
+              } else if (typeof st?.callsToday === 'number') {
+                callsToday = st.callsToday;
+              }
+            }
+          } catch { /* missing/corrupt state → null */ }
+          return writeJson(res, 200, {
+            provider: t.provider || null,
+            model: t.model || null,
+            schedule: t.schedule || null,
+            budget: t.budget != null ? Number(t.budget) : null,
+            recipe: t.recipe || null,
+            lastRunAt,
+            callsToday,
+          });
+        }
+        case route === 'POST /trainer/sync': {
+          // Stub: a real trainer scheduler lands in v5.1. For now we
+          // record the trigger in trainer-state.json so the dashboard's
+          // "Sync now" button has feedback, and a future trainer reads
+          // the queue. Surfacing it here keeps the API stable across the
+          // transition.
+          try {
+            const dir = gwConfigDir || skillsDefaultConfigDir();
+            fs.mkdirSync(dir, { recursive: true });
+            const statePath = nodePath.join(dir, 'trainer-state.json');
+            let st = {};
+            if (fs.existsSync(statePath)) {
+              try { st = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch { st = {}; }
+            }
+            st.lastSyncRequestAt = new Date().toISOString();
+            st.syncQueued = (st.syncQueued || 0) + 1;
+            fs.writeFileSync(statePath, JSON.stringify(st, null, 2));
+            return writeJson(res, 200, { ok: true, message: 'sync queued', queued: st.syncQueued });
+          } catch (e) {
+            return writeJson(res, 500, { error: e?.message || String(e) });
+          }
+        }
+        case route === 'GET /recall': {
+          // GET /recall?q=...&scope=sessions|skills|trajectories|memories|all&k=N
+          const q = url.searchParams.get('q');
+          if (!q) return writeJson(res, 400, { error: 'missing q query parameter' });
+          const scopeParam = url.searchParams.get('scope') || 'all';
+          const scope = scopeParam === 'all'
+            ? ['sessions', 'skills', 'trajectories', 'memories']
+            : scopeParam.split(',').map((x) => x.trim()).filter(Boolean);
+          const kParam = url.searchParams.get('k');
+          const k = kParam ? Math.max(1, Math.min(50, parseInt(kParam, 10) || 10)) : 10;
+          try {
+            const r = indexDb.recall(q, { configDir: gwConfigDir, scope, k });
+            return writeJson(res, 200, r);
+          } catch (e) {
+            return writeJson(res, 500, { error: e?.message || String(e) });
+          }
+        }
+        case route === 'GET /sandbox': {
+          const cfg = ctx.readConfig();
+          const sb = (cfg.sandbox && typeof cfg.sandbox === 'object') ? cfg.sandbox : {};
+          const active = sb.default || 'local';
+          const profiles = sandboxListBackends().map((name) => {
+            const section = sb[name];
+            const configured = !!section && typeof section === 'object';
+            let summary = '';
+            if (configured) {
+              if (name === 'docker' && section.image) summary = `image: ${section.image}`;
+              else if (name === 'ssh' && section.host) summary = `host: ${section.host}`;
+              else if (name === 'singularity' && section.image) summary = `image: ${section.image}`;
+              else if (name === 'modal' && section.app) summary = `app: ${section.app}`;
+              else if (name === 'daytona' && section.workspace) summary = `workspace: ${section.workspace}`;
+              else if (name === 'local' && section.confiner) summary = `confiner: ${section.confiner}`;
+            }
+            return { name, configured, summary };
+          });
+          return writeJson(res, 200, { profiles, active });
+        }
+        case req.method === 'POST' && /^\/sandbox\/([^/]+)\/test$/.test(url.pathname): {
+          // POST /sandbox/<name>/test — opens a session against the named
+          // backend, runs `echo hello`, returns { ok, durationMs, stdout }.
+          const name = url.pathname.match(/^\/sandbox\/([^/]+)\/test$/)[1];
+          try {
+            const sandboxMod = await import('./sandbox/index.mjs');
+            const cfg = ctx.readConfig();
+            // Synthesise a one-off cfg.sandbox.default override so we can
+            // test a backend without mutating the user's persisted choice.
+            const probeCfg = {
+              ...cfg,
+              sandbox: { ...(cfg.sandbox || {}), default: name },
+            };
+            const t0 = Date.now();
+            const box = sandboxMod.resolveSandbox(probeCfg, null);
+            const sess = await box.open();
+            let result;
+            try {
+              result = await sess.exec(['echo', 'hello'], { stdio: 'pipe' });
+            } finally {
+              try { await sess.close(); } catch { /* ignore */ }
+            }
+            const durationMs = Date.now() - t0;
+            const ok = result.code === 0;
+            return writeJson(res, ok ? 200 : 500, {
+              ok,
+              durationMs,
+              code: result.code,
+              stdout: String(result.stdout || '').slice(0, 200),
+              stderr: String(result.stderr || '').slice(0, 200),
+            });
+          } catch (e) {
+            return writeJson(res, 500, { ok: false, error: e?.message || String(e), code: e?.code });
+          }
+        }
+        case route === 'POST /sandbox/use': {
+          if (typeof ctx.writeConfig !== 'function') {
+            return writeJson(res, 405, { error: 'mutation disabled' });
+          }
+          let body;
+          try { body = await readJson(req); }
+          catch (e) { return writeJson(res, 400, { error: e?.message || String(e) }); }
+          const name = body && String(body.name || '').trim();
+          if (!name) return writeJson(res, 400, { error: 'name is required' });
+          if (!sandboxListBackends().includes(name)) {
+            return writeJson(res, 400, { error: `unknown sandbox backend: ${name}` });
+          }
+          const cfg = ctx.readConfig();
+          cfg.sandbox = { ...(cfg.sandbox || {}), default: name };
+          ctx.writeConfig(cfg);
+          return writeJson(res, 200, { ok: true, active: name });
+        }
+        case route === 'GET /channels': {
+          // Aggregate cfg.channels.<name> + any channel-specific runtime
+          // state we expose. Keeps the dashboard from having to know
+          // each channel module's shape.
+          const cfg = ctx.readConfig();
+          const chCfg = (cfg.channels && typeof cfg.channels === 'object') ? cfg.channels : {};
+          // Known built-in channel names (matches channels/ + channels-*).
+          const KNOWN = ['slack', 'matrix', 'telegram', 'discord', 'email', 'signal', 'whatsapp', 'voice', 'http'];
+          const out = [];
+          for (const name of KNOWN) {
+            const sec = chCfg[name];
+            if (!sec && !cfg[`${name}-bot-token`] && !cfg[`${name}-token`]) continue;
+            out.push({
+              name,
+              enabled: !!(sec && (sec.enabled !== false)),
+              lastInboundAt: sec?.lastInboundAt || null,
+              boundAgent: sec?.agent || sec?.boundAgent || null,
+            });
+          }
+          // Surface any additional configured channels we didn't enumerate.
+          for (const name of Object.keys(chCfg)) {
+            if (KNOWN.includes(name)) continue;
+            const sec = chCfg[name] || {};
+            out.push({
+              name,
+              enabled: sec.enabled !== false,
+              lastInboundAt: sec.lastInboundAt || null,
+              boundAgent: sec.agent || sec.boundAgent || null,
+            });
+          }
+          return writeJson(res, 200, { channels: out });
+        }
+        case route === 'POST /index/rebuild': {
+          try {
+            indexDb.rebuild(gwConfigDir);
+            ctx.indexLastRebuiltAt = new Date().toISOString();
+            return writeJson(res, 200, { ok: true, rebuiltAt: ctx.indexLastRebuiltAt });
+          } catch (e) {
+            return writeJson(res, 500, { ok: false, error: e?.message || String(e) });
           }
         }
 

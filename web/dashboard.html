@@ -2,10 +2,12 @@
 <!--
   lazyclaw dashboard — a single-file SPA served by `lazyclaw daemon`.
   Deliberately framework-free: vanilla DOM, vanilla fetch, no build
-  step. The full lazyclaude dashboard is gigantic; this is the
-  lazyclaw-only slice (chat / sessions / skills / providers /
-  status), aimed at users who installed via `npm i -g lazyclaw` and
-  don't want to clone the whole monorepo just to see a UI.
+  step. v5 tab set (17 tabs):
+    Chat · Sessions · Workflows · Skills · Providers · Rates · Metrics
+    · Doctor · Config · Status · Agents · Teams · Tasks
+    · Trainer · Recall · Sandbox · Channels
+  Personality / Trajectories / Nodes / SSE bus are deferred to v5.1
+  and remain CLI-only for now.
 -->
 <html lang="en">
 <head>
@@ -327,6 +329,10 @@
     <button data-tab="agents">Agents</button>
     <button data-tab="teams">Teams</button>
     <button data-tab="tasks">Tasks</button>
+    <button data-tab="trainer">Trainer</button>
+    <button data-tab="recall">Recall</button>
+    <button data-tab="sandbox">Sandbox</button>
+    <button data-tab="channels">Channels</button>
   </nav>
 
   <main>
@@ -351,6 +357,11 @@
 
     <section id="tab-skills">
       <h2>Skills</h2>
+      <div class="toolbar">
+        <button class="btn btn-secondary" onclick="LOADERS.skills()">Refresh</button>
+        <span class="dim" id="skills-meta"></span>
+      </div>
+      <div id="skills-suggestions"></div>
       <div id="skills-list"><div class="empty">Loading…</div></div>
     </section>
 
@@ -460,6 +471,50 @@
         <span class="dim" id="tasks-meta">Tasks are created via <code>lazyclaw task start</code>.</span>
       </div>
       <div id="tasks-list"><div class="empty">Loading…</div></div>
+    </section>
+
+    <section id="tab-trainer">
+      <h2>Trainer</h2>
+      <div class="toolbar">
+        <button class="btn btn-secondary" onclick="LOADERS.trainer()">Refresh</button>
+        <span class="dim" id="trainer-meta"></span>
+      </div>
+      <div id="trainer-card"><div class="empty">Loading…</div></div>
+    </section>
+
+    <section id="tab-recall">
+      <h2>Recall</h2>
+      <div class="toolbar">
+        <input type="search" id="recall-q" placeholder="search sessions / skills / trajectories / memories" style="flex:1;min-width:240px;">
+        <select id="recall-scope">
+          <option value="all">all scopes</option>
+          <option value="sessions">sessions</option>
+          <option value="skills">skills</option>
+          <option value="trajectories">trajectories</option>
+          <option value="memories">memories</option>
+        </select>
+        <button class="btn" onclick="LOADERS.recall()">Search</button>
+        <span class="dim" id="recall-meta"></span>
+      </div>
+      <div id="recall-list"><div class="empty">Enter a query above.</div></div>
+    </section>
+
+    <section id="tab-sandbox">
+      <h2>Sandbox</h2>
+      <div class="toolbar">
+        <button class="btn btn-secondary" onclick="LOADERS.sandbox()">Refresh</button>
+        <span class="dim" id="sandbox-meta"></span>
+      </div>
+      <div id="sandbox-list"><div class="empty">Loading…</div></div>
+    </section>
+
+    <section id="tab-channels">
+      <h2>Channels</h2>
+      <div class="toolbar">
+        <button class="btn btn-secondary" onclick="LOADERS.channels()">Refresh</button>
+        <span class="dim" id="channels-meta"></span>
+      </div>
+      <div id="channels-list"><div class="empty">Loading…</div></div>
     </section>
   </main>
 
@@ -618,7 +673,7 @@
       const root = document.getElementById('sessions-list');
       root.innerHTML = '<div class="empty">Loading…</div>';
       try {
-        const r = await api('/sessions');
+        const r = await api('/sessions?withV5=true');
         const arr = r.sessions || r;
         if (!Array.isArray(arr) || arr.length === 0) {
           root.innerHTML = '<div class="empty">No persisted sessions yet. Start one with <code>lazyclaw chat --session &lt;id&gt;</code>.</div>';
@@ -631,16 +686,34 @@
           const id = s.id || s.sessionId || s.name || JSON.stringify(s);
           const turns = s.turns ?? s.turnCount ?? '';
           const updated = s.updatedAt || s.mtime || '';
+          // v5 columns: trainerHandled / agentName / trajectoryId.
+          const tagTrained = s.trainerHandled
+            ? `<span class="pill ok" title="trained by ${escHtml(s.trainedBy || 'trainer')}">trained: ${escHtml(s.trainedBy || 'on')}</span>`
+            : '';
+          const tagAgent = s.agentName
+            ? `<span class="pill" style="background:rgba(217,119,87,0.18);color:var(--accent);">@${escHtml(s.agentName)}</span>`
+            : '';
+          const trajBtn = s.trajectoryId
+            ? `<button class="btn btn-secondary btn-sm" data-action="trajectory" data-traj="${escHtml(s.trajectoryId)}">Trajectory</button>`
+            : '';
           div.innerHTML = `<div class="name">${escHtml(id)}</div>
             <div class="dim">${turns ? turns + ' turns' : ''}</div>
+            ${tagTrained}${tagAgent}
             <div class="dim row-actions">${escHtml(updated)}</div>
             <button class="btn btn-secondary btn-sm" data-action="view">View</button>
             <button class="btn btn-secondary btn-sm" data-action="export">Export</button>
+            ${trajBtn}
             <button class="btn btn-danger btn-sm" data-action="delete">Delete</button>`;
           div.addEventListener('click', (e) => {
-            const action = e.target.closest('button')?.dataset.action;
+            const btn = e.target.closest('button');
+            const action = btn?.dataset.action;
             if (action === 'export') return openSessionExport(id);
             if (action === 'delete') return deleteSession(id);
+            if (action === 'trajectory') {
+              const traj = btn.dataset.traj;
+              window.open('/trajectories/' + encodeURIComponent(traj), '_blank');
+              return;
+            }
             return openSessionDetail(id);
           });
           root.appendChild(div);
@@ -697,38 +770,123 @@
       }
     }
 
+    // v5 confidence pill color: red <0.4, amber <0.7, green >=0.7.
+    function confidencePill(c) {
+      if (c == null || c === '') return '';
+      const n = Number(c);
+      if (!Number.isFinite(n)) return '';
+      const cls = n >= 0.7 ? 'ok' : (n >= 0.4 ? 'warn' : 'err');
+      return `<span class="pill ${cls}" title="confidence">${n.toFixed(2)}</span>`;
+    }
+
     LOADERS.skills = async function loadSkills() {
       const root = document.getElementById('skills-list');
+      const meta = document.getElementById('skills-meta');
+      const suggBox = document.getElementById('skills-suggestions');
       root.innerHTML = '<div class="empty">Loading…</div>';
+      // Fire suggestions fetch in parallel; render when ready.
+      apiSoft('/skills/suggestions').then(({ body }) => {
+        const items = (body && body.suggestions) || [];
+        if (!items.length) { suggBox.innerHTML = ''; return; }
+        suggBox.innerHTML = `<div class="card" style="border-color:var(--accent);">
+          <div class="name" style="color:var(--accent);">Curator suggestions (${items.length})</div>
+          ${items.slice(0, 5).map((s) => `<div class="dim" style="margin-top:6px;font-size:12px;">
+            ${escHtml(s.suggestion || s.cluster?.sample || '')}
+            <span class="dim" style="margin-left:6px;">${s.ts ? new Date(s.ts).toLocaleString() : ''}</span>
+          </div>`).join('')}
+        </div>`;
+      }).catch(() => { suggBox.innerHTML = ''; });
+
       try {
         const r = await api('/skills');
         const arr = r.skills || r;
         if (!Array.isArray(arr) || arr.length === 0) {
           root.innerHTML = '<div class="empty">No skills yet. Install one: <code>lazyclaw skills install &lt;user&gt;/&lt;repo&gt;</code>.</div>';
+          if (meta) meta.textContent = '';
           return;
         }
+        if (meta) meta.textContent = `${arr.length} skill${arr.length === 1 ? '' : 's'}`;
+        // Group by `group` field; fall back to 'ungrouped'.
+        const groups = new Map();
+        for (const s of arr) {
+          const g = (s.group && String(s.group)) || 'ungrouped';
+          if (!groups.has(g)) groups.set(g, []);
+          groups.get(g).push(s);
+        }
+        const groupNames = [...groups.keys()].sort();
         root.innerHTML = '';
-        arr.forEach((s) => {
-          const div = document.createElement('div');
-          div.className = 'card clickable';
-          div.innerHTML = `<div class="row" style="border:0;padding:0;">
-              <div class="name">${escHtml(s.name)}</div>
-              <div class="dim row-actions">${(s.bytes ?? '')} bytes</div>
-              <button class="btn btn-secondary btn-sm" data-action="view">View</button>
-              <button class="btn btn-danger btn-sm" data-action="delete">Delete</button>
-            </div>
-            <div class="dim" style="margin-top:6px;">${escHtml(s.summary || '')}</div>`;
-          div.addEventListener('click', (e) => {
-            const action = e.target.closest('button')?.dataset.action;
-            if (action === 'delete') return deleteSkill(s.name);
-            return openSkillDetail(s.name);
-          });
-          root.appendChild(div);
-        });
+        for (const g of groupNames) {
+          const wrap = document.createElement('div');
+          wrap.style.marginTop = '12px';
+          wrap.innerHTML = `<h3 style="font-size:13px;color:var(--dim);margin:0 0 6px 0;text-transform:uppercase;letter-spacing:0.05em;">${escHtml(g)} · ${groups.get(g).length}</h3>`;
+          for (const s of groups.get(g)) {
+            const div = document.createElement('div');
+            div.className = 'card clickable';
+            const trainedTag = s.trained_by
+              ? `<span class="pill" title="trained_by">${escHtml(s.trained_by)}</span>`
+              : '';
+            const conf = confidencePill(s.confidence);
+            const crossOk = Array.isArray(s.cross_cli_tested) && s.cross_cli_tested.length
+              ? `<span class="pill ok" title="cross-CLI: ${escHtml(s.cross_cli_tested.map((x) => x.provider || '').join(', '))}">x-cli ✓</span>`
+              : (s.cross_cli_tested === true
+                ? '<span class="pill ok" title="cross-CLI tested">x-cli ✓</span>'
+                : '<span class="pill" title="not cross-CLI tested" style="opacity:0.4;">x-cli —</span>');
+            div.innerHTML = `<div class="row" style="border:0;padding:0;">
+                <div class="name">${escHtml(s.name)}</div>
+                ${trainedTag}${conf}${crossOk}
+                <div class="dim row-actions">${(s.bytes ?? '')} bytes</div>
+                <button class="btn btn-secondary btn-sm" data-action="view">View</button>
+                <button class="btn btn-danger btn-sm" data-action="delete">Delete</button>
+              </div>
+              <div class="dim" style="margin-top:6px;">${escHtml(s.summary || s.description || '')}</div>`;
+            div.addEventListener('click', (e) => {
+              const action = e.target.closest('button')?.dataset.action;
+              if (action === 'delete') return deleteSkill(s.name);
+              return openSkillDetail(s.name);
+            });
+            wrap.appendChild(div);
+          }
+          root.appendChild(wrap);
+        }
+        // Synth-from-task footer.
+        const synthBar = document.createElement('div');
+        synthBar.className = 'toolbar';
+        synthBar.style.marginTop = '14px';
+        synthBar.innerHTML = `<input type="text" id="skill-synth-sid" placeholder="sessionId to synthesize" style="flex:1;min-width:200px;">
+          <button class="btn" onclick="skillSynth()">Synthesize from task</button>
+          <span class="dim" id="skill-synth-result"></span>`;
+        root.appendChild(synthBar);
       } catch (e) {
         root.innerHTML = `<div class="empty">⚠ ${escHtml(e.message)}</div>`;
       }
     };
+
+    async function skillSynth() {
+      const sid = (document.getElementById('skill-synth-sid').value || '').trim();
+      const out = document.getElementById('skill-synth-result');
+      if (!sid) { out.style.color = 'var(--warn)'; out.textContent = 'enter a sessionId'; return; }
+      out.style.color = 'var(--dim)';
+      out.textContent = '⏳ synthesizing…';
+      try {
+        const r = await fetch('/skills/synth', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ sessionId: sid }),
+        });
+        const body = await r.json().catch(() => ({}));
+        if (r.ok) {
+          out.style.color = 'var(--ok)';
+          out.textContent = '✓ ' + (body.name ? `created skill "${body.name}"` : (body.message || 'done'));
+          LOADERS.skills();
+        } else {
+          out.style.color = 'var(--err)';
+          out.textContent = '✗ ' + (body.error || r.statusText);
+        }
+      } catch (e) {
+        out.style.color = 'var(--err)';
+        out.textContent = '✗ ' + e.message;
+      }
+    }
 
     async function openSkillDetail(name) {
       openModal({ title: `Skill — ${name}`, bodyHtml: '<div class="empty">Loading…</div>' });
@@ -902,7 +1060,17 @@
       root.innerHTML = '<div class="empty">Loading…</div>';
       try {
         const r = await api('/status');
-        root.innerHTML = `<div class="card"><pre>${JSON.stringify(r, null, 2)}</pre></div>`;
+        // v5 one-line banner under the JSON card.
+        const v5 = r.v5 || {};
+        const trainer = v5.trainer || {};
+        const banner = `<div class="banner ok" style="margin-bottom:10px;">
+          <strong>v5:</strong>
+          trainer: <code>${escHtml(trainer.provider || 'off')}/${escHtml(trainer.model || '-')}</code>
+          · index: <code>${escHtml(String(v5.indexRows ?? '?'))} rows</code>
+          · sandbox: <code>${escHtml(v5.sandboxBackend || 'local')}</code>
+          ${v5.migrateBackup ? ` · backup: <code>${escHtml(v5.migrateBackup)}</code>` : ''}
+        </div>`;
+        root.innerHTML = banner + `<div class="card"><pre>${JSON.stringify(r, null, 2)}</pre></div>`;
       } catch (e) {
         root.innerHTML = `<div class="empty">⚠ ${e.message}</div>`;
       }
@@ -1229,6 +1397,24 @@
         : `<div class="banner err"><div><strong>${issues.length} issue${issues.length === 1 ? '' : 's'}:</strong>
             <ul>${issues.map((i) => `<li>${escHtml(i)}</li>`).join('')}</ul>
            </div></div>`;
+      // v5 index integrity row.
+      const idx = d.index || null;
+      let idxRow = '';
+      if (idx) {
+        const status = idx.ok
+          ? '<span class="pill ok">ok</span>'
+          : '<span class="pill err">degraded</span>';
+        const rowCounts = idx.rowCounts
+          ? Object.entries(idx.rowCounts).map(([k, v]) => `${k}=${v}`).join(' · ')
+          : '';
+        const rebuildBtn = idx.ok
+          ? ''
+          : '<button class="btn btn-danger btn-sm" onclick="rebuildIndex()" style="margin-left:8px;">Rebuild</button>';
+        idxRow = `<div class="row">
+          <div class="name">FTS5 index</div>
+          <div class="dim" style="margin-left:auto;">${status} <span class="dim">${escHtml(rowCounts)}</span>${rebuildBtn}</div>
+        </div>`;
+      }
       root.innerHTML = okBanner + `
         <div class="card">
           <div class="row"><div class="name">Provider</div><div class="dim" style="margin-left:auto;">${escHtml(d.provider || '—')}</div></div>
@@ -1236,9 +1422,23 @@
           <div class="row"><div class="name">API key</div><div class="dim" style="margin-left:auto;">${d.hasApiKey ? '<span class="pill ok">present</span>' : '<span class="pill warn">none</span>'}</div></div>
           <div class="row"><div class="name">Node</div><div class="dim" style="margin-left:auto;">${escHtml(d.nodeVersion || '—')}</div></div>
           <div class="row"><div class="name">Platform</div><div class="dim" style="margin-left:auto;">${escHtml(d.platform || '—')}</div></div>
+          ${idxRow}
           <div class="row"><div class="name">Known providers</div><div class="dim" style="margin-left:auto;">${(d.knownProviders || []).map(escHtml).join(' · ') || '—'}</div></div>
         </div>`;
     };
+
+    async function rebuildIndex() {
+      if (!confirm('Rebuild the FTS5 index? Existing index.db will be deleted and recreated empty.')) return;
+      try {
+        const r = await fetch('/index/rebuild', { method: 'POST' });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) { alert('Rebuild failed: ' + (body.error || r.statusText)); return; }
+        alert('Index rebuilt. Re-run Doctor to confirm.');
+        LOADERS.doctor();
+      } catch (e) {
+        alert('Rebuild failed: ' + e.message);
+      }
+    }
 
     // ── Config ───────────────────────────────────────────────────
     LOADERS.config = async function loadConfig() {
@@ -1516,6 +1716,165 @@
       try { await api(`/tasks/${encId}/${action}`, { method: 'POST' }); LOADERS.tasks(); }
       catch (e) { alert(`${action} failed: ` + e.message); }
     }
+
+    // ── Trainer / Recall / Sandbox / Channels (v5) ───────────────
+    LOADERS.trainer = async function loadTrainer() {
+      const root = document.getElementById('trainer-card');
+      const meta = document.getElementById('trainer-meta');
+      root.innerHTML = '<div class="empty">Loading…</div>';
+      try {
+        const r = await api('/trainer/status');
+        meta.textContent = r.lastRunAt ? `last run ${new Date(r.lastRunAt).toLocaleString()}` : 'no runs recorded';
+        const pct = (r.budget && r.callsToday != null)
+          ? Math.min(100, Math.round((r.callsToday / r.budget) * 100))
+          : null;
+        root.innerHTML = `<div class="card">
+          <div class="row"><div class="name">Provider</div><div class="dim" style="margin-left:auto;">${escHtml(r.provider || '—')}</div></div>
+          <div class="row"><div class="name">Model</div><div class="dim" style="margin-left:auto;">${escHtml(r.model || '—')}</div></div>
+          <div class="row"><div class="name">Schedule</div><div class="dim" style="margin-left:auto;">${escHtml(r.schedule || 'off')}</div></div>
+          <div class="row"><div class="name">Recipe</div><div class="dim" style="margin-left:auto;">${escHtml(r.recipe || 'inherit')}</div></div>
+          <div class="row"><div class="name">Calls today</div><div class="dim" style="margin-left:auto;">${r.callsToday ?? 0}${r.budget ? ` / ${r.budget} (${pct}%)` : ''}</div></div>
+        </div>
+        <div class="toolbar" style="margin-top:10px;">
+          <button class="btn" onclick="trainerSync()">Sync now</button>
+          <span class="dim" id="trainer-sync-result"></span>
+        </div>`;
+      } catch (e) {
+        root.innerHTML = `<div class="empty">⚠ ${escHtml(e.message)}</div>`;
+      }
+    };
+    async function trainerSync() {
+      const out = document.getElementById('trainer-sync-result');
+      out.textContent = '⏳ syncing…';
+      try {
+        const r = await fetch('/trainer/sync', { method: 'POST' });
+        const body = await r.json().catch(() => ({}));
+        out.style.color = r.ok ? 'var(--ok)' : 'var(--err)';
+        out.textContent = r.ok ? '✓ ' + (body.message || 'queued') : '✗ ' + (body.error || r.statusText);
+      } catch (e) {
+        out.style.color = 'var(--err)';
+        out.textContent = '✗ ' + e.message;
+      }
+    }
+
+    LOADERS.recall = async function loadRecall() {
+      const root = document.getElementById('recall-list');
+      const meta = document.getElementById('recall-meta');
+      const q = (document.getElementById('recall-q').value || '').trim();
+      const scope = document.getElementById('recall-scope').value || 'all';
+      if (!q) { root.innerHTML = '<div class="empty">Enter a query above.</div>'; meta.textContent = ''; return; }
+      root.innerHTML = '<div class="empty">Searching…</div>';
+      try {
+        const qs = new URLSearchParams({ q });
+        if (scope && scope !== 'all') qs.set('scope', scope);
+        const r = await api('/recall?' + qs.toString());
+        const hits = r.hits || [];
+        meta.textContent = `${hits.length} hit${hits.length === 1 ? '' : 's'} · ${r.latencyMs?.toFixed(1) ?? '?'} ms`;
+        if (!hits.length) { root.innerHTML = '<div class="empty">No matches.</div>'; return; }
+        root.innerHTML = hits.map((h) => {
+          const md = h.metadata || {};
+          const label = md.session_id || md.skill_name || md.trajectory_id || md.topic || '—';
+          return `<div class="card">
+            <div class="row" style="border:0;padding:0;">
+              <span class="pill" style="background:rgba(217,119,87,0.18);color:var(--accent);">${escHtml(h.scope)}</span>
+              <div class="name" style="margin-left:8px;">${escHtml(String(label))}</div>
+              <div class="dim row-actions">bm25 ${Number(h.bm25 || 0).toFixed(2)}</div>
+            </div>
+            <div class="dim" style="margin-top:6px;font-size:12px;">${h.snippet || ''}</div>
+          </div>`;
+        }).join('');
+      } catch (e) {
+        root.innerHTML = `<div class="empty">⚠ ${escHtml(e.message)}</div>`;
+      }
+    };
+    // Wire Enter-to-search.
+    document.getElementById('recall-q').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); LOADERS.recall(); }
+    });
+
+    LOADERS.sandbox = async function loadSandbox() {
+      const root = document.getElementById('sandbox-list');
+      const meta = document.getElementById('sandbox-meta');
+      root.innerHTML = '<div class="empty">Loading…</div>';
+      try {
+        const r = await api('/sandbox');
+        const profiles = r.profiles || [];
+        meta.textContent = `active: ${r.active || 'local'}`;
+        root.innerHTML = profiles.map((p) => {
+          const isActive = p.name === r.active;
+          return `<div class="card">
+            <div class="row" style="border:0;padding:0;">
+              <div class="name">${escHtml(p.name)}</div>
+              ${isActive ? '<span class="pill ok">active</span>' : ''}
+              ${p.configured ? '' : '<span class="pill warn">unconfigured</span>'}
+              <div class="dim row-actions">${escHtml(p.summary || '')}</div>
+              <button class="btn btn-secondary btn-sm" data-action="test" data-name="${escHtml(p.name)}">Test</button>
+              ${isActive ? '' : `<button class="btn btn-sm" data-action="use" data-name="${escHtml(p.name)}">Use</button>`}
+            </div>
+            <div class="dim" data-test-result="${escHtml(p.name)}" style="margin-top:6px;font-size:11px;"></div>
+          </div>`;
+        }).join('');
+        root.querySelectorAll('button[data-action="test"]').forEach((b) => {
+          b.addEventListener('click', () => sandboxTest(b.dataset.name));
+        });
+        root.querySelectorAll('button[data-action="use"]').forEach((b) => {
+          b.addEventListener('click', () => sandboxUse(b.dataset.name));
+        });
+      } catch (e) {
+        root.innerHTML = `<div class="empty">⚠ ${escHtml(e.message)}</div>`;
+      }
+    };
+    async function sandboxTest(name) {
+      const out = document.querySelector(`[data-test-result="${name}"]`);
+      if (!out) return;
+      out.textContent = '⏳ testing…';
+      out.style.color = 'var(--dim)';
+      try {
+        const r = await fetch('/sandbox/' + encodeURIComponent(name) + '/test', { method: 'POST' });
+        const body = await r.json().catch(() => ({}));
+        if (body.ok) {
+          out.style.color = 'var(--ok)';
+          out.textContent = `✓ ok · ${body.durationMs || '?'}ms · ${String(body.stdout || '').slice(0, 80)}`;
+        } else {
+          out.style.color = 'var(--err)';
+          out.textContent = `✗ ${body.error || 'failed'}`;
+        }
+      } catch (e) {
+        out.style.color = 'var(--err)';
+        out.textContent = '✗ ' + e.message;
+      }
+    }
+    async function sandboxUse(name) {
+      try {
+        const r = await fetch('/sandbox/use', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) });
+        if (!r.ok) { const e = await r.json().catch(() => ({})); alert('Failed: ' + (e.error || r.statusText)); return; }
+        LOADERS.sandbox();
+      } catch (e) { alert('Failed: ' + e.message); }
+    }
+
+    LOADERS.channels = async function loadChannels() {
+      const root = document.getElementById('channels-list');
+      const meta = document.getElementById('channels-meta');
+      root.innerHTML = '<div class="empty">Loading…</div>';
+      try {
+        const r = await api('/channels');
+        const arr = r.channels || [];
+        meta.textContent = `${arr.length} channel${arr.length === 1 ? '' : 's'}`;
+        if (!arr.length) { root.innerHTML = '<div class="empty">No channels configured. Configure via <code>lazyclaw config set channels.&lt;name&gt; ...</code>.</div>'; return; }
+        root.innerHTML = arr.map((c) => `<div class="card">
+          <div class="row" style="border:0;padding:0;">
+            <div class="name">${escHtml(c.name)}</div>
+            ${c.enabled ? '<span class="pill ok">enabled</span>' : '<span class="pill warn">disabled</span>'}
+            <div class="dim row-actions">${c.boundAgent ? 'agent: ' + escHtml(c.boundAgent) : '<span class="dim">no binding</span>'}</div>
+          </div>
+          <div class="dim" style="margin-top:6px;font-size:12px;">
+            last inbound: ${c.lastInboundAt ? new Date(c.lastInboundAt).toLocaleString() : '—'}
+          </div>
+        </div>`).join('');
+      } catch (e) {
+        root.innerHTML = `<div class="empty">⚠ ${escHtml(e.message)}</div>`;
+      }
+    };
 
     // First load = chat tab.
     LOADERS.chat();

@@ -29,14 +29,20 @@ Four things no other terminal agent CLI does together:
 3. **Cross-channel handoff.** `/handoff slack <channel-id>` moves the live conversation; context follows.
 4. **Six sandbox backends, one API.** `local` / `docker` / `ssh` / `singularity` / `modal` / `daytona`.
 
+## What's new in 5.0.x
+
+The 5.0.3 → 5.0.9 maintenance line is mostly a launcher and splash overhaul. `lazyclaw` with no arguments now drops you straight into chat — the arrow-key picker has moved to `lazyclaw menu`. The splash itself is responsive: a Larry-3D gradient wordmark, braille-rendered sloth hero, a tool catalog driven by `mas/tools/registry.mjs` (no more hand-edited lists), grouped skills, and a Hermes-style status bar that auto-collapses to a single column on narrow terminals.
+
+Per-release notes live in [CHANGELOG.md](./CHANGELOG.md).
+
 ## Known limitations (v5.1 roadmap)
 
 Calibrate expectations before reading the rest:
 
-- `recall` is callable from inside chat today; the top-level `lazyclaw recall ...` CLI shape ships in v5.1.
+- Recall today is reachable via `lazyclaw loop --recall "<query>" ...` and `lazyclaw goal ... --recall "<query>"`; the `/recall` slash command and top-level `lazyclaw recall ...` CLI shape both ship in v5.1.
 - `lazyclaw sandbox` exposes `list | test | add | use`; the `sandbox run --backend ...` shape lands in v5.1.
 - `codex-cli` and `gemini-cli` provider modules are tracked but not yet registered in the main runtime.
-- E2E matrix ships with 32 of 48 flows marked `test.skip` pending v5.1 wiring; the min-green-set is documented in `tests/e2e/phaseH-e2e-matrix.spec.ts`.
+- The E2E matrix in `tests/e2e/phaseH-e2e-matrix.spec.ts` still has a number of flows marked `test.skip` pending v5.1 wiring; the min-green-set is documented at the top of that file.
 
 ## Install
 
@@ -54,8 +60,9 @@ npm install && npm link
 
 ```bash
 lazyclaw version
-# → { "version": "5.0.0", "nodeVersion": "v20.11.0", "platform": "darwin" }
 ```
+
+Output reports the current installed version, Node version, and platform. See [CHANGELOG.md](./CHANGELOG.md) for release notes.
 
 Requires **Node 18+**. macOS / Linux / WSL are first-class. Native PowerShell runs but ghost-text and the ANSI banner fall back to plain prompts.
 
@@ -69,6 +76,8 @@ lazyclaw onboard         # arrow-key picker; defaults to claude-cli (no key)
 <img src="docs/screenshots/onboard.png" alt="lazyclaw onboard --non-interactive" width="720">
 
 ```bash
+lazyclaw                 # no-arg → chat (since v5.0.6)
+lazyclaw menu            # arrow-key launcher (formerly the no-arg default)
 lazyclaw status          # → { provider, model, hasApiKey }
 lazyclaw doctor          # validates config + provider registry + index.db
 ```
@@ -124,10 +133,16 @@ Plus two meta-providers, usable in either slot:
 
 ## What it ships
 
-### Around 50 tools plus MCP
-A unified registry covers fs, exec, web, os, coding, git (5 read + 2 sensitive), scheduling, delegation, media, ha, clarify, browser, and learning groups. Sensitive tools route through an approval hook. Bring external servers in over stdio MCP.
+### Tool registry — 12 categories plus MCP
+
+A single registry (`mas/tools/registry.mjs`) aggregates every first-party tool across twelve categories:
+
+`agents` · `browser` · `coding` · `exec` · `fs` · `git` · `iot` · `learning` · `media` · `net` · `os` · `scheduling`
+
+Tools flagged `sensitive: true` (writes, network egress, shell exec, sensitive git ops) route through an approval hook before execution. The splash renderer, the agent toolset resolver, and the runtime all read from the same registry, so a new tool group lights up everywhere at once. External servers extend the registry over stdio MCP.
 
 ### Channels that hand off
+
 First-class channels for Slack, Discord, Telegram, Matrix, Email, and Voice. Signal and WhatsApp ship as full implementations with external runtime dependencies (`signal-cli` for Signal; `whatsapp-web.js` browser automation with QR-on-first-run for WhatsApp). Move a live conversation between any two with `/handoff <target> <externalId>` — no other agent CLI does cross-channel handoff.
 
 ```bash
@@ -139,19 +154,23 @@ lazyclaw channels install @lazyclaw/channel-discord
 Slack is built-in and does not need `channels install`. The plugin loader expects `@lazyclaw/channel-<name>` npm package names.
 
 ### Personas that compose
+
 Swap personality per channel without losing session memory. Layers compose top-down: global SOUL → workspace SOUL → active personality → agent role → user model (USER.md) → skill bank → memory core → recent trajectory tail. See [docs/persona-cookbook.md](./docs/persona-cookbook.md).
 
 ### Loops and scheduled goals
+
 Durable foreground or `--detach` loops; cron-scheduled goals with channel fan-out. State lives in `~/.lazyclaw/loops/<id>/` and survives restart. See [docs/loop-goal-preflight.md](./docs/loop-goal-preflight.md).
 
 ### A TUI that ghosts the right answer
-Ink-based UI with two-column splash, sloth ASCII banner, Cursor-style ghost autocomplete (`→` accepts, `Tab` cycles), interrupt-and-redirect REPL, multiline editor, and a fixed 4-line footer with live cost rate cards.
+
+Ink-based UI with a responsive splash (Larry-3D gradient wordmark, sloth braille hero, grouped subcommand catalog, registry-backed tool list, filename-grouped skills, Hermes-style status bar — auto-collapses to single-column on narrow terminals), Cursor-style ghost autocomplete (`→` accepts, `Tab` cycles), interrupt-and-redirect REPL, and multiline editor.
 
 ## Command reference
 
 | Command | Purpose |
 |---|---|
-| `lazyclaw` | Interactive menu; type a slash command or pick a subcommand |
+| `lazyclaw` | No-arg → drops into chat (since v5.0.6) |
+| `lazyclaw menu` | Arrow-key launcher (formerly the no-arg default) |
 | `lazyclaw onboard` | Arrow-key setup; writes `~/.lazyclaw/config.json` |
 | `lazyclaw status` | Print active provider / model / masked key |
 | `lazyclaw doctor` | Validate config, provider registry, FTS5 index |
@@ -163,7 +182,9 @@ Ink-based UI with two-column splash, sloth ASCII banner, Cursor-style ghost auto
 | `lazyclaw channels install\|list\|remove` | Channel plugin lifecycle (`@lazyclaw/channel-<name>`) |
 | `lazyclaw trajectories export --format ...` | Export to atropos / axolotl / openai-ft / jsonl |
 | `lazyclaw personality use\|list\|show` | Activate / inspect personas |
+| `lazyclaw dashboard` | Local web UI on `127.0.0.1:19600` |
 | `lazyclaw migrate v5` | v4 → v5 with backup |
+| `lazyclaw recall` | (v5.1) Top-level recall over the FTS5 index — today, use `loop`/`goal` with `--recall "<query>"` |
 | `lazyclaw version` / `lazyclaw help` | Version + subcommand help |
 
 In-REPL slash commands include `/help`, `/status`, `/provider`, `/model`, `/skill`, `/loop`, `/goal`, `/memory`, `/agent`, `/team`, `/handoff`, `/personality`, `/exit`. Depth lives in `lazyclaw <cmd> --help` and the docs below.
@@ -189,7 +210,7 @@ Full guide: [docs/migration-v4-to-v5.md](./docs/migration-v4-to-v5.md).
 |---|---|---|
 | Start a chat | `lazyclaw chat` | `@lazyclaw <message>` |
 | Hand off to another surface | `/handoff slack <channel-id>` | `/handoff tui <thread-id>` |
-| Recall across history | `/recall "<query>"` inside chat (top-level CLI v5.1) | `/recall "<query>"` inside chat |
+| Recall across history | `lazyclaw loop --recall "<query>" ...` (slash + top-level v5.1) | `lazyclaw loop --recall "<query>" ...` (channel-side `/recall` v5.1) |
 | Switch persona | `/personality use terse` | `/personality use terse` |
 | Switch model | `/model <name>` | `/model <name>` |
 | Show status | `lazyclaw status` | `@lazyclaw status` |

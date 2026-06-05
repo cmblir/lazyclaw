@@ -4,6 +4,28 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.1.0] — 2026-06-05
+
+### Added
+
+- **Responsive splash with 4 tiers**. Splash now collapses cleanly on
+  narrow terminals: WIDE (≥140 cols, full wordmark + panel + sloth +
+  2-col), MEDIUM (90-139 cols, no wordmark, panel + sloth, wrapped
+  values), NARROW (60-89 cols, no panel border, single column with
+  truncated verbs), MINIMAL (<60 cols, headline + provider + cwd +
+  /help only). 6 new tier tests in `tests/phaseC-splash.test.mjs`.
+- **Dashboard v5**. `web/dashboard.html` overhauled to surface v5
+  state: trainer-split status, FTS5 recall query box, sandbox backend
+  health, channel plugin list, session/skill/trajectory browsers.
+  `daemon.mjs` extends the HTTP gateway with the routes those pages
+  need.
+
+### Changed
+
+- **README rewrite**. Length, accuracy, and ordering updated for the
+  5.0.3 → 5.0.9 splash/launcher work and the responsive tiers.
+  Honest "Known limitations (v5.1 roadmap)" section retained.
+
 ## [5.0.9] — 2026-06-05
 
 ### Added
