@@ -32,6 +32,8 @@ export const SLASH_COMMANDS = [
   { cmd: '/team',        help: 'list, create, or join a team' },
   { cmd: '/task',        help: 'create, list, or manage tasks' },
   { cmd: '/handoff',     help: 'hand current task off to another agent' },
+  { cmd: '/dashboard',   help: 'open the lazyclaw web UI in your browser' },
+  { cmd: '/clear',       help: 'alias for /new — clear conversation' },
   { cmd: '/exit',        help: 'leave the chat' },
   { cmd: '/quit',        help: 'alias for /exit' },
 ];

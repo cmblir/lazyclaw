@@ -2682,6 +2682,19 @@ async function cmdChat(flags = {}) {
         resolveAuthKey: (providerName) => _resolveAuthKey(cfg, providerName),
         onCharsSent: (n) => { _inkCharsSent += Number(n) || 0; },
       };
+      // v5.4.3 — ReplApp exposes an openPicker(opts) → Promise<id|null>
+      // via this ref. The slash dispatcher reads it through ctx.openPicker
+      // to drive /provider, /model, /personality without forking off raw
+      // stdin from Ink. When ReplApp hasn't populated the ref yet (early
+      // mount / non-Ink path) the dispatcher falls back to its hint
+      // string so users aren't stranded.
+      const _inkPickerRef = { current: null };
+      _inkCtx.openPicker = (opts) => {
+        const api = _inkPickerRef.current;
+        return api && typeof api.openPicker === 'function'
+          ? api.openPicker(opts)
+          : Promise.resolve(null);
+      };
       // v5.0.10: write streamed chunks straight to process.stdout. Ink
       // owns the screen, so interleaved stdout writes can produce some
       // visual jank — accepted trade for unblocking the chat loop. v5.1
@@ -2711,6 +2724,7 @@ async function cmdChat(flags = {}) {
         statusInfo: { provider: activeProvName, model: activeModel },
         runTurn: _inkRunTurn,
         onSlashCommand: _inkSlashHandler,
+        pickerRef: _inkPickerRef,
       }), { exitOnCtrlC: true, patchConsole: true });
       await ink.waitUntilExit();
       return;

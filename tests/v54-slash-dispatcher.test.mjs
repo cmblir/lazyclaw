@@ -204,11 +204,32 @@ test('/provider with unknown arg returns error, no mutation', async () => {
   assert.equal(ctx.getActiveProvName(), 'mockprov');
 });
 
-test('/provider with no arg shows hint', async () => {
+test('/provider with no arg + no picker falls back to hint', async () => {
+  // v5.4.3 — no ctx.openPicker → dispatcher returns the legacy hint
+  // string so non-Ink callers (CLI / tests) aren't stranded.
   const ctx = makeMockCtx();
   const out = await dispatchSlash('/provider', '', ctx);
   assert.match(out, /provider: mockprov/);
-  assert.match(out, /interactive picker not available/);
+  assert.match(out, /pass an arg: \/provider/);
+});
+
+test('/provider with no arg + openPicker opens the modal and applies the pick', async () => {
+  const ctx = makeMockCtx();
+  ctx.openPicker = async (opts) => {
+    assert.equal(opts.kind, 'provider');
+    return 'other';
+  };
+  const out = await dispatchSlash('/provider', '', ctx);
+  assert.match(out, /provider → other/);
+  assert.equal(ctx.getActiveProvName(), 'other');
+});
+
+test('/provider with no arg + cancelled picker returns "cancelled"', async () => {
+  const ctx = makeMockCtx();
+  ctx.openPicker = async () => null;
+  const out = await dispatchSlash('/provider', '', ctx);
+  assert.match(out, /cancelled/);
+  assert.equal(ctx.getActiveProvName(), 'mockprov');
 });
 
 test('/model with arg mutates ctx', async () => {

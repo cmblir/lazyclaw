@@ -125,16 +125,38 @@ async function _newReset(_args, ctx) {
   return 'cleared — new conversation';
 }
 
+function _providerLookup(registry, name) {
+  if (typeof registry.lookupProv === 'function') return registry.lookupProv(name);
+  return registry.PROVIDERS ? registry.PROVIDERS[name] : null;
+}
+
 async function _provider(args, ctx) {
   const registry = await _mod(ctx, 'registryMod', () => import('../providers/registry.mjs'));
-  const lookup = (name) => {
-    if (typeof registry.lookupProv === 'function') return registry.lookupProv(name);
-    return registry.PROVIDERS ? registry.PROVIDERS[name] : null;
-  };
+  // No arg → open the Ink modal picker (v5.4.3). Falls back to the
+  // pre-v5.4.3 hint string when ctx.openPicker isn't available (e.g.
+  // non-Ink callers or before the picker ref settles).
   if (!args) {
-    return `provider: ${ctx.getActiveProvName()}\n(interactive picker not available in Ink chat — pass an arg: /provider <name>)`;
+    if (typeof ctx.openPicker === 'function') {
+      const known = Object.keys(registry.PROVIDERS || {}).sort();
+      const info = registry.PROVIDER_INFO || {};
+      const items = known.map((id) => ({
+        id,
+        label: id,
+        desc: info[id] && info[id].docs ? String(info[id].docs).split('\n')[0].slice(0, 60) : '',
+      }));
+      const picked = await ctx.openPicker({
+        kind: 'provider',
+        title: 'select provider',
+        subtitle: `current: ${ctx.getActiveProvName()}`,
+        items,
+      });
+      if (!picked) return 'cancelled';
+      args = picked;
+    } else {
+      return `provider: ${ctx.getActiveProvName()}\n(pass an arg: /provider <name>)`;
+    }
   }
-  const next = lookup(args);
+  const next = _providerLookup(registry, args);
   if (!next) {
     const known = registry.PROVIDERS ? Object.keys(registry.PROVIDERS).join(', ') : '?';
     return `unknown provider: ${args} (known: ${known})`;
@@ -147,17 +169,36 @@ async function _provider(args, ctx) {
 async function _model(args, ctx) {
   const registry = await _mod(ctx, 'registryMod', () => import('../providers/registry.mjs'));
   if (!args) {
-    return `model: ${ctx.getActiveModel() || '(default)'}\n(interactive picker not available in Ink chat — pass an arg: /model <name>)`;
+    if (typeof ctx.openPicker === 'function') {
+      const provName = ctx.getActiveProvName();
+      const info = (registry.PROVIDER_INFO && registry.PROVIDER_INFO[provName]) || {};
+      const suggested = Array.isArray(info.suggestedModels) ? info.suggestedModels : [];
+      if (!suggested.length) {
+        return `no suggested models known for provider "${provName}" — pass one: /model <name>`;
+      }
+      const items = suggested.map((m) => ({
+        id: m,
+        label: m,
+        desc: info.defaultModel === m ? '(default)' : '',
+      }));
+      const picked = await ctx.openPicker({
+        kind: 'model',
+        title: `select model for ${provName}`,
+        subtitle: `current: ${ctx.getActiveModel() || '(default)'}`,
+        items,
+      });
+      if (!picked) return 'cancelled';
+      args = picked;
+    } else {
+      return `model: ${ctx.getActiveModel() || '(default)'}\n(pass an arg: /model <name>)`;
+    }
   }
   const { parseSlashProviderModel } = registry;
   const parsed = typeof parseSlashProviderModel === 'function'
     ? parseSlashProviderModel(args)
     : { provider: null, model: args };
   if (parsed.provider) {
-    const lookup = (name) => (typeof registry.lookupProv === 'function'
-      ? registry.lookupProv(name)
-      : (registry.PROVIDERS ? registry.PROVIDERS[name] : null));
-    const next = lookup(parsed.provider);
+    const next = _providerLookup(registry, parsed.provider);
     if (!next) return `unknown provider: ${parsed.provider}`;
     if (ctx.setActiveProvName) ctx.setActiveProvName(parsed.provider);
     if (ctx.setProv) ctx.setProv(next);
@@ -562,19 +603,267 @@ async function _handoff(args, ctx) {
   }
 }
 
-async function _personality(_args) {
-  // cmdPersonality lives in cli.mjs and is readline-coupled (reads from
-  // stdin via the global rl). Lifting it cleanly is a v5.5 follow-up; for
-  // v5.4 we surface the CLI alternative so operators aren't stranded.
-  return 'personality: interactive picker not yet wired into Ink chat — use `lazyclaw personality list|set <name>` from the shell, or restart with LAZYCLAW_NO_INK=1.';
+async function _personality(args, ctx) {
+  // cmdPersonality in cli.mjs is actually non-interactive (takes
+  // sub+a+b args). We mirror that surface here without going through
+  // cli.mjs (avoid circular import) — list / show / install / remove /
+  // use, plus a no-arg picker over installed personality files.
+  let fs, path;
+  try {
+    fs = await import('node:fs');
+    path = await import('node:path');
+  } catch (e) { return `/personality unavailable: ${e?.message || e}`; }
+  const dir = path.join(ctx.cfgDir, 'personalities');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch { /* swallow */ }
+
+  const list = () => fs.existsSync(dir)
+    ? fs.readdirSync(dir).filter((f) => f.endsWith('.md')).map((f) => f.slice(0, -3)).sort()
+    : [];
+
+  const tokens = splitWhitespace(args);
+  const sub = tokens[0];
+  const a = tokens[1];
+  const b = tokens[2];
+
+  // No arg → open Ink modal picker (v5.4.3). Confirm selects + activates.
+  if (!sub) {
+    const names = list();
+    if (!names.length) return 'no personalities installed — `lazyclaw personality install <name> <file.md>`';
+    if (typeof ctx.openPicker !== 'function') {
+      return `personalities: ${names.join(', ')}\n(pass an arg: /personality use <name>)`;
+    }
+    const items = names.map((n) => ({ id: n, label: n }));
+    const picked = await ctx.openPicker({
+      kind: 'personality',
+      title: 'select personality',
+      subtitle: 'Enter activates · Esc cancels',
+      items,
+    });
+    if (!picked) return 'cancelled';
+    return _personalityUse(picked, ctx, fs, path);
+  }
+
+  if (sub === 'list') {
+    const names = list();
+    if (!names.length) return 'no personalities installed';
+    return names.join('\n');
+  }
+  if (sub === 'show') {
+    if (!a) return 'usage: /personality show <name>';
+    const p = path.join(dir, `${a}.md`);
+    if (!fs.existsSync(p)) return `personality not found: ${a}`;
+    return fs.readFileSync(p, 'utf8');
+  }
+  if (sub === 'install') {
+    if (!a || !b) return 'usage: /personality install <name> <file.md>';
+    const dst = path.join(dir, `${a}.md`);
+    if (fs.existsSync(dst)) return `personality already installed: ${a}`;
+    if (!fs.existsSync(b)) return `source file not found: ${b}`;
+    fs.writeFileSync(dst, fs.readFileSync(b, 'utf8'));
+    return `installed ${a}`;
+  }
+  if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
+    if (!a) return 'usage: /personality remove <name>';
+    const p = path.join(dir, `${a}.md`);
+    if (!fs.existsSync(p)) return `personality not installed: ${a}`;
+    fs.unlinkSync(p);
+    return `removed ${a}`;
+  }
+  if (sub === 'use') {
+    if (!a) return 'usage: /personality use <name>';
+    return _personalityUse(a, ctx, fs, path);
+  }
+  return `/personality: unknown sub "${sub}" — list|show|install|remove|use (or no-arg picker)`;
 }
 
-async function _task() {
-  return 'task: slash form lands in v5.5 — use the `lazyclaw task` CLI for now.';
+function _personalityUse(name, ctx, fs, path) {
+  const dir = path.join(ctx.cfgDir, 'personalities');
+  const p = path.join(dir, `${name}.md`);
+  if (!fs.existsSync(p)) return `personality not installed: ${name}`;
+  // Read-merge-write config.json so we never clobber unrelated keys.
+  const cfgPath = path.join(ctx.cfgDir, 'config.json');
+  let diskCfg = {};
+  try { diskCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch { /* fresh */ }
+  diskCfg.persona = { ...(diskCfg.persona || {}), personality: name };
+  try { fs.mkdirSync(ctx.cfgDir, { recursive: true }); } catch {}
+  fs.writeFileSync(cfgPath, JSON.stringify(diskCfg, null, 2));
+  // Mirror onto the in-memory cfg so the next turn picks up the change.
+  if (ctx.cfg) {
+    ctx.cfg.persona = { ...(ctx.cfg.persona || {}), personality: name };
+  }
+  return `active personality → ${name}`;
 }
 
-async function _trainer() {
-  return 'trainer: configure via config.json (cfg.trainer) or `lazyclaw trainer` CLI — slash form lands in v5.5.';
+async function _task(args, ctx) {
+  let tasksMod, loopMod;
+  try {
+    tasksMod = await import('../tasks.mjs');
+    loopMod = await import('../loop-engine.mjs');
+  } catch (e) { return `/task unavailable: ${e?.message || e}`; }
+  let tokens;
+  try { tokens = loopMod.splitArgs(args); }
+  catch (e) { return `/task error: ${e?.message || e}`; }
+  const sub = tokens[0];
+  const id = tokens[1];
+
+  try {
+    if (!sub || sub === 'list') {
+      const items = tasksMod.listTasks(ctx.cfgDir);
+      if (!items.length) return 'no tasks. `lazyclaw task start --team ... --title ...` from the shell to create one.';
+      return items.map((t) =>
+        `• ${t.id} [${t.status || 'unknown'}] ${t.title || '(no title)'}${t.team ? ` — team=${t.team}` : ''}${t.lead ? ` — lead=${t.lead}` : ''}`
+      ).join('\n');
+    }
+    if (sub === 'show') {
+      if (!id) return 'usage: /task show <id>';
+      const t = tasksMod.getTask(id, ctx.cfgDir);
+      if (!t) return `no task "${id}"`;
+      return JSON.stringify(t, null, 2);
+    }
+    if (sub === 'transcript') {
+      if (!id) return 'usage: /task transcript <id> [text|md|json]';
+      const t = tasksMod.getTask(id, ctx.cfgDir);
+      if (!t) return `no task "${id}"`;
+      const fmt = tokens[2] || 'text';
+      if (typeof tasksMod.formatTranscript === 'function') {
+        return tasksMod.formatTranscript(t, fmt);
+      }
+      return JSON.stringify(t.turns || [], null, 2);
+    }
+    if (sub === 'abandon' || sub === 'done') {
+      if (!id) return `usage: /task ${sub} <id>`;
+      const next = tasksMod.patchTask(id, { status: sub === 'done' ? 'done' : 'abandoned' }, ctx.cfgDir);
+      return `✓ task ${id} → ${next?.status || sub}`;
+    }
+    if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
+      if (!id) return 'usage: /task remove <id>';
+      tasksMod.removeTask(id, ctx.cfgDir);
+      return `✓ removed task ${id}`;
+    }
+    if (sub === 'start' || sub === 'tick') {
+      return `task ${sub}: needs Slack + multi-agent router — run from the shell:\n  lazyclaw task ${sub} ...`;
+    }
+    return `/task: unknown sub "${sub}" — list|show|transcript|abandon|done|remove (start/tick: use CLI)`;
+  } catch (e) {
+    return `/task error: ${e?.message || e}`;
+  }
+}
+
+async function _trainer(args, ctx) {
+  const registry = await _mod(ctx, 'registryMod', () => import('../providers/registry.mjs'));
+  const tokens = splitWhitespace(args);
+  const sub = tokens[0] || 'show';
+
+  if (sub === 'show') {
+    let effective = { provider: ctx.getActiveProvName ? ctx.getActiveProvName() : null,
+                      model: ctx.getActiveModel ? ctx.getActiveModel() : null };
+    try {
+      if (typeof registry.resolveTrainer === 'function') {
+        effective = registry.resolveTrainer(ctx.cfg || {});
+      }
+    } catch { /* fall through */ }
+    const configured = (ctx.cfg && ctx.cfg.trainer) || null;
+    const cfgRender = configured
+      ? JSON.stringify(configured, null, 2)
+      : '(unset — trainer mirrors the chat provider/model)';
+    return [
+      'trainer (effective):',
+      `  provider: ${effective.provider}`,
+      `  model:    ${effective.model || '(default)'}`,
+      'trainer (configured):',
+      cfgRender,
+    ].join('\n');
+  }
+
+  if (sub === 'set') {
+    const spec = tokens[1];
+    if (!spec) return 'usage: /trainer set <provider>[:<model>]  (or `auto` for orchestrator-managed)';
+    const parsed = typeof registry.parseProviderModel === 'function'
+      ? registry.parseProviderModel(spec)
+      : { provider: spec.split(':')[0], model: spec.split(':')[1] || null };
+    if (!parsed || !parsed.provider) return `/trainer set: could not parse "${spec}"`;
+    if (parsed.provider !== 'auto') {
+      const next = _providerLookup(registry, parsed.provider);
+      if (!next) return `/trainer set: unknown provider "${parsed.provider}"`;
+    }
+    // Read-merge-write so unrelated cfg keys survive.
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const cfgPath = path.join(ctx.cfgDir, 'config.json');
+    let diskCfg = {};
+    try { diskCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch { /* fresh */ }
+    diskCfg.trainer = { ...(diskCfg.trainer || {}), provider: parsed.provider };
+    if (parsed.model) diskCfg.trainer.model = parsed.model;
+    else delete diskCfg.trainer.model;
+    try { fs.mkdirSync(ctx.cfgDir, { recursive: true }); } catch {}
+    fs.writeFileSync(cfgPath, JSON.stringify(diskCfg, null, 2));
+    if (ctx.cfg) ctx.cfg.trainer = { ...diskCfg.trainer };
+    return `✓ trainer → ${parsed.provider}${parsed.model ? ':' + parsed.model : ''}`;
+  }
+
+  if (sub === 'clear' || sub === 'unset') {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const cfgPath = path.join(ctx.cfgDir, 'config.json');
+    let diskCfg = {};
+    try { diskCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch { /* fresh */ }
+    delete diskCfg.trainer;
+    try { fs.mkdirSync(ctx.cfgDir, { recursive: true }); } catch {}
+    fs.writeFileSync(cfgPath, JSON.stringify(diskCfg, null, 2));
+    if (ctx.cfg) delete ctx.cfg.trainer;
+    return '✓ trainer cleared (will mirror chat provider/model)';
+  }
+
+  return `/trainer: unknown sub "${sub}" — show|set <p:m>|clear`;
+}
+
+// /dashboard — open the lazyclaw web UI. Reuses an already-running
+// daemon if one answers /healthz on 19600; otherwise spawns a detached
+// `node cli.mjs dashboard --no-open` child so the daemon outlives this
+// chat session. Never installs signal handlers / never process.exits —
+// Ctrl-C inside chat must NOT touch the dashboard.
+async function _dashboard(_args) {
+  const port = 19600;
+  const url = `http://127.0.0.1:${port}/dashboard`;
+  const healthUrl = `http://127.0.0.1:${port}/healthz`;
+  const { spawn } = await import('node:child_process');
+  const openBrowser = (u) => {
+    let cmd, args;
+    if (process.platform === 'darwin')      { cmd = 'open';     args = [u]; }
+    else if (process.platform === 'win32')  { cmd = 'cmd';      args = ['/c', 'start', '""', u]; }
+    else                                    { cmd = 'xdg-open'; args = [u]; }
+    try { spawn(cmd, args, { stdio: 'ignore', detached: true }).unref(); } catch { /* swallow */ }
+  };
+  const probe = async () => {
+    if (typeof fetch !== 'function') return false;
+    try {
+      const ac = new AbortController();
+      const t = setTimeout(() => ac.abort(), 300);
+      const r = await fetch(healthUrl, { signal: ac.signal });
+      clearTimeout(t);
+      return !!(r && r.ok);
+    } catch { return false; }
+  };
+  if (await probe()) {
+    openBrowser(url);
+    return `✓ dashboard already running — opened ${url}`;
+  }
+  // Spawn detached so the daemon outlives this chat process.
+  try {
+    const child = spawn(process.execPath, [process.argv[1], 'dashboard', '--no-open'], {
+      detached: true, stdio: 'ignore', cwd: process.cwd(), env: process.env,
+    });
+    child.unref();
+  } catch (e) {
+    return `dashboard error: failed to spawn — ${e?.message || e}`;
+  }
+  // Poll /healthz up to ~3s before opening the browser.
+  const start = Date.now();
+  while (Date.now() - start < 3000) {
+    if (await probe()) { openBrowser(url); return `✓ started dashboard — opened ${url}`; }
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  return `⚠ dashboard didn't come up within 3s. Try \`lazyclaw dashboard\` from another terminal. URL: ${url}`;
 }
 
 // ─── dispatch table ──────────────────────────────────────────────────────
@@ -586,6 +875,7 @@ export const SLASH_HANDLERS = new Map([
   ['/usage', _usage],
   ['/new', _newReset],
   ['/reset', _newReset],
+  ['/clear', _newReset],
   ['/provider', _provider],
   ['/model', _model],
   ['/skill', _skill],
@@ -602,6 +892,7 @@ export const SLASH_HANDLERS = new Map([
   ['/personality', _personality],
   ['/task', _task],
   ['/trainer', _trainer],
+  ['/dashboard', _dashboard],
   ['/exit', async () => 'EXIT'],
   ['/quit', async () => 'EXIT'],
 ]);

@@ -50,6 +50,32 @@ export function displayWidth(text) {
   return stringWidth(String(text));
 }
 
+// Cell-aware soft-wrap. Returns an array of visual rows whose width
+// respects the budget (first row uses `firstBudget`, subsequent rows
+// use `contBudget`). Hoisted to module level (was inner-fn) so the
+// cursor-anchor useEffect in <Editor/> can reuse it.
+export function wrapToBudget(text, firstBudget, contBudget) {
+  if (!text) return [''];
+  const out = [];
+  let line = '';
+  let lineW = 0;
+  let budget = firstBudget;
+  for (const ch of text) {
+    const w = stringWidth(ch);
+    if (lineW + w > budget) {
+      out.push(line);
+      line = ch;
+      lineW = w;
+      budget = contBudget;
+    } else {
+      line += ch;
+      lineW += w;
+    }
+  }
+  out.push(line);
+  return out;
+}
+
 // Display column of the caret given a state. Counts wide chars as 2.
 // On the first rendered line this is offset by PROMPT_WIDTH; on
 // continuation lines (after a Shift+Enter) it is offset by
@@ -146,6 +172,22 @@ export function Editor({
   slashSelectedIndex,    // number
   onSlashMove,           // (delta: -1 | +1) => void
   onSlashDismiss,        // () => void
+  // v5.4.3 modal-picker wiring (all optional — pre-v5.4.3 callers pass none).
+  // When modalOpen is true the Editor intercepts every key and routes it
+  // to the host callbacks; nothing reaches applyKey / onSubmit so the
+  // chat buffer is untouched while a picker is up.
+  modalOpen,             // boolean
+  modalQuery,            // string — current filter buffer (host-owned)
+  onModalMove,           // (delta: -1 | +1) => void
+  onModalConfirm,        // () => void
+  onModalCancel,         // () => void
+  onModalQuery,          // (next: string) => void
+  // v5.4.3 IME cursor anchor — when altEnabled is true, the Editor
+  // moves the terminal cursor back inside its content row after each
+  // render so macOS IMEs (Hangul / Japanese / Chinese) draw their
+  // pre-edit overlay at the actual typing position. Opt-out via the
+  // LAZYCLAW_NO_CURSOR_ANCHOR env var (handled internally).
+  altEnabled,
 }) {
   const [state, setState] = useState(() => makeEditorState({ history }));
   const slashOpen = Array.isArray(slashSuggestions) && slashSuggestions.length > 0;
@@ -167,6 +209,35 @@ export function Editor({
 
   useInput((input, key) => {
     const current = stateRef.current;
+    // ─── Modal-picker keyboard contract (highest priority — v5.4.3) ──
+    // When a host-owned picker is up, EVERY key is consumed by the
+    // picker. The chat buffer is never mutated and onSubmit is never
+    // fired. This is what prevents "Enter while picking a model" from
+    // accidentally submitting the typed-so-far buffer as a chat turn.
+    if (modalOpen) {
+      if (key.escape) { if (onModalCancel) onModalCancel(); return; }
+      if (key.return) { if (onModalConfirm) onModalConfirm(); return; }
+      if (key.upArrow)   { if (onModalMove) onModalMove(-1); return; }
+      if (key.downArrow) { if (onModalMove) onModalMove(+1); return; }
+      if (key.pageUp)    { if (onModalMove) onModalMove(-10); return; }
+      if (key.pageDown)  { if (onModalMove) onModalMove(+10); return; }
+      // Ctrl+U clears the filter (Unix-style line kill).
+      if (key.ctrl && (input === 'u' || input === 'U')) {
+        if (onModalQuery) onModalQuery('');
+        return;
+      }
+      if (key.backspace || key.delete) {
+        if (onModalQuery) onModalQuery(String(modalQuery || '').slice(0, -1));
+        return;
+      }
+      // Printable single char (no modifier) appends to filter.
+      if (input && !key.ctrl && !key.meta && input.length >= 1 && !key.tab) {
+        if (onModalQuery) onModalQuery(String(modalQuery || '') + input);
+        return;
+      }
+      // Anything else (Tab, function keys, etc.) swallowed.
+      return;
+    }
     // ─── Slash-popup keyboard contract (highest priority when open) ──
     if (slashOpen) {
       // Esc: clear the buffer and dismiss the popup. The host's onEscape
@@ -232,38 +303,77 @@ export function Editor({
     if (state.lastSubmit !== null && onSubmit) onSubmit(state.lastSubmit);
   }, [state.lastSubmit]);
 
+  // v5.4.3 — IME cursor anchor.
+  //
+  // After every Ink render commit, move the terminal cursor BACK inside
+  // the editor's content row so macOS Hangul / Japanese / Chinese IMEs
+  // draw their pre-edit overlay where the user is actually typing
+  // (instead of on the row below the editor box, where Ink's log-update
+  // parks the cursor by default via its trailing '\n').
+  //
+  // Trade-off: each render briefly moves the cursor, which means the
+  // NEXT render's log-update eraseLines starts from inside the editor.
+  // Ink immediately overwrites with the full new frame, so the user
+  // sees at most a one-tick flicker. The IME-correctness win is worth
+  // the cosmetic cost. Opt out via LAZYCLAW_NO_CURSOR_ANCHOR=1.
+  useEffect(() => {
+    if (!altEnabled) return;
+    if (process.env.LAZYCLAW_NO_CURSOR_ANCHOR === '1') return;
+    if (!(process.stdout && process.stdout.isTTY)) return;
+    const cols = Math.max(20, process.stdout.columns || 80);
+    const inner = Math.max(8, cols - 4);
+    const fb = inner - PROMPT_WIDTH;
+    const cb = inner - CONTINUATION_WIDTH;
+
+    // Count total rendered rows (for "rowsUp" math) and locate the
+    // cursor's (rowInEditor, colInLine) by wrapping the buffer up to
+    // the codepoint cursor position.
+    const fullLines = String(state.buffer || '').split('\n');
+    let totalRows = 0;
+    for (let li = 0; li < fullLines.length; li++) {
+      const wrapped = wrapToBudget(fullLines[li], fb, cb);
+      totalRows += wrapped.length;
+    }
+    const before = String(state.buffer || '').slice(0, state.cursor || 0);
+    const beforeLines = before.split('\n');
+    let rowInEditor = 0;
+    for (let li = 0; li < beforeLines.length - 1; li++) {
+      const wrapped = wrapToBudget(beforeLines[li], fb, cb);
+      rowInEditor += wrapped.length;
+    }
+    const lastBefore = beforeLines[beforeLines.length - 1] || '';
+    const lastWrapped = wrapToBudget(lastBefore, fb, cb);
+    rowInEditor += lastWrapped.length - 1;
+    const lastSegment = lastWrapped[lastWrapped.length - 1] || '';
+    const colInLine = stringWidth(lastSegment);
+
+    // After Ink writes `<frame>\n`, cursor sits on the line below the
+    // editor's bottom border at column 0. Editor geometry: 1 top border
+    // + totalRows content + 1 bottom border. So the row count between
+    // "below editor" and the cursor's target content row is
+    // (1 trailing-\n + 1 bottom border + (totalRows - 1 - rowInEditor))
+    // = totalRows + 1 - rowInEditor.
+    const rowsUp = Math.max(1, totalRows + 1 - rowInEditor);
+
+    // Column: 1-indexed. Left border at col 1, padX at col 2, prefix
+    // starts at col 3. Cursor sits one cell past the typed content.
+    const prefixWidth = rowInEditor === 0 ? PROMPT_WIDTH : CONTINUATION_WIDTH;
+    const colTarget = 3 + prefixWidth + colInLine;
+    try {
+      process.stdout.write(`\x1b[${rowsUp}A\x1b[${colTarget}G\x1b[?25h`);
+    } catch { /* stdout closed — swallow */ }
+  }, [state.buffer, state.cursor, altEnabled]);
+
   const lines = state.buffer.split('\n');
-  // Manual cell-aware wrapping. Ink's <Text wrap="wrap"> uses wrap-ansi,
-  // which IS string-width aware, but the box's width:'100%' resolves
-  // against ink-testing-library's stdout shim (and some real terminals
-  // when columns is reset by SIGWINCH late) at 100 cols regardless of
-  // the actual viewport — so wide CJK buffers visibly bleed past the
-  // box right edge in narrow terminals. Pre-wrap to the actual cell
-  // budget so Ink never has to guess.
+  // Ink's <Text wrap="wrap"> uses wrap-ansi (string-width aware) but the
+  // box's width resolves against ink-testing-library's stdout shim and
+  // some real terminals at 100 cols regardless of the actual viewport,
+  // so wide CJK buffers bleed past the right edge in narrow terminals.
+  // Pre-wrap to the actual cell budget via the module-level wrapToBudget
+  // (see top of this file) so Ink never has to guess.
   const TERM = Math.max(20, process.stdout.columns || 80);
   // Box overhead: 1 border + 1 padX on each side = 4 cells; first row
   // also reserves PROMPT_WIDTH; continuation rows reserve CONTINUATION_WIDTH.
-  function wrapToBudget(text, firstBudget, contBudget) {
-    if (!text) return [''];
-    const out = [];
-    let line = '';
-    let lineW = 0;
-    let budget = firstBudget;
-    for (const ch of text) {
-      const w = stringWidth(ch);
-      if (lineW + w > budget) {
-        out.push(line);
-        line = ch;
-        lineW = w;
-        budget = contBudget;
-      } else {
-        line += ch;
-        lineW += w;
-      }
-    }
-    out.push(line);
-    return out;
-  }
   const innerCells = Math.max(8, TERM - 4); // 2 border + 2 padX
   const renderedLines = [];
   for (let li = 0; li < lines.length; li++) {
