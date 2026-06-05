@@ -1634,28 +1634,31 @@ function _renderBanner(version) {
   ];
 }
 
-// v5 wordmark banner — ANSI Shadow style "LAZYCLAW" rendered in box-drawing
-// + half-block glyphs at 67 cols x 6 rows. Wider than the chat splash gutter
-// because the no-arg launcher has the full terminal width to work with.
-// Single-tone orange. Opt out with LAZYCLAW_LEGACY_MENU=1 to fall back to
-// the boxed figlet variant above.
-const _V5_WORDMARK = [
-  "  ██╗      █████╗ ███████╗██╗   ██╗ ██████╗██╗      █████╗ ██╗    ██╗",
-  "  ██║     ██╔══██╗╚══███╔╝╚██╗ ██╔╝██╔════╝██║     ██╔══██╗██║    ██║",
-  "  ██║     ███████║  ███╔╝  ╚████╔╝ ██║     ██║     ███████║██║ █╗ ██║",
-  "  ██║     ██╔══██║ ███╔╝    ╚██╔╝  ██║     ██║     ██╔══██║██║███╗██║",
-  "  ███████╗██║  ██║███████╗   ██║   ╚██████╗███████╗██║  ██║╚███╔███╔╝",
-  "  ╚══════╝╚═╝  ╚═╝╚══════╝   ╚═╝    ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝ ",
-];
+// v5 hero banner — the chafa-rendered braille sloth shared with the chat
+// splash (tui/banner.generated.mjs). Centered in TERM_WIDTH at runtime so
+// the launcher and chat splash present identical visual identity.
+// Opt out with LAZYCLAW_LEGACY_MENU=1 to fall back to the v4 figlet box.
+let _slothBannerRowsCache = null;
+async function _loadSlothBanner() {
+  if (_slothBannerRowsCache !== null) return _slothBannerRowsCache;
+  try {
+    const { banner } = await import('./tui/banner.generated.mjs');
+    _slothBannerRowsCache = banner;
+  } catch {
+    _slothBannerRowsCache = null;
+  }
+  return _slothBannerRowsCache;
+}
 
-function _renderV5Banner(version) {
+async function _renderV5Banner(version) {
+  const b = await _loadSlothBanner();
+  if (!b) return _renderBanner(version); // missing tarball asset → v4 figlet
+  const TERM_W = Math.max(80, process.stdout.columns || 80);
+  const pad = Math.max(0, Math.floor((TERM_W - b.width) / 2));
+  const rows = b.rows.map(r => _orange(' '.repeat(pad) + r));
   const v = String(version || '?.?.?');
-  const wmCols = 69; // width of _V5_WORDMARK rows including leading "  "
-  const versionLine = `  v${v}`;
-  return [
-    ..._V5_WORDMARK.map(_orange),
-    _orange(versionLine.padEnd(wmCols)),
-  ];
+  rows.push(_orange((' '.repeat(pad) + `lazyclaw v${v}`).padEnd(TERM_W)));
+  return rows;
 }
 
 function _printChatBanner(activeProvName, activeModel, version) {
@@ -6746,7 +6749,7 @@ async function cmdLauncher() {
     const useLegacyBanner = !!process.env.LAZYCLAW_LEGACY_MENU;
     const bannerRowsCached = useLegacyBanner
       ? _renderBanner(readVersionFromRepo())
-      : _renderV5Banner(readVersionFromRepo());
+      : await _renderV5Banner(readVersionFromRepo());
     const draw = () => {
       process.stdout.write('\x1b[?25l\x1b[2J\x1b[H'); // hide cursor + clear
       bannerRowsCached.forEach((l) => process.stdout.write(l + '\n'));

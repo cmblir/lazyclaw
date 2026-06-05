@@ -1,21 +1,21 @@
-// tui/splash.mjs — two-column launch splash (spec §5.1).
+// tui/splash.mjs — hero-banner launch splash.
 //
 // Public surface:
 //   - <Splash {...props} />            ink component for live REPL mount
 //   - renderSplashToString(props)      pure string builder used by tests
 //                                       and by the non-TTY path.
 //
-// Layout: 24-cell sloth gutter (cols 0-23) | 2-cell separator (24-25)
-//   | 52-cell right column (cols 26-77) | 2-cell right padding.
-// Footer: exactly 4 lines, blank row separates body from footer.
+// Layout: 47-cell-wide hero banner centered in 80-col terminal,
+// followed by a two-column tools|skills section (36 cells each)
+// and a 4-line footer.
 import React from 'react';
 import { Box, Text } from 'ink';
 import stringWidth from 'string-width';
 import { theme } from './theme.mjs';
 import { banner } from './banner.generated.mjs';
 
-const RIGHT_COL_WIDTH = 52;
-const GUTTER_WIDTH = 24;
+const TERM_WIDTH = 80;
+const COL_WIDTH = 36; // 2 (lpad) + 36 + 2 (mid) + 36 + 2 (rpad) = 78 ≈ 80 with slack
 
 function fit(text, max) {
   if (stringWidth(text) <= max) return text.padEnd(max);
@@ -48,29 +48,26 @@ function skillRow({ group, names }) {
   return `${fit(group, 9)}${tail}${more}`;
 }
 
-function buildBody(props) {
+function buildBanner() {
+  // Center the hero banner inside TERM_WIDTH. banner.width may be < TERM_WIDTH;
+  // pad each side equally so it floats over the centerline.
+  const pad = Math.max(0, Math.floor((TERM_WIDTH - banner.width) / 2));
+  return banner.rows.map(row => ' '.repeat(pad) + row);
+}
+
+function buildToolsAndSkills(props) {
   const { tools = [], skills = [] } = props;
-  const right = [];
-  right.push('Available Tools');
-  right.push('─'.repeat(45));
-  for (const t of tools.slice(0, 8)) right.push(toolRow(t));
-  if (tools.length > 8) right.push(`... and ${tools.length - 8} more tool groups`);
-  right.push('');
-  right.push('Available Skills');
-  right.push('─'.repeat(45));
-  for (const s of skills.slice(0, 8)) right.push(skillRow(s));
-  if (skills.length > 8) right.push(`... and ${skills.length - 8} more skill groups`);
-
-  const left = banner.rows.slice();
-  while (left.length < right.length) left.push('');
-  while (right.length < left.length) right.push('');
-
+  const SECT_WIDTH = TERM_WIDTH - 4;
   const lines = [];
-  for (let i = 0; i < left.length; i++) {
-    const lhs = fit(left[i], GUTTER_WIDTH);
-    const rhs = fit(right[i], RIGHT_COL_WIDTH);
-    lines.push(`  ${lhs}  ${rhs}`);
-  }
+  lines.push(`  ${fit('Available Tools', SECT_WIDTH)}`);
+  lines.push(`  ${'─'.repeat(SECT_WIDTH)}`);
+  for (const t of tools.slice(0, 8)) lines.push(`  ${fit(toolRow(t), SECT_WIDTH)}`);
+  if (tools.length > 8) lines.push(`  ${fit(`... and ${tools.length - 8} more tool groups`, SECT_WIDTH)}`);
+  lines.push('');
+  lines.push(`  ${fit('Available Skills', SECT_WIDTH)}`);
+  lines.push(`  ${'─'.repeat(SECT_WIDTH)}`);
+  for (const s of skills.slice(0, 8)) lines.push(`  ${fit(skillRow(s), SECT_WIDTH)}`);
+  if (skills.length > 8) lines.push(`  ${fit(`... and ${skills.length - 8} more skill groups`, SECT_WIDTH)}`);
   return lines;
 }
 
@@ -89,10 +86,14 @@ function buildFooter(props) {
 }
 
 export function renderSplashToString(props, { columns = 80 } = {}) {
-  void columns; // currently fixed-width at 80; <72 fallback is in cli.mjs
-  const body = buildBody(props);
-  const footer = buildFooter(props);
-  return [...body, '', ...footer].join('\n');
+  void columns; // splash is fixed-width 80
+  return [
+    ...buildBanner(),
+    '',
+    ...buildToolsAndSkills(props),
+    '',
+    ...buildFooter(props),
+  ].join('\n');
 }
 
 export function Splash(props) {

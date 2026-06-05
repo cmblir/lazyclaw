@@ -4,6 +4,25 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.0.4] — 2026-06-05
+
+### Changed
+
+- **Hero banner is a high-resolution chafa braille render**. Both the
+  no-arg launcher and the chat splash now share the same 47×35 dense
+  braille sloth (rendered from the Pexels sleepy-sloth photo via
+  `chafa --symbols=braille --invert`). Replaces the 24×12 hand-drawn
+  icon (chat) and the ANSI Shadow `LAZYCLAW` wordmark (launcher) —
+  identical visual identity across both entry points.
+- **Chat splash layout is now hero-on-top, single-column body**.
+  Tools and skills stack full-width (76 cells) below the banner
+  instead of competing for a 24-cell gutter. Verb lists no longer
+  truncate. `LAZYCLAW_LEGACY_MENU=1` still drops the launcher banner
+  back to the v4 figlet box.
+- **Banner contract relaxed**. `tui/banner.generated.mjs` no longer
+  has to be 24 cells wide; the test now asserts `rows.length ===
+  height` and `stringWidth(row) <= width` instead of literal `24/12`.
+
 ## [5.0.3] — 2026-06-05
 
 ### Changed
