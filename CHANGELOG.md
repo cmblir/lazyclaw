@@ -4,6 +4,38 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.4.2] — 2026-06-06
+
+### Fixed
+
+- **v5.4.1 blank-screen bug (real fix).** v5.4.1 claimed to render the
+  splash inside the alt-buffer via `<Static items={scrollback}/>`. In
+  practice Ink's `<Static/>` writes its items to stdout above the live
+  frame — inside the DEC 1049 alt canvas that area is immediately
+  overwritten by the next live frame, so the splash + per-turn history
+  were invisible. The alt-buffer arm of `tui/repl.mjs` now renders
+  scrollback items as regular flex children (`state.scrollback.map(
+  ScrollbackItem)`). The non-alt branch still uses `<Static/>` so the
+  v5.3 scroll-away contract on the primary buffer is preserved.
+- **CJK input character drops.** macOS Korean / Japanese IMEs commit
+  each completed syllable as a separate stdin event. The pre-v5.4.2
+  `<Editor/>` callback captured `state` via the React render closure,
+  so two events fired in the same React frame caused the second
+  applyKey to start from the pre-first-event state and overwrite the
+  first event's setState payload — leaving the first character missing
+  from the buffer. v5.4.2 mirrors editor state into a `useRef` and
+  commits through it, so every keystroke applies on top of the most
+  recent buffer regardless of render timing.
+
+### Tests
+
+- `tests/v54-altbuffer.test.mjs`: new structural test pins that the
+  alt-buffer arm does NOT use `<Static/>` (regression for the v5.4.1
+  Static-in-alt-canvas trap).
+- `tests/v542-editor-stale-closure.test.mjs`: new test pins the
+  `stateRef + commit()` pattern and verifies `applyKey` chains across
+  rapid Hangul + Han + emoji inserts without dropping a character.
+
 ## [5.4.1] — 2026-06-06
 
 ### Fixed
