@@ -2418,11 +2418,45 @@ async function cmdChat(flags = {}) {
       const { renderSplashToString } = await import('./tui/splash.mjs');
       // narrow-terminal fallback: <60 cols falls back to v4
       if ((process.stdout.columns || 80) < 60) throw new Error('narrow-terminal');
+
+      // Tool groups — read the v5 registry and collapse to one row per category.
+      let toolGroups = [];
+      try {
+        const registry = await import('./mas/tools/registry.mjs');
+        const byCat = registry.byCategory();
+        toolGroups = Object.entries(byCat).map(([category, items]) => ({
+          category,
+          sensitive: items.some(t => t.sensitive),
+          verbs: items.map(t => t.name.replace(/^[a-z]+_/, '')).slice(0, 6),
+        })).sort((a, b) => a.category.localeCompare(b.category));
+      } catch { /* registry unavailable → empty list */ }
+
+      // Skill groups — group installed skills by filename hyphen-prefix
+      // (canonical C5 fallback: <group>-<name>.md → group; bare names → 'general').
+      let skillGroups = [];
+      try {
+        const { listSkills } = await import('./skills.mjs');
+        const flat = listSkills();
+        const byGroup = new Map();
+        for (const s of flat) {
+          const i = s.name.indexOf('-');
+          const group = i > 0 ? s.name.slice(0, i) : 'general';
+          const sub = i > 0 ? s.name.slice(i + 1) : s.name;
+          if (!byGroup.has(group)) byGroup.set(group, []);
+          byGroup.get(group).push(sub);
+        }
+        skillGroups = [...byGroup.entries()]
+          .map(([group, names]) => ({ group, names: names.slice(0, 6) }))
+          .sort((a, b) => a.group.localeCompare(b.group));
+      } catch { /* skills dir unavailable → empty list */ }
+
       const splashProps = {
         provider: activeProvName, model: activeModel,
         trainer: {}, sessionId: flags.session || '',
         cwd: process.cwd(),
-        tools: [], skills: [],
+        version: readVersionFromRepo(),
+        tools: toolGroups,
+        skills: skillGroups,
       };
       void renderSplashToString; // surfaced for tests; runtime uses <Splash/>
       const ink = render(/* @__PURE__ */ React.createElement(ReplApp, {

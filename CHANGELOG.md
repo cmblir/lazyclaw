@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.0.7] — 2026-06-05
+
+### Fixed
+
+- **Chat splash now lists the real tools and skills**. 5.0.6 mounted
+  the ink REPL with empty `tools: []` / `skills: []` props, so every
+  install rendered `0 tools · 0 skills`. The chat command now reads
+  `mas/tools/registry.byCategory()` (12 categories: agents, browser,
+  coding, exec, fs, git, iot, learning, media, net, os, scheduling)
+  and `skills.listSkills()` grouped by filename hyphen-prefix, and
+  passes both into the splash. Sensitive categories are flagged with
+  a trailing `*`.
+
 ## [5.0.6] — 2026-06-05
 
 ### Changed
