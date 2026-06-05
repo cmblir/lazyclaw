@@ -154,23 +154,20 @@ test('ReplApp source contains the FullScreen wrapper and routes through it', asy
   assert.ok(literalLeave <= 2, `expected at most 2 literal 1049l occurrences, got ${literalLeave}`);
 });
 
-test('cli.mjs pre-prints splash to primary buffer and nulls splashProps when alt mounts', async () => {
-  // String-level contract test on cli.mjs — keeps the splash hand-off
-  // in lock-step with the alt-buffer mount logic.
+test('cli.mjs passes splashProps to ReplApp and uses exitOnCtrlC (v5.4.1)', async () => {
+  // v5.4.1 contract: splashProps reaches ReplApp directly so the
+  // Static scrollback renders the splash INSIDE the alt-buffer.
+  // The v5.4.0 pre-print gate is intentionally removed (it caused
+  // a blank-screen-on-mount bug).
   const fs = await import('node:fs');
   const url = await import('node:url');
   const path = await import('node:path');
   const here = path.dirname(url.fileURLToPath(import.meta.url));
   const cli = fs.readFileSync(path.join(here, '..', 'cli.mjs'), 'utf8');
-
-  // The hand-off block must exist and gate on isTTY + LAZYCLAW_NO_ALT.
-  assert.ok(cli.includes('_altWillMount'), 'cli.mjs must compute _altWillMount before render()');
-  assert.ok(cli.includes('renderSplashToString(splashProps)'),
-    'cli.mjs must pre-print the splash to the primary buffer');
-  assert.ok(cli.includes('LAZYCLAW_NO_ALT'),
-    'cli.mjs must honor LAZYCLAW_NO_ALT in the alt-mount gate');
-  // render() must be called with exitOnCtrlC: true so the Ctrl-C path
-  // unmounts cleanly and triggers FullScreen cleanup.
+  assert.ok(/ReplApp[\s\S]{0,400}splashProps,/.test(cli),
+    'cli.mjs must pass splashProps to ReplApp');
   assert.ok(cli.includes('exitOnCtrlC: true'),
     'render() must be called with exitOnCtrlC: true');
+  assert.ok(!cli.includes('_altWillMount'),
+    'cli.mjs must NOT reintroduce the v5.4.0 pre-print gate');
 });
