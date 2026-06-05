@@ -33,6 +33,8 @@
   "scripts": {
     "test": "node --test tests/phaseC-*.test.mjs && playwright test",
     "test:bench": "node scripts/bench-providers.mjs",
+    "test:bench:index": "node --test tests/index_store.bench.mjs",
+    "test:perf": "node --test tests/phaseH-perf.test.mjs tests/index_store.bench.mjs",
     "migrate:v5": "node scripts/migrate-v5.mjs",
     "build:splash": "node scripts/build-splash.mjs"
   },
