@@ -124,15 +124,16 @@ test('/help lists every command in SLASH_COMMANDS', async () => {
 
 // ─── trivial info commands ───────────────────────────────────────────────
 
-test('/status returns JSON with expected fields', async () => {
+test('/status reports provider, model, key, messages, session', async () => {
+  // v5.4.4 — /status renders a human-readable block instead of JSON.
+  // Old JSON.parse contract dropped; we assert each field appears.
   const ctx = makeMockCtx();
   const out = await dispatchSlash('/status', '', ctx);
-  const parsed = JSON.parse(out);
-  assert.equal(parsed.provider, 'mockprov');
-  assert.equal(parsed.model, 'mockmodel');
-  assert.equal(parsed.keyMasked, '***');
-  assert.equal(parsed.messageCount, 0);
-  assert.equal(parsed.sessionId, null);
+  assert.match(out, /provider:\s+mockprov/);
+  assert.match(out, /model:\s+mockmodel/);
+  assert.match(out, /api key:\s+\*\*\*/);
+  assert.match(out, /messages:\s+0/);
+  assert.match(out, /session:\s+\(none/);
 });
 
 test('/version returns version + node + platform', async () => {
@@ -142,14 +143,14 @@ test('/version returns version + node + platform', async () => {
   assert.ok(out.includes(process.platform));
 });
 
-test('/usage returns JSON with messageCount + charsSent', async () => {
+test('/usage reports messageCount + charsSent in a human block', async () => {
+  // v5.4.4 — human-readable instead of JSON.
   const ctx = makeMockCtx();
   ctx.setMessages([{ role: 'user', content: 'hi' }]);
   ctx.setCharsSent(42);
   const out = await dispatchSlash('/usage', '', ctx);
-  const parsed = JSON.parse(out);
-  assert.equal(parsed.messageCount, 1);
-  assert.equal(parsed.charsSent, 42);
+  assert.match(out, /messages:\s+1/);
+  assert.match(out, /chars sent:\s+42/);
 });
 
 // ─── /exit + /quit ────────────────────────────────────────────────────────
@@ -313,18 +314,19 @@ test('/memory (no arg) → core, does not throw on empty', async () => {
   assert.equal(typeof out, 'string');
 });
 
-test('/memory recent returns JSON array', async () => {
+test('/memory recent returns a readable list (or empty marker)', async () => {
+  // v5.4.4 — human-readable instead of JSON.
   const ctx = makeMockCtx();
   const out = await dispatchSlash('/memory', 'recent', ctx);
-  const parsed = JSON.parse(out);
-  assert.ok(Array.isArray(parsed));
+  assert.equal(typeof out, 'string');
+  assert.ok(out.length > 0);
 });
 
-test('/memory episodic (no topic) returns JSON list', async () => {
+test('/memory episodic (no topic) returns a readable list (or empty marker)', async () => {
   const ctx = makeMockCtx();
   const out = await dispatchSlash('/memory', 'episodic', ctx);
-  const parsed = JSON.parse(out);
-  assert.ok(Array.isArray(parsed));
+  assert.equal(typeof out, 'string');
+  assert.ok(out.length > 0);
 });
 
 test('/memory garbage shows usage', async () => {

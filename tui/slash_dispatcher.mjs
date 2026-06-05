@@ -73,14 +73,19 @@ async function _help() {
 
 async function _status(_args, ctx) {
   const registry = await _mod(ctx, 'registryMod', () => import('../providers/registry.mjs'));
-  const out = {
-    provider: ctx.getActiveProvName(),
-    model: ctx.getActiveModel(),
-    keyMasked: registry.maskApiKey(ctx.cfg && ctx.cfg['api-key']),
-    messageCount: ctx.getMessages().length,
-    sessionId: ctx.getSessionId() || null,
-  };
-  return JSON.stringify(out);
+  const provider = ctx.getActiveProvName();
+  const model = ctx.getActiveModel() || '(default)';
+  const keyMasked = registry.maskApiKey(ctx.cfg && ctx.cfg['api-key']);
+  const messageCount = ctx.getMessages().length;
+  const sessionId = ctx.getSessionId() || '(none — in-memory)';
+  return [
+    'status:',
+    `  provider:  ${provider}`,
+    `  model:     ${model}`,
+    `  api key:   ${keyMasked}`,
+    `  messages:  ${messageCount}`,
+    `  session:   ${sessionId}`,
+  ].join('\n');
 }
 
 async function _version(_args, ctx) {
@@ -91,22 +96,33 @@ async function _version(_args, ctx) {
 async function _usage(_args, ctx) {
   const msgs = ctx.getMessages();
   const runningUsage = ctx.getRunningUsage && ctx.getRunningUsage();
-  const out = {
-    messageCount: msgs.length,
-    charsSent: (ctx.getCharsSent && ctx.getCharsSent()) || 0,
-  };
-  if (runningUsage) out.tokens = runningUsage;
-  if (runningUsage && ctx.cfg && ctx.cfg.rates && typeof ctx.cfg.rates === 'object') {
-    try {
-      const { costFromUsage } = await import('../providers/rates.mjs');
-      const r = costFromUsage(
-        { provider: ctx.getActiveProvName(), model: ctx.getActiveModel(), usage: runningUsage },
-        ctx.cfg.rates,
-      );
-      if (r) out.cost = r;
-    } catch { /* never let cost-card lookup fail the slash */ }
+  const charsSent = (ctx.getCharsSent && ctx.getCharsSent()) || 0;
+  const lines = [
+    'usage:',
+    `  messages:  ${msgs.length}`,
+    `  chars sent: ${charsSent.toLocaleString('en-US')}`,
+  ];
+  if (runningUsage) {
+    lines.push(
+      `  tokens in:  ${(runningUsage.inputTokens || 0).toLocaleString('en-US')}`,
+      `  tokens out: ${(runningUsage.outputTokens || 0).toLocaleString('en-US')}`,
+      `  tokens tot: ${(runningUsage.totalTokens || 0).toLocaleString('en-US')}`,
+      `  turns:      ${runningUsage.turnsWithUsage || 0}`,
+    );
+    if (ctx.cfg && ctx.cfg.rates && typeof ctx.cfg.rates === 'object') {
+      try {
+        const { costFromUsage } = await import('../providers/rates.mjs');
+        const r = costFromUsage(
+          { provider: ctx.getActiveProvName(), model: ctx.getActiveModel(), usage: runningUsage },
+          ctx.cfg.rates,
+        );
+        if (r && r.totalUsd != null) {
+          lines.push(`  cost (USD): $${Number(r.totalUsd).toFixed(4)}`);
+        }
+      } catch { /* never let cost-card lookup fail the slash */ }
+    }
   }
-  return JSON.stringify(out);
+  return lines.join('\n');
 }
 
 async function _newReset(_args, ctx) {
@@ -295,8 +311,15 @@ async function _memory(args, ctx) {
     return body || '(empty core memory)';
   }
   if (which === 'recent') {
-    const items = mem.loadRecent(20, ctx.cfgDir);
-    return JSON.stringify(items, null, 2);
+    const items = mem.loadRecent(20, ctx.cfgDir) || [];
+    if (!items.length) return '(no recent memory)';
+    return ['recent memory (last ' + items.length + '):',
+      ...items.map((it, i) => {
+        const role = it.role || 'msg';
+        const content = String(it.content || '').replace(/\s+/g, ' ').slice(0, 80);
+        return `  ${String(i + 1).padStart(2)}. [${role}] ${content}${(it.content || '').length > 80 ? '…' : ''}`;
+      })
+    ].join('\n');
   }
   if (which === 'episodic') {
     const topic = tokens[1];
@@ -304,7 +327,11 @@ async function _memory(args, ctx) {
       const body = mem.loadEpisodic(topic, ctx.cfgDir);
       return body || `(no episodic file "${topic}")`;
     }
-    return JSON.stringify(mem.listEpisodic(ctx.cfgDir), null, 2);
+    const items = mem.listEpisodic(ctx.cfgDir) || [];
+    if (!items.length) return '(no episodic files yet — run /dream to consolidate)';
+    return ['episodic files:',
+      ...items.map((it) => `  • ${typeof it === 'string' ? it : (it.topic || JSON.stringify(it))}`)
+    ].join('\n');
   }
   return 'usage: /memory [core|recent|episodic [topic]]';
 }
@@ -817,53 +844,172 @@ async function _trainer(args, ctx) {
   return `/trainer: unknown sub "${sub}" — show|set <p:m>|clear`;
 }
 
-// /dashboard — open the lazyclaw web UI. Reuses an already-running
-// daemon if one answers /healthz on 19600; otherwise spawns a detached
-// `node cli.mjs dashboard --no-open` child so the daemon outlives this
-// chat session. Never installs signal handlers / never process.exits —
-// Ctrl-C inside chat must NOT touch the dashboard.
-async function _dashboard(_args) {
+// /dashboard — open the lazyclaw web UI.
+//
+// v5.4.4 ROOT-CAUSE FIX (was: rapid repeated /dashboard within one chat
+// session spawned 20+ daemon children).
+//
+// Original implementation:
+//   probe /healthz → if !200, spawn detached `lazyclaw dashboard
+//   --no-open` and poll for up to 3s.
+//
+// Failure mode that produced the 20+ spawn pile-up:
+//   1. User types /dashboard. probe fails (no daemon). Spawn child A.
+//   2. Child A begins binding port 19600. Takes ~500ms-2s to be ready.
+//   3. User types /dashboard again BEFORE A is ready. probe still fails.
+//      Spawn child B. Child B sees EADDRINUSE and calls _killPortOccupant
+//      (cli.mjs:3611) which SIGTERMs child A. B takes over.
+//   4. Repeat. Each /dashboard kills the previous daemon and starts a
+//      new one. With autorepeat / many slash calls this stacks fast.
+//
+// Two-layer guard:
+//   - A module-level _dashboardSpawning latch refuses concurrent spawn
+//     attempts. While a spawn is in flight, /dashboard says so + returns
+//     without firing another child.
+//   - A _dashboardChildPid cache remembers the PID we already spawned;
+//     subsequent calls check kill(pid, 0) to confirm the child is alive
+//     and just open the browser without spawning.
+//
+// We probe both /healthz (HTTP) AND a raw net.connect port check so a
+// slow-starting daemon (binding the listener but not yet answering HTTP)
+// still counts as "running".
+let _dashboardSpawning = false;
+let _dashboardChildPid = null;
+
+function _portIsListening(port, timeoutMs = 200) {
+  return new Promise((resolve) => {
+    import('node:net').then(({ createConnection }) => {
+      let settled = false;
+      const sock = createConnection({ host: '127.0.0.1', port });
+      const done = (ok) => {
+        if (settled) return;
+        settled = true;
+        try { sock.destroy(); } catch {}
+        resolve(ok);
+      };
+      sock.once('connect', () => done(true));
+      sock.once('error', () => done(false));
+      setTimeout(() => done(false), timeoutMs);
+    }).catch(() => resolve(false));
+  });
+}
+
+async function _dashboardProbe(port) {
+  // Fast path — port-level probe. Catches a daemon that has bound the
+  // socket but hasn't finished initializing its HTTP routes.
+  if (await _portIsListening(port, 200)) return true;
+  // Slow path — full /healthz fetch, for defense in depth.
+  if (typeof fetch !== 'function') return false;
+  try {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 250);
+    const r = await fetch(`http://127.0.0.1:${port}/healthz`, { signal: ac.signal });
+    clearTimeout(t);
+    return !!(r && r.ok);
+  } catch { return false; }
+}
+
+function _openBrowser(url) {
+  return import('node:child_process').then(({ spawn }) => {
+    let cmd, args;
+    if (process.platform === 'darwin')      { cmd = 'open';     args = [url]; }
+    else if (process.platform === 'win32')  { cmd = 'cmd';      args = ['/c', 'start', '""', url]; }
+    else                                    { cmd = 'xdg-open'; args = [url]; }
+    try { spawn(cmd, args, { stdio: 'ignore', detached: true }).unref(); } catch { /* swallow */ }
+  });
+}
+
+async function _dashboardStop(port) {
+  // Best-effort kill of every lazyclaw dashboard daemon on the box.
+  // Used to clean up after the v5.4.3 spawn pile-up bug.
+  if (process.platform === 'win32') {
+    return 'dashboard stop: not implemented on Windows yet — kill via Task Manager';
+  }
+  const { spawn } = await import('node:child_process');
+  // Step 1: lsof the port and SIGTERM each PID.
+  const portPids = await new Promise((resolve) => {
+    try {
+      const lsof = spawn('lsof', ['-ti', `tcp:${port}`], { stdio: ['ignore', 'pipe', 'ignore'] });
+      let buf = '';
+      lsof.stdout.on('data', (d) => { buf += d.toString('utf8'); });
+      lsof.on('error', () => resolve([]));
+      lsof.on('close', () => resolve(
+        buf.trim().split(/\s+/).map((s) => parseInt(s, 10)).filter(Number.isFinite)
+      ));
+    } catch { resolve([]); }
+  });
+  for (const pid of portPids) {
+    try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ }
+  }
+  // Step 2: pkill any process whose command line includes "lazyclaw dashboard"
+  // — catches detached children that bound a different (random) port via
+  // cmdDashboard's EADDRINUSE fallback.
+  let pkilled = 0;
+  try {
+    const pkill = spawn('pkill', ['-f', 'lazyclaw dashboard'], { stdio: ['ignore', 'ignore', 'ignore'] });
+    pkilled = await new Promise((r) => pkill.on('close', (code) => r(code === 0 ? 1 : 0)));
+  } catch { /* fine */ }
+  _dashboardChildPid = null;
+  return `✓ stopped ${portPids.length} listener(s) on :${port}${pkilled ? ' + remaining `lazyclaw dashboard` processes via pkill' : ''}`;
+}
+
+async function _dashboard(args) {
   const port = 19600;
   const url = `http://127.0.0.1:${port}/dashboard`;
-  const healthUrl = `http://127.0.0.1:${port}/healthz`;
-  const { spawn } = await import('node:child_process');
-  const openBrowser = (u) => {
-    let cmd, args;
-    if (process.platform === 'darwin')      { cmd = 'open';     args = [u]; }
-    else if (process.platform === 'win32')  { cmd = 'cmd';      args = ['/c', 'start', '""', u]; }
-    else                                    { cmd = 'xdg-open'; args = [u]; }
-    try { spawn(cmd, args, { stdio: 'ignore', detached: true }).unref(); } catch { /* swallow */ }
-  };
-  const probe = async () => {
-    if (typeof fetch !== 'function') return false;
-    try {
-      const ac = new AbortController();
-      const t = setTimeout(() => ac.abort(), 300);
-      const r = await fetch(healthUrl, { signal: ac.signal });
-      clearTimeout(t);
-      return !!(r && r.ok);
-    } catch { return false; }
-  };
-  if (await probe()) {
-    openBrowser(url);
+  const sub = splitWhitespace(args)[0];
+  if (sub === 'stop' || sub === 'kill') return _dashboardStop(port);
+
+  // 1. Already running anywhere on the machine? → reuse.
+  if (await _dashboardProbe(port)) {
+    await _openBrowser(url);
     return `✓ dashboard already running — opened ${url}`;
   }
-  // Spawn detached so the daemon outlives this chat process.
+
+  // 2. We spawned in this chat — is that child still alive?
+  if (_dashboardChildPid != null) {
+    try {
+      process.kill(_dashboardChildPid, 0); // signal 0 = liveness probe
+      // Child alive but not answering yet. Don't re-spawn; just nudge.
+      await _openBrowser(url);
+      return `✓ dashboard starting (pid ${_dashboardChildPid}) — opened ${url}`;
+    } catch {
+      _dashboardChildPid = null; // child died; fall through and respawn.
+    }
+  }
+
+  // 3. Spawn already in flight from a concurrent /dashboard? Don't pile on.
+  if (_dashboardSpawning) {
+    await _openBrowser(url);
+    return `dashboard is still booting — opened ${url}; try again in a moment if it didn't load`;
+  }
+
+  // 4. Cold start. Spawn ONE detached child, poll up to 3s, latch the
+  //    spawn flag in a finally so it always clears.
+  _dashboardSpawning = true;
   try {
-    const child = spawn(process.execPath, [process.argv[1], 'dashboard', '--no-open'], {
-      detached: true, stdio: 'ignore', cwd: process.cwd(), env: process.env,
-    });
-    child.unref();
-  } catch (e) {
-    return `dashboard error: failed to spawn — ${e?.message || e}`;
+    const { spawn } = await import('node:child_process');
+    let child;
+    try {
+      child = spawn(process.execPath, [process.argv[1], 'dashboard', '--no-open'], {
+        detached: true, stdio: 'ignore', cwd: process.cwd(), env: process.env,
+      });
+      child.unref();
+      _dashboardChildPid = child.pid;
+    } catch (e) {
+      return `dashboard error: failed to spawn — ${e?.message || e}`;
+    }
+    const start = Date.now();
+    while (Date.now() - start < 3000) {
+      if (await _dashboardProbe(port)) {
+        await _openBrowser(url);
+        return `✓ started dashboard (pid ${child.pid}) — opened ${url}`;
+      }
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    return `⚠ dashboard didn't come up within 3s (pid ${child.pid}). URL: ${url}`;
+  } finally {
+    _dashboardSpawning = false;
   }
-  // Poll /healthz up to ~3s before opening the browser.
-  const start = Date.now();
-  while (Date.now() - start < 3000) {
-    if (await probe()) { openBrowser(url); return `✓ started dashboard — opened ${url}`; }
-    await new Promise((r) => setTimeout(r, 150));
-  }
-  return `⚠ dashboard didn't come up within 3s. Try \`lazyclaw dashboard\` from another terminal. URL: ${url}`;
 }
 
 // ─── dispatch table ──────────────────────────────────────────────────────
