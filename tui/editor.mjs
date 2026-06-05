@@ -50,6 +50,48 @@ export function displayWidth(text) {
   return stringWidth(String(text));
 }
 
+// ─── IME cursor anchor (v5.4.4) ─────────────────────────────────────
+//
+// v5.4.3 shipped an anchor that moved the cursor inside the editor
+// after every render so IME pre-edit composition appeared in the
+// editor box. It also caused visible flicker because Ink's log-update
+// (node_modules/ink/build/log-update.js) emits an eraseLines sequence
+// (`\x1b[2K\x1b[1A...`) on every redraw — and that sequence walks UP
+// from the CURRENT cursor position. With our anchor up inside the
+// editor, eraseLines erased rows ABOVE the frame, then wrote the new
+// frame starting one editor-height higher than the previous one.
+//
+// v5.4.4 fix — monkey-patch process.stdout.write the first time the
+// anchor fires. When the patched writer sees a chunk that BEGINS with
+// `\x1b[2K` (the start of log-update's eraseLines) AND the anchor
+// offset is non-zero, it prepends `\x1b[<offset>B\r` to move the
+// cursor BACK DOWN to the row log-update expects (one below the
+// previous frame's last line). The user sees no flicker; IME still
+// reads the editor cursor position because the anchor lives across
+// the gap between renders.
+const _anchorState = { offset: 0, shimmed: false };
+
+function _installAnchorShim() {
+  if (_anchorState.shimmed) return;
+  if (!(process.stdout && typeof process.stdout.write === 'function')) return;
+  const orig = process.stdout.write.bind(process.stdout);
+  process.stdout.write = function patchedWrite(chunk, ...rest) {
+    try {
+      if (
+        _anchorState.offset > 0 &&
+        typeof chunk === 'string' &&
+        chunk.startsWith('\x1b[2K')
+      ) {
+        const off = _anchorState.offset;
+        _anchorState.offset = 0;
+        return orig.call(this, `\x1b[${off}B\r` + chunk, ...rest);
+      }
+    } catch { /* fall through to unmodified write */ }
+    return orig.call(this, chunk, ...rest);
+  };
+  _anchorState.shimmed = true;
+}
+
 // Cell-aware soft-wrap. Returns an array of visual rows whose width
 // respects the budget (first row uses `firstBudget`, subsequent rows
 // use `contBudget`). Hoisted to module level (was inner-fn) so the
@@ -359,6 +401,8 @@ export function Editor({
     // starts at col 3. Cursor sits one cell past the typed content.
     const prefixWidth = rowInEditor === 0 ? PROMPT_WIDTH : CONTINUATION_WIDTH;
     const colTarget = 3 + prefixWidth + colInLine;
+    _installAnchorShim();
+    _anchorState.offset = rowsUp;
     try {
       process.stdout.write(`\x1b[${rowsUp}A\x1b[${colTarget}G\x1b[?25h`);
     } catch { /* stdout closed — swallow */ }
