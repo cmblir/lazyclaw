@@ -1,0 +1,8 @@
+{
+  "provider": "claude",
+  "model": "claude-opus-4-7",
+  "sandbox": "docker",
+  "channels": {
+    "slack": { "botToken": "xoxb-xxx", "appToken": "xapp-xxx" }
+  }
+}
