@@ -1634,6 +1634,33 @@ function _renderBanner(version) {
   ];
 }
 
+// v5 sloth banner — shared with the ink splash (tui/splash.mjs).
+// Single-tone orange like _renderBanner so the no-arg launcher and the
+// chat splash share a visual identity. Opt out with LAZYCLAW_LEGACY_MENU=1
+// to fall back to the boxed figlet variant above.
+let _v5BannerRowsCache = null;
+async function _renderV5Banner(version) {
+  if (!_v5BannerRowsCache) {
+    try {
+      const { banner } = await import('./tui/banner.generated.mjs');
+      _v5BannerRowsCache = banner.rows;
+    } catch {
+      _v5BannerRowsCache = null;
+    }
+  }
+  if (!_v5BannerRowsCache) return _renderBanner(version);
+  const v = String(version || '?.?.?');
+  return _v5BannerRowsCache.map((row, i) => {
+    if (i === 8) {
+      // Caption row — overlay "lazyclaw v<version>" centered on the 24-wide art
+      const cap = `lazyclaw  v${v}`;
+      const pad = Math.max(0, Math.floor((24 - cap.length) / 2));
+      return _orange(' '.repeat(pad) + cap + ' '.repeat(24 - pad - cap.length));
+    }
+    return _orange(row);
+  });
+}
+
 function _printChatBanner(activeProvName, activeModel, version) {
   if (!process.stdout.isTTY) return;
   // Single-hue header: labels dim-orange, values/emphasis full-orange, so the
@@ -6719,9 +6746,13 @@ async function cmdLauncher() {
     process.stdin.resume();
     process.stdin.ref();
 
+    const useLegacyBanner = !!process.env.LAZYCLAW_LEGACY_MENU;
+    const bannerRowsCached = useLegacyBanner
+      ? _renderBanner(readVersionFromRepo())
+      : await _renderV5Banner(readVersionFromRepo());
     const draw = () => {
       process.stdout.write('\x1b[?25l\x1b[2J\x1b[H'); // hide cursor + clear
-      _renderBanner(readVersionFromRepo()).forEach((l) => process.stdout.write(l + '\n'));
+      bannerRowsCached.forEach((l) => process.stdout.write(l + '\n'));
       process.stdout.write('\n');
       process.stdout.write(`  ${dim('provider ·')} ${ok(provider)}\n`);
       process.stdout.write(`  ${dim('model    ·')} ${ok(model)}\n`);

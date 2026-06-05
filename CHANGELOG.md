@@ -4,6 +4,21 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.0.1] — 2026-06-05
+
+### Changed
+
+- **No-arg launcher banner** now matches the chat splash. Typing
+  `lazyclaw` shows the same sloth ASCII art as `lazyclaw chat` (the
+  Phase C banner) instead of the v4 figlet box. Visual identity is
+  consistent across both entry points.
+
+### Added
+
+- `LAZYCLAW_LEGACY_MENU=1` env var restores the v4 figlet banner in
+  the no-arg launcher for users who prefer it. The arrow-key menu
+  itself is unchanged.
+
 ## [5.0.0] — 2026-06-05
 
 Hermes-parity release. v5 reorganises lazyclaw around four substrates —
