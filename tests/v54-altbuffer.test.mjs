@@ -154,6 +154,32 @@ test('ReplApp source contains the FullScreen wrapper and routes through it', asy
   assert.ok(literalLeave <= 2, `expected at most 2 literal 1049l occurrences, got ${literalLeave}`);
 });
 
+test('ReplApp alt-buffer branch does NOT use <Static/> for scrollback (v5.4.2)', async () => {
+  // Regression for v5.4.1: <Static/> writes above the Ink live frame; in
+  // the DEC 1049 alt canvas the live frame immediately overwrites that
+  // area, so the splash + history were invisible. The alt-buffer branch
+  // must render scrollback items as regular flex children.
+  const fs = await import('node:fs');
+  const url = await import('node:url');
+  const path = await import('node:path');
+  const here = path.dirname(url.fileURLToPath(import.meta.url));
+  const src = fs.readFileSync(path.join(here, '..', 'tui', 'repl.mjs'), 'utf8');
+
+  // The non-alt branch still uses <Static/>; the alt-buffer branch must
+  // map scrollback to ScrollbackItem directly. Pin via a structural regex
+  // that matches the alt-buffer arm: `altEnabled\n? ...flexGrow: 1...
+  // state.scrollback.map(`.
+  const altArm = /altEnabled[\s\S]{0,800}?state\.scrollback\.map\(/;
+  assert.ok(altArm.test(src),
+    'alt-buffer arm must render state.scrollback via .map(ScrollbackItem)');
+  // And it must NOT contain a <Static items=...> call between the
+  // altEnabled ternary and the closing live-region paren.
+  const altRegion = src.match(/altEnabled[\s\S]*?(?=: React\.createElement\(\s*Static)/);
+  assert.ok(altRegion, 'expected to find the alt-buffer arm preceding the non-alt Static fallback');
+  assert.ok(!/Static,\s*\{\s*items:/.test(altRegion[0]),
+    'alt-buffer arm must NOT use <Static items=.../>');
+});
+
 test('cli.mjs passes splashProps to ReplApp and uses exitOnCtrlC (v5.4.1)', async () => {
   // v5.4.1 contract: splashProps reaches ReplApp directly so the
   // Static scrollback renders the splash INSIDE the alt-buffer.

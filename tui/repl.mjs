@@ -2,11 +2,15 @@
 // (spec §5.8) AND a sticky-bottom chat layout (v5.3).
 //
 // Layout (top → bottom inside the outer column):
-//   1. <Static items={scrollback}/> — splash item + per-turn user/assistant
-//      blocks. Static renders each item ONCE to terminal scrollback and
-//      never re-renders it, so the splash + history scroll away naturally
-//      as new content appends. This is the Claude CLI / opencode pattern
-//      translated to Ink's idiom — Static IS the scroll buffer.
+//   1. Scrollback — splash item + per-turn user/assistant blocks.
+//      Non-alt path uses <Static items={scrollback}/>: Ink writes each
+//      item ONCE to terminal scrollback so the splash + history scroll
+//      away naturally as new content appends (the v5.3 contract).
+//      Alt-buffer path renders the same items as regular flex children
+//      instead — Static's "write above the live frame" mechanism is
+//      invisible inside the DEC 1049 alt canvas (the live frame
+//      immediately overwrites that area), so v5.4.1 splashes vanished.
+//      Flex children re-render each frame; <Splash/> output is stable.
 //   2. Live region — partial assistant stream (state.liveAssistant) and
 //      optional <SlashHints/> while the input buffer starts with '/'.
 //      This Box re-renders on every chunk; the rest of the tree does not.
@@ -366,19 +370,23 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
     React.createElement(
       Box,
       { flexDirection: 'column', height: outerHeight },
-      // 1) Scrollback (write-once via Ink Static).
-      //    In alt-buffer mode the Static lives inside a flex-grow inner
-      //    Box so it absorbs slack rather than pushing the editor out of
-      //    the viewport. In legacy mode it stays sibling-flat so the
-      //    structural test (Editor must be last sibling) still passes.
+      // 1) Scrollback.
+      //    Alt-buffer path: render items as regular flex children, NOT via
+      //    <Static/>. Ink's <Static/> writes once to stdout above the live
+      //    frame — in the DEC 1049 alt canvas that area is immediately
+      //    overwritten by the next live frame, so the splash + history
+      //    end up invisible (v5.4.1 regression). Trade-off: items
+      //    re-render each frame; <Splash/> output is stable so this is
+      //    visually identical to the Static version.
+      //    Non-alt path: keeps <Static/> — the legacy v5.3 contract
+      //    (splash scrolls away naturally on the primary buffer) AND the
+      //    structural snapshot in tests/v53-repl-layout.test.mjs.
       altEnabled
         ? React.createElement(
             Box,
             { flexDirection: 'column', flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
-            React.createElement(
-              Static,
-              { items: state.scrollback },
-              (item) => React.createElement(ScrollbackItem, { key: item.id, item })
+            state.scrollback.map((item) =>
+              React.createElement(ScrollbackItem, { key: item.id, item })
             ),
             // Live region — partial assistant stream (inside the scroll
             // region so it grows naturally above the status bar).
