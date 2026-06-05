@@ -4,6 +4,24 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.0.6] — 2026-06-05
+
+### Changed
+
+- **Hermes-style splash**. ANSI Shadow `LAZYCLAW` wordmark on top,
+  bordered panel below with the sloth on the left and Available
+  Tools / Available Skills on the right. Provider, cwd, and session
+  info now sit outside the panel followed by a welcome line and a
+  trainer tip — mirrors the Hermes Agent reference layout.
+- **Panel is terminal-width responsive**. Border spans
+  `process.stdout.columns - 4`, so the box fills wide terminals
+  instead of floating in the middle as a small 80-col box.
+- **`lazyclaw` (no subcommand) now drops into chat**. The arrow-key
+  launcher menu moved behind `lazyclaw menu`. Non-TTY callers
+  (pipes, scripts) still get the historical usage line.
+- **Shared `tui/wordmark.mjs` module** so the chat splash and the
+  launcher render the same ANSI Shadow art without duplication.
+
 ## [5.0.5] — 2026-06-05
 
 ### Fixed

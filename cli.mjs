@@ -1011,6 +1011,8 @@ const SUBCOMMANDS = [
   'agent', 'team', 'task',
   // v5.0 Phase G — persona compose + cross-tool import (spec §9, §10)
   'personality', 'migrate', 'hermes', 'openclaw',
+  // v5.0.6 — arrow-key launcher menu (was the no-arg default in v5.0.5-)
+  'menu',
   // v5.0 Phase H1 — trajectory exporter (spec §2.7)
   'trajectories',
 ];
@@ -1634,30 +1636,32 @@ function _renderBanner(version) {
   ];
 }
 
-// v5 hero banner — the chafa-rendered braille sloth shared with the chat
-// splash (tui/banner.generated.mjs). Centered in TERM_WIDTH at runtime so
-// the launcher and chat splash present identical visual identity.
+// v5 hero banner — ANSI Shadow LAZYCLAW wordmark stacked on top of the
+// braille sloth (tui/banner.generated.mjs + tui/wordmark.mjs). Left-aligned
+// with a 2-cell margin so wide terminals don't push the art to the right.
 // Opt out with LAZYCLAW_LEGACY_MENU=1 to fall back to the v4 figlet box.
-let _slothBannerRowsCache = null;
-async function _loadSlothBanner() {
-  if (_slothBannerRowsCache !== null) return _slothBannerRowsCache;
+let _bannerAssetsCache = null;
+async function _loadBannerAssets() {
+  if (_bannerAssetsCache !== null) return _bannerAssetsCache;
   try {
     const { banner } = await import('./tui/banner.generated.mjs');
-    _slothBannerRowsCache = banner;
+    const { wordmark } = await import('./tui/wordmark.mjs');
+    _bannerAssetsCache = { banner, wordmark };
   } catch {
-    _slothBannerRowsCache = null;
+    _bannerAssetsCache = null;
   }
-  return _slothBannerRowsCache;
+  return _bannerAssetsCache;
 }
 
 async function _renderV5Banner(version) {
-  const b = await _loadSlothBanner();
-  if (!b) return _renderBanner(version); // missing tarball asset → v4 figlet
-  const TERM_W = Math.max(80, process.stdout.columns || 80);
-  const pad = Math.max(0, Math.floor((TERM_W - b.width) / 2));
-  const rows = b.rows.map(r => _orange(' '.repeat(pad) + r));
+  const a = await _loadBannerAssets();
+  if (!a) return _renderBanner(version); // missing tarball asset → v4 figlet
   const v = String(version || '?.?.?');
-  rows.push(_orange((' '.repeat(pad) + `lazyclaw v${v}`).padEnd(TERM_W)));
+  const rows = [];
+  for (const r of a.wordmark.rows) rows.push(_orange('  ' + r));
+  rows.push('');
+  for (const r of a.banner.rows) rows.push(_orange('  ' + r));
+  rows.push(_orange('  ' + `lazyclaw v${v}`));
   return rows;
 }
 
@@ -6944,18 +6948,17 @@ async function main() {
   const argv = process.argv.slice(2);
   const cmd = argv[0];
   const rest = parseArgs(argv.slice(1));
-  // No subcommand at all: drop into the interactive launcher when we
-  // can render one (TTY both ways), otherwise fall through to the
-  // historical "Usage: ..." line so scripts / piped callers stay
-  // predictable.
+  // No subcommand at all: drop into chat REPL (v5.0.6 default). The
+  // arrow-key launcher menu is still available via `lazyclaw menu`.
+  // Non-TTY callers (pipes, scripts) get the historical usage line.
   if (cmd === undefined) {
     if (process.stdin.isTTY && process.stdout.isTTY) {
-      await cmdLauncher();
-      return;
+      process.argv.splice(2, 0, 'chat');
+      return main();
     }
     console.error('Usage: lazyclaw <' + SUBCOMMANDS.join('|') + '> ...');
     console.error('Run `lazyclaw help` for a one-line summary of each subcommand.');
-    console.error('Tip: launch in an interactive terminal to get the arrow-key menu.');
+    console.error('Tip: launch in an interactive terminal to drop into chat.');
     process.exit(2);
   }
   switch (cmd) {
@@ -7347,6 +7350,11 @@ async function main() {
     case '--help':
     case '-h': {
       cmdHelp(rest.positional[0]);
+      break;
+    }
+    case 'menu': {
+      // v5.0.6 — explicit arrow-key launcher (was the no-arg default in v5.0.5-).
+      await cmdLauncher();
       break;
     }
     default:

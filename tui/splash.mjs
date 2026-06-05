@@ -1,21 +1,32 @@
-// tui/splash.mjs — hero-banner launch splash.
+// tui/splash.mjs — Hermes-style hero splash.
 //
-// Public surface:
-//   - <Splash {...props} />            ink component for live REPL mount
-//   - renderSplashToString(props)      pure string builder used by tests
-//                                       and by the non-TTY path.
+// Layout (terminal-width responsive):
 //
-// Layout: 47-cell-wide hero banner centered in 80-col terminal,
-// followed by a two-column tools|skills section (36 cells each)
-// and a 4-line footer.
+//   ██╗      █████╗ ...   ← wordmark (top, single-tone orange)
+//   ...
+//
+//   ╭───── lazyclaw vX.Y.Z · trainer-split + FTS5 recall ─────────────╮
+//   │  [sloth braille]      Available Tools                            │
+//   │                        fs   read · write · ...                   │
+//   │                       Available Skills                           │
+//   │                       N tools · M skills · /help for commands    │
+//   ╰──────────────────────────────────────────────────────────────────╯
+//
+//   provider · X · Y    trainer · A · B
+//   /Users/o/cwd
+//   Session: 20260605_180543_2e0351
+//
+//   Welcome to lazyclaw. Type your message or /help for commands.
+//   + Tip: ...
 import React from 'react';
 import { Box, Text } from 'ink';
 import stringWidth from 'string-width';
 import { theme } from './theme.mjs';
 import { banner } from './banner.generated.mjs';
+import { wordmark } from './wordmark.mjs';
 
-const TERM_WIDTH = 80;
-const COL_WIDTH = 36; // 2 (lpad) + 36 + 2 (mid) + 36 + 2 (rpad) = 78 ≈ 80 with slack
+const LMARGIN = '  ';
+const TITLE = ' trainer-split · FTS5 recall · 6-backend sandbox ';
 
 function fit(text, max) {
   if (stringWidth(text) <= max) return text.padEnd(max);
@@ -35,74 +46,84 @@ function shortCwd(cwd) {
 }
 
 function toolRow({ category, sensitive, verbs }) {
-  const label = sensitive ? `(sensitive) ${category}` : category;
-  const labelWidth = sensitive ? 20 : 9;
+  const label = sensitive ? `${category}*` : category;
   const tail = verbs.slice(0, 6).join(' · ');
-  const more = verbs.length > 6 ? ` (${verbs.length - 6} more)` : '';
-  return `${fit(label, labelWidth)}${tail}${more}`;
+  return `${label.padEnd(12)} ${tail}`;
 }
 
 function skillRow({ group, names }) {
   const tail = names.slice(0, 6).join(' · ');
-  const more = names.length > 6 ? ` (${names.length - 6} more)` : '';
-  return `${fit(group, 9)}${tail}${more}`;
+  return `${group.padEnd(12)} ${tail}`;
 }
 
-function buildBanner() {
-  // Center the hero banner inside TERM_WIDTH. banner.width may be < TERM_WIDTH;
-  // pad each side equally so it floats over the centerline.
-  const pad = Math.max(0, Math.floor((TERM_WIDTH - banner.width) / 2));
-  return banner.rows.map(row => ' '.repeat(pad) + row);
-}
+export function renderSplashToString(props, opts = {}) {
+  const cols = opts.columns || process.stdout.columns || 100;
+  const TERM = Math.max(80, cols);
+  const PANEL_W = TERM - LMARGIN.length * 2;
+  const INNER = PANEL_W - 4;             // 2 border + 2 padding
+  const SLOTH_W = banner.width;
+  const RIGHT_W = Math.max(40, INNER - SLOTH_W - 2);
 
-function buildToolsAndSkills(props) {
-  const { tools = [], skills = [] } = props;
-  const SECT_WIDTH = TERM_WIDTH - 4;
   const lines = [];
-  lines.push(`  ${fit('Available Tools', SECT_WIDTH)}`);
-  lines.push(`  ${'─'.repeat(SECT_WIDTH)}`);
-  for (const t of tools.slice(0, 8)) lines.push(`  ${fit(toolRow(t), SECT_WIDTH)}`);
-  if (tools.length > 8) lines.push(`  ${fit(`... and ${tools.length - 8} more tool groups`, SECT_WIDTH)}`);
-  lines.push('');
-  lines.push(`  ${fit('Available Skills', SECT_WIDTH)}`);
-  lines.push(`  ${'─'.repeat(SECT_WIDTH)}`);
-  for (const s of skills.slice(0, 8)) lines.push(`  ${fit(skillRow(s), SECT_WIDTH)}`);
-  if (skills.length > 8) lines.push(`  ${fit(`... and ${skills.length - 8} more skill groups`, SECT_WIDTH)}`);
-  return lines;
-}
 
-function buildFooter(props) {
+  // Wordmark
+  for (const r of wordmark.rows) lines.push(LMARGIN + r);
+  lines.push('');
+
+  // Panel top with title
+  const versionLabel = ` lazyclaw ${props.version || ''} ·${TITLE} `;
+  const dashLeft = '─'.repeat(8);
+  const dashRight = '─'.repeat(Math.max(2, PANEL_W - 2 - dashLeft.length - stringWidth(versionLabel)));
+  lines.push(`${LMARGIN}╭${dashLeft}${versionLabel}${dashRight}╮`);
+
+  // Right column content
+  const { tools = [], skills = [] } = props;
+  const right = [];
+  right.push('Available Tools');
+  for (const t of tools.slice(0, 8)) right.push(toolRow(t));
+  if (tools.length > 8) right.push(`(and ${tools.length - 8} more tool groups...)`);
+  right.push('');
+  right.push('Available Skills');
+  for (const s of skills.slice(0, 8)) right.push(skillRow(s));
+  if (skills.length > 8) right.push(`(and ${skills.length - 8} more skill groups...)`);
+  right.push('');
+  right.push(`${tools.length} tools · ${skills.length} skills · /help for commands`);
+
+  const sloth = banner.rows.slice();
+  while (sloth.length < right.length) sloth.push(' '.repeat(SLOTH_W));
+  while (right.length < sloth.length) right.push('');
+
+  for (let i = 0; i < sloth.length; i++) {
+    const l = sloth[i] || ' '.repeat(SLOTH_W);
+    const r = fit(right[i] || '', RIGHT_W);
+    lines.push(`${LMARGIN}│ ${l}  ${r} │`);
+  }
+  lines.push(`${LMARGIN}╰${'─'.repeat(PANEL_W - 2)}╯`);
+  lines.push('');
+
+  // Provider / session info
   const { provider, model, trainer = {}, sessionId, cwd } = props;
   const tProv = trainer.provider || provider;
   const tModel = trainer.model || model;
-  const sid = (sessionId || '').slice(0, 8);
-  const cwdShort = shortCwd(cwd || process.cwd());
-  return [
-    fit(`  provider · ${provider} · ${model}`, 56) + fit(`cwd · ${cwdShort}`, 22),
-    fit(`  trainer  · ${tProv} · ${tModel}  session ${sid}`, 78),
-    fit('  slash    · /help · /model · /trainer · /skills · /tools · /exit', 78),
-    fit('  hint     · Shift+Enter newline · Ctrl-R recall · Esc interrupt', 78),
-  ];
-}
+  lines.push(`${LMARGIN}${provider} · ${model}  ·  trainer ${tProv} · ${tModel}`);
+  lines.push(`${LMARGIN}${shortCwd(cwd || process.cwd())}`);
+  if (sessionId) lines.push(`${LMARGIN}Session: ${sessionId}`);
+  lines.push('');
+  lines.push(`${LMARGIN}Welcome to lazyclaw. Type your message or /help for commands.`);
+  lines.push(`${LMARGIN}+ Tip: trainer learns from your Claude Pro subscription at $0.`);
 
-export function renderSplashToString(props, { columns = 80 } = {}) {
-  void columns; // splash is fixed-width 80
-  return [
-    ...buildBanner(),
-    '',
-    ...buildToolsAndSkills(props),
-    '',
-    ...buildFooter(props),
-  ].join('\n');
+  return lines.join('\n');
 }
 
 export function Splash(props) {
   const lines = renderSplashToString(props).split('\n');
+  // Color the wordmark and sloth rows; everything else stays default.
+  const heroRowCount = wordmark.height + 1 + 1 + banner.height + 1; // word + blank + top + sloth + bottom
   return React.createElement(
     Box,
     { flexDirection: 'column' },
     lines.map((line, i) =>
-      React.createElement(Text, { key: i, color: i < banner.height ? theme.fg : undefined }, line)
+      React.createElement(Text, { key: i, color: i < heroRowCount ? theme.fg : undefined }, line)
     )
   );
 }

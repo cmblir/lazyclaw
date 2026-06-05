@@ -25,27 +25,31 @@ test('splash renders without throwing', () => {
   assert.ok(typeof out === 'string' && out.length > 0);
 });
 
-test('every rendered line fits within 80 columns', () => {
-  const out = renderSplashToString(fixture, { columns: 80 });
+test('every rendered line fits within 110 columns (Hermes-style hero width)', () => {
+  const out = renderSplashToString(fixture, { columns: 110 });
   for (const [i, line] of out.split('\n').entries()) {
-    assert.ok(stringWidth(line) <= 80, `line ${i} width=${stringWidth(line)}`);
+    assert.ok(stringWidth(line) <= 110, `line ${i} width=${stringWidth(line)}`);
   }
 });
 
-test('footer is exactly 4 informational lines', () => {
-  const out = renderSplashToString(fixture, { columns: 80 });
-  assert.match(out, /provider · claude-cli · sonnet-4\.7/);
-  assert.match(out, /trainer\s+· claude-cli · haiku-4\.5/);
-  assert.match(out, /slash\s+· \/help/);
-  assert.match(out, /hint\s+· Shift\+Enter/);
+test('shows chat + trainer provider/model line', () => {
+  const out = renderSplashToString(fixture, { columns: 120 });
+  assert.match(out, /claude-cli · sonnet-4\.7/);
+  assert.match(out, /trainer claude-cli · haiku-4\.5/);
+});
+
+test('shows welcome + tip lines', () => {
+  const out = renderSplashToString(fixture, { columns: 120 });
+  assert.match(out, /Welcome to lazyclaw/);
+  assert.match(out, /Type your message or \/help for commands/);
 });
 
 test('tools section lists verbs joined by middle-dot', () => {
-  const out = renderSplashToString(fixture, { columns: 80 });
+  const out = renderSplashToString(fixture, { columns: 120 });
   assert.match(out, /fs\s+read · write · edit · glob · grep/);
 });
 
-test('sensitive tools are tagged with (sensitive)', () => {
-  const out = renderSplashToString(fixture, { columns: 80 });
-  assert.match(out, /\(sensitive\) admin/);
+test('sensitive tools are flagged with *', () => {
+  const out = renderSplashToString(fixture, { columns: 120 });
+  assert.match(out, /admin\*\s+keys · billing/);
 });
