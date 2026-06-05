@@ -35,8 +35,7 @@ const BUILTINS = [
 
 import { TOOL as editTool }  from './edit.mjs';
 import { TOOL as patchTool } from './patch.mjs';
-import * as recallMod from './recall.mjs';
-const recallTool = adaptLegacy(recallMod, { category: 'learning', sensitive: false });
+import { TOOL as recallTool } from './recall.mjs';
 import { TOOLS as learningTools } from './learning.mjs';
 import { TOOLS as webTools } from './web.mjs';
 import { TOOLS as osTools } from './os.mjs';

@@ -33,6 +33,9 @@ export const PARAMETERS = {
 const DEFAULT_SCOPES = ['sessions', 'skills', 'trajectories', 'memories'];
 const MAX_K = 50;
 
+let _stubRecall = null;
+export function __setRecall(fn) { _stubRecall = typeof fn === 'function' ? fn : null; }
+
 export async function exec(args, { configDir } = {}) {
   if (!args || typeof args.query !== 'string' || !args.query.trim()) {
     return { ok: false, error: 'recall: query is required' };
@@ -43,19 +46,24 @@ export async function exec(args, { configDir } = {}) {
   const filter = args.filter && typeof args.filter === 'object' ? args.filter : {};
   const t0 = Date.now();
 
-  try {
-    openIndex(configDir);
-  } catch (err) {
-    return { ok: false, error: `recall: openIndex failed — ${err?.message || err}` };
-  }
-
-  // Delegate to the index's own recall; it already enforces k≤50, sorts
-  // by bm25 across scopes, and returns {scope, rank, bm25, snippet, metadata}.
   let out;
-  try {
-    out = indexRecall(query, { configDir, scope: scopes, k });
-  } catch (err) {
-    return { ok: false, error: `recall: query failed — ${err?.message || err}` };
+  if (_stubRecall) {
+    try {
+      out = await _stubRecall(query, { scope: scopes, k });
+    } catch (err) {
+      return { ok: false, error: `recall: stub threw — ${err?.message || err}` };
+    }
+  } else {
+    try {
+      openIndex(configDir);
+    } catch (err) {
+      return { ok: false, error: `recall: openIndex failed — ${err?.message || err}` };
+    }
+    try {
+      out = indexRecall(query, { configDir, scope: scopes, k });
+    } catch (err) {
+      return { ok: false, error: `recall: query failed — ${err?.message || err}` };
+    }
   }
 
   // Apply optional UNINDEXED filter (metadata-level equality / since predicate).
@@ -84,3 +92,12 @@ export async function exec(args, { configDir } = {}) {
     latencyMs: Date.now() - t0,
   };
 }
+
+export const TOOL = {
+  name: NAME,
+  category: 'learning',
+  sensitive: false,
+  description: DESCRIPTION,
+  parameters: PARAMETERS,
+  exec,
+};
