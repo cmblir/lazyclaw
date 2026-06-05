@@ -4,6 +4,64 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.4.3] — 2026-06-06
+
+### Fixed
+
+- **/help no longer overlaps the status bar in the alt-buffer chat.**
+  The splash carried its own baked-in status row (`provider · model |
+  ctx -- | […] | 0s`) at the end of every tier. With ReplApp's real
+  `<StatusBar/>` already pinned to the bottom of the alt canvas, that
+  baked row appeared as a phantom second status line and — more
+  importantly — pushed the tall splash + slash output past the
+  bottom-pinned chrome. The baked row is removed in all three render
+  tiers; once the user types their first turn, the splash drops from
+  the visible scrollback so /help and other multi-line slash output
+  renders cleanly above the StatusBar.
+- **macOS Hangul / Japanese / Chinese IME pre-edit anchors inside the
+  editor.** Ink's `log-update` writes `frame + '\n'`, which parked the
+  terminal cursor on the row BELOW the editor's bottom border. macOS
+  IMEs anchor the marked-text overlay at the terminal cursor, so
+  composing syllables appeared at the bottom-left of the alt canvas
+  instead of inside the editor box. The editor now emits a
+  `\x1b[<n>A\x1b[<m>G\x1b[?25h` escape after each render to move the
+  cursor back into its content row at the correct column (computed
+  via the same `wrapToBudget` used to render the buffer). Opt out via
+  `LAZYCLAW_NO_CURSOR_ANCHOR=1` if your terminal misbehaves.
+
+### Added
+
+- **Ink-native modal picker for /provider, /model, /personality.**
+  New `tui/modal_picker.mjs` component + ReplApp `openPicker(opts) →
+  Promise<id|null>` API. Editor intercepts Up/Down/Enter/Esc/printable
+  while the modal is up so the chat buffer is never mutated and the
+  current turn is never accidentally submitted. `/provider` with no
+  arg lists the registered providers; `/model` with no arg lists the
+  current provider's suggested models; `/personality` with no arg
+  lists `~/.lazyclaw/personalities/*.md`. The legacy `/provider X` /
+  `/model X` arg form still works for scripts and non-TTY callers.
+- **/dashboard slash.** Probes `http://127.0.0.1:19600/healthz` and
+  reuses an already-running daemon when present; otherwise spawns a
+  detached `lazyclaw dashboard --no-open` child so the daemon
+  outlives the chat session. Opens the URL in the platform browser.
+  Never installs signal handlers; Ctrl-C in chat does NOT touch the
+  dashboard.
+- **/task and /trainer slash forms.** `/task list|show|transcript|
+  abandon|done|remove` wraps `tasks.mjs` directly (start/tick still
+  point to the shell CLI because they need Slack + the multi-agent
+  router). `/trainer show|set <provider:model>|clear` reads and
+  writes `cfg.trainer` via a read-merge-write of `config.json` so
+  the rest of the user's config is preserved.
+- **/clear alias** — same semantics as `/new` / `/reset`; matches
+  Claude CLI muscle memory.
+
+### Changed
+
+- `tui/editor.mjs` `wrapToBudget` is now an exported module-level
+  function so the cursor-anchor effect and future external callers
+  (snapshot tools, tests) can share it without duplicating the
+  cell-aware wrap logic.
+
 ## [5.4.2] — 2026-06-06
 
 ### Fixed
