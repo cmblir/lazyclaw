@@ -28,7 +28,7 @@
 // `width: '100%'` so Ink's wrap-ansi (already string-width aware) gets
 // the full terminal budget — fixes the perceived right-edge truncation
 // on long Korean buffers.
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Box, Text, useInput } from 'ink';
 import stringWidth from 'string-width';
 import { theme } from './theme.mjs';
@@ -150,15 +150,31 @@ export function Editor({
   const [state, setState] = useState(() => makeEditorState({ history }));
   const slashOpen = Array.isArray(slashSuggestions) && slashSuggestions.length > 0;
 
+  // v5.4.2: keep a synchronous mirror of the editor state so back-to-back
+  // keystrokes don't lose characters to React's stale-closure problem.
+  // Korean / Japanese IME commits each completed syllable as a separate
+  // stdin event; if two events fire inside one React frame the second
+  // useInput call captures the pre-first-event `state` and overwrites
+  // the first event's setState payload — leaving the first character
+  // missing from `buffer`. Reading + writing through the ref means every
+  // applyKey() sees the latest buffer regardless of render timing.
+  const stateRef = useRef(state);
+  useEffect(() => { stateRef.current = state; }, [state]);
+  const commit = (next) => {
+    stateRef.current = next;
+    setState(next);
+  };
+
   useInput((input, key) => {
+    const current = stateRef.current;
     // ─── Slash-popup keyboard contract (highest priority when open) ──
     if (slashOpen) {
       // Esc: clear the buffer and dismiss the popup. The host's onEscape
       // is NOT called in this branch — Esc here is a popup gesture, not
       // a turn-abort. (Outside of popup mode Esc still aborts streaming.)
       if (key.escape) {
-        const cleared = { ...state, buffer: '', cursor: 0, lastSubmit: null, lastWasPaste: false };
-        setState(cleared);
+        const cleared = { ...current, buffer: '', cursor: 0, lastSubmit: null, lastWasPaste: false };
+        commit(cleared);
         if (onBufferChange) {
           try { onBufferChange(''); } catch {}
         }
@@ -184,15 +200,15 @@ export function Editor({
       if (key.tab || key.return) {
         const safeIdx = Math.max(0, Math.min(slashSuggestions.length - 1, slashSelectedIndex || 0));
         const picked = slashSuggestions[safeIdx];
-        const bufTrim = state.buffer.replace(/\s+$/, '');
-        const alreadyExact = !!picked && (state.buffer === picked.cmd || bufTrim === picked.cmd);
+        const bufTrim = current.buffer.replace(/\s+$/, '');
+        const alreadyExact = !!picked && (current.buffer === picked.cmd || bufTrim === picked.cmd);
         if (alreadyExact) {
           if (key.tab) return; // no completion to make
           // key.return on exact match → fall through to applyKey/submit.
         } else {
           if (picked) {
-            const next = fillSlashCommand(state, picked.cmd);
-            setState(next);
+            const next = fillSlashCommand(current, picked.cmd);
+            commit(next);
             if (onBufferChange) {
               try { onBufferChange(next.buffer); } catch {}
             }
@@ -206,8 +222,8 @@ export function Editor({
     // Esc: forward to host (ReplApp uses this to abort an in-flight turn).
     // Do not mutate the buffer — the user may want to keep typing.
     if (key.escape) { if (onEscape) onEscape(); return; }
-    const next = applyKey(state, { input, key });
-    setState(next);
+    const next = applyKey(current, { input, key });
+    commit(next);
     if (onBufferChange) {
       try { onBufferChange(next.buffer); } catch { /* observer is best-effort */ }
     }
