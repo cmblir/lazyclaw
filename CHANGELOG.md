@@ -4,6 +4,20 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.0.2] — 2026-06-05
+
+### Fixed
+
+- **Critical: `tui/` and `mcp/` directories were missing from the npm
+  tarball.** Phase C (ink TUI: splash, repl, editor, ghost, banner,
+  theme) and Phase E (MCP stdio client + server_spawn driver) shipped
+  in the git tree but were not listed in `package.json#files`, so
+  `npm install -g lazyclaw@5.0.0` / `@5.0.1` produced a package that
+  silently fell through to the v4 figlet REPL on `lazyclaw chat`
+  because `import('./tui/repl.mjs')` threw `ERR_MODULE_NOT_FOUND`.
+  Both directories are now in the file list and verified present in
+  the tarball.
+
 ## [5.0.1] — 2026-06-05
 
 ### Changed
