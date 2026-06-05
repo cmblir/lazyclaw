@@ -4,6 +4,49 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.4.4] — 2026-06-06
+
+### Fixed
+
+- **/dashboard no longer spawns a daemon pile-up.** Rapid repeated
+  `/dashboard` inside a single chat session used to fork a fresh
+  detached `lazyclaw dashboard --no-open` child every time, and each
+  new child's cmdDashboard called `_killPortOccupant` to SIGTERM the
+  prior one to claim port 19600. With autorepeat or several /dashboard
+  calls back-to-back this stacked 20+ zombie children. Root-cause fix:
+  module-level `_dashboardSpawning` latch + `_dashboardChildPid` cache;
+  port-level probe (raw `net.connect` to :19600) before the slower
+  `/healthz` HTTP probe, so a daemon that has bound the socket but
+  not yet answered HTTP is recognized as running. Concurrent /dashboard
+  calls now reuse the in-flight spawn and the same browser open.
+- **No more cursor flicker from the IME anchor.** v5.4.3's anchor
+  moved the terminal cursor inside the editor between renders so
+  Ink's next `log-update` eraseLines walked up from inside the editor
+  and erased rows ABOVE the actual frame, painting the new frame one
+  editor-height higher (visible jitter on every keystroke). The
+  editor now lazy-installs a one-time `process.stdout.write` shim:
+  whenever the next write starts with `\x1b[2K` (log-update's
+  eraseLines prefix) AND the anchor offset is non-zero, the shim
+  prepends `\x1b[<offset>B\r` to move the cursor back DOWN to the
+  row log-update expects before erasing. Net effect: IME composition
+  stays inside the editor AND there is no visible flicker.
+
+### Added
+
+- **`/dashboard stop`** — best-effort kill of every listener bound to
+  :19600 (via `lsof -ti tcp:19600 | kill`) plus a `pkill -f
+  "lazyclaw dashboard"` sweep. Cleanup helper for anyone who ran
+  v5.4.3 long enough to accumulate zombie daemons.
+
+### Changed
+
+- `/status`, `/usage`, `/memory recent`, `/memory episodic` (no
+  topic) now render human-readable blocks instead of JSON dumps. The
+  shell-CLI subcommands keep their original `emitJson` output for
+  scripts. (Hermes-style friendliness pass.)
+- `/help` text for `/provider`, `/model`, `/personality` updated to
+  surface the no-arg picker as the primary UX.
+
 ## [5.4.3] — 2026-06-06
 
 ### Fixed
