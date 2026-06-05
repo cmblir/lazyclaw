@@ -13,7 +13,11 @@
 //   filter:    optional object of UNINDEXED column equality filters
 //              (session_id, agent, outcome, trained_by, group_name, kind, since)
 
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { openIndex, recall as indexRecall } from '../index_db.mjs';
+import { sameFamily } from '../confidence.mjs';
 
 export const NAME = 'recall';
 export const DESCRIPTION =
@@ -26,12 +30,50 @@ export const PARAMETERS = {
     k: { type: 'integer', minimum: 1, maximum: 50 },
     summarize: { type: 'boolean' },
     filter: { type: 'object', additionalProperties: true },
+    // M10 — cross-CLI provider-aware ranking. When the caller is a
+    // worker on a specific provider (e.g. anthropic/openai/gemini),
+    // skills whose frontmatter cross_cli_tested[] includes that
+    // provider's family are boosted ahead of untested duplicates.
+    workerProvider: { type: 'string', description: 'Boost skills whose cross_cli_tested[] includes this provider family (e.g. "anthropic").' },
   },
   required: ['query'],
 };
 
 const DEFAULT_SCOPES = ['sessions', 'skills', 'trajectories', 'memories'];
 const MAX_K = 50;
+
+function _defaultConfigDir() {
+  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
+}
+
+// Minimal frontmatter parser — read just the cross_cli_tested provider
+// list for a skill by name. Returns [] when the file is missing or
+// parse fails (best-effort ranking helper, not a strict loader).
+function _readSkillCrossCli(skillName, configDir) {
+  if (!skillName) return [];
+  try {
+    const dir = configDir || _defaultConfigDir();
+    const filePath = path.join(dir, 'skills', `${skillName}.md`);
+    if (!fs.existsSync(filePath)) return [];
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const m = raw.match(/^---\n([\s\S]*?)\n---/);
+    if (!m) return [];
+    const fm = m[1];
+    // Find cross_cli_tested block — YAML list form:
+    //   cross_cli_tested:
+    //     - provider: anthropic
+    //       …
+    const idx = fm.indexOf('cross_cli_tested:');
+    if (idx < 0) return [];
+    const tail = fm.slice(idx);
+    const providers = [];
+    for (const line of tail.split('\n')) {
+      const pm = line.match(/^\s*-?\s*provider:\s*['"]?([\w.-]+)['"]?\s*$/);
+      if (pm) providers.push(pm[1]);
+    }
+    return providers;
+  } catch { return []; }
+}
 
 let _stubRecall = null;
 export function __setRecall(fn) { _stubRecall = typeof fn === 'function' ? fn : null; }
@@ -83,12 +125,34 @@ export async function exec(args, { configDir } = {}) {
     });
   }
 
+  // M10 — cross-CLI provider-aware boost. For each `skills` hit, peek
+  // at the skill file's cross_cli_tested[] frontmatter. If any entry's
+  // provider is in the same family as workerProvider, promote the hit
+  // above untested siblings. We do this AFTER the FTS5 ranking so the
+  // base bm25 ordering still dominates — boosting is a tie-breaker /
+  // small re-rank, not a wholesale replacement.
+  const workerProvider = args.workerProvider ? String(args.workerProvider).trim() : '';
+  if (workerProvider) {
+    const boosted = hits.map((h, idx) => {
+      if (h.scope !== 'skills') return { h, boost: 0, idx };
+      const skillName = h.metadata?.skill_name || '';
+      const tested = _readSkillCrossCli(skillName, configDir);
+      const matched = tested.some((p) => sameFamily(p, workerProvider));
+      return { h, boost: matched ? 1 : 0, idx };
+    });
+    // Stable sort: matching skills first (boost desc), then preserve
+    // original FTS5 order via idx for ties.
+    boosted.sort((a, b) => (b.boost - a.boost) || (a.idx - b.idx));
+    hits = boosted.map((b) => ({ ...b.h, crossCliBoosted: b.boost > 0 }));
+  }
+
   return {
     ok: true,
     query,
     hits: hits.slice(0, k),
     summary: null,           // v5.0: raw hits only; v5.1 wires trainer.
     summarizedBy: null,
+    workerProvider: workerProvider || null,
     latencyMs: Date.now() - t0,
   };
 }

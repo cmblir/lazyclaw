@@ -339,6 +339,22 @@ export function makeHandler(ctx) {
   // having to subscribe to the SSE bus.
   const SUGG_RING_MAX = 50;
   const nudgeSuggestionsRing = [];
+  // v5 Group A (M2): when the operator opts in via
+  // cfg.orchestra.learning.autoSynthOnNudge, every emitted cluster
+  // also triggers runLearning('nudge', { cluster }) so the canonical
+  // funnel can distill the repeated prompt into a SKILL.md. The SSE
+  // broadcast and ring buffer still fire unconditionally so the
+  // dashboard sees suggestions even when auto-synth is disabled
+  // (the conservative default — we never want a noisy chat to bloat
+  // the skills/ dir without the operator's blessing).
+  let _learningHub = null;
+  const _readAutoSynthOnNudge = () => {
+    try {
+      const cfg = typeof ctx.readConfig === 'function' ? ctx.readConfig() : {};
+      const orch = cfg?.orchestra || cfg?.orchestrator || {};
+      return !!(orch.learning && orch.learning.autoSynthOnNudge);
+    } catch { return false; }
+  };
   const _nudgeLoop = nudge.startNudgeLoop({
     configDir: gwConfigDir,
     emit: (event) => {
@@ -350,6 +366,26 @@ export function makeHandler(ctx) {
           nudgeSuggestionsRing.length = SUGG_RING_MAX;
         }
       } catch { /* ignore */ }
+      if (_readAutoSynthOnNudge()) {
+        (async () => {
+          try {
+            if (!_learningHub) _learningHub = await import('./mas/learning.mjs');
+            const cfg = typeof ctx.readConfig === 'function' ? ctx.readConfig() : {};
+            // Wrap the single cluster in the items[] shape runLearning('nudge')
+            // expects so the representative task is the cluster's sample
+            // prompt.
+            const itemTask = { id: `nudge-${event.ts || Date.now()}`, title: 'nudge cluster', turns: [{ agent: 'user', text: event.cluster?.sample || '' }] };
+            await _learningHub.runLearning('nudge', {
+              cluster: { items: [itemTask] },
+              configDir: gwConfigDir,
+              cfg,
+            });
+          } catch (err) {
+            try { logger?.warn?.('nudge_learning_failed', { err: err.message }); }
+            catch { /* ignore */ }
+          }
+        })();
+      }
     },
     logger,
   });
@@ -510,11 +546,13 @@ export function makeHandler(ctx) {
           return writeJson(res, 200, result);
         }
         case route === 'GET /health':
+        case route === 'GET /healthz':
           // Conventional liveness check — always 200 if the process
           // is alive enough to hit the route. No config inspection
           // (use /doctor for readiness), no provider probing — this
           // is the "is the daemon up?" probe that load balancers
-          // and watchdog scripts expect at this path.
+          // and watchdog scripts expect at this path. m15: K8s
+          // readiness probes default to /healthz so we alias.
           return writeJson(res, 200, {
             ok: true,
             status: 'alive',
@@ -1550,7 +1588,10 @@ export function makeHandler(ctx) {
           // 404 when the file is missing so the caller can branch.
           // 400 when the name fails skillPath validation (path traversal,
           // dotfile, etc.) — same protections as the CLI.
-          const name = skillMatch[1];
+          // m13 — decodeURIComponent before validation (see PUT below).
+          let name;
+          try { name = decodeURIComponent(skillMatch[1]); }
+          catch { return writeJson(res, 400, { error: 'malformed skill name' }); }
           try {
             const cfgDir = ctx.sessionsDirGetter();
             const file = skillPath(name, cfgDir);
@@ -1570,7 +1611,13 @@ export function makeHandler(ctx) {
           //   201 on first write, 200 on overwrite (caller can branch on
           //   the status if they care about idempotency vs newness).
           //   400 on invalid name (skillPath validation) or oversize body.
-          const name = skillMatch[1];
+          // m13 — decodeURIComponent the segment before validation so
+          // a request like `PUT /skills/foo%2Fbar` is rejected as a path-
+          // separator (slash) rather than letting the literal-percent
+          // filename slip through.
+          let name;
+          try { name = decodeURIComponent(skillMatch[1]); }
+          catch { return writeJson(res, 400, { error: 'malformed skill name' }); }
           const cfgDir = ctx.sessionsDirGetter();
           let priorExists = false;
           try {
@@ -1598,7 +1645,10 @@ export function makeHandler(ctx) {
           // existed or not, mirroring DELETE /sessions/<id>. The body
           // reports `removed: true|false` so callers can branch when
           // they care.
-          const name = skillMatch[1];
+          // m13 — decodeURIComponent before validation (see PUT below).
+          let name;
+          try { name = decodeURIComponent(skillMatch[1]); }
+          catch { return writeJson(res, 400, { error: 'malformed skill name' }); }
           const cfgDir = ctx.sessionsDirGetter();
           try {
             const file = skillPath(name, cfgDir);
@@ -1612,11 +1662,22 @@ export function makeHandler(ctx) {
         case req.method === 'DELETE' && !!sessionMatch: {
           // DELETE /sessions/<id> — idempotent. 200 on both "deleted" and
           // "didn't exist" so callers can use it as a reset without checking
-          // first.
+          // first. m16: include `removed: <bool>` for shape parity with
+          // sibling DELETEs (/skills, /workflows).
           const id = sessionMatch[1];
           try {
-            ctx.sessionsMod.clearSession(id, ctx.sessionsDirGetter());
-            return writeJson(res, 200, { ok: true, id });
+            // Use the sessions module's path resolver to check existence
+            // BEFORE clearSession (which is unconditional unlink-if-exists).
+            const sessDir = ctx.sessionsDirGetter();
+            let existedBefore = false;
+            try {
+              const sessPath = ctx.sessionsMod.sessionPath
+                ? ctx.sessionsMod.sessionPath(id, sessDir)
+                : null;
+              if (sessPath) existedBefore = fs.existsSync(sessPath);
+            } catch { /* sessionPath unavailable → leave as unknown */ }
+            ctx.sessionsMod.clearSession(id, sessDir);
+            return writeJson(res, 200, { ok: true, id, removed: existedBefore });
           } catch (err) {
             return writeJson(res, 400, { error: err?.message || String(err) });
           }
@@ -1949,14 +2010,29 @@ export function makeHandler(ctx) {
           }
         }
         case req.method === 'GET' && /^\/agents\/([^/]+)\/memory$/.test(url.pathname): {
+          // M13 — 404 when the agent is not registered. The historical
+          // behaviour silently returned an empty body, which made
+          // typos indistinguishable from "no memory yet" and let the
+          // dashboard render a stub for a non-existent agent.
           const name = url.pathname.match(/^\/agents\/([^/]+)\/memory$/)[1];
+          const agentsMod = await import('./agents.mjs');
+          if (!agentsMod.getAgent(name)) {
+            return writeJson(res, 404, { error: `no agent "${name}"`, name });
+          }
           const memMod = await import('./mas/agent_memory.mjs');
           const text = memMod.readMemory(name);
           res.writeHead(200, { 'content-type': 'text/markdown; charset=utf-8', 'cache-control': 'no-cache' });
           return res.end(text);
         }
         case req.method === 'PUT' && /^\/agents\/([^/]+)\/memory$/.test(url.pathname): {
+          // M13 — 404 when the agent is not registered. Without this
+          // check, writeRaw happily created memory.md for a misspelled
+          // agent name and the orphan file lived forever.
           const name = url.pathname.match(/^\/agents\/([^/]+)\/memory$/)[1];
+          const agentsMod = await import('./agents.mjs');
+          if (!agentsMod.getAgent(name)) {
+            return writeJson(res, 404, { error: `no agent "${name}"`, name });
+          }
           const memMod = await import('./mas/agent_memory.mjs');
           // Read raw text body — content-type defaults to text/markdown
           // but JSON {"text": "..."} is also accepted for tooling that
@@ -1979,6 +2055,10 @@ export function makeHandler(ctx) {
         }
         case req.method === 'DELETE' && /^\/agents\/([^/]+)\/memory$/.test(url.pathname): {
           const name = url.pathname.match(/^\/agents\/([^/]+)\/memory$/)[1];
+          const agentsMod = await import('./agents.mjs');
+          if (!agentsMod.getAgent(name)) {
+            return writeJson(res, 404, { error: `no agent "${name}"`, name });
+          }
           const memMod = await import('./mas/agent_memory.mjs');
           const removed = memMod.clear(name);
           return writeJson(res, 200, { name, cleared: removed });

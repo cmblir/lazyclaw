@@ -195,10 +195,15 @@ test.describe('Phase 18 — agent memory', () => {
     expect(JSON.parse(tick.stdout).stoppedBy).toBe('done');
 
     // First request to anthropic must include the prior-insight bullet
-    // inside the system prompt body.
-    const firstPost = mock.posts[0].body as { system: string };
-    expect(firstPost.system).toContain('prior insight A');
-    expect(firstPost.system).toContain('What you remember');
+    // inside the system prompt body. Group B / C9 lifted system to a
+    // cache_control:ephemeral block array (from the mention router's
+    // cache:true). Normalise to a string regardless of shape.
+    const firstPost = mock.posts[0].body as { system: string | Array<{ text: string }> };
+    const sysText = typeof firstPost.system === 'string'
+      ? firstPost.system
+      : (firstPost.system || []).map((b) => b.text || '').join('\n');
+    expect(sysText).toContain('prior insight A');
+    expect(sysText).toContain('What you remember');
     await mock.close();
   });
 

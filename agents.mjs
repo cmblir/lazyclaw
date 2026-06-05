@@ -80,13 +80,15 @@ function defaultShape(name) {
     // for `lazyclaw agent reflect`; 'off' disables writes entirely.
     memoryWrite: 'auto',
     memoryMaxChars: 12 * 1024,
-    // Phase 20 — self-improving skill synthesis trigger. 'manual'
-    // (default) means a skill is only written when the user runs
-    // `lazyclaw agent skill-synth`; 'auto' fires synthesis on terminal
-    // `done` alongside reflection; 'off' disables it. Defaults to
-    // 'manual' (unlike memoryWrite) because a synthesised SKILL.md
-    // feeds every future agent's prompt, so we keep it opt-in.
-    skillWrite: 'manual',
+    // v5 Group A (M3) — self-improving skill synthesis trigger.
+    // Default flipped to 'auto' so the learning loop actually closes
+    // end-to-end on a fresh install: every agent that finishes a task
+    // contributes a SKILL.md unless the operator explicitly opted out
+    // ('manual' waits for `lazyclaw agent skill-synth`; 'off' disables).
+    // The canonical post-task hook (mas/learning.mjs) also reads
+    // `(skillWrite ?? 'auto')`, so v4 records that pre-date this field
+    // get the new default without a forced migration.
+    skillWrite: 'auto',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
@@ -114,7 +116,7 @@ export function registerAgent({ name, displayName, role = '', provider = 'claude
   if (!VALID_MEMORY_WRITE.includes(mw)) {
     throw new AgentError(`memoryWrite must be one of ${VALID_MEMORY_WRITE.join(', ')}`, 'AGENT_BAD_MEMORY_WRITE');
   }
-  const sw = skillWrite ?? 'manual';
+  const sw = skillWrite ?? 'auto';
   if (!VALID_SKILL_WRITE.includes(sw)) {
     throw new AgentError(`skillWrite must be one of ${VALID_SKILL_WRITE.join(', ')}`, 'AGENT_BAD_SKILL_WRITE');
   }

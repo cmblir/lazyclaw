@@ -5,6 +5,7 @@
 
 import * as registry from './tools/registry.mjs';
 import * as audit from './audit.mjs';
+import { DEFAULT_TOOLS } from '../agents.mjs';
 
 export class ToolError extends Error {
   constructor(message, code) {
@@ -14,9 +15,15 @@ export class ToolError extends Error {
   }
 }
 
+// Resolve the tool whitelist into JSON-Schema entries.
+//   - undefined    → DEFAULT_TOOLS (the 5 safe defaults a fresh agent gets)
+//   - []           → advertise zero tools (matches the deny-check
+//                    semantics in runTool — an agent with no whitelist
+//                    is allowed to use NOTHING, not everything)
+//   - ['bash',…]   → the explicit list, intersected with the registry
 export function listToolSchemas(names) {
   const out = [];
-  const wanted = Array.isArray(names) && names.length ? names : registry.listNames();
+  const wanted = names === undefined ? DEFAULT_TOOLS : (Array.isArray(names) ? names : []);
   for (const name of wanted) {
     const t = registry.lookup(name);
     if (!t) continue;

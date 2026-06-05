@@ -230,30 +230,85 @@ export function makeOrchestratorProvider(opts = {}) {
       yield `\n`;
 
       // ── Phase 2: EXECUTE ────────────────────────────────────────────
-      yield `### 2. Executing ${trimmed.length} subtask${trimmed.length === 1 ? '' : 's'}\n\n`;
+      // Concurrency policy (canonical spec §3 + C11 fix):
+      //   concurrency <= 1  → sequential, streams each worker's chunks
+      //                        inline as they arrive (live-feedback UX).
+      //   concurrency >= 2  → Promise.all-based parallel dispatch. Each
+      //                        worker buffers its own chunks; we flush
+      //                        them IN PLAN ORDER (subtask 1, then 2, …)
+      //                        so the user-facing output stays readable
+      //                        regardless of which worker finished first.
+      // The number is clamped to [1, workers.length] so a runaway value
+      // can't accidentally over-subscribe a single worker.
+      const rawConcurrency = Number.isFinite(o.concurrency) ? Math.floor(o.concurrency) : 1;
+      const concurrency = Math.max(1, Math.min(rawConcurrency, workers.length));
+      yield `### 2. Executing ${trimmed.length} subtask${trimmed.length === 1 ? '' : 's'}${concurrency > 1 ? ` (concurrency=${concurrency}, parallel)` : ''}\n\n`;
       const results = [];
-      for (let i = 0; i < trimmed.length; i++) {
-        const sub = trimmed[i];
-        const worker = workers[i % workers.length];
-        yield `**Subtask ${sub.id}** \`${worker.name}${worker.model ? ':' + worker.model : ''}\` — ${sub.task}\n\n`;
-        let res = '';
-        try {
-          for await (const chunk of worker.prov.sendMessage([{ role: 'user', content: sub.task }], {
-            apiKey: keyResolver(cfg, worker.name),
-            model: worker.model || undefined,
-            signal: callerOpts.signal,
-          })) {
-            const s = String(chunk);
-            res += s;
-            yield s;
+      if (concurrency <= 1) {
+        // Sequential streaming path — historical default, preserved.
+        for (let i = 0; i < trimmed.length; i++) {
+          const sub = trimmed[i];
+          const worker = workers[i % workers.length];
+          yield `**Subtask ${sub.id}** \`${worker.name}${worker.model ? ':' + worker.model : ''}\` — ${sub.task}\n\n`;
+          let res = '';
+          try {
+            for await (const chunk of worker.prov.sendMessage([{ role: 'user', content: sub.task }], {
+              apiKey: keyResolver(cfg, worker.name),
+              model: worker.model || undefined,
+              signal: callerOpts.signal,
+            })) {
+              const s = String(chunk);
+              res += s;
+              yield s;
+            }
+            results.push({ ...sub, worker: `${worker.name}${worker.model ? ':' + worker.model : ''}`, result: res, error: null });
+          } catch (e) {
+            const msg = e?.message || String(e);
+            yield `\n⚠ worker error: ${msg}\n`;
+            results.push({ ...sub, worker: `${worker.name}${worker.model ? ':' + worker.model : ''}`, result: '', error: msg });
           }
-          results.push({ ...sub, worker: `${worker.name}${worker.model ? ':' + worker.model : ''}`, result: res, error: null });
-        } catch (e) {
-          const msg = e?.message || String(e);
-          yield `\n⚠ worker error: ${msg}\n`;
-          results.push({ ...sub, worker: `${worker.name}${worker.model ? ':' + worker.model : ''}`, result: '', error: msg });
+          yield `\n\n---\n\n`;
         }
-        yield `\n\n---\n\n`;
+      } else {
+        // Parallel dispatch — buffer chunks per subtask, then flush in
+        // plan order. We start every subtask up-front (Promise.all over
+        // the slice) so wall-clock equals max-per-subtask, not sum.
+        // A single subtask failure does NOT block the others — the
+        // _runSubtask wrapper catches and records the error inline.
+        async function _runSubtask(sub, worker) {
+          const chunks = [];
+          let error = null;
+          try {
+            for await (const chunk of worker.prov.sendMessage([{ role: 'user', content: sub.task }], {
+              apiKey: keyResolver(cfg, worker.name),
+              model: worker.model || undefined,
+              signal: callerOpts.signal,
+            })) {
+              chunks.push(String(chunk));
+            }
+          } catch (e) {
+            error = e?.message || String(e);
+          }
+          return { sub, worker, chunks, error };
+        }
+        const settled = await Promise.all(
+          trimmed.map((sub, i) => _runSubtask(sub, workers[i % workers.length])),
+        );
+        // Flush in plan order so the synthesis prompt + user view see
+        // subtask 1, then 2, etc.
+        for (const { sub, worker, chunks, error } of settled) {
+          yield `**Subtask ${sub.id}** \`${worker.name}${worker.model ? ':' + worker.model : ''}\` — ${sub.task}\n\n`;
+          const text = chunks.join('');
+          if (text) yield text;
+          if (error) yield `\n⚠ worker error: ${error}\n`;
+          results.push({
+            ...sub,
+            worker: `${worker.name}${worker.model ? ':' + worker.model : ''}`,
+            result: text,
+            error,
+          });
+          yield `\n\n---\n\n`;
+        }
       }
 
       // ── Phase 3: SYNTHESIS ──────────────────────────────────────────
@@ -276,6 +331,29 @@ export function makeOrchestratorProvider(opts = {}) {
       } catch (e) {
         yield `⚠ synthesis error: ${e?.message || String(e)}. Worker outputs above are the final material — please review them directly.\n`;
       }
+
+      // v5 (canonical decision C2) — fire the canonical post-task
+      // learning hook in a microtask so the user's stream is not
+      // blocked. Failures are silent here; mas/learning.mjs already
+      // swallows each sub-routine's errors and the audit log captures
+      // observability on its own. We import lazily so the orchestrator
+      // module stays cheap to load when learning is unused.
+      queueMicrotask(() => {
+        import('../mas/orchestra.mjs')
+          .then(o => o.firePostTask({
+            cfg,
+            agent: { name: 'orchestrator', provider: planner.name, model: planner.model, role: SYNTHESIS_SYSTEM },
+            task: {
+              id: `orch-${Date.now()}`,
+              title: userText.slice(0, 80),
+              turns: [
+                { agent: 'user', text: userText },
+                ...results.map(r => ({ agent: r.worker, text: r.result || r.error || '' })),
+              ],
+            },
+          }))
+          .catch(() => { /* swallow — learning is best-effort */ });
+      });
     },
   };
 }

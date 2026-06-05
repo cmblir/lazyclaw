@@ -297,7 +297,25 @@ function buildAntiPatternPrompt(task, transcript) {
 // agent skill, which we then version-bump). Body/description are
 // re-sanitised here too so a direct caller (CLI/router) can't bypass
 // the redaction + cap. Returns { skill, path, version }.
-export function installSynthesized({ name, description = '', body = '', sourceTask = '', createdBy = 'agent' } = {}, configDir, ts = new Date()) {
+export function installSynthesized({
+  name,
+  description = '',
+  body = '',
+  sourceTask = '',
+  createdBy = 'agent',
+  // v5 (Group A — C6 + M1): forward every frontmatter field
+  // synthesizeSkill / runLearning already computed. Without these
+  // forwards the resulting SKILL.md was missing trained_by, confidence,
+  // cross_cli_tested and the anti-pattern flag — exactly the metadata
+  // the canonical learning loop needs to rank skills cross-CLI.
+  trainedBy = null,
+  trainedOnModel = null,
+  trajectoryRef = null,
+  confidence = null,
+  crossCliTested = null,
+  outcome = 'done',
+  group = null,
+} = {}, configDir, ts = new Date()) {
   // Slugify BEFORE reserving the name so a direct caller (CLI/router)
   // can't smuggle a newline/colon into the filename or inject a second
   // frontmatter key. parseSynthOutput already slugifies, but this path
@@ -313,6 +331,13 @@ export function installSynthesized({ name, description = '', body = '', sourceTa
     body: sanitizeSkillBody(body),
     version,
     ts,
+    trainedBy,
+    trainedOnModel,
+    trajectoryRef,
+    confidence,
+    crossCliTested,
+    outcome,
+    group,
   });
   const p = skills.installSkill(finalName, doc, configDir);
   // Phase A: FTS5 mirror (spec §4.4). Group fallback per canonical C5.
@@ -320,9 +345,18 @@ export function installSynthesized({ name, description = '', body = '', sourceTa
     const { meta, body: skillBody } = parseFrontmatter(doc);
     const group = meta.group
       || (finalName.includes('-') ? finalName.split('-')[0] : 'legacy');
+    // Operator-precedence fix (Group A — M5): the original expression
+    //   meta.trained_by || createdBy === 'agent' ? 'agent' : 'user'
+    // parses as
+    //   (meta.trained_by || (createdBy === 'agent')) ? 'agent' : 'user'
+    // so an agent-installed skill with frontmatter `trained_by: human`
+    // was being indexed as `trained_by: 'agent'` (the truthy `meta.trained_by`
+    // collapses to a bare boolean inside the ternary). The corrected
+    // parenthesisation honours frontmatter first, then falls back to
+    // createdBy-derived 'agent' / 'user'.
     _indexSkill({
       skill_name: finalName,
-      trained_by: meta.trained_by || createdBy === 'agent' ? 'agent' : 'user',
+      trained_by: meta.trained_by || (createdBy === 'agent' ? 'agent' : 'user'),
       group_name: group,
       content: skillBody,
     }, configDir);

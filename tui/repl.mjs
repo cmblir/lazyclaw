@@ -56,6 +56,12 @@ export function consumeNextTurnFirstMessage(state) {
 }
 
 // ─── React mount ─────────────────────────────────────────────────────────
+// v5.1 TODO (C7 follow-up): replace direct stdout writes in cli.mjs's
+// _chatRunTurnFactory with a scrollback ref'd via this component. The
+// shape would be an `onOutput` prop that pushes chunks into a `useState`
+// array rendered through Ink's <Static items={scrollback}/>. v5.0.10
+// ships with raw stdout writes interleaved with Ink (acceptable visual
+// jank in exchange for unblocking the chat loop).
 export function ReplApp({ splashProps, runTurn }) {
   const [state, setState] = useState(makeReplState);
   const { exit } = useApp();

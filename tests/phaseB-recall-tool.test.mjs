@@ -43,8 +43,12 @@ test('recall tool: caps k at 50', async () => {
 });
 
 test('tool_runner: recall is registered and discoverable', async () => {
+  // Group B / M7 — listToolSchemas(undefined) now returns DEFAULT_TOOLS
+  // (the safe-default set a fresh agent gets), not every registered
+  // tool. Discoverability still means "the tool is in the registry";
+  // we ask for it by name to confirm.
   const runner = await import('../mas/tool_runner.mjs');
-  const schemas = runner.listToolSchemas();
+  const schemas = runner.listToolSchemas(['recall']);
   const names = schemas.map((s) => s.name);
   assert.ok(names.includes('recall'), `expected recall in [${names.join(', ')}]`);
 });

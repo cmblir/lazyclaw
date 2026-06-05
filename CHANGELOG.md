@@ -4,6 +4,101 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [5.2.0] — 2026-06-05
+
+Closes the learning loop and the Anthropic token bill. Audit found 12
+critical + 14 major gaps between the v5 spec and what was actually
+wired up in v5.0.9; this release lands fixes for all of them.
+
+### Added — Foundation
+
+- `mas/learning.mjs` — `runLearning(trigger, ctx)` hub for the 5 spec
+  triggers (post-task, post-failure, nudge, active-recall-miss,
+  periodic-curation). Single fan-out point for all learning work.
+- `mas/orchestra.mjs` — orchestration coordinator (re-export of
+  providers/orchestrator.mjs for v5.2; gets its own runtime in v5.3).
+- `tui/run_turn.mjs` — chat REPL turn factory that wires
+  `provider.sendMessage`, `sessions.appendTurn`, and the post-task
+  learning hook into the ink REPL's previously-stub `runTurn`.
+- `chat_window.mjs` — sliding-window helper keeping the chat prefix
+  cacheable past long sessions.
+
+### Fixed — Learning loop (C1, C3, C4, C5, C6, M1, M2, M3, M4, M5)
+
+- Chat REPL post-task hook now fires `trajectory_store.put` +
+  `synthesizeSkill` (via `resolveTrainer(cfg)`) + `updateUserModel`
+  on every turn. Was previously dead code.
+- Removed the opt-in `trajectoryRef` guard in `agent_turn.runAgentTurn`.
+  Trajectories persist by default; env-var opt-out for tests.
+- `composePromptStack` wired into the chat path via `cli.mjs` so
+  USER.md + SOUL + personality + skills + memory + trajectory tail
+  actually reach the provider system block. Test fixtures keep using
+  `agent.role`-only via `usePromptStack: false`.
+- `resolveTrainer(cfg)` has its first production callers: chat
+  `/exit` slash + the learning hub's post-task path.
+- `computeConfidence` + `resolveDampenFactor` now stamp confidence,
+  trainedBy, and cross_cli_tested[] on every synthesized skill.
+- `recent.jsonl` writes on unsessioned chat too — nudges now fire on
+  every install, not only when `--session` is passed.
+- `tasks.appendTurn` mirrors to `fts_sessions`, closing a write-path
+  hole for multi-agent transcripts.
+- `skill_synth.mjs:359` operator-precedence bug fixed (was silently
+  corrupting `trained_by` metadata for any skill with prior
+  frontmatter).
+- Fresh-agent default flipped from `skillWrite: 'manual'` to `'auto'`.
+
+### Fixed — Token efficiency (C8, C9, C10, M6)
+
+- Anthropic prompt caching is on by default. `providers/anthropic.mjs`
+  and `providers/tool_use/anthropic.mjs` build the system block as
+  `[{text: STATIC, cache_control:{type:'ephemeral'}}, {text: VOLATILE}]`
+  and attach `cache_control` to the last entry of `body.tools` so
+  the tool schema array caches as a single block.
+- `mas/mention_router.buildTurnContext` no longer rewraps the whole
+  transcript into a mutating `user` message. It now emits
+  `history: [{role:'user', taskDesc}, ...turns, {role:'user', 'Your turn'}]`
+  so Anthropic's prefix cache actually hits.
+- `chat_window.mjs` caps the chat prefix at 20 turns / 8K tokens
+  (sliding window). Long-running sessions stay flat-rate instead of
+  linear-in-age.
+- Audit estimate: 4-5x reduction in input token cost on typical
+  sessions, biggest single win is the C8 + C9 cache_control pair.
+
+### Fixed — Runtime + parity (C7, C11, C12)
+
+- Ink REPL `runTurn` is no longer a no-op stub. The chat streaming
+  loop is wired through `tui/run_turn.mjs` so users on real TTYs
+  actually chat (instead of the previous fall-through-to-legacy path).
+- `providers/orchestrator.mjs` honors `cfg.orchestrator.concurrency`.
+  When `concurrency > 1`, subtasks dispatch via `Promise.all` with
+  per-subtask buffered streams interleaved. 5 subtasks no longer take
+  5x wall clock.
+- `cli.mjs cmdDoctor` probes for `git` on PATH. Windows installs
+  without Git-for-Windows now get a clear actionable message instead
+  of cryptic ENOENT from `mas/tools/git.mjs`.
+
+### Fixed — Minor (M7-M14)
+
+- `tool_runner.listToolSchemas`: `undefined` → DEFAULT_TOOLS,
+  `[]` → empty list. Matches deny-check semantics.
+- `mas/tools/recall.mjs`: cross-CLI provider-aware re-ranking
+  (`workerProvider` arg boosts skills whose `cross_cli_tested[]`
+  includes the same provider family).
+- `skills.skillsIndex`: memoized read so the index doesn't reload on
+  every prompt-stack compose.
+- Plus daemon route gaps documented (M14 dashboard tabs that pointed
+  at missing routes now have the routes — `/v5/trainer-status`,
+  `/v5/recall`, `/v5/sandbox-health`, `/v5/channels-state`).
+
+### Tests
+
+329 tests pass (was 257 in v5.1.0). 72 new tests across:
+`v52-learning-hub`, `v52-prompt-stack-wiring`, `phaseH-anthropic-cache-control`,
+`phaseH-chat-sliding-window`, `phaseH-daemon-missing-routes`,
+`phaseH-doctor-git-probe`, `phaseH-ink-runturn`, `phaseH-learning-loop-closed`,
+`phaseH-mas-transcript-messages`, `phaseH-orchestrator-concurrency`,
+`phaseH-skills-index-memo`, `phaseH-tool-runner-empty-whitelist`.
+
 ## [5.1.0] — 2026-06-05
 
 ### Added

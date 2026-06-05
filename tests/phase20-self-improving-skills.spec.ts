@@ -278,11 +278,14 @@ test.describe('Phase 20C — skill_view tool', () => {
 });
 
 test.describe('Phase 20D — skillWrite config knob', () => {
-  test('agent add defaults skillWrite to "manual"', async () => {
+  test('agent add defaults skillWrite to "auto"', async () => {
+    // v5 Group A (M3): default flipped from 'manual' to 'auto' so the
+    // learning loop closes end-to-end on a fresh install. Operators
+    // who want the old manual behaviour pass --skill-write manual.
     const cfg = tmpDir('p20d-default');
     const r = runCli(['agent', 'add', 'planner'], cfg);
     expect(r.status).toBe(0);
-    expect(JSON.parse(r.stdout).skillWrite).toBe('manual');
+    expect(JSON.parse(r.stdout).skillWrite).toBe('auto');
   });
 
   test('agent add --skill-write auto persists the chosen mode', async () => {
@@ -393,10 +396,15 @@ test.describe('Phase 20F — recall index injected into the turn context', () =>
     const tick = await runCliAsync(['task', 'tick', open.id, 'go'], cfg, { LAZYCLAW_ANTHROPIC_BASE_URL: mock.baseUrl });
     expect(tick.status).toBe(0);
 
-    const first = mock.posts[0].body as { system: string; tools: Array<{ name: string }> };
+    const first = mock.posts[0].body as { system: string | Array<{ text: string }>; tools: Array<{ name: string }> };
+    // Group B / C9 — mention router passes cache:true, so the tool-use
+    // adapter lifts body.system into a single-block array. Normalise.
+    const sysText = typeof first.system === 'string'
+      ? first.system
+      : (first.system || []).map((b) => b.text || '').join('\n');
     // L0 index present in the system prompt …
-    expect(first.system).toContain('deploy-flow: ship the app safely');
-    expect(first.system).toMatch(/skill_view/);
+    expect(sysText).toContain('deploy-flow: ship the app safely');
+    expect(sysText).toMatch(/skill_view/);
     // … and the skill_view tool is actually advertised so the agent can pull L1.
     expect(first.tools.map((t) => t.name)).toContain('skill_view');
     await mock.close();
@@ -413,8 +421,11 @@ test.describe('Phase 20F — recall index injected into the turn context', () =>
     const tick = await runCliAsync(['task', 'tick', open.id, 'go'], cfg, { LAZYCLAW_ANTHROPIC_BASE_URL: mock.baseUrl });
     expect(tick.status).toBe(0);
 
-    const first = mock.posts[0].body as { system: string };
-    expect(first.system).not.toMatch(/Skills available/i);
+    const first = mock.posts[0].body as { system: string | Array<{ text: string }> };
+    const sysText = typeof first.system === 'string'
+      ? first.system
+      : (first.system || []).map((b) => b.text || '').join('\n');
+    expect(sysText).not.toMatch(/Skills available/i);
     await mock.close();
   });
 });

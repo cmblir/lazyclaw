@@ -157,7 +157,30 @@ export function appendTurn(id, turn, configDir = defaultConfigDir()) {
   const t = getTask(id, configDir);
   if (!t) throw new TaskError(`no task "${id}"`, 'TASK_NO_TASK');
   const turns = Array.isArray(t.turns) ? [...t.turns, turn] : [turn];
-  return patchTask(id, { turns }, configDir);
+  const next = patchTask(id, { turns }, configDir);
+  // v5 Group A (M4): mirror the appended turn to the FTS5 sessions
+  // index using session_id = `task:<id>` so the recall tool can surface
+  // task transcripts the same way it surfaces chat sessions. Namespaced
+  // with the `task:` prefix to avoid colliding with chat session ids.
+  // Best-effort: any FTS failure stays inside the dynamic-import block
+  // so a missing index_db (e.g. in a stripped test env) never breaks
+  // task writes.
+  try {
+    void (async () => {
+      try {
+        const { indexSessionTurn } = await import('./mas/index_db.mjs');
+        const turnIdx = turns.length - 1;
+        indexSessionTurn({
+          session_id: `task:${id}`,
+          turn_idx: turnIdx,
+          role: turn.agent === 'user' ? 'user' : 'assistant',
+          ts: Date.parse(turn.ts) || Date.now(),
+          content: turn.text || '',
+        }, configDir);
+      } catch { /* swallow */ }
+    })();
+  } catch { /* swallow */ }
+  return next;
 }
 
 export function removeTask(id, configDir = defaultConfigDir()) {

@@ -25,6 +25,7 @@ import * as tasksMod from '../tasks.mjs';
 import * as agentMemory from './agent_memory.mjs';
 import * as skillSynth from './skill_synth.mjs';
 import * as skills from '../skills.mjs';
+import { composePromptStack } from './prompt_stack.mjs';
 
 export class MentionRouterError extends Error {
   constructor(message, code) {
@@ -97,9 +98,31 @@ export function buildTurnContext({ task, team, agent, agentRecord, teammates, co
   // The agent loads a full skill on demand with the skill_view tool —
   // progressive disclosure, so skill bodies don't bloat every prompt.
   const skillsBlock = buildSkillsBlock(configDir);
+  // v5 (canonical decision C5) — prepend the 8-layer prompt stack so the
+  // workspace SOUL / personality / USER.md / long-term memory layers land
+  // ahead of the agent's role. composePromptStack returns '' on a fresh
+  // install so the prompt is byte-identical to the pre-v5 shape when no
+  // layer source exists on disk. Wrapped in try/catch so a missing
+  // configDir file never crashes a live agent turn.
+  let promptStack = '';
+  try {
+    promptStack = composePromptStack({
+      cfgDir: configDir,
+      agent: agentRecord,
+      workspace: task?.workspace || agentRecord.workspace || '',
+    }) || '';
+  } catch { /* best-effort — see comment above */ }
+  // When composePromptStack emitted a Role layer (layer 3) we drop the
+  // bare `role` line below to avoid duplicating agent.role inside the
+  // system prompt. The stack helper builds the Role layer iff
+  // agentRecord.role is non-empty, so checking `promptStack` includes
+  // the marker `## Role (` is sufficient.
+  const stackHasRole = promptStack.includes('## Role (');
   const system = [
-    role,
-    role && '\n\n---\n',
+    promptStack || null,
+    promptStack && '\n\n---\n',
+    stackHasRole ? null : role,
+    !stackHasRole && role && '\n\n---\n',
     memBlock || null,
     skillsBlock || null,
     `You are *${agentRecord.displayName || agentRecord.name}* on team "${team.displayName || team.name}".`,
@@ -113,7 +136,56 @@ export function buildTurnContext({ task, team, agent, agentRecord, teammates, co
     renderTranscript(task.turns),
     `\n\n# Your turn (as ${agentRecord.name}):`,
   ];
-  return { system, user: userParts.join('') };
+
+  // Group B / C10 — also emit history-as-messages. The legacy
+  // single-string `user` field is kept for callers that snapshot it
+  // (existing tests), but production code (runTaskTurn) now wires
+  // `history` into runAgentTurn so Anthropic's prompt cache + KV
+  // cache can lock onto the prior turns byte-identically across
+  // router iterations.
+  //
+  // Mapping:
+  //   - turn.agent === 'user'  → role:'user', plain content
+  //   - turn.agent === speaker → role:'assistant'  (the model's own
+  //     prior turn — looks like an assistant's text from its POV)
+  //   - turn.agent === any other teammate → role:'user' with a
+  //     `[FROM x]` prefix so the model knows it's a peer speaking,
+  //     not the human user
+  // We always prepend a single user-role kickoff message with the
+  // task spec so the first message in the history is anchored on the
+  // task; and we always append a final user-role "your turn" marker
+  // so the model knows when to speak.
+  const history = [];
+  const taskKickoff = [
+    `# Task: ${task.title}`,
+    task.description ? `\n${task.description}\n` : '',
+  ].join('').trim();
+  if (taskKickoff) history.push({ role: 'user', content: taskKickoff });
+  for (const t of (Array.isArray(task.turns) ? task.turns : [])) {
+    if (!t || !t.agent) continue;
+    const txt = String(t.text || '');
+    if (!txt) continue;
+    if (t.agent === 'user') {
+      history.push({ role: 'user', content: txt });
+    } else if (t.agent === agentRecord.name) {
+      history.push({ role: 'assistant', content: txt });
+    } else if (t.agent === 'system') {
+      // System pseudo-turns (kickoff seed) collapse into a user-role
+      // prefix-tagged note so message-role alternation stays clean.
+      history.push({ role: 'user', content: `[SYSTEM] ${txt}` });
+    } else {
+      history.push({ role: 'user', content: `[FROM ${t.agent}] ${txt}` });
+    }
+  }
+  // "Your turn" marker — always a user-role tail so the model is
+  // prompted to speak as the named agent. Combined with the speaker
+  // mapping above this gives Anthropic a stable cacheable prefix:
+  // the first N-1 messages are identical across router iterations
+  // for the same task, and only this final marker (plus a new prior
+  // turn) changes per router pass.
+  history.push({ role: 'user', content: `# Your turn (as ${agentRecord.name})` });
+
+  return { system, user: userParts.join(''), history };
 }
 
 // Build the system-prompt block listing the skills the agent can pull
@@ -238,7 +310,7 @@ async function autoReflect({ task, agentsById, apiKey, baseUrl, fetchImpl, confi
   for (const name of collectParticipants(task)) {
     const agentRecord = agentsById[name];
     if (!agentRecord) continue;
-    if (agentRecord.memoryWrite && agentRecord.memoryWrite !== 'auto') continue;
+    if ((agentRecord.memoryWrite ?? 'auto') !== 'auto') continue;
     try {
       const body = await agentMemory.reflectOnce({
         agent: agentRecord,
@@ -257,18 +329,19 @@ async function autoReflect({ task, agentsById, apiKey, baseUrl, fetchImpl, confi
   }
 }
 
-// Phase 20 — fire one skill-synthesis LLM call per participating agent
-// whose skillWrite is 'auto', installing the resulting SKILL.md into
-// the shared skills dir. Default skillWrite is 'manual', so this is a
-// no-op unless the user opted an agent in. Best-effort: a failed
-// synthesis is logged, never thrown, so it can't poison a finished
-// task.
+// Phase 20 / v5 Group A (M3) — fire one skill-synthesis LLM call per
+// participating agent whose skillWrite is 'auto' (the default since
+// v5). Installs the resulting SKILL.md into the shared skills dir.
+// Legacy v4 agents (no explicit skillWrite field) inherit the new
+// 'auto' default via the `?? 'auto'` guard below — without a forced
+// migration. Best-effort: a failed synthesis is logged, never thrown,
+// so it can't poison a finished task.
 async function autoSynthSkills({ task, agentsById, apiKey, baseUrl, fetchImpl, configDir, logger = () => {} }) {
   if (!task || !Array.isArray(task.turns)) return;
   for (const name of collectParticipants(task)) {
     const agentRecord = agentsById[name];
     if (!agentRecord) continue;
-    if (agentRecord.skillWrite !== 'auto') continue;
+    if ((agentRecord.skillWrite ?? 'auto') !== 'auto') continue;
     try {
       const result = await skillSynth.synthesizeSkill({ agent: agentRecord, task, apiKey, baseUrl, fetchImpl });
       if (result) {
@@ -370,10 +443,18 @@ export async function runTaskTurn({
     try {
       result = await agentTurn.runAgentTurn({
         agent: { ...agentRecord, role: ctx.system },
-        userMessage: ctx.user,
-        history: [],
+        // Group B / C10 — feed the transcript as a proper messages
+        // history. The kickoff + prior turns + "your turn" marker
+        // live in ctx.history; we leave userMessage empty so the
+        // adapter doesn't double-append a redundant user turn.
+        userMessage: '',
+        history: ctx.history,
         taskId: current.id,
         configDir, cwd, apiKey, fetchImpl, baseUrl, signal, approve,
+        // C9 — enable Anthropic prompt caching for the static system
+        // prefix + tool definitions. Non-anthropic adapters ignore
+        // the flag (it's a no-op for OpenAI/Gemini/claude-cli).
+        cache: true,
       });
     } catch (err) {
       await clearTypingPlaceholder(typing, logger);

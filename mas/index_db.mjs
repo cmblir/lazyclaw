@@ -21,6 +21,26 @@ function defaultConfigDir() {
   return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
 }
 
+// m11 — when a write-through hook fails, append a structured entry to
+// <configDir>/index-failures.jsonl so `lazyclaw doctor` can surface
+// recent failures (last 24h) and the operator can rebuild before the
+// silent stale-index problem compounds. Best-effort: any error during
+// the append itself is swallowed (we don't want to spam stderr from a
+// background hook).
+function _logIndexFailure(configDir, scope, err) {
+  try {
+    fs.mkdirSync(configDir, { recursive: true });
+    const file = path.join(configDir, 'index-failures.jsonl');
+    const entry = {
+      ts: new Date().toISOString(),
+      event: 'index.write.failed',
+      scope,
+      error: String(err?.message || err || 'unknown'),
+    };
+    fs.appendFileSync(file, JSON.stringify(entry) + '\n');
+  } catch { /* swallow — surface only via console.warn below */ }
+}
+
 function dbPath(configDir) {
   return path.join(configDir, 'index.db');
 }
@@ -131,6 +151,7 @@ export function indexSessionTurn(row, configDir = defaultConfigDir()) {
       String(row.role || ''), Number(row.ts || Date.now()),
     );
   } catch (e) {
+    _logIndexFailure(configDir, 'sessions', e);
     // eslint-disable-next-line no-console
     console.warn('[index_db] indexSessionTurn failed:', e.message);
   }
@@ -145,6 +166,7 @@ export function indexSkill(row, configDir = defaultConfigDir()) {
       String(row.group_name || ''),
     );
   } catch (e) {
+    _logIndexFailure(configDir, 'skills', e);
     // eslint-disable-next-line no-console
     console.warn('[index_db] indexSkill failed:', e.message);
   }
@@ -159,6 +181,7 @@ export function indexTrajectory(row, configDir = defaultConfigDir()) {
       String(row.outcome || ''),
     );
   } catch (e) {
+    _logIndexFailure(configDir, 'trajectories', e);
     // eslint-disable-next-line no-console
     console.warn('[index_db] indexTrajectory failed:', e.message);
   }
@@ -172,6 +195,7 @@ export function indexMemory(row, configDir = defaultConfigDir()) {
       String(row.topic || ''), String(row.kind || ''),
     );
   } catch (e) {
+    _logIndexFailure(configDir, 'memories', e);
     // eslint-disable-next-line no-console
     console.warn('[index_db] indexMemory failed:', e.message);
   }
@@ -190,21 +214,57 @@ function sanitizeFtsQuery(q) {
   return s.replace(/[-:+]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * Cross-scope FTS5 recall. Content-only semantics — all UNINDEXED
+ * metadata columns (session_id, skill_name, agent, outcome, topic, …)
+ * are returned as `metadata` but NOT searchable via MATCH (m9). Use
+ * `opts.where` to post-filter on metadata equality.
+ *
+ * @param {string} query  FTS5 MATCH query. By default the query is
+ *                        sanitised: `-`, `:`, `+` rewritten to spaces
+ *                        so a bareword like "write-through" doesn't
+ *                        get parsed as NOT-through. Pass `opts.raw=true`
+ *                        to bypass sanitisation when you need real
+ *                        FTS5 operators (NOT, OR, near).
+ * @param {Object} [opts]
+ * @param {string} [opts.configDir]
+ * @param {string[]} [opts.scope]  default: all four scopes
+ * @param {number} [opts.k]        default 10, capped at 50
+ * @param {boolean} [opts.raw]     bypass sanitiseFtsQuery (power users)
+ * @param {Object} [opts.where]    metadata equality post-filter, e.g.
+ *                                 { trained_by: 'human', agent: 'reviewer' }
+ *                                 Applied after FTS5 returns hits; values
+ *                                 are coerced to string before compare.
+ */
 export function recall(query, opts = {}) {
   const t0 = process.hrtime.bigint();
   const configDir = opts.configDir || defaultConfigDir();
   const scope = opts.scope || ['sessions', 'skills', 'trajectories', 'memories'];
   const k = Math.min(Math.max(Number(opts.k) || 10, 1), 50);
   const s = _stmts(configDir);
-  const safeQuery = sanitizeFtsQuery(query);
+  const safeQuery = opts.raw ? String(query ?? '').trim() : sanitizeFtsQuery(query);
+  const whereKeys = (opts.where && typeof opts.where === 'object') ? Object.keys(opts.where) : [];
+  // Over-fetch when a where-filter is set: post-filter can drop most
+  // hits, so request 2x k from FTS5 so the final trimmed slice has
+  // enough to fill k. Capped at the FTS5-side 200 hard limit.
+  const fetchK = whereKeys.length ? Math.min(200, k * 2) : k;
   const hits = [];
   for (const sc of scope) {
     const stmt = s.queries[sc];
     if (!stmt) continue;
     try {
-      const rows = stmt.all(safeQuery, k);
+      const rows = stmt.all(safeQuery, fetchK);
       for (const r of rows) {
         const { scope: sc2, bm25, snippet, ...metadata } = r;
+        // Apply where-filter at row level — keeps the bm25 ordering
+        // intact and avoids re-fetching after sort.
+        if (whereKeys.length) {
+          let skip = false;
+          for (const wk of whereKeys) {
+            if (String(metadata[wk] ?? '') !== String(opts.where[wk])) { skip = true; break; }
+          }
+          if (skip) continue;
+        }
         hits.push({ scope: sc2, rank: hits.length, bm25, snippet, metadata });
       }
     } catch (e) {

@@ -4,7 +4,24 @@
 import { spawnSync } from 'node:child_process';
 
 function git(cwd, args, opts = {}) {
-  const r = spawnSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+  // M11 / C12 — detect a missing git binary (Windows without
+  // Git-for-Windows, minimal Docker base images) up front and surface
+  // a clear remediation hint. The historical behaviour returned
+  // {ok:false} with a cryptic spawn error, which made the
+  // "lazyclaw doctor" path the only reliable signal. Now any agent
+  // touching this tool also gets a one-line diagnostic.
+  const exe = process.env.GIT_EXECUTABLE || 'git';
+  const r = spawnSync(exe, args, { cwd, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+  if (r.error && r.error.code === 'ENOENT') {
+    return {
+      ok: false,
+      stdout: '',
+      stderr: '',
+      exitCode: null,
+      error: 'GIT_NOT_INSTALLED',
+      hint: 'git binary not found on PATH. Install Git, or set GIT_EXECUTABLE. See `lazyclaw doctor`.',
+    };
+  }
   return { ok: r.status === 0, stdout: r.stdout, stderr: r.stderr, exitCode: r.status };
 }
 

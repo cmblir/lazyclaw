@@ -8,6 +8,12 @@ import { pathToFileURL } from 'node:url';
 import { resolveSandbox, listBackends } from './sandbox/index.mjs';
 // Phase G: defaultConfigDir for personality subcommand (spec §9, decision C7).
 import { defaultConfigDir as _persDefaultCfg } from './memory.mjs';
+// Group B / M6 — chat sliding window. Lives in its own module so
+// tests can import the helper without invoking cli.mjs::main().
+import { applyChatWindow as _applyChatWindow, CHAT_WINDOW_TURNS, CHAT_WINDOW_TOKEN_BUDGET } from './chat_window.mjs';
+// v5 Group C (C7) — shared chat-turn streaming closure. Single source
+// of truth for both the ink REPL path and the legacy readline path.
+import { makeRunTurn as _chatRunTurnFactory } from './tui/run_turn.mjs';
 
 async function loadEngine() {
   return import('./workflow/persistent.mjs');
@@ -858,6 +864,58 @@ async function cmdDoctor() {
   if (cfg.provider && !PROVIDERS_HAS(_registryMod.PROVIDERS, cfg.provider)) {
     issues.push(`unknown provider "${cfg.provider}" — registered: ${Object.keys(_registryMod.PROVIDERS).join(', ')}`);
   }
+  // C12 — MinGit / Windows safety net. mas/tools/git.mjs shells out to
+  // `git`; on a stripped Windows PATH (no Git-for-Windows installed) or
+  // a minimal Docker base image, that spawnSync ENOENTs and any agent
+  // task touching the git tool fails opaquely. Probe up-front so
+  // `lazyclaw doctor` surfaces a clean diagnostic and the operator can
+  // install the binary before they trip over it.
+  let gitInfo = null;
+  try {
+    const { spawnSync } = await import('node:child_process');
+    const gitExe = process.env.GIT_EXECUTABLE || 'git';
+    const probe = spawnSync(gitExe, ['--version'], { encoding: 'utf8' });
+    if (probe.error && probe.error.code === 'ENOENT') {
+      issues.push('git binary not found on PATH — `mas/tools/git.mjs` will fail. Install Git: macOS `xcode-select --install`; Linux `apt install git` / `yum install git`; Windows Git-for-Windows (https://git-scm.com/download/win). Or set the GIT_EXECUTABLE env var to an explicit path.');
+      gitInfo = { ok: false, code: 'ENOENT' };
+    } else if (probe.status !== 0) {
+      issues.push(`git --version exited ${probe.status} (${(probe.stderr || '').trim().slice(0, 200)})`);
+      gitInfo = { ok: false, status: probe.status, stderr: (probe.stderr || '').trim().slice(0, 200) };
+    } else {
+      gitInfo = { ok: true, version: (probe.stdout || '').trim() };
+    }
+  } catch (e) {
+    gitInfo = { ok: false, error: e?.message || String(e) };
+  }
+  // m11 — stale index probe. mas/index_db.mjs write-through hooks
+  // log failures to <configDir>/index-failures.jsonl; surface a recent
+  // count so the operator notices a silently-degraded index. Best-effort:
+  // missing file → 0 failures (the common case).
+  let indexInfo = null;
+  try {
+    const cfgDir = path.dirname(configPath());
+    const auditFile = path.join(cfgDir, 'index-failures.jsonl');
+    if (fs.existsSync(auditFile)) {
+      const raw = fs.readFileSync(auditFile, 'utf8');
+      const lines = raw.split('\n').filter(Boolean);
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      let recent = 0;
+      for (const line of lines) {
+        try {
+          const entry = JSON.parse(line);
+          if (entry?.ts && new Date(entry.ts).getTime() >= cutoff) recent++;
+        } catch { /* skip malformed */ }
+      }
+      indexInfo = { failuresLast24h: recent, totalFailures: lines.length };
+      if (recent > 0) {
+        issues.push(`${recent} index write failure(s) in the last 24h — run \`lazyclaw index rebuild\` to recover.`);
+      }
+    } else {
+      indexInfo = { failuresLast24h: 0, totalFailures: 0 };
+    }
+  } catch (e) {
+    indexInfo = { error: e?.message || String(e) };
+  }
   // Workflow state health — informational counters that show whether
   // the user has any failed or stuck workflow runs to attend to. We
   // don't push these to `issues` (a stuck workflow doesn't break the
@@ -901,6 +959,8 @@ async function cmdDoctor() {
     issues,
     knownProviders: Object.keys(_registryMod.PROVIDERS),
     workflows,
+    git: gitInfo,
+    index: indexInfo,
     timestamp: new Date().toISOString(),
   };
   console.log(JSON.stringify(out, null, 2));
@@ -1694,6 +1754,7 @@ function _printChatBanner(activeProvName, activeModel, version) {
   process.stdout.write(lines.join('\n') + '\n');
 }
 
+
 // Interactive provider/model picker. Used on first run (no config) or
 // when the user passes --pick. Falls back to plain stdin reads when
 // stdout isn't a TTY (CI/script callers should pass --non-interactive
@@ -2469,9 +2530,113 @@ async function cmdChat(flags = {}) {
         skills: skillGroups,
       };
       void renderSplashToString; // surfaced for tests; runtime uses <Splash/>
+
+      // C7 — minimal chat-session state for the ink path so runTurn can
+      // talk to the provider (the legacy readline path below sets up the
+      // same shape — kept duplicated here intentionally so the ink branch
+      // remains self-contained and the legacy path stays byte-identical).
+      // Slash commands aren't wired into the ink REPL yet (v5.1 follow-up);
+      // until then, system-prompt composition / --session resume happen
+      // identically to the legacy path.
+      let _inkSandboxSpec = null;
+      if (flags.sandbox) {
+        const sb = await import('./sandbox.mjs');
+        try { _inkSandboxSpec = sb.parseSandboxSpec(flags.sandbox, flags); }
+        catch (err) { console.error(`error: ${err.message}`); process.exit(2); }
+      }
+      let _inkSessionId = flags.session || null;
+      const _inkCfgDir = path.dirname(configPath());
+      let _inkMessages = _inkSessionId
+        ? sessionsMod.loadTurns(_inkSessionId, _inkCfgDir).map((t) => ({ role: t.role, content: t.content }))
+        : [];
+      if (_inkMessages.length > 0) {
+        const cfgChat = cfg.chat || {};
+        const winTurns = Number(cfgChat.windowTurns) || CHAT_WINDOW_TURNS;
+        const winTokens = Number(cfgChat.windowTokens) || CHAT_WINDOW_TOKEN_BUDGET;
+        const { messages: trimmed } = _applyChatWindow(_inkMessages, { turns: winTurns, tokens: winTokens });
+        _inkMessages = trimmed;
+      }
+      // System prompt composition — mirrors the legacy path's sysParts logic.
+      const _inkSkillNames = (flags.skill ? String(flags.skill) : (Array.isArray(cfg.skills) ? cfg.skills.join(',') : ''))
+        .split(',').map((s) => s.trim()).filter(Boolean);
+      const _inkWorkspaceName = flags.workspace || cfg.workspace || '';
+      const _inkSysParts = [];
+      try {
+        const { composePromptStack } = await import('./mas/prompt_stack.mjs');
+        const stacked = composePromptStack({
+          cfgDir: _inkCfgDir,
+          agent: { name: 'chat', role: '' },
+          workspace: _inkWorkspaceName,
+        });
+        if (stacked && stacked.trim()) _inkSysParts.push(stacked);
+      } catch { /* never block chat start on stack composition */ }
+      if (_inkWorkspaceName && !_inkMessages.some((m) => m.role === 'system')) {
+        try {
+          const ws = await import('./workspace.mjs');
+          const wsPrompt = ws.composeWorkspacePrompt(_inkCfgDir, _inkWorkspaceName);
+          if (wsPrompt) _inkSysParts.push(wsPrompt);
+        } catch (err) { console.error(`workspace error: ${err.message}`); process.exit(2); }
+      }
+      if (_inkSkillNames.length > 0 && !_inkMessages.some((m) => m.role === 'system')) {
+        try {
+          const sys = skillsMod.composeSystemPrompt(_inkSkillNames, _inkCfgDir);
+          if (sys) _inkSysParts.push(sys);
+        } catch (err) { console.error(`skill error: ${err.message}`); process.exit(2); }
+      }
+      if (_inkSysParts.length && !_inkMessages.some((m) => m.role === 'system')) {
+        const merged = _inkSysParts.join('\n\n---\n\n');
+        _inkMessages.unshift({ role: 'system', content: merged });
+        if (_inkSessionId) sessionsMod.appendTurn(_inkSessionId, 'system', merged, _inkCfgDir);
+      }
+      let _inkRunningUsage = null;
+      const _inkAccumulateUsage = (u) => {
+        if (!u) return;
+        if (!_inkRunningUsage) _inkRunningUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0, turnsWithUsage: 0 };
+        _inkRunningUsage.inputTokens  += Number(u.inputTokens) || 0;
+        _inkRunningUsage.outputTokens += Number(u.outputTokens) || 0;
+        _inkRunningUsage.totalTokens  += Number(u.totalTokens) || ((Number(u.inputTokens) || 0) + (Number(u.outputTokens) || 0));
+        _inkRunningUsage.turnsWithUsage += 1;
+      };
+      const _inkChatStartedAt = Date.now();
+      const _inkSyntheticChatSessionId = `chat-${process.pid}-${_inkChatStartedAt}`;
+      const _inkPersistTurn = (role, content) => {
+        if (_inkSessionId) {
+          sessionsMod.appendTurn(_inkSessionId, role, content, _inkCfgDir);
+          return;
+        }
+        try {
+          import('./memory.mjs').then((m) => {
+            try { m.appendRecent(_inkSyntheticChatSessionId, role, content, _inkCfgDir); }
+            catch { /* swallow */ }
+          }).catch(() => {});
+        } catch { /* swallow */ }
+      };
+      const _inkCtx = {
+        cfg,
+        cfgDir: _inkCfgDir,
+        sandboxSpec: _inkSandboxSpec,
+        syntheticChatSessionId: _inkSyntheticChatSessionId,
+        getMessages: () => _inkMessages,
+        getProv: () => prov,
+        getActiveProvName: () => activeProvName,
+        getActiveModel: () => activeModel,
+        getSessionId: () => _inkSessionId,
+        persistTurn: _inkPersistTurn,
+        accumulateUsage: _inkAccumulateUsage,
+        resolveAuthKey: (providerName) => _resolveAuthKey(cfg, providerName),
+      };
+      // v5.0.10: write streamed chunks straight to process.stdout. Ink
+      // owns the screen, so interleaved stdout writes can produce some
+      // visual jank — accepted trade for unblocking the chat loop. v5.1
+      // TODO: route through a ref'd scrollback <Static/> region in
+      // ReplApp so Ink owns all output.
+      const _inkRunTurn = _chatRunTurnFactory({
+        ctx: _inkCtx,
+        writeFn: (chunk) => process.stdout.write(chunk),
+      });
       const ink = render(/* @__PURE__ */ React.createElement(ReplApp, {
         splashProps,
-        runTurn: async (_text, _signal) => { void _text; void _signal; },
+        runTurn: _inkRunTurn,
       }));
       await ink.waitUntilExit();
       return;
@@ -2529,6 +2694,24 @@ async function cmdChat(flags = {}) {
     ? sessionsMod.loadTurns(sessionId, cfgDir).map(t => ({ role: t.role, content: t.content }))
     : [];
 
+  // M6 — apply sliding window at session start. Long-running sessions
+  // (50+ turns) used to ship every prior turn to the provider every
+  // request; we now keep at most CHAT_WINDOW_TURNS turns (default 20)
+  // plus the system message. Operators can override via env. The
+  // per-session log on disk is untouched — only the in-memory prompt
+  // window is trimmed. We log to stderr once at session start so the
+  // user knows context was dropped.
+  if (messages.length > 0) {
+    const cfgChat = cfg.chat || {};
+    const winTurns = Number(cfgChat.windowTurns) || CHAT_WINDOW_TURNS;
+    const winTokens = Number(cfgChat.windowTokens) || CHAT_WINDOW_TOKEN_BUDGET;
+    const { messages: trimmed, dropped } = _applyChatWindow(messages, { turns: winTurns, tokens: winTokens });
+    if (dropped > 0) {
+      process.stderr.write(`[chat] sliding window: dropped ${dropped} older turn(s), ${trimmed.length} kept\n`);
+    }
+    messages = trimmed;
+  }
+
   // --skill (comma-separated names) composes into a system message at the
   // head of the conversation. Same shape as `agent --skill`. Defaults from
   // config.skills array when --skill not passed. We only inject if no
@@ -2542,6 +2725,21 @@ async function cmdChat(flags = {}) {
   // a faithful preview.
   const workspaceName = flags.workspace || cfg.workspace || '';
   const sysParts = [];
+  // v5 (canonical decision C5) — prepend the 8-layer composePromptStack
+  // output. Falls back silently to no-op when the configDir has none of
+  // the source files present (fresh install) so chat-start stays
+  // byte-identical to the v4 shape until a user authors USER.md or a
+  // personality. Wrapped in try/catch — chat start must never break on
+  // a stack composition error.
+  try {
+    const { composePromptStack } = await import('./mas/prompt_stack.mjs');
+    const stacked = composePromptStack({
+      cfgDir,
+      agent: { name: 'chat', role: '' },
+      workspace: workspaceName,
+    });
+    if (stacked && stacked.trim()) sysParts.push(stacked);
+  } catch { /* never block chat start on stack composition */ }
   if (workspaceName && !messages.some(m => m.role === 'system')) {
     try {
       const ws = await import('./workspace.mjs');
@@ -2582,10 +2780,55 @@ async function cmdChat(flags = {}) {
     runningUsage.totalTokens  += Number(u.totalTokens) || ((Number(u.inputTokens) || 0) + (Number(u.outputTokens) || 0));
     runningUsage.turnsWithUsage += 1;
   };
+  // v5 Group A (M2): always-on synthetic session id so an unsessioned
+  // chat still populates memory/recent.jsonl. Without this, the nudge
+  // loop never saw repeated prompts in chat sessions that didn't pass
+  // --session, and `nudge.suggest_skill` clusters silently lost ~95%
+  // of their evidence. The `chat-<pid>-<startTs>` prefix keeps the
+  // synthetic id distinguishable from real session ids on disk.
+  const chatStartedAt = Date.now();
+  const _syntheticChatSessionId = `chat-${process.pid}-${chatStartedAt}`;
   const persistTurn = (role, content) => {
-    if (!sessionId) return;
-    sessionsMod.appendTurn(sessionId, role, content, cfgDir);
+    if (sessionId) {
+      sessionsMod.appendTurn(sessionId, role, content, cfgDir);
+      return;
+    }
+    // No --session: don't touch sessions/<id>.jsonl, but DO append to
+    // memory/recent.jsonl directly so the nudge loop can cluster on
+    // unsessioned chats. Best-effort — a broken memory module must not
+    // break a chat turn.
+    try {
+      import('./memory.mjs').then((m) => {
+        try { m.appendRecent(_syntheticChatSessionId, role, content, cfgDir); }
+        catch { /* swallow */ }
+      }).catch(() => {});
+    } catch { /* swallow */ }
   };
+
+  // C7 — shared runTurn closure for the legacy path. The same factory
+  // backs the ink path above; both call sites get one set of bugs.
+  // Getters close over the *current* binding of sessionId, prov,
+  // activeProvName, activeModel — so a mid-session /provider switch
+  // takes effect on the very next turn.
+  const _legacyCtx = {
+    cfg,
+    cfgDir,
+    sandboxSpec,
+    syntheticChatSessionId: _syntheticChatSessionId,
+    getMessages: () => messages,
+    getProv: () => prov,
+    getActiveProvName: () => activeProvName,
+    getActiveModel: () => activeModel,
+    getSessionId: () => sessionId,
+    persistTurn,
+    accumulateUsage,
+    resolveAuthKey: (providerName) => _resolveAuthKey(cfg, providerName),
+    onCharsSent: (n) => { charsSent += n; },
+  };
+  const runTurn = _chatRunTurnFactory({
+    ctx: _legacyCtx,
+    writeFn: (chunk) => process.stdout.write(chunk),
+  });
 
   const handleSlash = async (line) => {
     const cmd = line.split(/\s+/)[0];
@@ -3172,6 +3415,35 @@ async function cmdChat(flags = {}) {
         return true;
       }
       case '/exit': {
+        // v5 Group A (C4): fire one updateUserModel call before exit so
+        // the Honcho-style USER.md captures the durable facts surfaced
+        // in this session. Wrapped in a 3-second timeout so a slow
+        // trainer never makes /exit hang. Best-effort: failure logs are
+        // suppressed so we don't disturb the clean shutdown.
+        try {
+          const turns = sessionId
+            ? sessionsMod.loadTurns(sessionId, cfgDir)
+            : messages.map((t) => ({ role: t.role, content: t.content }));
+          if (turns && turns.length) {
+            const trainer = (typeof _registryMod?.resolveTrainer === 'function')
+              ? _registryMod.resolveTrainer(cfg)
+              : { provider: activeProvName, model: activeModel };
+            const userModelPromise = import('./mas/user_modeler.mjs').then((m) =>
+              m.updateUserModel({
+                sessionTurns: turns,
+                provider: trainer.provider,
+                model: trainer.model,
+                apiKey: _resolveAuthKey(cfg, trainer.provider),
+                baseUrl: _resolveBaseUrl(trainer.provider),
+                configDir: cfgDir,
+              }),
+            ).catch(() => null);
+            await Promise.race([
+              userModelPromise,
+              new Promise((resolve) => setTimeout(resolve, 3000)),
+            ]);
+          }
+        } catch { /* /exit must never hang or throw */ }
         return 'EXIT';
       }
       default:
@@ -3189,10 +3461,6 @@ async function cmdChat(flags = {}) {
       if (useTerminal) rl.prompt();
       continue;
     }
-    messages.push({ role: 'user', content: text });
-    charsSent += text.length;
-    persistTurn('user', text);
-    let acc = '';
     // Per-turn AbortController. Ctrl+C during a stream aborts THIS turn
     // and returns to the prompt instead of killing the process. Outside
     // a stream, Ctrl+C still terminates (we restore the default handler
@@ -3210,55 +3478,12 @@ async function cmdChat(flags = {}) {
     // gaps between CJK characters (visible in user-reported screen
     // captures of Korean replies).
     if (useTerminal) _ghost.suspend();
-    // Buffered writer — coalesce single-character streaming chunks
-    // into ~30 ms windows. Two reasons:
-    //   1. Korean / Japanese / Chinese tokens often arrive as one
-    //      character per chunk. Each individual `process.stdout.write`
-    //      can race against terminal redraw on a wide-cell character,
-    //      producing the same "visible space between every character"
-    //      symptom the suspend above also addresses.
-    //   2. Far fewer syscalls. A 200-char Korean reply was ~200
-    //      separate writes; this collapses to ~7-10.
-    let _writeBuf = '';
-    let _writeTimer = null;
-    const _flush = () => {
-      if (_writeBuf) { process.stdout.write(_writeBuf); _writeBuf = ''; }
-      _writeTimer = null;
-    };
-    const _writeChunk = (s) => {
-      _writeBuf += s;
-      if (!_writeTimer) _writeTimer = setTimeout(_flush, 30);
-    };
     try {
-      for await (const chunk of prov.sendMessage(messages, {
-        apiKey: _resolveAuthKey(cfg, activeProvName),
-        model: activeModel,
-        sandbox: sandboxSpec,
-        signal: turnAc.signal,
-        onUsage: accumulateUsage,
-      })) {
-        _writeChunk(chunk);
-        acc += chunk;
-      }
-      // Drain anything still buffered before the trailing newline so
-      // the prompt lands on its own line cleanly.
-      if (_writeTimer) clearTimeout(_writeTimer);
-      _flush();
-      process.stdout.write('\n');
-      messages.push({ role: 'assistant', content: acc });
-      persistTurn('assistant', acc);
-    } catch (err) {
-      // Drain pending buffer so partial reply stays on screen even
-      // when the stream errors mid-flight.
-      if (_writeTimer) clearTimeout(_writeTimer);
-      _flush();
-      // ABORT errors are user-initiated; partial assistant output is
-      // discarded (we don't append a half-reply to the message history
-      // because the next turn would treat it as a complete reply and
-      // give odd context to the model).
-      if (err?.code !== 'ABORT' && !turnAc.signal.aborted) {
-        process.stdout.write(`error: ${err?.message || String(err)}\n`);
-      }
+      // C7 — single source of truth for the streaming + persist +
+      // post-task learning loop. The factory handles the user-msg push,
+      // 30 ms buffered writer (CJK-safe), assistant-msg push,
+      // persistTurn for both turns, and the post-task learning hook.
+      await runTurn(text, turnAc.signal);
     } finally {
       process.off('SIGINT', onSigint);
       if (useTerminal) _ghost.resume();

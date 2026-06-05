@@ -51,6 +51,13 @@ export async function callOnce({
   baseUrl,
   fetchImpl,
   signal,
+  // Group B / C9 — prompt caching. Opt-in; the existing phase 12b/24
+  // test surface asserts the no-cache byte shape so this defaults off.
+  // Production call sites (agent_turn, mention_router) pass `cache:true`
+  // so every real Messages API call from the tool-use path gets a
+  // cache_control:ephemeral block on the static system prefix AND on
+  // the last tool object (so the tool schema cache also benefits).
+  cache = false,
 } = {}) {
   if (!Array.isArray(messages) || messages.length === 0) {
     throw new AnthropicToolUseError('messages[] is required and non-empty', 'NO_MESSAGES');
@@ -65,16 +72,45 @@ export async function callOnce({
     max_tokens: maxTokens,
     messages,
   };
-  if (system && String(system).trim()) body.system = String(system);
-  if (tools && tools.length) body.tools = tools;
+  if (system && String(system).trim()) {
+    if (cache) {
+      // Lift the system string into a one-block array carrying
+      // cache_control. The Anthropic API accepts either a plain string
+      // OR an array of text blocks here; we use the array form so we
+      // can attach the breakpoint marker.
+      body.system = [{ type: 'text', text: String(system), cache_control: { type: 'ephemeral' } }];
+    } else {
+      body.system = String(system);
+    }
+  }
+  if (tools && tools.length) {
+    if (cache) {
+      // Clone the array (don't mutate the caller's reference) and
+      // attach cache_control to the LAST tool — that marks the entire
+      // tool block as cacheable, per Anthropic's spec.
+      const cloned = tools.map((t, i) => (i === tools.length - 1
+        ? { ...t, cache_control: { type: 'ephemeral' } }
+        : t));
+      body.tools = cloned;
+    } else {
+      body.tools = tools;
+    }
+  }
+
+  const headers = {
+    'Content-Type': 'application/json',
+    'x-api-key': apiKey,
+    'anthropic-version': ANTHROPIC_VERSION,
+  };
+  if (cache) {
+    // The prompt-caching beta header. Required only on early adoption;
+    // safe to include on newer API versions where it's a no-op.
+    headers['anthropic-beta'] = 'prompt-caching-2024-07-31';
+  }
 
   const res = await fetchFn(url, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': ANTHROPIC_VERSION,
-    },
+    headers,
     body: JSON.stringify(body),
     signal,
   });

@@ -145,16 +145,32 @@ export const anthropicProvider = {
       stream: true,
       messages: apiMessages,
     };
-    const sys = opts.system || messages.find(m => m.role === 'system')?.content;
-    if (sys) {
-      // Prompt caching: when opts.cache is truthy, mark the system prompt
-      // as ephemeral-cacheable so repeated calls with the same system
-      // prefix only pay full input cost once. The Messages API expects
-      // an array of text blocks here, so we lift the string into one.
-      if (opts.cache) {
-        body.system = [{ type: 'text', text: String(sys), cache_control: { type: 'ephemeral' } }];
-      } else {
-        body.system = sys;
+    // Multi-block system support (Group B / C8). When the caller has
+    // separated the STATIC prefix (workspace + skills index + agent.role
+    // + USER.md) from the VOLATILE per-turn content, we ship two text
+    // blocks so the prompt cache hits the long static prefix while the
+    // volatile suffix changes per turn. Static block carries
+    // cache_control:ephemeral; volatile does not.
+    const hasMultiBlock = (opts.systemStatic && String(opts.systemStatic).trim()) || (opts.systemVolatile && String(opts.systemVolatile).trim());
+    if (hasMultiBlock) {
+      const blocks = [];
+      const staticText = opts.systemStatic ? String(opts.systemStatic) : '';
+      const volatileText = opts.systemVolatile ? String(opts.systemVolatile) : '';
+      if (staticText) blocks.push({ type: 'text', text: staticText, cache_control: { type: 'ephemeral' } });
+      if (volatileText) blocks.push({ type: 'text', text: volatileText });
+      body.system = blocks;
+    } else {
+      const sys = opts.system || messages.find(m => m.role === 'system')?.content;
+      if (sys) {
+        // Prompt caching: when opts.cache is truthy, mark the system prompt
+        // as ephemeral-cacheable so repeated calls with the same system
+        // prefix only pay full input cost once. The Messages API expects
+        // an array of text blocks here, so we lift the string into one.
+        if (opts.cache) {
+          body.system = [{ type: 'text', text: String(sys), cache_control: { type: 'ephemeral' } }];
+        } else {
+          body.system = sys;
+        }
       }
     }
     // Extended thinking. opts.thinking: { enabled?: boolean, budgetTokens?: number }.

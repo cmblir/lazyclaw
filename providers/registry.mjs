@@ -524,6 +524,12 @@ export function parseSlashProviderModel(s) {
 const RESERVED_PROVIDER_NAMES = new Set([
   'mock', 'claude-cli', 'anthropic', 'openai', 'gemini', 'ollama',
   'orchestrator',
+  // M12 — `test` is reserved because the daemon intercepts
+  // GET /providers/test and POST /providers/test for batch provider
+  // probing. Allowing a custom provider literally named "test" would
+  // shadow those routes (GET/DELETE for the literal name become
+  // unreachable). Reject up-front in the POST validator.
+  'test',
   '__add_custom__', '__custom_model__', '__fetch_models__',
 ]);
 

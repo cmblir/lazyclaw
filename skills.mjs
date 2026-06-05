@@ -15,6 +15,22 @@ import os from 'node:os';
 const SKILLS_DIRNAME = 'skills';
 const SKILL_EXT = '.md';
 
+// Group B / M8 — memoize listSkills() + skillsIndex() per configDir.
+// composePromptStack is called on every chat/agent turn; listing the
+// skills directory + statting + reading every file used to cost ~2-5 ms
+// at ~30 skills, and was the largest non-network item in the per-turn
+// flame graph. Cache key is the skills/ directory's mtimeMs — any
+// install/remove via this module bumps it (writeFile updates the
+// containing dir's mtime). Manual edits with `vim` also bust the cache
+// because writing a file in a directory updates that dir's mtime.
+// _invalidateSkillsCache() is exported as the safety hatch for callers
+// that want to be explicit.
+const _indexCache = new Map();  // cfgDir → { mtimeMs, skills, index }
+
+export function _invalidateSkillsCache(configDir = defaultConfigDir()) {
+  _indexCache.delete(configDir);
+}
+
 export function defaultConfigDir() {
   return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
 }
@@ -33,7 +49,14 @@ export function skillPath(name, configDir = defaultConfigDir()) {
 export function listSkills(configDir = defaultConfigDir()) {
   const dir = skillsDir(configDir);
   if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir)
+  // M8 — cache hit when the skills/ directory's mtime is unchanged.
+  let dirMtime = 0;
+  try { dirMtime = fs.statSync(dir).mtimeMs; } catch { /* unreadable → bypass cache */ }
+  const cached = _indexCache.get(configDir);
+  if (cached && cached.mtimeMs === dirMtime && dirMtime > 0) {
+    return cached.skills;
+  }
+  const skills = fs.readdirSync(dir)
     .filter(name => name.endsWith(SKILL_EXT))
     .map(name => {
       const full = path.join(dir, name);
@@ -57,6 +80,10 @@ export function listSkills(configDir = defaultConfigDir()) {
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
+  if (dirMtime > 0) {
+    _indexCache.set(configDir, { mtimeMs: dirMtime, skills, index: null });
+  }
+  return skills;
 }
 
 // Parse a leading YAML frontmatter block (--- … ---). Only the flat
@@ -108,9 +135,19 @@ function firstHeading(body) {
 // paying for their full bodies (progressive disclosure — the model
 // pulls a full skill on demand via the skill_view tool).
 export function skillsIndex(configDir = defaultConfigDir()) {
+  // Memoize the rendered index alongside the cached skills array — both
+  // are pure functions of the skills/ mtime.
+  const cached = _indexCache.get(configDir);
+  if (cached && cached.index !== null) return cached.index;
   const skills = listSkills(configDir);
-  if (!skills.length) return '';
-  return skills.map((s) => `- ${s.name}: ${s.summary}`.trimEnd()).join('\n');
+  if (!skills.length) {
+    if (cached) cached.index = '';
+    return '';
+  }
+  const index = skills.map((s) => `- ${s.name}: ${s.summary}`.trimEnd()).join('\n');
+  const refreshed = _indexCache.get(configDir);
+  if (refreshed) refreshed.index = index;
+  return index;
 }
 
 export function loadSkill(name, configDir = defaultConfigDir()) {
@@ -123,12 +160,14 @@ export function installSkill(name, content, configDir = defaultConfigDir()) {
   const p = skillPath(name, configDir);
   fs.mkdirSync(path.dirname(p), { recursive: true });
   fs.writeFileSync(p, content);
+  _invalidateSkillsCache(configDir);
   return p;
 }
 
 export function removeSkill(name, configDir = defaultConfigDir()) {
   const p = skillPath(name, configDir);
   if (fs.existsSync(p)) fs.unlinkSync(p);
+  _invalidateSkillsCache(configDir);
 }
 
 export function skillExists(name, configDir = defaultConfigDir()) {
