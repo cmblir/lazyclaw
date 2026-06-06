@@ -20,7 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { openIndex, rebuild, indexSessionTurn, indexSkill, indexMemory } from '../mas/index_db.mjs';
+import { reindexAll } from '../mas/index_db.mjs';
 import { parseFrontmatter } from '../skills.mjs';
 
 function defaultConfigDir() {
@@ -96,67 +96,11 @@ function upgradeAllSkills(configDir) {
   return { upgraded: n };
 }
 
+// Rebuild + repopulate the FTS index. The walk now lives in index_db.reindexAll
+// (shared with the daemon POST /index/rebuild route) so a "rebuild" is always a
+// repopulate, never a silent zeroing.
 function rebuildIndex(configDir) {
-  rebuild(configDir);
-  openIndex(configDir);
-
-  // Sessions.
-  const sessDir = path.join(configDir, 'sessions');
-  if (fs.existsSync(sessDir)) {
-    for (const f of fs.readdirSync(sessDir)) {
-      if (!f.endsWith('.jsonl')) continue;
-      const id = f.slice(0, -'.jsonl'.length);
-      const raw = fs.readFileSync(path.join(sessDir, f), 'utf8');
-      let idx = 0;
-      for (const line of raw.split('\n')) {
-        if (!line) continue;
-        try {
-          const obj = JSON.parse(line);
-          indexSessionTurn({
-            session_id: id, turn_idx: idx++, role: obj.role || 'user',
-            ts: obj.ts || 0, content: obj.content || '',
-          }, configDir);
-        } catch { /* skip malformed */ }
-      }
-    }
-  }
-
-  // Skills.
-  const skillsDir = path.join(configDir, 'skills');
-  if (fs.existsSync(skillsDir)) {
-    for (const f of fs.readdirSync(skillsDir)) {
-      if (!f.endsWith('.md')) continue;
-      const name = f.slice(0, -'.md'.length);
-      const raw = fs.readFileSync(path.join(skillsDir, f), 'utf8');
-      const { meta, body } = parseFrontmatter(raw);
-      indexSkill({
-        skill_name: name,
-        trained_by: meta.trained_by || 'legacy',
-        group_name: meta.group || (name.includes('-') ? name.split('-')[0] : 'legacy'),
-        content: body,
-      }, configDir);
-    }
-  }
-
-  // Memory (core + episodic).
-  const memDir = path.join(configDir, 'memory');
-  if (fs.existsSync(memDir)) {
-    const corePath = path.join(memDir, 'core.md');
-    if (fs.existsSync(corePath)) {
-      indexMemory({ topic: 'core', kind: 'core',
-        content: fs.readFileSync(corePath, 'utf8') }, configDir);
-    }
-    const epi = path.join(memDir, 'episodic');
-    if (fs.existsSync(epi)) {
-      for (const f of fs.readdirSync(epi)) {
-        if (!f.endsWith('.md')) continue;
-        indexMemory({
-          topic: f.slice(0, -'.md'.length), kind: 'episodic',
-          content: fs.readFileSync(path.join(epi, f), 'utf8'),
-        }, configDir);
-      }
-    }
-  }
+  reindexAll(configDir);
 }
 
 export async function migrateV5(opts = {}) {

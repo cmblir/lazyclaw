@@ -85,6 +85,16 @@ function prepareStatements(db) {
     insertMemory: db.prepare(
       `INSERT INTO fts_memories(content, topic, kind)
        VALUES (?, ?, ?)`),
+    // Upsert-by-natural-key deletes (skills/trajectories/memories only —
+    // these get re-indexed for the same key on every save/put, so a bare
+    // INSERT would accumulate duplicate FTS rows that skew bm25 and eat the
+    // recall k-budget). Sessions are NOT deduped this way: each turn has a
+    // unique (session_id,turn_idx) in normal flow, and a per-turn full-table
+    // DELETE would reintroduce O(n^2) on the hot write path; session dedup is
+    // handled by reindexAll rebuilding from scratch.
+    deleteSkill: db.prepare(`DELETE FROM fts_skills WHERE skill_name = ?`),
+    deleteTrajectory: db.prepare(`DELETE FROM fts_trajectories WHERE trajectory_id = ?`),
+    deleteMemory: db.prepare(`DELETE FROM fts_memories WHERE topic = ? AND kind = ?`),
     queries: {
       sessions: db.prepare(
         `SELECT 'sessions' AS scope, bm25(fts_sessions) AS bm25,
@@ -160,6 +170,7 @@ export function indexSessionTurn(row, configDir = defaultConfigDir()) {
 export function indexSkill(row, configDir = defaultConfigDir()) {
   try {
     const s = _stmts(configDir);
+    s.deleteSkill.run(String(row.skill_name || ''));   // upsert by skill_name
     s.insertSkill.run(
       redactSecrets(String(row.content || '')),
       String(row.skill_name || ''), String(row.trained_by || ''),
@@ -175,6 +186,7 @@ export function indexSkill(row, configDir = defaultConfigDir()) {
 export function indexTrajectory(row, configDir = defaultConfigDir()) {
   try {
     const s = _stmts(configDir);
+    s.deleteTrajectory.run(String(row.trajectory_id || ''));   // upsert by trajectory_id
     s.insertTrajectory.run(
       redactSecrets(String(row.content || '')),
       String(row.trajectory_id || ''), String(row.agent || ''),
@@ -190,6 +202,7 @@ export function indexTrajectory(row, configDir = defaultConfigDir()) {
 export function indexMemory(row, configDir = defaultConfigDir()) {
   try {
     const s = _stmts(configDir);
+    s.deleteMemory.run(String(row.topic || ''), String(row.kind || ''));   // upsert by (topic,kind)
     s.insertMemory.run(
       redactSecrets(String(row.content || '')),
       String(row.topic || ''), String(row.kind || ''),
@@ -287,6 +300,9 @@ export function integrityCheck(configDir = defaultConfigDir()) {
   return { ok: r === 'ok', result: r };
 }
 
+// Destructive primitive: drop the db (+ WAL sidecars) and recreate the empty
+// schema. Callers that want a *populated* index must use reindexAll — a bare
+// rebuild leaves recall returning zero hits.
 export function rebuild(configDir = defaultConfigDir()) {
   closeIndex(configDir);
   const p = dbPath(configDir);
@@ -299,4 +315,70 @@ export function rebuild(configDir = defaultConfigDir()) {
     }
   }
   openIndex(configDir);
+}
+
+// Minimal frontmatter splitter (trained_by / group are the only keys reindex
+// needs); avoids importing skills.mjs and risking an import cycle.
+function _miniFrontmatter(raw) {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(String(raw || ''));
+  if (!m) return { meta: {}, body: String(raw || '') };
+  const meta = {};
+  for (const line of m[1].split('\n')) {
+    const i = line.indexOf(':');
+    if (i > 0) meta[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return { meta, body: m[2] };
+}
+
+// Rebuild AND repopulate the FTS index from the on-disk source of truth
+// (sessions JSONL, flat skill .md, memory core/episodic). This is what
+// `index rebuild` / doctor recovery must call — a bare rebuild() zeroes recall.
+// Shared by scripts/migrate-v5 and the daemon POST /index/rebuild route.
+export function reindexAll(configDir = defaultConfigDir()) {
+  rebuild(configDir);
+  // Sessions — flat <configDir>/sessions/<id>.jsonl, one turn per line.
+  const sessDir = path.join(configDir, 'sessions');
+  if (fs.existsSync(sessDir)) {
+    for (const f of fs.readdirSync(sessDir)) {
+      if (!f.endsWith('.jsonl')) continue;
+      const id = f.slice(0, -'.jsonl'.length);
+      let idx = 0;
+      const raw = fs.readFileSync(path.join(sessDir, f), 'utf8');
+      for (const line of raw.split('\n')) {
+        if (!line) continue;
+        try {
+          const o = JSON.parse(line);
+          indexSessionTurn({ session_id: id, turn_idx: idx++, role: o.role || 'user', ts: o.ts || 0, content: o.content || '' }, configDir);
+        } catch { /* skip malformed line */ }
+      }
+    }
+  }
+  // Skills — canonical flat <configDir>/skills/<name>.md (skip the .archive dir).
+  const skillsDir = path.join(configDir, 'skills');
+  if (fs.existsSync(skillsDir)) {
+    for (const f of fs.readdirSync(skillsDir)) {
+      if (!f.endsWith('.md')) continue;
+      const name = f.slice(0, -'.md'.length);
+      const { meta, body } = _miniFrontmatter(fs.readFileSync(path.join(skillsDir, f), 'utf8'));
+      indexSkill({
+        skill_name: name,
+        trained_by: meta.trained_by || 'legacy',
+        group_name: meta.group || (name.includes('-') ? name.split('-')[0] : 'legacy'),
+        content: body,
+      }, configDir);
+    }
+  }
+  // Memory — core.md + episodic/*.md.
+  const memDir = path.join(configDir, 'memory');
+  if (fs.existsSync(memDir)) {
+    const core = path.join(memDir, 'core.md');
+    if (fs.existsSync(core)) indexMemory({ topic: 'core', kind: 'core', content: fs.readFileSync(core, 'utf8') }, configDir);
+    const epi = path.join(memDir, 'episodic');
+    if (fs.existsSync(epi)) {
+      for (const f of fs.readdirSync(epi)) {
+        if (!f.endsWith('.md')) continue;
+        indexMemory({ topic: f.slice(0, -'.md'.length), kind: 'episodic', content: fs.readFileSync(path.join(epi, f), 'utf8') }, configDir);
+      }
+    }
+  }
 }

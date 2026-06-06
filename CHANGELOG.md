@@ -76,6 +76,16 @@ Versioning: [SemVer](https://semver.org/).
   two writers onto `result.json` on SIGTERM. The daemon `POST /chat` stream now
   aborts the provider when the SSE client disconnects (it previously kept
   generating — and billing — to completion), matching the `/agent` path.
+- **`index rebuild` repopulates instead of zeroing recall; recall is faster and
+  dedup'd.** A bare `rebuild()` (and the daemon `POST /index/rebuild`) dropped
+  the FTS5 db and recreated it EMPTY — silently wiping the recall corpus. A
+  shared `reindexAll()` now rebuilds AND repopulates from disk (sessions /
+  skills / memory); the daemon route and `migrate v5` both use it. Skill /
+  trajectory / memory writes upsert by natural key, so replay / re-index no
+  longer accumulates duplicate rows that skew bm25 ranking. The recall read
+  path skips the per-process `integrity_check` (it belongs in `doctor`), and
+  `appendTurn` keeps an in-memory turn counter instead of re-reading the whole
+  session file on every turn (was O(n²) over a session's life).
 - **Agent skill tools share the real skill store now.** `skill_create` /
   `skill_view` / `skill_edit` wrote and read a private
   `skills/<name>/SKILL.md` directory, while everything else — the

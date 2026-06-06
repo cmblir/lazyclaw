@@ -97,7 +97,11 @@ export async function exec(args, { configDir } = {}) {
     }
   } else {
     try {
-      openIndex(configDir);
+      // Skip the full-b-tree integrity_check on the read hot path. recall is
+      // the most frequent reader and every CLI subcommand / agent worker is a
+      // fresh process, so the check (which scales with index size) would be
+      // paid on essentially every recall. It belongs in `doctor`, not here.
+      openIndex(configDir, { runIntegrityCheck: false });
     } catch (err) {
       return { ok: false, error: `recall: openIndex failed — ${err?.message || err}` };
     }

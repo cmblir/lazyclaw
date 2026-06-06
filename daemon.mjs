@@ -2342,7 +2342,9 @@ export function makeHandler(ctx) {
         }
         case route === 'POST /index/rebuild': {
           try {
-            indexDb.rebuild(gwConfigDir);
+            // reindexAll, not rebuild: a bare rebuild zeroes the FTS index and
+            // never repopulates, so this route used to silently wipe recall.
+            indexDb.reindexAll(gwConfigDir);
             ctx.indexLastRebuiltAt = new Date().toISOString();
             return writeJson(res, 200, { ok: true, rebuiltAt: ctx.indexLastRebuiltAt });
           } catch (e) {
