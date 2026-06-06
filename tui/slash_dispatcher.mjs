@@ -34,6 +34,7 @@
 // LAZYCLAW_NO_INK=1. Re-implementing these as Ink overlays is a v5.5 item.
 
 import { SLASH_COMMANDS } from './slash_commands.mjs';
+import { supportsLiveFetch, fetchModelsForProvider } from '../providers/model_catalogue.mjs';
 
 // ─── helpers ─────────────────────────────────────────────────────────────
 
@@ -182,32 +183,159 @@ async function _provider(args, ctx) {
   return `provider → ${args}`;
 }
 
+function _infoFor(registry, provName) {
+  return (registry.PROVIDER_INFO && registry.PROVIDER_INFO[provName]) || {};
+}
+
+// A composite provider (orchestrator) has no real model list — its only
+// "model" is the provider name itself, so the model picker would dead-end
+// on a single bogus row. Detect it so we can redirect to a provider pick.
+function _isCompositeProvider(info, provName) {
+  if (info && info.composite) return true;
+  const s = info && Array.isArray(info.suggestedModels) ? info.suggestedModels : null;
+  return !!(s && s.length === 1 && s[0] === provName);
+}
+
+// Whether the active provider exposes any selectable model (a suggested
+// model that isn't just the provider name, or a live-fetchable catalogue).
+function _hasRealModels(info, provName) {
+  if (supportsLiveFetch(info, provName)) return true;
+  const s = info && Array.isArray(info.suggestedModels) ? info.suggestedModels : [];
+  return s.some((m) => m && m !== provName);
+}
+
+// Build the model-picker rows: suggested + any live-fetched models, deduped,
+// with the provider default tagged, plus pinned sentinel rows for live-fetch
+// (when supported) and free-text custom entry.
+function _buildModelItems(info, provName, dynamicModels) {
+  const base = Array.isArray(info.suggestedModels) ? info.suggestedModels : [];
+  const all = Array.from(new Set([...(dynamicModels || []), ...base])).filter((m) => m && m !== provName);
+  const items = [];
+  if (supportsLiveFetch(info, provName)) {
+    items.push({
+      id: '__fetch_models__',
+      label: '↻ fetch live model list',
+      desc: 'pull the current catalogue from the provider',
+      pinned: true,
+    });
+  }
+  for (const m of all) {
+    items.push({ id: m, label: m, desc: info.defaultModel === m ? '(default)' : '' });
+  }
+  items.push({
+    id: '__custom_model__',
+    label: '… type a custom model id',
+    desc: 'type the id into the filter above, then pick this row',
+    pinned: true,
+    freeText: true,
+  });
+  return items;
+}
+
+// Run the model picker for `provName`, looping on the live-fetch row and
+// resolving the free-text row from the typed filter. Returns a concrete
+// model id, or null on cancel.
+async function _pickModelLoop(ctx, registry, provName) {
+  const info = _infoFor(registry, provName);
+  let dynamic = [];
+  let note = '';
+  for (let guard = 0; guard < 50; guard++) {
+    const items = _buildModelItems(info, provName, dynamic);
+    const picked = await ctx.openPicker({
+      kind: 'model',
+      title: `select model for ${provName}`,
+      subtitle: note || `current: ${ctx.getActiveModel() || '(default)'}`,
+      items,
+    });
+    if (picked == null) return null;
+    if (typeof picked === 'object') {
+      // free-text custom row → { id, query }
+      const typed = String(picked.query || '').trim();
+      if (!typed) { note = 'type a model id into the filter first'; continue; }
+      return typed;
+    }
+    if (picked === '__fetch_models__') {
+      try {
+        const fetcher = typeof ctx.fetchModels === 'function'
+          ? ctx.fetchModels
+          : (provId) => fetchModelsForProvider({
+              cfg: ctx.cfg,
+              registryMod: registry,
+              resolveAuthKey: (id) => (ctx.resolveAuthKey ? ctx.resolveAuthKey(id) : ''),
+              providerId: provId,
+            });
+        const fetched = await fetcher(provName);
+        if (Array.isArray(fetched) && fetched.length) {
+          dynamic = fetched;
+          note = `fetched ${fetched.length} model(s) — pick one or type a custom id`;
+        } else {
+          note = 'no models returned — using the suggested list';
+        }
+      } catch (e) {
+        note = `fetch failed: ${e && e.message ? e.message : e}`;
+      }
+      continue;
+    }
+    return picked;
+  }
+  return null;
+}
+
+// Flat provider picker used when the active provider is composite and the
+// user needs to escape it before choosing a model. Hides composites + mock,
+// mirroring the legacy wizard's filter (cli.mjs:1979). (Family grouping +
+// add-custom land in P2.)
+async function _pickProviderForModel(ctx, registry) {
+  const info = registry.PROVIDER_INFO || {};
+  const known = Object.keys(registry.PROVIDERS || {})
+    .filter((id) => id !== 'mock' && !((info[id] || {}).composite))
+    .sort();
+  const items = known.map((id) => ({
+    id,
+    label: id,
+    desc: info[id] && info[id].docs ? String(info[id].docs).split('\n')[0].slice(0, 60) : '',
+  }));
+  const picked = await ctx.openPicker({
+    kind: 'provider',
+    title: 'select provider (then a model)',
+    subtitle: `${ctx.getActiveProvName()} has no selectable models — pick a provider`,
+    items,
+  });
+  return typeof picked === 'string' ? picked : null;
+}
+
 async function _model(args, ctx) {
   const registry = await _mod(ctx, 'registryMod', () => import('../providers/registry.mjs'));
   if (!args) {
     if (typeof ctx.openPicker === 'function') {
-      const provName = ctx.getActiveProvName();
-      const info = (registry.PROVIDER_INFO && registry.PROVIDER_INFO[provName]) || {};
-      const suggested = Array.isArray(info.suggestedModels) ? info.suggestedModels : [];
-      if (!suggested.length) {
-        return `no suggested models known for provider "${provName}" — pass one: /model <name>`;
+      let provName = ctx.getActiveProvName();
+      let info = _infoFor(registry, provName);
+      let switched = false;
+      // Composite (orchestrator) or model-less active provider → pick a
+      // provider first so the user is never dead-ended on a single row.
+      if (_isCompositeProvider(info, provName) || !_hasRealModels(info, provName)) {
+        const pickedProv = await _pickProviderForModel(ctx, registry);
+        if (!pickedProv) return 'cancelled';
+        if (pickedProv !== provName) {
+          const next = _providerLookup(registry, pickedProv);
+          if (!next) return `unknown provider: ${pickedProv}`;
+          if (ctx.setActiveProvName) ctx.setActiveProvName(pickedProv);
+          if (ctx.setProv) ctx.setProv(next);
+          switched = true;
+        }
+        provName = pickedProv;
+        info = _infoFor(registry, provName);
       }
-      const items = suggested.map((m) => ({
-        id: m,
-        label: m,
-        desc: info.defaultModel === m ? '(default)' : '',
-      }));
-      const picked = await ctx.openPicker({
-        kind: 'model',
-        title: `select model for ${provName}`,
-        subtitle: `current: ${ctx.getActiveModel() || '(default)'}`,
-        items,
-      });
-      if (!picked) return 'cancelled';
-      args = picked;
-    } else {
-      return `model: ${ctx.getActiveModel() || '(default)'}\n(pass an arg: /model <name>)`;
+      const model = await _pickModelLoop(ctx, registry, provName);
+      if (model == null) {
+        return switched ? `provider → ${provName} (model unchanged)` : 'cancelled';
+      }
+      if (ctx.setActiveModel) ctx.setActiveModel(model);
+      return switched
+        ? `provider → ${provName} · model → ${model}`
+        : `model → ${model}`;
     }
+    return `model: ${ctx.getActiveModel() || '(default)'}\n(pass an arg: /model <name>)`;
   }
   const { parseSlashProviderModel } = registry;
   const parsed = typeof parseSlashProviderModel === 'function'
