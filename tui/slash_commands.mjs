@@ -33,7 +33,7 @@ export const SLASH_COMMANDS = [
   { cmd: '/dream',       help: 'consolidate recent memory into per-topic episodic files' },
   { cmd: '/agent',       help: 'spawn or switch agent: /agent NAME' },
   { cmd: '/team',        help: 'list, create, or join a team' },
-  { cmd: '/task',        help: 'list/show/transcript/abandon/done/remove (start/tick: CLI)' },
+  { cmd: '/task',        help: 'multi-agent tasks: start/tick/list/show/transcript/abandon/done/remove' },
   { cmd: '/handoff',     help: 'hand current task off to another agent' },
   { cmd: '/exit',        help: 'leave the chat' },
   { cmd: '/quit',        help: 'alias for /exit' },

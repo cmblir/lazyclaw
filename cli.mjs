@@ -2673,6 +2673,7 @@ async function cmdChat(flags = {}) {
         persistTurn: _inkPersistTurn,
         accumulateUsage: _inkAccumulateUsage,
         resolveAuthKey: (providerName) => _resolveAuthKey(cfg, providerName),
+        resolveBaseUrl: (providerName) => _resolveBaseUrl(providerName),
         onCharsSent: (n) => { _inkCharsSent += Number(n) || 0; },
         // P2 — let /provider add register a custom OpenAI-compatible endpoint
         // by read-merge-writing config.json from inside the Ink session.

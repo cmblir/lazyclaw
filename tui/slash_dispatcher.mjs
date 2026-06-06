@@ -1124,7 +1124,7 @@ function _personalityUse(name, ctx, fs, path) {
   return `active personality → ${name}`;
 }
 
-async function _task(args, ctx) {
+async function _task(args, ctx, write) {
   let tasksMod, loopMod;
   try {
     tasksMod = await _mod(ctx, 'tasksMod', () => import('../tasks.mjs'));
@@ -1190,14 +1190,90 @@ async function _task(args, ctx) {
       tasksMod.removeTask(id, ctx.cfgDir);
       return `✓ removed task ${id}`;
     }
-    if (sub === 'start' || sub === 'tick') {
-      // Full multi-agent router + Slack kickoff can't safely run inline in the
-      // Ink scrollback (blocking + stdout ownership). Echo the exact command
-      // with the user's args so it's one paste away in a shell.
-      const rest = args.replace(new RegExp(`^\\s*${sub}\\s*`), '').trim();
-      return `task ${sub} runs the multi-agent router + Slack — run it from a shell:\n  lazyclaw task ${sub}${rest ? ' ' + rest : ' ...'}`;
+    if (sub === 'start') {
+      // /task start <team> --title "..." [--description "..."] [--lead <name>]
+      const teamsMod = await _mod(ctx, 'teamsMod', () => import('../teams.mjs'));
+      const agentsMod = await _mod(ctx, 'agentsMod', () => import('../agents.mjs'));
+      const rest = tokens.slice(1);
+      let teamName = null, title = '', description = '', lead = null;
+      for (let i = 0; i < rest.length; i++) {
+        const t = rest[i];
+        if (t === '--title') title = rest[++i] || '';
+        else if (t === '--description' || t === '--desc') description = rest[++i] || '';
+        else if (t === '--lead') lead = rest[++i] || null;
+        else if (!teamName && !t.startsWith('--')) teamName = t;
+      }
+      if (!teamName || !title) return 'usage: /task start <team> --title "..." [--description "..."] [--lead <name>]';
+      const team = teamsMod.getTeam(teamName, ctx.cfgDir);
+      if (!team) return `no team "${teamName}"`;
+      const leadName = lead || team.lead;
+      const leadAgent = agentsMod.getAgent(leadName, ctx.cfgDir);
+      const seeded = tasksMod.registerTask(
+        { title, description, team: teamName, lead: leadName, slackChannel: team.slackChannel, status: 'pending' },
+        ctx.cfgDir,
+      );
+      let ts = '';
+      if (team.slackChannel) {
+        try {
+          loadDotenvIfAny(ctx.cfgDir);
+          const SlackChannel = ctx.SlackChannel || (await import('../channels/slack.mjs')).SlackChannel;
+          const slack = new SlackChannel({ requireInbound: false });
+          await slack.start(async () => '', {});
+          const text = tasksMod.buildKickoffMessage({
+            id: seeded.id, title: seeded.title, description: seeded.description,
+            leadDisplayName: (leadAgent && leadAgent.displayName) || leadName,
+            teamDisplayName: team.displayName || team.name,
+          });
+          const res = await slack.send(team.slackChannel, text);
+          ts = (res && res.ts) || '';
+          await slack.stop().catch(() => {});
+        } catch (e) {
+          try { tasksMod.removeTask(seeded.id, ctx.cfgDir); } catch { /* best-effort */ }
+          return `task start: ${e?.message || e}`;
+        }
+      }
+      const turns = ts ? [{ agent: 'system', text: `Task opened by user. Lead: ${leadName}.`, ts }] : [];
+      const finalTask = tasksMod.patchTask(seeded.id, { slackThreadTs: ts, status: ts ? 'running' : 'pending', turns }, ctx.cfgDir);
+      return `✓ task ${finalTask.id} started (status: ${finalTask.status}${ts ? `, slack thread ${ts}` : ', no Slack thread'})`;
     }
-    return `/task: unknown sub "${sub}" — list|show|transcript|abandon|done|remove (start/tick: use CLI)`;
+    if (sub === 'tick') {
+      // /task tick <id> [message] — one multi-agent router turn. The router
+      // emits through a logger callback (not raw stdout), so it runs inline in
+      // the Ink chat with output routed through `write`.
+      if (!id) return 'usage: /task tick <id> [message]';
+      const teamsMod = await _mod(ctx, 'teamsMod', () => import('../teams.mjs'));
+      const agentsMod = await _mod(ctx, 'agentsMod', () => import('../agents.mjs'));
+      const task = tasksMod.getTask(id, ctx.cfgDir);
+      if (!task) return `no task "${id}"`;
+      const team = teamsMod.getTeam(task.team, ctx.cfgDir);
+      if (!team) return `task tick: team "${task.team}" disappeared`;
+      const agentsById = {};
+      for (const name of team.agents) {
+        const rec = agentsMod.getAgent(name, ctx.cfgDir);
+        if (!rec) return `task tick: agent "${name}" disappeared`;
+        agentsById[name] = rec;
+      }
+      loadDotenvIfAny(ctx.cfgDir);
+      const router = await _mod(ctx, 'routerMod', () => import('../mas/mention_router.mjs'));
+      const leadAgent = agentsById[team.lead];
+      const apiKey = ctx.resolveAuthKey ? ctx.resolveAuthKey(leadAgent.provider) : '';
+      const baseUrl = ctx.resolveBaseUrl ? ctx.resolveBaseUrl(leadAgent.provider) : undefined;
+      const userMsg = tokens.slice(2).join(' ').trim();
+      try {
+        if (typeof write === 'function') { try { write('  ↻ running task turn…\n'); } catch {} }
+        const result = await router.runTaskTurn({
+          task, team, agentsById,
+          userMessage: userMsg || undefined,
+          configDir: ctx.cfgDir,
+          apiKey, baseUrl,
+          logger: (line) => { if (typeof write === 'function') { try { write(line); } catch {} } },
+        });
+        return `✓ task ${result.task.id} → ${result.task.status} (${result.iterations} agent turn(s)${result.stoppedBy ? `, stopped by ${result.stoppedBy}` : ''})`;
+      } catch (e) {
+        return `task tick: ${e?.message || e}`;
+      }
+    }
+    return `/task: unknown sub "${sub}" — start|tick|list|show|transcript|abandon|done|remove`;
   } catch (e) {
     return `/task error: ${e?.message || e}`;
   }
