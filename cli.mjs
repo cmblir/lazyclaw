@@ -2685,8 +2685,10 @@ async function cmdChat(flags = {}) {
       // 'EXIT' (caller unmounts), or void (streamed via write). /exit and
       // /quit are also intercepted earlier inside ReplApp.handleSubmit so
       // either path terminates cleanly.
-      const _inkSlashHandler = async (line) => {
+      const _inkSlashHandler = async (line, signal) => {
         const { cmd, args } = _parseSlashLine(line);
+        // Thread the REPL's abort signal so Esc/Ctrl-C can stop a /loop.
+        _inkCtx.loopSignal = signal || null;
         return _dispatchSlash(cmd, args, _inkCtx, (chunk) => {
           try { process.stdout.write(chunk); } catch { /* swallow */ }
         });

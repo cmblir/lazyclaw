@@ -273,7 +273,9 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
       const controller = new AbortController();
       setState((s) => onUserInput(s, { text: trimmed, controller }));
       try {
-        const result = await onSlashCommand(trimmed);
+        // Pass the signal so the host can abort a long slash op (e.g. /loop)
+        // when the user hits Esc (onEscape aborts state.controller).
+        const result = await onSlashCommand(trimmed, controller.signal);
         if (result === 'EXIT') { exit(); return; }
         if (typeof result === 'string' && result.length > 0) {
           setState((s) => onStreamChunk(s, { chunk: result }));

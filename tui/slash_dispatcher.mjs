@@ -749,7 +749,7 @@ async function _loop(args, ctx, write) {
       'usage: /loop <prompt> [--max N] [--until "<regex>"] [--use-memory] [--recall "<q>"]',
       `  default --max ${loopMod.LOOP_MAX_DEFAULT}, ceiling ${loopMod.LOOP_MAX_CEILING}`,
       `  session: ${ctx.getSessionId && ctx.getSessionId() || '(none — turns will not be persisted)'}`,
-      '  note: Ink chat runs /loop without mid-loop Ctrl-C abort; set LAZYCLAW_NO_INK=1 for the full loop UX.',
+      '  press Esc to abort a running loop.',
     ].join('\n');
   }
   let parsed;
@@ -801,7 +801,9 @@ async function _loop(args, ctx, write) {
     return parts.join('\n\n---\n\n');
   }) : null;
 
-  const ac = new AbortController();
+  // Use the abort signal the REPL threads in (Esc / Ctrl-C aborts the running
+  // loop). Falls back to a fresh controller for non-Ink callers.
+  const signal = ctx.loopSignal || new AbortController().signal;
   try {
     const result = await loopMod.runLoop({
       prompt: parsed.prompt,
@@ -815,7 +817,7 @@ async function _loop(args, ctx, write) {
           try { write(`  ↻ loop iteration ${i}/${max}\n`); } catch {}
         }
       },
-      signal: ac.signal,
+      signal,
       buildSystem,
     });
     if (ctx.setCharsSent && ctx.getCharsSent) {
