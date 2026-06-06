@@ -29,6 +29,20 @@ Versioning: [SemVer](https://semver.org/).
 - **Esc aborts a running `/loop`.** The Ink loop used a throwaway
   AbortController; it now uses the REPL's turn signal, so Esc stops the loop
   between iterations and cancels the in-flight request.
+- **The splash (sloth + manual) no longer vanishes the moment you run a
+  command.** v5.4.3 hard-dropped it from scrollback after the first turn; it
+  now stays and scrolls off the top of the alt canvas naturally
+  (`justifyContent: flex-end`).
+- **Less typing flicker.** Every keystroke re-rendered the whole scrollback,
+  including the expensive `<Splash/>` (gradient + ASCII recompute).
+  `ScrollbackItem` is now memoized so committed lines don't re-render on each
+  keypress. (Full-frame redraw is inherent to the alt-buffer fullscreen; set
+  `LAZYCLAW_NO_ALT=1` for the flicker-free Static scrollback.)
+- **`/model` can reach any provider's models.** A user on ollama could not see
+  the connected claude-cli models; the picker now has a "⇄ pick a different
+  provider" row, so opus/sonnet are reachable without leaving `/model`.
+- **`/skills` lists + picks installed skills** (was a plain alias for
+  `/skill`, which never listed) and tells you how to install when none exist.
 
 ### Added (restored from the pre-Ink readline chat)
 
