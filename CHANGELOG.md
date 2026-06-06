@@ -62,6 +62,13 @@ Versioning: [SemVer](https://semver.org/).
   fall back to a paid provider it prints a one-time notice instead of charging
   silently. Unknown short model aliases now pass through to the CLI instead of
   being dropped to the CLI default.
+- **Every advertised OpenAI-compatible provider can now be an agent / trainer.**
+  `resolveToolUseAdapter` had a hardcoded 4-provider switch, so onboarding on
+  Groq / OpenRouter / DeepSeek / NIM / Together / xAI / Mistral / Fireworks (or
+  a custom OpenAI-compatible endpoint) worked for chat but threw "does not
+  support text completion" the moment you used agents, teams, or skill
+  synthesis. They now resolve to the OpenAI tool-use adapter bound to the
+  provider's base URL.
 - **Agent skill tools share the real skill store now.** `skill_create` /
   `skill_view` / `skill_edit` wrote and read a private
   `skills/<name>/SKILL.md` directory, while everything else — the

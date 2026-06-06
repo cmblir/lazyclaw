@@ -35,11 +35,35 @@ export async function resolveToolUseAdapter(provider) {
     case 'gemini':     return await import('../providers/tool_use/gemini.mjs');
     case 'claude-cli': return await import('../providers/tool_use/claude_cli.mjs');
     default:
-      throw new ProviderAdapterError(
-        `provider "${provider}" does not support text completion`,
-        'PROVIDER_ADAPTER_UNKNOWN',
-      );
+      return await _openAICompatAdapter(provider);
   }
+}
+
+// Any OpenAI-wire-compatible provider — the built-in compat vendors
+// (nim/openrouter/groq/together/xai/deepseek/mistral/fireworks) and custom
+// providers — can drive tool-use through the OpenAI adapter, just at a
+// different base URL. They advertise as first-class providers, so agents,
+// teams, and the trainer must work for them too (previously they threw
+// "does not support text completion"). We bind the provider's baseUrl so the
+// caller doesn't have to know it; an explicit baseUrl in the call still wins.
+async function _openAICompatAdapter(provider) {
+  let info;
+  try {
+    const reg = await import('../providers/registry.mjs');
+    info = reg.PROVIDER_INFO && reg.PROVIDER_INFO[provider];
+  } catch { info = null; }
+  if (!info || !(info.builtinOpenAICompat || info.custom || info.baseUrl)) {
+    throw new ProviderAdapterError(
+      `provider "${provider}" does not support text completion`,
+      'PROVIDER_ADAPTER_UNKNOWN',
+    );
+  }
+  const base = await import('../providers/tool_use/openai.mjs');
+  if (!info.baseUrl) return base; // custom without a stored baseUrl — caller supplies it
+  return {
+    ...base,
+    callOnce: (opts = {}) => base.callOnce({ baseUrl: info.baseUrl, ...opts }),
+  };
 }
 
 // Run one no-tools text completion through the provider's tool-use
