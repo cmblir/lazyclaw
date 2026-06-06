@@ -6,6 +6,13 @@ import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 // sandbox subcommands — list/test/add/use (Phase D).
 import { resolveSandbox, listBackends } from './sandbox/index.mjs';
+// P1 restore: shared OpenAI-compatible model-catalogue resolution, also used
+// by the Ink slash dispatcher so /model regains the live /v1/models fetch.
+import {
+  modelCatalogueFor as _modelCatalogueResolve,
+  fetchModelsForProvider as _fetchModelsResolve,
+  supportsLiveFetch as _supportsLiveFetch,
+} from './providers/model_catalogue.mjs';
 // Phase G: defaultConfigDir for personality subcommand (spec §9, decision C7).
 import { defaultConfigDir as _persDefaultCfg } from './memory.mjs';
 // Group B / M6 — chat sliding window. Lives in its own module so
@@ -2284,7 +2291,7 @@ async function _pickModelInteractive(providerId, opts = {}) {
   const baseModels = Array.isArray(meta.suggestedModels) ? meta.suggestedModels.slice() : [];
   const isCustom = !!meta.custom;
   const isBuiltinCompat = !!meta.builtinOpenAICompat;
-  const supportsLiveFetch = !!meta.baseUrl || providerId === 'openai' || providerId === 'ollama' || isBuiltinCompat;
+  const supportsLiveFetch = _supportsLiveFetch(meta, providerId);
 
   if (!baseModels.length && !supportsLiveFetch) return null;
 
@@ -2352,32 +2359,22 @@ async function _pickModelInteractive(providerId, opts = {}) {
 // compatible model catalogue (e.g. anthropic, gemini, claude-cli).
 function _modelCatalogueFor(providerId) {
   const cfg = readConfig();
-  const meta = (_registryMod.PROVIDER_INFO || {})[providerId] || {};
-  if (meta.custom && meta.baseUrl) {
-    const entry = (cfg.customProviders || []).find((p) => p && p.name === providerId) || {};
-    return { baseUrl: meta.baseUrl, apiKey: entry.apiKey || cfg['api-key'] || '' };
-  }
-  // Built-in OpenAI-compatible vendors (nim / openrouter / groq / together /
-  // xai / deepseek / mistral / fireworks). The registry exposes a baseUrl
-  // and the auth-key resolver already knows about the env-var fallback.
-  if (meta.builtinOpenAICompat && meta.baseUrl) {
-    return { baseUrl: meta.baseUrl, apiKey: _resolveAuthKey(cfg, providerId) };
-  }
-  if (providerId === 'openai') {
-    return { baseUrl: 'https://api.openai.com/v1', apiKey: _resolveAuthKey(cfg, 'openai') };
-  }
-  if (providerId === 'ollama') {
-    const host = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
-    return { baseUrl: `${host.replace(/\/$/, '')}/v1`, apiKey: '' };
-  }
-  return null;
+  return _modelCatalogueResolve({
+    cfg,
+    registryMod: _registryMod,
+    resolveAuthKey: (id) => _resolveAuthKey(cfg, id),
+    providerId,
+  });
 }
 
 async function _fetchModelsForProvider(providerId) {
-  const c = _modelCatalogueFor(providerId);
-  if (!c) throw new Error(`provider "${providerId}" does not expose an OpenAI-compatible /v1/models endpoint`);
-  const { fetchOpenAICompatModels } = await import('./providers/openai_compat.mjs');
-  return fetchOpenAICompatModels({ baseUrl: c.baseUrl, apiKey: c.apiKey });
+  const cfg = readConfig();
+  return _fetchModelsResolve({
+    cfg,
+    registryMod: _registryMod,
+    resolveAuthKey: (id) => _resolveAuthKey(cfg, id),
+    providerId,
+  });
 }
 
 // Walk the user through registering a new OpenAI-compatible custom
