@@ -96,11 +96,16 @@ export function ModalPicker({
       const marker = selected ? '❯ ' : '  ';
       const label = String(it.label || it.id || '').padEnd(labelW);
       const desc = it.desc ? `  ${it.desc}` : '';
-      // Render selected row inverse-bold for contrast.
+      // Render selected row inverse-bold for contrast. A row `tag` (e.g.
+      // "api key" / "no key" / "custom") renders as a dim trailing pill so
+      // the picker signals at a glance which providers need a key.
       rows.push(React.createElement(
         Text,
         { key: `it-${absoluteIdx}`, bold: selected, inverse: selected },
         `${marker}${label}${desc}`,
+        it.tag
+          ? React.createElement(Text, { key: 'tag', dimColor: true }, `  [${it.tag}]`)
+          : null,
       ));
     }
     if (end < total) {

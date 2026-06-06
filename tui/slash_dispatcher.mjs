@@ -35,6 +35,7 @@
 
 import { SLASH_COMMANDS } from './slash_commands.mjs';
 import { supportsLiveFetch, fetchModelsForProvider } from '../providers/model_catalogue.mjs';
+import { providerFamilies, providerTag } from './provider_families.mjs';
 
 // ─── helpers ─────────────────────────────────────────────────────────────
 
@@ -147,26 +148,61 @@ function _providerLookup(registry, name) {
   return registry.PROVIDERS ? registry.PROVIDERS[name] : null;
 }
 
+// Pick a provider via the family drill-in (API key / CLI-Local / Mock),
+// mirroring the legacy readline wizard. Single-option steps auto-advance.
+// orchestrator is never listed. Returns a provider id or null on cancel.
+async function _pickProviderDrillIn(ctx, registry) {
+  const info = registry.PROVIDER_INFO || {};
+  const families = providerFamilies(registry);
+  const nonEmpty = Object.values(families).filter((f) => f.members.length > 0);
+  if (!nonEmpty.length) return null;
+
+  // ── Step 1 — auth family (skipped when only one is populated) ──
+  let family = nonEmpty[0];
+  if (nonEmpty.length > 1) {
+    const picked = await ctx.openPicker({
+      kind: 'provider-family',
+      title: 'select provider — how do you want to auth?',
+      subtitle: 'API: bring your own key · CLI/Local: use this machine · Mock: offline',
+      items: nonEmpty.map((f) => ({
+        id: f.id,
+        label: f.label,
+        desc: `${f.desc} · ${f.members.slice(0, 3).join(' / ')}${f.members.length > 3 ? ` (+${f.members.length - 3})` : ''}`,
+        tag: f.tag,
+      })),
+    });
+    if (!picked || typeof picked !== 'string') return null;
+    family = families[picked];
+    if (!family || !family.members.length) return null;
+  }
+
+  // ── Step 2 — provider in that family (auto-advances on a single member) ──
+  if (family.members.length === 1) return family.members[0];
+  const items = family.members.map((id) => {
+    const meta = info[id] || {};
+    let desc = '';
+    if (meta.custom) desc = `custom · ${meta.baseUrl || ''}`;
+    else if (meta.builtinOpenAICompat) desc = meta.label || meta.baseUrl || '';
+    else if (meta.label && meta.label !== id) desc = meta.label;
+    return { id, label: id, desc, tag: providerTag(meta) };
+  });
+  const picked = await ctx.openPicker({
+    kind: 'provider',
+    title: `select provider — ${family.label}`,
+    subtitle: `current: ${ctx.getActiveProvName()}`,
+    items,
+  });
+  return typeof picked === 'string' ? picked : null;
+}
+
 async function _provider(args, ctx) {
   const registry = await _mod(ctx, 'registryMod', () => import('../providers/registry.mjs'));
-  // No arg → open the Ink modal picker (v5.4.3). Falls back to the
-  // pre-v5.4.3 hint string when ctx.openPicker isn't available (e.g.
-  // non-Ink callers or before the picker ref settles).
+  // No arg → drill-in modal picker (family -> provider). Falls back to the
+  // pre-v5.4.3 hint string when ctx.openPicker isn't available (e.g. non-Ink
+  // callers or before the picker ref settles).
   if (!args) {
     if (typeof ctx.openPicker === 'function') {
-      const known = Object.keys(registry.PROVIDERS || {}).sort();
-      const info = registry.PROVIDER_INFO || {};
-      const items = known.map((id) => ({
-        id,
-        label: id,
-        desc: info[id] && info[id].docs ? String(info[id].docs).split('\n')[0].slice(0, 60) : '',
-      }));
-      const picked = await ctx.openPicker({
-        kind: 'provider',
-        title: 'select provider',
-        subtitle: `current: ${ctx.getActiveProvName()}`,
-        items,
-      });
+      const picked = await _pickProviderDrillIn(ctx, registry);
       if (!picked) return 'cancelled';
       args = picked;
     } else {

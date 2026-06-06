@@ -13,6 +13,8 @@ import {
   fetchModelsForProvider as _fetchModelsResolve,
   supportsLiveFetch as _supportsLiveFetch,
 } from './providers/model_catalogue.mjs';
+// P2 restore: shared provider family bucketing (also used by the Ink picker).
+import { bucketProviders as _bucketProviders } from './tui/provider_families.mjs';
 // Phase G: defaultConfigDir for personality subcommand (spec §9, decision C7).
 import { defaultConfigDir as _persDefaultCfg } from './memory.mjs';
 // Group B / M6 — chat sliding window. Lives in its own module so
@@ -1967,27 +1969,15 @@ async function _arrowMenu({ title, subtitle, footer, items, defaultIdx = 0, sear
 // here (rather than registry.mjs) because it's a UX concept, not
 // an intrinsic provider attribute.
 function _providerFamilies() {
-  const info = _registryMod.PROVIDER_INFO || {};
-  const all = Object.keys(_registryMod.PROVIDERS);
-  const buckets = {
-    api: { label: 'API key', desc: 'paste an sk-... key during setup',  tag: '\x1b[38;5;245m[needs key]\x1b[0m', members: [] },
-    cli: { label: 'CLI / Local', desc: 'keyless — uses an existing CLI login or a local daemon', tag: '\x1b[38;5;208m[no key]\x1b[0m', members: [] },
-    mock: { label: 'Mock', desc: 'offline echo, only useful for testing', tag: '\x1b[38;5;245m[test]\x1b[0m', members: [] },
+  // Membership (api/cli/mock, orchestrator excluded) is shared with the Ink
+  // picker via tui/provider_families.mjs so both paths bucket identically.
+  // The ANSI tags below are readline-specific, so they're applied here.
+  const b = _bucketProviders(_registryMod);
+  return {
+    api: { label: 'API key', desc: 'paste an sk-... key during setup',  tag: '\x1b[38;5;245m[needs key]\x1b[0m', members: b.api },
+    cli: { label: 'CLI / Local', desc: 'keyless — uses an existing CLI login or a local daemon', tag: '\x1b[38;5;208m[no key]\x1b[0m', members: b.cli },
+    mock: { label: 'Mock', desc: 'offline echo, only useful for testing', tag: '\x1b[38;5;245m[test]\x1b[0m', members: b.mock },
   };
-  for (const name of all) {
-    // v5.3.2 — orchestrator is strictly opt-in. It's still registered so
-    // `lazyclaw orchestrator …` and explicit `--provider orchestrator`
-    // keep working, but the setup wizard must never land on it as a
-    // default. Previously a fresh user picking "CLI/Local" got
-    // orchestrator bucketed alongside claude-cli/ollama and could end
-    // up with `{ provider: 'orchestrator', model: 'orchestrator' }`
-    // written to cfg.json.
-    if (name === 'mock') buckets.mock.members.push(name);
-    else if (name === 'orchestrator') continue;
-    else if ((info[name] || {}).requiresApiKey) buckets.api.members.push(name);
-    else buckets.cli.members.push(name);
-  }
-  return buckets;
 }
 
 // Multi-step provider / model picker — replaces the flat 40-row
