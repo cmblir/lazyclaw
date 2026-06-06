@@ -481,17 +481,16 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
       altEnabled
         ? React.createElement(
             Box,
-            { flexDirection: 'column', flexGrow: 1, flexShrink: 1, overflow: 'hidden' },
-            // v5.4.3 — once any user/assistant turn has been committed,
-            // drop the splash from the visible scrollback. Inside the
-            // alt-buffer canvas the splash cannot scroll off naturally
-            // (no native scrollback), so leaving it visible pushes the
-            // newest content past the StatusBar+Editor on tall outputs
-            // like /help. The splash still flashes on first mount.
-            (state.scrollback.length > 1
-              ? state.scrollback.filter((it) => it.kind !== 'splash')
-              : state.scrollback
-            ).map((item) =>
+            // v5.5 — `justifyContent: 'flex-end'` pins the newest content to
+            // the bottom of the fixed-height alt canvas; older lines (the
+            // splash / sloth + manual) overflow off the TOP and are clipped
+            // naturally, exactly like a real scrollback. This replaces the
+            // v5.4.3 hack that hard-dropped the splash after the first turn
+            // (which made the manual + character abruptly vanish the moment
+            // you ran any command). The splash now scrolls off only once
+            // there's enough content to push it past the top edge.
+            { flexDirection: 'column', flexGrow: 1, flexShrink: 1, overflow: 'hidden', justifyContent: 'flex-end' },
+            state.scrollback.map((item) =>
               React.createElement(ScrollbackItem, { key: item.id, item })
             ),
             // Live region — partial assistant stream (inside the scroll
@@ -582,10 +581,15 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
   );
 }
 
-// ScrollbackItem renders each <Static/> child. Splash renders via the
-// real <Splash/> component (preserves gradient wordmark colorization);
-// everything else is plain Text.
-export function ScrollbackItem({ item }) {
+// ScrollbackItem renders each scrollback child. Splash renders via the real
+// <Splash/> component (preserves gradient wordmark colorization); everything
+// else is plain Text.
+//
+// Wrapped in React.memo: scrollback item objects are stable across renders,
+// so when only the editor buffer changes (every keystroke) the memo skips
+// re-rendering every committed line. Without this the whole alt-buffer
+// scrollback re-rendered on each keypress — the source of the typing flicker.
+export const ScrollbackItem = React.memo(function ScrollbackItem({ item }) {
   if (item.kind === 'splash') {
     return React.createElement(Splash, item.splashProps);
   }
@@ -601,7 +605,7 @@ export function ScrollbackItem({ item }) {
   }
   // 'assistant' (default)
   return React.createElement(Text, { color: theme.fg }, item.text);
-}
+});
 
 // StatusBar — single row, provider · model · ctx · streaming indicator.
 // Kept intentionally minimal in v5.3; token gauges land separately once
