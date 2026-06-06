@@ -43,6 +43,15 @@ Versioning: [SemVer](https://semver.org/).
   provider" row, so opus/sonnet are reachable without leaving `/model`.
 - **`/skills` lists + picks installed skills** (was a plain alias for
   `/skill`, which never listed) and tells you how to install when none exist.
+- **`/dashboard` opens the actually-bound port.** It hard-coded 19600, so a
+  random-port fallback (EADDRINUSE) opened a dead URL; it now reads the
+  daemon's printed URL. Also stops leaking a daemon + browser tab under the
+  test runner.
+- **`/task done|abandon` posts the Slack closing message** to the bound thread
+  (parity with the CLI), best-effort and never rolling back the status change.
+  `/task start|tick` now echoes the exact shell command with your args.
+- **`/menu` command palette.** Browse the full subcommand catalog from chat
+  (the no-arg launcher menu was hidden behind `lazyclaw menu`).
 
 ### Added (restored from the pre-Ink readline chat)
 
