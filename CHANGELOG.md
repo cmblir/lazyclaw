@@ -22,6 +22,13 @@ Versioning: [SemVer](https://semver.org/).
 - **`/goal add --cron` actually schedules now.** It used to record the cron
   string on the goal but never install a job (and `/goal close` left any job
   dangling). Both now attach/detach through a shared `goals_cron.mjs`.
+- **The StatusBar refreshes after a `/provider` or `/model` switch.** It read
+  a literal captured at mount, so it showed the old provider/model until the
+  next restart; it now refreshes from a live `getStatus()` after each slash
+  command and turn (and feeds the ctx token gauge).
+- **Esc aborts a running `/loop`.** The Ink loop used a throwaway
+  AbortController; it now uses the REPL's turn signal, so Esc stops the loop
+  between iterations and cancels the in-flight request.
 
 ### Added (restored from the pre-Ink readline chat)
 
