@@ -745,7 +745,7 @@ async function _loop(args, ctx, write) {
   catch (e) { return `loop unavailable: ${e?.message || e}`; }
   if (!args) {
     return [
-      'usage: /loop <prompt> [--max N] [--until "<regex>"]',
+      'usage: /loop <prompt> [--max N] [--until "<regex>"] [--use-memory] [--recall "<q>"]',
       `  default --max ${loopMod.LOOP_MAX_DEFAULT}, ceiling ${loopMod.LOOP_MAX_CEILING}`,
       `  session: ${ctx.getSessionId && ctx.getSessionId() || '(none — turns will not be persisted)'}`,
       '  note: Ink chat runs /loop without mid-loop Ctrl-C abort; set LAZYCLAW_NO_INK=1 for the full loop UX.',
@@ -778,6 +778,28 @@ async function _loop(args, ctx, write) {
   };
 
   const messages = ctx.getMessages();
+  // --memory / --recall rebuild the system message from disk every iteration
+  // (a parallel writer mutating core.md mid-loop is reflected next call). We
+  // capture the chat's prior system so it can be restored after the loop.
+  const _sysBefore = (messages.find((m) => m.role === 'system') || {}).content ?? null;
+  let memMod = null;
+  if (parsed.useMemory || parsed.recall) {
+    try { memMod = await import('../memory.mjs'); } catch { memMod = null; }
+  }
+  const buildSystem = memMod ? (() => {
+    const parts = [];
+    if (parsed.useMemory) {
+      const core = memMod.loadCore(ctx.cfgDir);
+      if (core && core.trim()) parts.push(core);
+    }
+    if (parsed.recall) {
+      const text = memMod.recall(parsed.recall, { topN: 3 }, ctx.cfgDir);
+      if (text && text.trim()) parts.push(text);
+    }
+    if (_sysBefore) parts.push(_sysBefore);
+    return parts.join('\n\n---\n\n');
+  }) : null;
+
   const ac = new AbortController();
   try {
     const result = await loopMod.runLoop({
@@ -793,6 +815,7 @@ async function _loop(args, ctx, write) {
         }
       },
       signal: ac.signal,
+      buildSystem,
     });
     if (ctx.setCharsSent && ctx.getCharsSent) {
       ctx.setCharsSent(ctx.getCharsSent() + parsed.prompt.length * result.iterations);
@@ -802,6 +825,19 @@ async function _loop(args, ctx, write) {
     return `✓ loop done — ${result.iterations}/${parsed.max} iteration(s)${tail}`;
   } catch (err) {
     return `loop error: ${err?.message || String(err)}`;
+  } finally {
+    // Restore the chat's prior system message — the engine overwrote
+    // messages[0] with the per-iteration memory composition.
+    if (buildSystem) {
+      const sysIdx = messages.findIndex((m) => m.role === 'system');
+      if (_sysBefore != null) {
+        if (sysIdx >= 0) messages[sysIdx] = { role: 'system', content: _sysBefore };
+        else messages.unshift({ role: 'system', content: _sysBefore });
+      } else if (sysIdx >= 0) {
+        messages.splice(sysIdx, 1);
+      }
+      if (ctx.setMessages) ctx.setMessages(messages);
+    }
   }
 }
 
