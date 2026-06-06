@@ -15,44 +15,14 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import stringWidth from 'string-width';
 import { theme } from './theme.mjs';
+// Pure (react-free) primitives live in modal_filter.mjs so they can be unit
+// tested without the Ink runtime. Re-exported here for back-compat with
+// existing importers (tui/repl.mjs).
+import { filterModalItems, _computeWindow, resolveModalPick } from './modal_filter.mjs';
+
+export { filterModalItems, _computeWindow, resolveModalPick };
 
 const DEFAULT_MAX_ROWS = 12;
-
-// Pure filter — prefix > substring > subsequence. Stable order within
-// each tier (original list order is the tiebreaker).
-export function filterModalItems(query, items) {
-  const q = String(query || '').trim().toLowerCase();
-  const list = Array.isArray(items) ? items : [];
-  if (!q) return list.slice();
-  const prefix = [], substr = [], subseq = [];
-  for (const it of list) {
-    const hay = `${it.label || it.id || ''} ${it.desc || ''}`.toLowerCase();
-    if (hay.startsWith(q)) prefix.push(it);
-    else if (hay.includes(q)) substr.push(it);
-    else if (_isSubseq(q, hay)) subseq.push(it);
-  }
-  return [...prefix, ...substr, ...subseq];
-}
-
-function _isSubseq(needle, hay) {
-  let i = 0;
-  for (const ch of hay) {
-    if (ch === needle[i]) i++;
-    if (i === needle.length) return true;
-  }
-  return false;
-}
-
-// Pure window computation — slide a window of `maxRows` items so that
-// `selectedIndex` is always visible. Mirrors the pattern in
-// tui/slash_popup.mjs._computeWindow.
-export function _computeWindow(idx, total, maxRows) {
-  const n = Math.max(0, total);
-  const m = Math.max(1, maxRows);
-  if (n <= m) return { start: 0, end: n };
-  let start = Math.max(0, Math.min(n - m, idx - Math.floor(m / 2)));
-  return { start, end: start + m };
-}
 
 // Presentational component.
 //

@@ -38,7 +38,7 @@ import { Splash, renderSplashToString } from './splash.mjs';
 import { Editor } from './editor.mjs';
 import { SlashPopup, filterSlashCommands } from './slash_popup.mjs';
 import { SLASH_COMMANDS } from './slash_commands.mjs';
-import { ModalPicker, filterModalItems } from './modal_picker.mjs';
+import { ModalPicker, filterModalItems, resolveModalPick } from './modal_picker.mjs';
 import { theme } from './theme.mjs';
 
 // ─── Alt-buffer mount (DEC 1049) ─────────────────────────────────────────
@@ -425,9 +425,10 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
     });
   }, [modalView.length]);
   const onModalConfirm = useCallback(() => {
-    const picked = modalView[modalIdx];
-    closeModal(picked ? picked.id : null);
-  }, [modalView, modalIdx, closeModal]);
+    // A `freeText` row resolves to { id, query } so the dispatcher can use
+    // the typed filter buffer as a custom value (e.g. an unlisted model id).
+    closeModal(resolveModalPick(modalView[modalIdx], modalQuery));
+  }, [modalView, modalIdx, modalQuery, closeModal]);
   const onModalCancel = useCallback(() => { closeModal(null); }, [closeModal]);
   const onModalQuery = useCallback((next) => {
     setModalQuery(next || '');
