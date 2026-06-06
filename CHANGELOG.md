@@ -8,6 +8,21 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **Agent skill tools share the real skill store now.** `skill_create` /
+  `skill_view` / `skill_edit` wrote and read a private
+  `skills/<name>/SKILL.md` directory, while everything else — the
+  self-improvement synthesizer, the curator, the FTS5 recall index, and the
+  hermes/openclaw importers — uses the flat `skills/<name>.md` store. So the
+  agent could not view skills it had synthesized, and skills it created were
+  invisible to recall and curation. All three tools now go through
+  `skills.mjs`, and `skill_view` records a curator usage hit again. The unused
+  duplicate `mas/tools/skill_view.mjs` was removed.
+- **`npm test` runs the whole suite again.** The script globbed only
+  `tests/phaseC-*.test.mjs` (6 of 110 node files), so the sandbox, FTS5,
+  learning, and daemon unit tests never ran under the canonical gate, and it
+  failed on a stale resume-count assertion. The node glob now covers
+  `tests/*.test.mjs`, Playwright is pinned to `*.spec.ts`, the stale assertion
+  is fixed, and a CI workflow runs the full gate on every push and PR.
 - **`/model` no longer dead-ends on "orchestrator".** When `cfg.provider`
   is the composite `orchestrator`, the start-up provider picker is skipped,
   so the active provider was the orchestrator — and the Ink `/model` picker
