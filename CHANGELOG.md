@@ -27,6 +27,14 @@ Versioning: [SemVer](https://semver.org/).
   is now scrubbed of secret-shaped variables (`*_API_KEY`, `*_TOKEN`,
   `*_SECRET`, `*_PASSWORD`, `*_PRIVATE_KEY`, …) while operational vars (PATH,
   HOME, locale) pass through.
+- **SSRF guard hardened and extended to the browser tool.** `web_fetch` chased
+  redirects with `redirect:'follow'`, so a public URL could 30x-redirect into
+  `127.0.0.1` / `169.254.169.254` / RFC1918 and bypass the pre-flight check; it
+  now follows redirects manually and re-validates every hop. `browser_navigate`
+  had no host filter at all — it now runs the same DNS-resolving guard before
+  `page.goto` and aborts in-page requests to private/metadata IPs via context
+  route interception. IPv6 loopback / link-local / ULA and IPv4-mapped-private
+  addresses are recognized now too.
 
 ### Fixed
 

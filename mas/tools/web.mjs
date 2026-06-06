@@ -11,20 +11,40 @@ const PRIVATE_V4 = [
   /^127\./, /^169\.254\./, /^0\./, /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,
 ];
 
-async function isSafeUrl(url) {
+// True for an address (or literal-IP host) that must never be reached from a
+// tool: RFC1918 / loopback / link-local v4, IPv6 loopback (::1), link-local
+// (fe80::/10), unique-local (fc00::/7), unspecified (::), and IPv4-mapped
+// private v6 (::ffff:a.b.c.d). Pure/synchronous — no DNS.
+export function isPrivateAddr(addr) {
+  const a = String(addr || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (PRIVATE_V4.some((re) => re.test(a))) return true;
+  if (a === '::1' || a === '::' || a === '0:0:0:0:0:0:0:1') return true;
+  if (/^fe[89ab][0-9a-f]:/.test(a)) return true;       // fe80::/10 link-local
+  if (/^f[cd][0-9a-f]{2}:/.test(a)) return true;        // fc00::/7 unique-local
+  const mapped = a.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped && PRIVATE_V4.some((re) => re.test(mapped[1]))) return true;
+  return false;
+}
+
+export async function isSafeUrl(url) {
   let u;
   try { u = new URL(url); } catch { return { ok: false, error: 'bad URL' }; }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return { ok: false, error: `scheme ${u.protocol} blocked` };
   const host = u.hostname.replace(/^\[|\]$/g, '');
   if (host === 'localhost' || host === '0.0.0.0') return { ok: false, error: 'loopback blocked (SSRF)' };
-  if (PRIVATE_V4.some(re => re.test(host))) return { ok: false, error: 'private address blocked (SSRF)' };
-  if (host.includes(':')) return { ok: false, error: 'IPv6 disabled' };
+  // Literal IP host (v4 or v6): block private/loopback directly, no DNS.
+  if (host.includes(':')) {
+    if (isPrivateAddr(host)) return { ok: false, error: 'private address blocked (SSRF)' };
+    return { ok: true }; // public IPv6 literal
+  }
+  if (PRIVATE_V4.some((re) => re.test(host))) return { ok: false, error: 'private address blocked (SSRF)' };
   if (!/^[a-z0-9.-]+$/i.test(host)) return { ok: false, error: 'bad host' };
+  // Resolve and reject any A/AAAA that lands on a private/loopback address
+  // (anti-rebinding for the entry URL).
   try {
     const addrs = await dns.lookup(host, { all: true });
     for (const a of addrs) {
-      if (PRIVATE_V4.some(re => re.test(a.address))) return { ok: false, error: 'resolves to private address (SSRF)' };
-      if (a.address === '127.0.0.1' || a.address === '::1') return { ok: false, error: 'resolves to loopback (SSRF)' };
+      if (isPrivateAddr(a.address)) return { ok: false, error: 'resolves to private address (SSRF)' };
     }
   } catch (e) {
     return { ok: false, error: `dns: ${e.message}` };
@@ -51,12 +71,28 @@ const web_fetch = {
     if (!safe.ok) return { ok: false, error: `web_fetch: ${safe.error}` };
     const maxBytes = Math.min(args.maxBytes || 2_000_000, 5_000_000);
     try {
-      const res = await fetch(args.url, {
-        method: args.method || 'GET',
-        headers: args.headers || {},
-        body: args.body,
-        redirect: 'follow',
-      });
+      // Follow redirects manually, re-validating every hop. undici's
+      // redirect:'follow' would chase a 30x into a private IP (or a
+      // DNS-rebind) without re-checking — the classic SSRF-via-redirect.
+      let current = args.url;
+      let res;
+      for (let hop = 0; hop <= 5; hop++) {
+        res = await fetch(current, {
+          method: args.method || 'GET',
+          headers: args.headers || {},
+          body: args.body,
+          redirect: 'manual',
+        });
+        if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
+          if (hop === 5) return { ok: false, error: 'web_fetch: too many redirects' };
+          const next = new URL(res.headers.get('location'), current).toString();
+          const ns = await isSafeUrl(next);
+          if (!ns.ok) return { ok: false, error: `web_fetch: redirect ${ns.error}` };
+          current = next;
+          continue;
+        }
+        break;
+      }
       const buf = Buffer.from(await res.arrayBuffer());
       const truncated = buf.length > maxBytes;
       return {
