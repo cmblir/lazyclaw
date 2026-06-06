@@ -69,6 +69,13 @@ Versioning: [SemVer](https://semver.org/).
   support text completion" the moment you used agents, teams, or skill
   synthesis. They now resolve to the OpenAI tool-use adapter bound to the
   provider's base URL.
+- **Crash-safety in persisted-state and stream paths.** `loadState` (workflow
+  inspect/resume) and `trajectory_store.get` did an unguarded `JSON.parse`, so a
+  corrupt/truncated file threw an uncaught `SyntaxError` instead of failing
+  gracefully — both now return null. The detached loop worker no longer races
+  two writers onto `result.json` on SIGTERM. The daemon `POST /chat` stream now
+  aborts the provider when the SSE client disconnects (it previously kept
+  generating — and billing — to completion), matching the `/agent` path.
 - **Agent skill tools share the real skill store now.** `skill_create` /
   `skill_view` / `skill_edit` wrote and read a private
   `skills/<name>/SKILL.md` directory, while everything else — the

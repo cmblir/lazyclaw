@@ -85,7 +85,13 @@ const max = Number(args.max) || loopEngine.LOOP_MAX_DEFAULT;
 loops.patchMeta(loopId, { status: 'running', startedAt: new Date().toISOString() }, cfgDir);
 
 const ac = new AbortController();
+// When a signal arrives, onTerm writes the authoritative 'killed' result and
+// owns the exit. `terminating` stops the normal-completion path (which the
+// aborted runLoop returns into within the same ~50ms window) from racing a
+// second writeResult onto the same file.
+let terminating = false;
 function onTerm(sig) {
+  terminating = true;
   ac.abort();
   loops.patchMeta(loopId, { status: 'killed', finishedAt: new Date().toISOString(), signal: sig }, cfgDir);
   loops.writeResult(loopId, { stoppedBy: 'kill', signal: sig }, cfgDir);
@@ -149,12 +155,17 @@ try {
     onIteration,
     signal: ac.signal,
   });
-  const finalStatus = result.stoppedBy === 'abort' ? 'killed' : 'completed';
-  loops.patchMeta(loopId, { status: finalStatus, finishedAt: new Date().toISOString() }, cfgDir);
-  loops.writeResult(loopId, result, cfgDir);
-  process.exit(0);
+  if (!terminating) {
+    const finalStatus = result.stoppedBy === 'abort' ? 'killed' : 'completed';
+    loops.patchMeta(loopId, { status: finalStatus, finishedAt: new Date().toISOString() }, cfgDir);
+    loops.writeResult(loopId, result, cfgDir);
+    process.exit(0);
+  }
+  // else: a signal is terminating us — onTerm wrote the result and owns exit.
 } catch (err) {
-  loops.patchMeta(loopId, { status: 'failed', finishedAt: new Date().toISOString() }, cfgDir);
-  loops.writeResult(loopId, { error: err?.message || String(err), stack: err?.stack }, cfgDir);
-  process.exit(1);
+  if (!terminating) {
+    loops.patchMeta(loopId, { status: 'failed', finishedAt: new Date().toISOString() }, cfgDir);
+    loops.writeResult(loopId, { error: err?.message || String(err), stack: err?.stack }, cfgDir);
+    process.exit(1);
+  }
 }

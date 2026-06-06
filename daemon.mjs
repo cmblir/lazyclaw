@@ -1765,17 +1765,27 @@ export function makeHandler(ctx) {
           };
           if (body.stream === true) {
             writeSseHead(res);
+            // Abort the provider when the SSE client disconnects — otherwise it
+            // keeps generating (burning tokens/cost) for a caller that's gone.
+            // Mirrors the /agent stream path.
+            const ac = new AbortController();
+            req.on('aborted', () => ac.abort());
+            res.on('close', () => { if (!res.writableEnded) ac.abort(); });
             try {
-              for await (const chunk of prov.sendMessage(messages, sendOpts)) {
+              for await (const chunk of prov.sendMessage(messages, { ...sendOpts, signal: ac.signal })) {
+                if (ac.signal.aborted) break;
                 writeSse(res, 'token', { text: chunk });
                 await new Promise(r => setImmediate(r));
               }
-              if (captured) writeSse(res, 'usage', captured);
-              const cost = computeCost();
-              if (cost) writeSse(res, 'cost', cost);
-              writeSse(res, 'done', { ok: true });
+              if (!ac.signal.aborted) {
+                if (captured) writeSse(res, 'usage', captured);
+                const cost = computeCost();
+                if (cost) writeSse(res, 'cost', cost);
+                writeSse(res, 'done', { ok: true });
+              }
               return res.end();
             } catch (err) {
+              if (err?.code === 'ABORT' || ac.signal.aborted) return res.end();
               writeSse(res, 'error', { message: err?.message || String(err) });
               return res.end();
             }

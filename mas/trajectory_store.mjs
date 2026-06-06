@@ -147,10 +147,13 @@ export async function get(id, opts = {}) {
   for (const bucket of fs.readdirSync(root)) {
     const file = recordPath(configDir, bucket, id);
     if (fs.existsSync(file)) {
-      const raw = fs.readFileSync(file, 'utf8').trim();
-      const rec = JSON.parse(raw);
-      cachePush(id, rec);
-      return rec;
+      // Guard the parse like the sibling listByTaskId does — a truncated record
+      // (crash during _trajPut) must return null, not throw an uncaught error.
+      try {
+        const rec = JSON.parse(fs.readFileSync(file, 'utf8').trim());
+        cachePush(id, rec);
+        return rec;
+      } catch { return null; }
     }
   }
   return null;

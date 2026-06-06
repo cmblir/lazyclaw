@@ -48,7 +48,15 @@ export function statePath(sessionId, dir = DEFAULT_DIR) {
 export function loadState(sessionId, dir = DEFAULT_DIR) {
   const p = statePath(sessionId, dir);
   if (!fs.existsSync(p)) return null;
-  return JSON.parse(fs.readFileSync(p, 'utf8'));
+  // A corrupt/truncated state file (kill -9 mid-write, disk-full, hand-edit)
+  // must not crash `inspect`/`resume` with a raw SyntaxError — treat it as
+  // "no prior state" (start fresh), matching loops.readMeta / goals.getGoal.
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch (e) {
+    process.stderr.write(`[workflow] ignoring unreadable state ${p}: ${e?.message || e}\n`);
+    return null;
+  }
 }
 
 /**
