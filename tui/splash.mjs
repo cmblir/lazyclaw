@@ -26,18 +26,11 @@ const WORDMARK_BREAKPOINT = 140;  // drop wordmark below this
 const MEDIUM_BREAKPOINT   = 90;   // side-by-side sloth+panel above this; stacked below
 const NARROW_BREAKPOINT   = 45;   // headline-only fallback below this
 
-// Subcommand catalog — grouped for the splash so a new user sees the
-// surface area at a glance. Mirrors SUBCOMMANDS in cli.mjs.
-export const SUBCOMMAND_GROUPS = [
-  ['core',     ['chat', 'agent', 'orchestrator', 'dashboard', 'menu']],
-  ['workflow', ['run', 'resume', 'inspect', 'clear', 'validate', 'graph']],
-  ['config',   ['config', 'auth', 'rates', 'providers', 'setup', 'onboard']],
-  ['state',    ['sessions', 'skills', 'workspace', 'memory', 'status', 'doctor']],
-  ['runtime',  ['daemon', 'cron', 'loop', 'loops', 'goal']],
-  ['channels', ['slack', 'telegram', 'matrix', 'channels', 'message', 'pairing']],
-  ['v5',       ['sandbox', 'personality', 'migrate', 'hermes', 'openclaw', 'trajectories']],
-  ['utility',  ['browse', 'version', 'completion', 'help', 'export', 'import', 'nodes']],
-];
+// Subcommand catalog — grouped for the splash so a new user sees the surface
+// area at a glance. Single source of truth lives in the react-free
+// tui/subcommands.mjs so the in-chat /menu palette can share it.
+export { SUBCOMMAND_GROUPS } from './subcommands.mjs';
+import { SUBCOMMAND_GROUPS } from './subcommands.mjs';
 
 function fit(text, max) {
   if (stringWidth(text) <= max) return text.padEnd(max);

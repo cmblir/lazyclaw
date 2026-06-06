@@ -25,6 +25,7 @@ export const SLASH_COMMANDS = [
   { cmd: '/trainer',     help: 'view or set trainer provider/model: /trainer show|set <p:m>|clear' },
   { cmd: '/personality', help: 'pick a personality (or sub: list|show|install|remove|use)' },
   { cmd: '/dashboard',   help: 'open the lazyclaw web UI in your browser' },
+  { cmd: '/menu',        help: 'browse the full subcommand catalog (command palette)' },
   { cmd: '/loop',        help: 'repeat one prompt: /loop "fix lint" [--max N] [--until "<regex>"]' },
   { cmd: '/goal',        help: 'register/switch goal: /goal add NAME | /goal list' },
   { cmd: '/memory',      help: 'show layered memory: /memory [core|recent|episodic [topic]]' },

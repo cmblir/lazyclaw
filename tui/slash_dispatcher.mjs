@@ -40,6 +40,7 @@ import { addCustomProvider } from '../providers/custom_provider.mjs';
 import { setAuthKey } from '../providers/auth_store.mjs';
 import { attachGoalCron, detachGoalCron } from '../goals_cron.mjs';
 import { loadDotenvIfAny } from '../dotenv_min.mjs';
+import { SUBCOMMAND_GROUPS } from './subcommands.mjs';
 
 // ─── helpers ─────────────────────────────────────────────────────────────
 
@@ -1525,6 +1526,39 @@ async function _dashboard(args) {
   }
 }
 
+// /menu — in-chat command palette over the full subcommand catalog. The
+// no-arg launcher menu used to be the home screen; defaulting to chat hid it
+// behind `lazyclaw menu`. This restores discoverability: browse subcommands
+// and get the exact command to run. (Most subcommands own stdout / spawn, so
+// they can't safely run inline in the Ink scrollback — we echo the command.)
+async function _menu(args, ctx) {
+  if (typeof ctx.openPicker === 'function') {
+    const items = [];
+    const seen = new Set();
+    for (const [group, cmds] of SUBCOMMAND_GROUPS) {
+      for (const c of cmds) {
+        if (seen.has(c)) continue;
+        seen.add(c);
+        items.push({ id: c, label: c, desc: group });
+      }
+    }
+    const picked = await ctx.openPicker({
+      kind: 'menu',
+      title: 'lazyclaw subcommands',
+      subtitle: 'Enter shows how to run it · Esc cancels',
+      items,
+    });
+    if (!picked) return 'cancelled';
+    const cmd = typeof picked === 'string' ? picked : picked.id;
+    return `run from a shell:  lazyclaw ${cmd}`;
+  }
+  return [
+    'subcommands:',
+    ...SUBCOMMAND_GROUPS.map(([g, cmds]) => `  ${g.padEnd(9)} ${cmds.join(' ')}`),
+    '(run: lazyclaw <subcommand>)',
+  ].join('\n');
+}
+
 // ─── dispatch table ──────────────────────────────────────────────────────
 
 export const SLASH_HANDLERS = new Map([
@@ -1552,6 +1586,7 @@ export const SLASH_HANDLERS = new Map([
   ['/task', _task],
   ['/trainer', _trainer],
   ['/dashboard', _dashboard],
+  ['/menu', _menu],
   ['/exit', async () => 'EXIT'],
   ['/quit', async () => 'EXIT'],
 ]);
