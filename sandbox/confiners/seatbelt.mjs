@@ -9,6 +9,22 @@ export function available() {
   catch { return false; }
 }
 
+// Escape a path for an SBPL double-quoted string literal. Without this a path
+// containing `"` (or a backslash) could close the string and inject arbitrary
+// SBPL directives — e.g. re-enabling `(allow network*)` or widening file
+// access — neutering the sandbox. Reject control characters outright; escape
+// backslash and double-quote.
+function sbplPath(p) {
+  const s = String(p);
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c < 0x20 || c === 0x7f) {
+      throw new Error('seatbelt: path contains control characters; refusing to build profile');
+    }
+  }
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
 export function buildArgv(argv, opts = {}) {
   const readOnly = opts.readOnly || [];
   const readWrite = opts.readWrite || [process.cwd()];
@@ -21,8 +37,8 @@ export function buildArgv(argv, opts = {}) {
     '(allow signal)',
     '(allow sysctl-read)',
     allowNet ? '(allow network*)' : '(deny network*)',
-    ...readOnly.map(p => `(allow file-read* (subpath "${p}"))`),
-    ...readWrite.map(p => `(allow file-read* file-write* (subpath "${p}"))`),
+    ...readOnly.map(p => `(allow file-read* (subpath "${sbplPath(p)}"))`),
+    ...readWrite.map(p => `(allow file-read* file-write* (subpath "${sbplPath(p)}"))`),
   ].join('\n');
   return ['sandbox-exec', '-p', profile, ...argv];
 }

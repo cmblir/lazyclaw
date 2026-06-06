@@ -42,6 +42,14 @@ Versioning: [SemVer](https://semver.org/).
   0700 dir (the pattern the gateway device store already used), tightens an
   existing loose config the first time it is read, and applies the same to
   persisted workflow state.
+- **No more fake `landlock` sandbox; seatbelt profile injection closed.** The
+  `landlock` confiner reported itself available on any Linux but returned the
+  command argv unchanged, so selecting it ran fully unconfined while appearing
+  sandboxed — worse than `none`. It now reports unavailable and refuses to build
+  an argv (fail-closed) until a real enforcer ships. The macOS `seatbelt`
+  confiner interpolated paths into its SBPL profile unescaped, so a path
+  containing `")` could inject directives (e.g. re-enable networking); paths are
+  now escaped and control characters rejected.
 
 ### Fixed
 

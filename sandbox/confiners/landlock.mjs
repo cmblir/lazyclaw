@@ -1,14 +1,20 @@
 // sandbox/confiners/landlock.mjs — Linux Landlock helper.
 //
 // Landlock is enforced from *inside* the process via the
-// landlock_create_ruleset() syscall. With no native bindings available
-// in plain Node, we currently emit the argv unchanged and let
-// downstream tooling (e.g. a future `lazyclaw-landlock-shim` binary)
-// install the ruleset. Returns argv unchanged on non-Linux.
+// landlock_create_ruleset() syscall, which needs a native binding / preloader
+// shim that lazyclaw does not ship yet. The previous implementation returned
+// the argv UNCHANGED, so selecting `confiner: landlock` ran the command with
+// ZERO confinement while reporting itself available — a false security
+// guarantee that is worse than `none`. Until a real enforcer ships we report
+// unavailable and refuse to build an argv, so the request fails closed instead
+// of silently running unconfined.
 
-export function available() { return process.platform === 'linux'; }
+export function available() { return false; }
 
-export function buildArgv(argv, _opts = {}) {
-  // Pass-through. Spec §0.1 C8 leaves room for a preloader binary.
-  return [...argv];
+export function buildArgv() {
+  throw new Error(
+    'landlock confiner is not implemented (no enforcement shim is shipped) — ' +
+    'it would run the command unconfined. Use confiner bubblewrap or firejail ' +
+    'on Linux, or set confiner:none deliberately.',
+  );
 }

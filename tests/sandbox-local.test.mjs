@@ -48,11 +48,21 @@ test('firejail confiner emits firejail --private --net=none', () => {
   assert.equal(out.at(-1), 'claude');
 });
 
-test('landlock confiner skips wrap on non-linux and returns input unchanged', () => {
-  const out = landlock.buildArgv(['claude'], { readWrite: ['/work'] });
-  // landlock is enforced from inside the child via a tiny preloader;
-  // the wrap returns either the unchanged argv or [LL_PRELOAD, ...argv].
-  assert.ok(out.length >= 1 && out.at(-1) === 'claude');
+test('landlock confiner is unavailable and refuses to build argv (no silent no-op)', () => {
+  // It used to return the argv UNCHANGED, so selecting confiner:landlock ran
+  // the command with zero confinement while reporting itself available — a
+  // false security guarantee. It now fails closed: unavailable + throws.
+  assert.equal(landlock.available(), false);
+  assert.throws(() => landlock.buildArgv(['claude'], { readWrite: ['/work'] }), /not implemented|unconfined/i);
+});
+
+test('seatbelt escapes SBPL string metacharacters and rejects control chars (no profile injection)', () => {
+  const out = seatbelt.buildArgv(['claude'], { readWrite: ['/tmp/x") (allow network*) ("'] });
+  // The injected `")` must be escaped (\") rather than closing the subpath
+  // string and re-enabling the network.
+  assert.match(out[2], /\\"/);
+  assert.doesNotMatch(out[2], /subpath "\/tmp\/x"\) \(allow network/);
+  assert.throws(() => seatbelt.buildArgv(['claude'], { readWrite: ['/tmp/\nrc'] }), /control characters/i);
 });
 
 test('LocalSandbox dispatches by confiner key', async () => {
