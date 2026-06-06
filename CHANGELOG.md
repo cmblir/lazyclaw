@@ -35,6 +35,13 @@ Versioning: [SemVer](https://semver.org/).
   `page.goto` and aborts in-page requests to private/metadata IPs via context
   route interception. IPv6 loopback / link-local / ULA and IPv4-mapped-private
   addresses are recognized now too.
+- **Config and workflow-state files are written owner-only (0600).** `writeConfig`
+  saved `config.json` — which stores plaintext API keys and auth profiles — at
+  the default umask (typically world/group-readable 0644), so any local user on
+  a shared host could read the keys. It now writes atomically at 0600 inside a
+  0700 dir (the pattern the gateway device store already used), tightens an
+  existing loose config the first time it is read, and applies the same to
+  persisted workflow state.
 
 ### Fixed
 

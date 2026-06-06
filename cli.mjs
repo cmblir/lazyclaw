@@ -6,6 +6,9 @@ import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 // sandbox subcommands — list/test/add/use (Phase D).
 import { resolveSandbox, listBackends } from './sandbox/index.mjs';
+// Owner-only (0600/0700) atomic writer for config.json — it holds plaintext
+// API keys / auth profiles and must not be group/other readable.
+import { writeJsonSecure, tightenIfLoose } from './secure_write.mjs';
 // P1 restore: shared OpenAI-compatible model-catalogue resolution, also used
 // by the Ink slash dispatcher so /model regains the live /v1/models fetch.
 import {
@@ -49,14 +52,17 @@ function configPath() {
 function readConfig() {
   const p = configPath();
   if (!fs.existsSync(p)) return {};
+  // Migrate already-deployed world/group-readable config.json (plaintext keys)
+  // to 0600 the first time we touch it. Best-effort, idempotent.
+  tightenIfLoose(p);
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); }
   catch { return {}; }
 }
 
 function writeConfig(cfg) {
-  const p = configPath();
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
+  // 0600 file in a 0700 dir, atomically — config.json stores plaintext API
+  // keys / auth profiles, so it must be owner-only on disk.
+  writeJsonSecure(configPath(), cfg);
 }
 
 // Synchronous, dependency-free resolver for the api-key the

@@ -7,6 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { topologicalLevels, retryWithBackoff, runWithTimeout, settleWithConcurrency } from './executor.mjs';
+// Workflow state can carry transcript content; persist it owner-only (0600).
+import { writeJsonSecure } from '../secure_write.mjs';
 
 const DEFAULT_DIR = '.workflow-state';
 
@@ -54,12 +56,9 @@ export function loadState(sessionId, dir = DEFAULT_DIR) {
  * @param {string} [dir]
  */
 export function saveState(state, dir = DEFAULT_DIR) {
-  fs.mkdirSync(dir, { recursive: true });
   state.updatedAt = Date.now();
-  const p = statePath(state.sessionId, dir);
-  const tmp = `${p}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
-  fs.renameSync(tmp, p);
+  // Atomic owner-only write (tmp + rename + 0600), same as the gateway store.
+  writeJsonSecure(statePath(state.sessionId, dir), state);
 }
 
 function initState(sessionId, nodes) {
