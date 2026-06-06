@@ -2,13 +2,23 @@
 // LazyClaw CLI — workflow + config commands.
 import path from 'node:path';
 import fs from 'node:fs';
-import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 // sandbox subcommands — list/test/add/use (Phase D).
 import { resolveSandbox, listBackends } from './sandbox/index.mjs';
-// Owner-only (0600/0700) atomic writer for config.json — it holds plaintext
-// API keys / auth profiles and must not be group/other readable.
-import { writeJsonSecure, tightenIfLoose } from './secure_write.mjs';
+// Phase D2 — config IO + key/url resolution + version lookup extracted to
+// lib/ so the per-domain command modules can share them without importing the
+// whole entrypoint.
+import {
+  configPath, readConfig, writeConfig,
+  _resolveAuthKey, _resolveBaseUrl, readVersionFromRepo,
+} from './lib/config.mjs';
+// Phase D2 — provider-registry bootstrap (lazy load + per-call re-register).
+import { ensureRegistry, requireRegistry, getRegistry } from './lib/registry_boot.mjs';
+// Phase D2 — argument parsing + shell completion + subcommand inventory.
+import {
+  SUBCOMMANDS, SUBCOMMAND_SUBS, BOOLEAN_FLAGS,
+  parseArgs, bashCompletion, zshCompletion,
+} from './lib/args.mjs';
 // P1 restore: shared OpenAI-compatible model-catalogue resolution, also used
 // by the Ink slash dispatcher so /model regains the live /v1/models fetch.
 import {
@@ -41,67 +51,6 @@ import { dispatchSlash as _dispatchSlash, parseSlashLine as _parseSlashLine } fr
 
 async function loadEngine() {
   return import('./workflow/persistent.mjs');
-}
-
-function configPath() {
-  const override = process.env.LAZYCLAW_CONFIG_DIR;
-  const dir = override ? override : path.join(os.homedir(), '.lazyclaw');
-  return path.join(dir, 'config.json');
-}
-
-function readConfig() {
-  const p = configPath();
-  if (!fs.existsSync(p)) return {};
-  // Migrate already-deployed world/group-readable config.json (plaintext keys)
-  // to 0600 the first time we touch it. Best-effort, idempotent.
-  tightenIfLoose(p);
-  try { return JSON.parse(fs.readFileSync(p, 'utf8')); }
-  catch { return {}; }
-}
-
-function writeConfig(cfg) {
-  // 0600 file in a 0700 dir, atomically — config.json stores plaintext API
-  // keys / auth profiles, so it must be owner-only on disk.
-  writeJsonSecure(configPath(), cfg);
-}
-
-// Synchronous, dependency-free resolver for the api-key the
-// chat / agent flow sends. Mirrors config_features.resolveApiKey
-// without forcing the dynamic import on every hot-path call.
-//   1. cfg.authProfiles[provider] active label, if set
-//   2. first profile in the array
-//   3. customProviders[<provider>].apiKey (custom OpenAI-compat entries)
-//   4. PROVIDER_INFO[<provider>].envKey / altEnvKeys env var (built-in
-//      OpenAI-compat: nim → NVIDIA_API_KEY, openrouter → OPENROUTER_API_KEY, …)
-//   5. legacy single `cfg["api-key"]` (pre-v3.93 configs)
-function _resolveAuthKey(cfg, provider) {
-  const arr = (cfg.authProfiles || {})[provider] || [];
-  const active = (cfg.authActiveProfile || {})[provider];
-  const hit = arr.find((p) => p && p.label === active) || arr[0];
-  if (hit?.key) return hit.key;
-  const custom = Array.isArray(cfg.customProviders)
-    ? cfg.customProviders.find((p) => p && p.name === provider)
-    : null;
-  if (custom?.apiKey) return custom.apiKey;
-  // Built-in OpenAI-compat env var fallback. Skipped silently when the
-  // registry module isn't loaded yet (every chat / agent path calls
-  // ensureRegistry() before _resolveAuthKey, so this is just defence-in-depth).
-  if (_registryMod && typeof _registryMod.resolveBuiltinEnvKey === 'function') {
-    const envHit = _registryMod.resolveBuiltinEnvKey(provider);
-    if (envHit) return envHit;
-  }
-  return cfg['api-key'] || '';
-}
-
-// Per-provider base-URL override (used by tests + private gateways).
-// Single source of truth — the reflect / skill-synth / task-tick paths
-// all resolve through here so a new provider's env var lands in one spot.
-function _resolveBaseUrl(provider) {
-  return {
-    anthropic: process.env.LAZYCLAW_ANTHROPIC_BASE_URL,
-    openai:    process.env.LAZYCLAW_OPENAI_BASE_URL,
-    gemini:    process.env.LAZYCLAW_GEMINI_BASE_URL,
-  }[provider] || undefined;
 }
 
 async function importWorkflow(file) {
@@ -782,7 +731,7 @@ function cmdConfigSet(key, value) {
 function applyOnboardConfig(currentCfg, flags) {
   // Honors the OpenClaw-style unified provider/model string ("anthropic/claude-opus-4-7")
   // by splitting it, but explicit --provider always wins.
-  const { parseSlashProviderModel } = require_registry_sync();
+  const { parseSlashProviderModel } = requireRegistry();
   const next = { ...currentCfg };
   if (flags.model) {
     const parsed = parseSlashProviderModel(flags.model);
@@ -796,40 +745,6 @@ function applyOnboardConfig(currentCfg, flags) {
 
 // Module is ESM but we want a synchronous-looking helper for the CLI flow.
 // Cache the import on first use so we don't pay for it on every config call.
-let _registryMod = null;
-function require_registry_sync() {
-  if (!_registryMod) {
-    // eslint-disable-next-line no-undef
-    throw new Error('registry module not pre-loaded — call ensureRegistry() first');
-  }
-  return _registryMod;
-}
-async function ensureRegistry() {
-  if (!_registryMod) _registryMod = await import('./providers/registry.mjs');
-  // Re-run registration on every call so config changes within the same
-  // process (e.g. setup wizard adding a custom endpoint mid-session) take
-  // effect for the next chat / agent / picker invocation. registerCustom-
-  // Providers is idempotent — re-registering the same name is a no-op.
-  try {
-    if (typeof _registryMod.registerCustomProviders === 'function') {
-      _registryMod.registerCustomProviders(readConfig());
-    }
-  } catch { /* never let a malformed cfg.customProviders block startup */ }
-  // Wire the orchestrator's live cfg + auth-key resolver. We do this on
-  // every ensureRegistry() call (cheap — just replaces the closure) so a
-  // mid-session config edit (custom provider added, env var exported)
-  // takes effect on the next orchestrator turn without a restart.
-  try {
-    if (typeof _registryMod.registerOrchestrator === 'function') {
-      _registryMod.registerOrchestrator({
-        cfgGetter: readConfig,
-        keyResolver: _resolveAuthKey,
-      });
-    }
-  } catch { /* defensive */ }
-  return _registryMod;
-}
-
 async function cmdOnboard(flags) {
   await ensureRegistry();
   if (!flags['non-interactive']) {
@@ -849,13 +764,13 @@ async function cmdOnboard(flags) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const ask = q => new Promise(resolve => rl.question(q, resolve));
     if (!flags.provider) {
-      const provs = Object.keys(_registryMod.PROVIDERS).join('|');
+      const provs = Object.keys(getRegistry().PROVIDERS).join('|');
       const noKeyHint = '\x1b[38;5;208mclaude-cli\x1b[0m (subscription, no key) is the default';
       process.stdout.write(`hint: ${noKeyHint}\n`);
       flags.provider = (await ask(`provider [${provs}]: `)).trim() || 'claude-cli';
     }
     if (!flags.model) {
-      const meta = (_registryMod.PROVIDER_INFO || {})[flags.provider] || {};
+      const meta = (getRegistry().PROVIDER_INFO || {})[flags.provider] || {};
       const sample = (meta.suggestedModels || []).slice(0, 4).join(' · ') || '(any)';
       const dflt = meta.defaultModel || '';
       flags.model = (await ask(`model (e.g. ${sample}) [${dflt}]: `)).trim() || dflt;
@@ -863,7 +778,7 @@ async function cmdOnboard(flags) {
     // Only ask for api-key when the picked provider actually needs one.
     // claude-cli / ollama / mock all skip this — that's the whole point
     // of supporting them.
-    const meta = (_registryMod.PROVIDER_INFO || {})[flags.provider] || {};
+    const meta = (getRegistry().PROVIDER_INFO || {})[flags.provider] || {};
     if (meta.requiresApiKey && !flags['api-key']) {
       const prefix = meta.keyPrefix ? ` (starts with "${meta.keyPrefix}")` : '';
       flags['api-key'] = (await ask(`api-key${prefix}: `)).trim();
@@ -885,12 +800,12 @@ async function cmdDoctor() {
   // Only flag a missing api-key when the picked provider actually
   // requires one. claude-cli / ollama / mock all run keylessly, so the
   // previous `provider !== 'mock'` check produced false positives.
-  const _meta = (_registryMod.PROVIDER_INFO || {})[cfg.provider] || {};
+  const _meta = (getRegistry().PROVIDER_INFO || {})[cfg.provider] || {};
   if (cfg.provider && _meta.requiresApiKey && !cfg['api-key']) {
     issues.push(`config['api-key'] is missing for provider "${cfg.provider}"`);
   }
-  if (cfg.provider && !PROVIDERS_HAS(_registryMod.PROVIDERS, cfg.provider)) {
-    issues.push(`unknown provider "${cfg.provider}" — registered: ${Object.keys(_registryMod.PROVIDERS).join(', ')}`);
+  if (cfg.provider && !PROVIDERS_HAS(getRegistry().PROVIDERS, cfg.provider)) {
+    issues.push(`unknown provider "${cfg.provider}" — registered: ${Object.keys(getRegistry().PROVIDERS).join(', ')}`);
   }
   // v5.3.2 soft-migration — pre-5.3.2 wizards could write
   // `provider: 'orchestrator'` even when the user never configured the
@@ -1007,7 +922,7 @@ async function cmdDoctor() {
     platform: `${process.platform}-${process.arch}`,
     issues,
     warnings,
-    knownProviders: Object.keys(_registryMod.PROVIDERS),
+    knownProviders: Object.keys(getRegistry().PROVIDERS),
     workflows,
     git: gitInfo,
     index: indexInfo,
@@ -1028,7 +943,7 @@ async function cmdStatus() {
     configPath: configPath(),
     provider: cfg.provider || null,
     model: cfg.model || null,
-    keyMasked: _registryMod.maskApiKey(cfg['api-key']),
+    keyMasked: getRegistry().maskApiKey(cfg['api-key']),
   };
   console.log(JSON.stringify(out, null, 2));
 }
@@ -1049,36 +964,6 @@ const SLASH_COMMANDS = [
   { cmd: '/exit',   help: 'leave the chat' },
 ];
 
-function readVersionFromRepo() {
-  // Two source-of-truth lookups, in order:
-  //   1. The npm-published package's own package.json (sits next to
-  //      cli.mjs once installed via `npm i -g lazyclaw`).
-  //   2. The monorepo's VERSION file at the repo root (one or two
-  //      levels up depending on how the file is symlinked / copied).
-  // Either one wins on first hit. Falls back to '0.0.0' so the CLI
-  // never crashes on a stripped-down install.
-  const here = path.dirname(new URL(import.meta.url).pathname);
-  const candidates = [
-    { kind: 'pkg',     path: path.resolve(here, './package.json') },
-    { kind: 'pkg',     path: path.resolve(here, '../package.json') },
-    { kind: 'version', path: path.resolve(here, '../../VERSION') },
-    { kind: 'version', path: path.resolve(here, '../../../VERSION') },
-  ];
-  for (const c of candidates) {
-    try {
-      const raw = fs.readFileSync(c.path, 'utf8').trim();
-      if (!raw) continue;
-      if (c.kind === 'pkg') {
-        const v = JSON.parse(raw).version;
-        if (v) return v;
-      } else {
-        return raw;
-      }
-    } catch { /* keep trying */ }
-  }
-  return '0.0.0';
-}
-
 async function cmdVersion() {
   const out = {
     version: readVersionFromRepo(),
@@ -1086,139 +971,6 @@ async function cmdVersion() {
     platform: `${process.platform}-${process.arch}`,
   };
   console.log(JSON.stringify(out));
-}
-
-// Subcommand inventory used by `lazyclaw completion`. Single source of
-// truth so adding a subcommand updates the completion script too. The
-// dispatcher in main() is the runtime authority; this list mirrors it.
-const SUBCOMMANDS = [
-  'run', 'resume', 'inspect', 'clear', 'validate', 'graph',
-  'config', 'chat', 'agent',
-  'doctor', 'status', 'onboard',
-  'sessions', 'skills', 'providers',
-  'daemon', 'version', 'completion', 'help',
-  'export', 'import',
-  'rates',
-  // v5.0 — sandbox 6-backend (Phase D)
-  'sandbox',
-  // OpenClaw-parity subsurfaces (v3.93–v3.98)
-  'auth', 'pairing', 'nodes', 'message', 'workspace', 'browse', 'cron',
-  // v3.99.6 — multi-step setup wizard + lazyclaw-only dashboard
-  'setup', 'dashboard',
-  // v3.99.22 — multi-agent orchestrator config
-  'orchestrator',
-  // v3.99.30 — /loop and /goal slash commands (in-session + detached)
-  'loop', 'loops', 'goal', 'memory',
-  // v4.0.0 — Slack Socket Mode listener (inbound DM / @-mention)
-  'slack',
-  // v4.3.0 — Telegram long-poll listener (zero-install mobile control)
-  'telegram',
-  // v4.3.0 — Matrix /sync long-poll listener
-  'matrix',
-  // v5.0 — channels plugin loader (Phase F)
-  'channels',
-  // v4.1.0 — multi-agent slack system (Phase 9+)
-  'agent', 'team', 'task',
-  // v5.0 Phase G — persona compose + cross-tool import (spec §9, §10)
-  'personality', 'migrate', 'hermes', 'openclaw',
-  // v5.0.6 — arrow-key launcher menu (was the no-arg default in v5.0.5-)
-  'menu',
-  // v5.0 Phase H1 — trajectory exporter (spec §2.7)
-  'trajectories',
-];
-
-const SUBCOMMAND_SUBS = {
-  config:    ['get', 'set', 'list', 'delete', 'unset', 'path', 'edit', 'validate'],
-  sessions:  ['list', 'show', 'clear', 'export', 'search'],
-  skills:    ['list', 'show', 'install', 'remove', 'search', 'curate', 'classify'],
-  providers: ['list', 'info', 'test', 'add', 'remove', 'models'],
-  rates:     ['list', 'set', 'delete', 'shape', 'validate', 'copy'],
-  sandbox:   ['list', 'test', 'add', 'use'],
-  completion: ['bash', 'zsh'],
-  auth:      ['list', 'add', 'remove', 'use', 'rotate'],
-  pairing:   ['list', 'add', 'remove'],
-  nodes:     ['list', 'register', 'remove', 'pending', 'approve', 'revoke', 'devices'],
-  message:   ['list', 'add', 'remove', 'send'],
-  workspace: ['list', 'init', 'show', 'remove', 'path'],
-  cron:      ['list', 'add', 'remove', 'show', 'sync', 'run'],
-  orchestrator: ['status', 'set-planner', 'workers', 'set-max-subtasks', 'clear'],
-  loops:     ['list', 'show', 'kill', 'tail'],
-  goal:      ['add', 'list', 'show', 'close', 'switch', 'tick', 'channel'],
-  memory:    ['show', 'dream', 'edit'],
-  slack:     ['listen'],
-  telegram:  ['listen'],
-  matrix:    ['listen'],
-  agent:     ['add', 'list', 'show', 'edit', 'remove'],
-  team:      ['add', 'list', 'show', 'edit', 'remove'],
-  task:      ['start', 'list', 'show', 'abandon', 'done', 'remove'],
-  trajectories: ['export'],
-};
-
-function bashCompletion() {
-  // Standard bash COMPREPLY pattern. We split COMP_WORDS into:
-  //   [0] = lazyclaw, [1] = subcommand, [2+] = subcommand args.
-  // Two-level completion: word index 1 → top subcommands; index 2 → the
-  // sub-subcommand list (if defined for that subcommand). Beyond index 2
-  // we don't try to enumerate dynamic items (session ids etc.) — that
-  // would require running the CLI on every <Tab>, which is too slow.
-  const subs = SUBCOMMANDS.join(' ');
-  const subSubsCases = Object.entries(SUBCOMMAND_SUBS)
-    .map(([name, list]) => `      ${name})\n        COMPREPLY=( $(compgen -W "${list.join(' ')}" -- "$cur") )\n        ;;`)
-    .join('\n');
-  return `# lazyclaw bash completion. Source from your shell:
-#   eval "$(node /path/to/cli.mjs completion bash)"
-_lazyclaw_completion() {
-  local cur prev words cword
-  _init_completion 2>/dev/null || {
-    cur="\${COMP_WORDS[COMP_CWORD]}"
-    prev="\${COMP_WORDS[COMP_CWORD-1]}"
-    cword=$COMP_CWORD
-  }
-  if [ "$cword" -eq 1 ]; then
-    COMPREPLY=( $(compgen -W "${subs}" -- "$cur") )
-    return 0
-  fi
-  if [ "$cword" -eq 2 ]; then
-    case "\${COMP_WORDS[1]}" in
-${subSubsCases}
-    esac
-    return 0
-  fi
-  return 0
-}
-complete -F _lazyclaw_completion lazyclaw
-`;
-}
-
-function zshCompletion() {
-  // _arguments-style. We list subcommands then dispatch on the first
-  // positional via a single `_describe`. Sub-subcommands handled by a
-  // case inside the function. Same coverage rationale as bash.
-  const subs = SUBCOMMANDS.map(s => `    '${s}'`).join('\n');
-  const subSubsCases = Object.entries(SUBCOMMAND_SUBS)
-    .map(([name, list]) => `      (${name}) _values 'sub' ${list.map(v => `'${v}'`).join(' ')} ;;`)
-    .join('\n');
-  return `#compdef lazyclaw
-# lazyclaw zsh completion. Add to fpath, or eval inline:
-#   eval "$(node /path/to/cli.mjs completion zsh)"
-_lazyclaw() {
-  local subs=(
-${subs}
-  )
-  if (( CURRENT == 2 )); then
-    _values 'subcommand' \${subs[@]}
-    return
-  fi
-  if (( CURRENT == 3 )); then
-    case \${words[2]} in
-${subSubsCases}
-    esac
-    return
-  fi
-}
-compdef _lazyclaw lazyclaw
-_lazyclaw "$@"
-`;
 }
 
 async function cmdCompletion(shell) {
@@ -1442,7 +1194,7 @@ async function cmdAgent(prompt, flags) {
   const skillsMod = await import('./skills.mjs');
   const cfg = readConfig();
   const provName = flags.provider || cfg.provider || 'mock';
-  let prov = _registryMod.PROVIDERS[provName];
+  let prov = getRegistry().PROVIDERS[provName];
   if (!prov) { console.error(`unknown provider: ${provName}`); process.exit(2); }
   // --fallback "openai,ollama" wraps the primary in a withFallback chain so
   // RATE_LIMIT/CONNECTION_REFUSED/5xx on the primary trips through to the
@@ -1453,7 +1205,7 @@ async function cmdAgent(prompt, flags) {
   if (fallbackList.length > 0) {
     const chain = [prov];
     for (const fb of fallbackList) {
-      const fp = _registryMod.PROVIDERS[fb];
+      const fp = getRegistry().PROVIDERS[fb];
       if (!fp) { console.error(`unknown fallback provider: ${fb}`); process.exit(2); }
       chain.push(fp);
     }
@@ -1986,7 +1738,7 @@ function _providerFamilies() {
   // Membership (api/cli/mock, orchestrator excluded) is shared with the Ink
   // picker via tui/provider_families.mjs so both paths bucket identically.
   // The ANSI tags below are readline-specific, so they're applied here.
-  const b = _bucketProviders(_registryMod);
+  const b = _bucketProviders(getRegistry());
   return {
     api: { label: 'API key', desc: 'paste an sk-... key during setup',  tag: '\x1b[38;5;245m[needs key]\x1b[0m', members: b.api },
     cli: { label: 'CLI / Local', desc: 'keyless — uses an existing CLI login or a local daemon', tag: '\x1b[38;5;208m[no key]\x1b[0m', members: b.cli },
@@ -2005,9 +1757,9 @@ function _providerFamilies() {
 // Steps that have only one option auto-advance so the user doesn't
 // stare at a single-row menu (e.g. the Mock family has just `mock`).
 async function _pickProviderInteractive() {
-  const providers = Object.keys(_registryMod.PROVIDERS);
+  const providers = Object.keys(getRegistry().PROVIDERS);
   if (!providers.length) return { provider: 'mock', model: null };
-  const info = _registryMod.PROVIDER_INFO || {};
+  const info = getRegistry().PROVIDER_INFO || {};
   const families = _providerFamilies();
 
   // Non-TTY fallback — single-prompt picker, identical to before.
@@ -2148,8 +1900,8 @@ async function _setupOrchestratorInteractive() {
   const dim    = (s) => `\x1b[2m${s}\x1b[0m`;
   const bold   = (s) => `\x1b[1m${s}\x1b[0m`;
   const ok     = (s) => `\x1b[32m${s}\x1b[0m`;
-  const info = _registryMod.PROVIDER_INFO || {};
-  const eligibleNames = Object.keys(_registryMod.PROVIDERS).filter((n) => n !== 'orchestrator' && n !== 'mock');
+  const info = getRegistry().PROVIDER_INFO || {};
+  const eligibleNames = Object.keys(getRegistry().PROVIDERS).filter((n) => n !== 'orchestrator' && n !== 'mock');
   if (eligibleNames.length === 0) {
     process.stdout.write('\n' + accent('orchestrator setup') + ': no eligible workers — register a real provider first.\n');
     await _quickPrompt('  press Enter to continue ');
@@ -2290,7 +2042,7 @@ async function _pauseChatForSubMenu(rl, ghost, body) {
 // null when the provider has no curated models and no live-fetch surface
 // (mock) — the caller should treat that as "use the provider default".
 async function _pickModelInteractive(providerId, opts = {}) {
-  const info = _registryMod.PROVIDER_INFO || {};
+  const info = getRegistry().PROVIDER_INFO || {};
   const meta = info[providerId] || {};
   const baseModels = Array.isArray(meta.suggestedModels) ? meta.suggestedModels.slice() : [];
   const isCustom = !!meta.custom;
@@ -2365,7 +2117,7 @@ function _modelCatalogueFor(providerId) {
   const cfg = readConfig();
   return _modelCatalogueResolve({
     cfg,
-    registryMod: _registryMod,
+    registryMod: getRegistry(),
     resolveAuthKey: (id) => _resolveAuthKey(cfg, id),
     providerId,
   });
@@ -2375,7 +2127,7 @@ async function _fetchModelsForProvider(providerId) {
   const cfg = readConfig();
   return _fetchModelsResolve({
     cfg,
-    registryMod: _registryMod,
+    registryMod: getRegistry(),
     resolveAuthKey: (id) => _resolveAuthKey(cfg, id),
     providerId,
   });
@@ -2401,7 +2153,7 @@ async function _addCustomProviderInteractive() {
   process.stdout.write(dim('  · Groq             https://api.groq.com/openai/v1') + '\n');
   process.stdout.write(dim('  · vLLM / LM Studio http://localhost:8000/v1') + '\n\n');
 
-  const { validateCustomProviderName, registerCustomProviders, fetchOpenAICompatModels, isBuiltinOpenAICompatName } = _registryMod;
+  const { validateCustomProviderName, registerCustomProviders, fetchOpenAICompatModels, isBuiltinOpenAICompatName } = getRegistry();
   let name;
   while (true) {
     const raw = (await _quickPrompt(`  ${bold('name')} ${dim('(short id, e.g. "nim", "openrouter"):')} `)).trim();
@@ -2441,7 +2193,7 @@ async function _addCustomProviderInteractive() {
   // /provider add flow can't drift. The interactive prompts above already
   // validated name + baseUrl; addCustomProvider re-validates harmlessly.
   const result = await addCustomProvider({
-    registry: _registryMod,
+    registry: getRegistry(),
     readConfig,
     writeConfig,
     name,
@@ -2476,7 +2228,7 @@ async function cmdChat(flags = {}) {
   // iteration; today the slash commands work against the on-disk default.
   let activeProvName = cfg.provider || '';
   let activeModel = cfg.model || null;
-  const lookupProv = (name) => _registryMod.PROVIDERS[name];
+  const lookupProv = (name) => getRegistry().PROVIDERS[name];
   // First-run routing: a genuine fresh install (no provider, interactive)
   // gets the full 5-step guided setup (provider+model, workspace, skills) —
   // not just the provider picker. `chat --pick` stays a lightweight re-pick.
@@ -2658,7 +2410,7 @@ async function cmdChat(flags = {}) {
         sandboxSpec: _inkSandboxSpec,
         syntheticChatSessionId: _inkSyntheticChatSessionId,
         version: readVersionFromRepo(),
-        registryMod: _registryMod,
+        registryMod: getRegistry(),
         sessionsMod,
         // Pre-imported so dispatcher avoids a dynamic import per /skill call.
         skillsMod,
@@ -2945,7 +2697,7 @@ async function cmdChat(flags = {}) {
         const out = {
           provider: activeProvName,
           model: activeModel,
-          keyMasked: _registryMod.maskApiKey(cfg['api-key']),
+          keyMasked: getRegistry().maskApiKey(cfg['api-key']),
           messageCount: messages.length,
         };
         process.stdout.write(JSON.stringify(out) + '\n');
@@ -2981,7 +2733,7 @@ async function cmdChat(flags = {}) {
         }
         const next = lookupProv(arg);
         if (!next) {
-          process.stdout.write(`unknown provider: ${arg} (known: ${Object.keys(_registryMod.PROVIDERS).join(', ')})\n`);
+          process.stdout.write(`unknown provider: ${arg} (known: ${Object.keys(getRegistry().PROVIDERS).join(', ')})\n`);
           return true;
         }
         activeProvName = arg;
@@ -3009,7 +2761,7 @@ async function cmdChat(flags = {}) {
         }
         // Honor unified provider/model: `/model anthropic/claude-opus-4-7`
         // splits and switches both.
-        const { parseSlashProviderModel } = _registryMod;
+        const { parseSlashProviderModel } = getRegistry();
         const parsed = parseSlashProviderModel(arg);
         if (parsed.provider) {
           const next = lookupProv(parsed.provider);
@@ -3528,8 +3280,8 @@ async function cmdChat(flags = {}) {
             ? sessionsMod.loadTurns(sessionId, cfgDir)
             : messages.map((t) => ({ role: t.role, content: t.content }));
           if (turns && turns.length) {
-            const trainer = (typeof _registryMod?.resolveTrainer === 'function')
-              ? _registryMod.resolveTrainer(cfg)
+            const trainer = (typeof getRegistry()?.resolveTrainer === 'function')
+              ? getRegistry().resolveTrainer(cfg)
               : { provider: activeProvName, model: activeModel };
             const userModelPromise = import('./mas/user_modeler.mjs').then((m) =>
               m.updateUserModel({
@@ -3981,7 +3733,7 @@ async function cmdRates(sub, positional, flags = {}) {
       const cfg = readConfig();
       await ensureRegistry();
       const { validateRates } = await import('./rates-validate.mjs');
-      const result = validateRates(cfg.rates, _registryMod.PROVIDERS);
+      const result = validateRates(cfg.rates, getRegistry().PROVIDERS);
       console.log(JSON.stringify(result, null, 2));
       process.exit(result.ok ? 0 : 1);
     }
@@ -4462,7 +4214,7 @@ async function cmdLoop(prompt, flags = {}) {
   catch (e) { console.error(`loop: ${e?.message || e}`); process.exit(2); }
 
   const provName = flags.provider || cfg.provider || 'mock';
-  const prov = _registryMod.PROVIDERS[provName];
+  const prov = getRegistry().PROVIDERS[provName];
   if (!prov) { console.error(`unknown provider: ${provName}`); process.exit(2); }
   const model = flags.model || cfg.model;
 
@@ -4776,7 +4528,7 @@ async function cmdGoal(sub, positional, flags = {}) {
       await ensureRegistry();
       const cfg = readConfig();
       const provName = flags.provider || cfg.provider || 'mock';
-      const prov = _registryMod.PROVIDERS[provName];
+      const prov = getRegistry().PROVIDERS[provName];
       if (!prov) { console.error(`unknown provider: ${provName}`); process.exit(2); }
       const model = flags.model || cfg.model;
 
@@ -4937,7 +4689,7 @@ async function cmdMemory(sub, positional, flags = {}) {
       await ensureRegistry();
       const cfg = readConfig();
       const provName = flags.provider || cfg.provider || 'mock';
-      const prov = _registryMod.PROVIDERS[provName];
+      const prov = getRegistry().PROVIDERS[provName];
       if (!prov) { console.error(`unknown provider: ${provName}`); process.exit(2); }
       const sid = positional[0] || flags.session || null;
       try {
@@ -5513,7 +5265,7 @@ async function cmdSlack(sub, positional, flags = {}) {
   process.stderr.write(`[slack] .env: ${envInfo.loaded} keys loaded from ${envInfo.path}\n`);
 
   const provName = flags.provider || cfg.provider || 'mock';
-  const prov = _registryMod.PROVIDERS[provName];
+  const prov = getRegistry().PROVIDERS[provName];
   if (!prov) { console.error(`unknown provider: ${provName}`); process.exit(2); }
   const model = flags.model || cfg.model;
 
@@ -5605,7 +5357,7 @@ async function cmdTelegram(sub, positional, flags = {}) {
   process.stderr.write(`[telegram] .env: ${envInfo.loaded} keys loaded from ${envInfo.path}\n`);
 
   const provName = flags.provider || cfg.provider || 'mock';
-  const prov = _registryMod.PROVIDERS[provName];
+  const prov = getRegistry().PROVIDERS[provName];
   if (!prov) { console.error(`unknown provider: ${provName}`); process.exit(2); }
   const model = flags.model || cfg.model;
 
@@ -5684,7 +5436,7 @@ async function cmdMatrix(sub, positional, flags = {}) {
   process.stderr.write(`[matrix] .env: ${envInfo.loaded} keys loaded from ${envInfo.path}\n`);
 
   const provName = flags.provider || cfg.provider || 'mock';
-  const prov = _registryMod.PROVIDERS[provName];
+  const prov = getRegistry().PROVIDERS[provName];
   if (!prov) { console.error(`unknown provider: ${provName}`); process.exit(2); }
   const model = flags.model || cfg.model;
 
@@ -5967,8 +5719,8 @@ async function cmdProviders(sub, positional, flags = {}) {
       // to a minimal shape so this never crashes the CLI even mid-refactor.
       // --filter / --limit pattern matches v3.33-v3.46 across the other
       // list surfaces. Filter on provider name, case-insensitive.
-      let out = Object.keys(_registryMod.PROVIDERS).map(name => {
-        const meta = _registryMod.PROVIDER_INFO[name] || { name, requiresApiKey: false, docs: '' };
+      let out = Object.keys(getRegistry().PROVIDERS).map(name => {
+        const meta = getRegistry().PROVIDER_INFO[name] || { name, requiresApiKey: false, docs: '' };
         return {
           name,
           requiresApiKey: !!meta.requiresApiKey,
@@ -5990,9 +5742,9 @@ async function cmdProviders(sub, positional, flags = {}) {
     case 'info': {
       const name = positional[0];
       if (!name) { console.error('Usage: lazyclaw providers info <name>'); process.exit(2); }
-      const meta = _registryMod.PROVIDER_INFO[name];
+      const meta = getRegistry().PROVIDER_INFO[name];
       if (!meta) {
-        console.error(`unknown provider: ${name} (registered: ${Object.keys(_registryMod.PROVIDERS).join(', ')})`);
+        console.error(`unknown provider: ${name} (registered: ${Object.keys(getRegistry().PROVIDERS).join(', ')})`);
         process.exit(2);
       }
       console.log(JSON.stringify(meta, null, 2));
@@ -6022,8 +5774,8 @@ async function cmdProviders(sub, positional, flags = {}) {
         const apiKey = cfg['api-key'] || '';
         const t0all = Date.now();
         const results = await Promise.all(
-          Object.entries(_registryMod.PROVIDERS).map(async ([pid, provider]) => {
-            const meta = _registryMod.PROVIDER_INFO[pid] || {};
+          Object.entries(getRegistry().PROVIDERS).map(async ([pid, provider]) => {
+            const meta = getRegistry().PROVIDER_INFO[pid] || {};
             const model = flags.model || cfg.model || meta.defaultModel || 'unknown';
             const t0 = Date.now();
             try {
@@ -6055,13 +5807,13 @@ async function cmdProviders(sub, positional, flags = {}) {
         }, null, 2));
         process.exit(allOk ? 0 : 1);
       }
-      const provider = _registryMod.PROVIDERS[name];
+      const provider = getRegistry().PROVIDERS[name];
       if (!provider) {
-        console.error(`unknown provider: ${name} (registered: ${Object.keys(_registryMod.PROVIDERS).join(', ')})`);
+        console.error(`unknown provider: ${name} (registered: ${Object.keys(getRegistry().PROVIDERS).join(', ')})`);
         process.exit(2);
       }
       // cfg already declared above for the all-mode branch; reuse it.
-      const meta = _registryMod.PROVIDER_INFO[name] || {};
+      const meta = getRegistry().PROVIDER_INFO[name] || {};
       // --model / --prompt come in via the parsed flags map (parseArgs
       // lifted them out of positional). --model wins over config.model
       // wins over PROVIDER_INFO.defaultModel.
@@ -6122,7 +5874,7 @@ async function cmdProviders(sub, positional, flags = {}) {
         process.exit(2);
       }
       let validName;
-      try { validName = _registryMod.validateCustomProviderName(name); }
+      try { validName = getRegistry().validateCustomProviderName(name); }
       catch (e) { console.error(e.message); process.exit(2); }
       if (!/^https?:\/\//i.test(String(baseUrl))) {
         console.error('--base-url must start with http:// or https://');
@@ -6140,12 +5892,12 @@ async function cmdProviders(sub, positional, flags = {}) {
       if (idx >= 0) cfg.customProviders[idx] = { ...cfg.customProviders[idx], ...entry };
       else cfg.customProviders.push(entry);
       writeConfig(cfg);
-      _registryMod.registerCustomProviders(cfg);
+      getRegistry().registerCustomProviders(cfg);
 
       let probe = null;
       if (!flags['no-probe']) {
         try {
-          const list = await _registryMod.fetchOpenAICompatModels({
+          const list = await getRegistry().fetchOpenAICompatModels({
             baseUrl: entry.baseUrl, apiKey: entry.apiKey || '',
           });
           probe = { ok: true, modelCount: list.length, sample: list.slice(0, 8) };
@@ -6156,7 +5908,7 @@ async function cmdProviders(sub, positional, flags = {}) {
               updated.customProviders[i].suggestedModels = list.slice(0, 50);
               if (!updated.customProviders[i].defaultModel) updated.customProviders[i].defaultModel = list[0];
               writeConfig(updated);
-              _registryMod.registerCustomProviders(updated);
+              getRegistry().registerCustomProviders(updated);
             }
           }
         } catch (e) {
@@ -6194,7 +5946,7 @@ async function cmdProviders(sub, positional, flags = {}) {
       //   lazyclaw providers models openai --filter gpt-4
       const name = positional[0];
       if (!name) { console.error('Usage: lazyclaw providers models <name> [--filter <substr>]'); process.exit(2); }
-      if (!_registryMod.PROVIDERS[name]) {
+      if (!getRegistry().PROVIDERS[name]) {
         console.error(`unknown provider: ${name}`);
         process.exit(2);
       }
@@ -6235,7 +5987,7 @@ async function cmdOrchestrator(sub, positional, _flags = {}) {
   await ensureRegistry();
   const cfg = readConfig();
   const orch = cfg.orchestrator && typeof cfg.orchestrator === 'object' ? cfg.orchestrator : {};
-  const known = Object.keys(_registryMod.PROVIDERS);
+  const known = Object.keys(getRegistry().PROVIDERS);
   const validateSpec = (spec) => {
     if (!spec) throw new Error('provider spec required (e.g. "claude-cli" or "openai:gpt-4o")');
     const colon = spec.indexOf(':');
@@ -6621,7 +6373,7 @@ async function cmdConfigValidate() {
   const cfg = readConfig();
   await ensureRegistry();
   const { validateConfig } = await import('./config-validate.mjs');
-  const { ok, issues, warnings } = validateConfig(cfg, _registryMod.PROVIDERS);
+  const { ok, issues, warnings } = validateConfig(cfg, getRegistry().PROVIDERS);
   console.log(JSON.stringify({
     ok,
     configPath: configPath(),
@@ -6630,77 +6382,6 @@ async function cmdConfigValidate() {
     warnings,
   }, null, 2));
   process.exit(ok ? 0 : 1);
-}
-
-// Flags whose presence is the signal — they don't consume the next arg
-// even when one is available. Without this allow-list,
-// `lazyclaw run --parallel demo wf.mjs` would set `flags.parallel='demo'`
-// and silently lose the session id; the user would only see a
-// "missing positional" error after the dispatcher rejected it.
-const BOOLEAN_FLAGS = new Set([
-  'parallel',
-  'parallel-persistent',
-  'once',
-  'non-interactive',
-  'include-secrets',
-  'include-sessions',
-  'overwrite-skills',
-  'no-overwrite-config',
-  'import-sessions',
-  'show-thinking',
-  'usage',
-  'cost',
-  'response-cache',
-  'help',         // also handled as a subcommand alias
-  'version',
-  'summary',      // inspect: trim per-node detail
-  'regex',        // sessions search: treat query as a regex
-  'lr',           // graph: emit Mermaid `graph LR` (left-right)
-  'force',        // rates copy: overwrite existing destination
-  'aggregate',    // inspect (list mode): per-node stats across sessions
-  'all',          // providers test: run all providers in parallel
-  'with-turn-count', // sessions list: include turn count per session
-  'no-probe',     // providers add: skip the /v1/models reachability probe
-  'pick',         // onboard / chat: force the interactive picker even when provider already set
-  'detach',       // loop: fork worker and return immediately
-  'use-memory',   // loop: prepend core memory to each iteration
-  'force',        // goal tick --force: bypass schedule when invoked manually
-]);
-
-function parseArgs(argv) {
-  const out = { positional: [], flags: {} };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    // POSIX `--`: everything after is positional verbatim. Used by
-    // `cron add <name> "<spec>" -- <cmd> [args...]` so a recurring
-    // command with --flag of its own doesn't get parsed as our flag.
-    if (a === '--') {
-      for (let j = i + 1; j < argv.length; j++) out.positional.push(argv[j]);
-      break;
-    }
-    if (a.startsWith('--')) {
-      const eq = a.indexOf('=');
-      if (eq >= 0) {
-        out.flags[a.slice(2, eq)] = a.slice(eq + 1);
-      } else {
-        const name = a.slice(2);
-        if (BOOLEAN_FLAGS.has(name)) {
-          // Known boolean — never consumes the next arg.
-          out.flags[name] = true;
-          continue;
-        }
-        const next = argv[i + 1];
-        if (next === undefined || next.startsWith('--')) {
-          // Unknown flag at end-of-args or before another --flag: still boolean.
-          out.flags[name] = true;
-        } else {
-          out.flags[name] = next;
-          i += 1;
-        }
-      }
-    } else out.positional.push(a);
-  }
-  return out;
 }
 
 // Interactive launcher — fired when the user types `lazyclaw` with
