@@ -2806,26 +2806,6 @@ async function cmdRates(sub, positional, flags = {}) {
 // only ran `lazyclaw chat` or similar; cli.mjs is already a 2700-line
 // hot path and we don't need every helper paged in.
 
-async function cmdBrowse(url, flags = {}) {
-  if (!url) { console.error('Usage: lazyclaw browse <url> [--max-bytes <N>] [--timeout-ms <N>] [--meta]'); process.exit(2); }
-  const { browse } = await import('./browse.mjs');
-  const opts = {};
-  if (flags['max-bytes'] !== undefined) opts.maxBytes = parseInt(flags['max-bytes'], 10);
-  if (flags['timeout-ms'] !== undefined) opts.timeoutMs = parseInt(flags['timeout-ms'], 10);
-  if (flags['user-agent']) opts.userAgent = flags['user-agent'];
-  try {
-    const r = await browse(url, opts);
-    if (flags.meta) {
-      process.stderr.write(JSON.stringify({
-        url: r.url, title: r.title, bytes: r.bytes, truncated: r.truncated,
-      }) + '\n');
-    }
-    process.stdout.write(r.markdown);
-  } catch (e) {
-    console.error(`error: ${e?.message || e}`);
-    process.exit(1);
-  }
-}
 
 
 // `lazyclaw memory <show|dream|edit> [args]`
@@ -3738,107 +3718,6 @@ async function cmdOrchestrator(sub, positional, _flags = {}) {
 
 
 // sandbox subcommands — list/test/add/use (Phase D).
-async function cmdSandbox(args, flags = {}) {
-  const sub = args[0];
-
-  if (!sub || sub === 'list') {
-    for (const kind of listBackends()) process.stdout.write(`${kind}\n`);
-    return 0;
-  }
-
-  if (sub === 'test') {
-    const name = args[1];
-    if (!name) { process.stderr.write('usage: lazyclaw sandbox test <kind|profile>\n'); return 2; }
-    const cfg = _sandboxLoadConfigOrEmpty();
-    // If `name` looks like a known kind, route to that kind. If it
-    // is not a known kind AND not a profile in cfg, treat as an
-    // unknown identifier and report SANDBOX_BAD_KIND.
-    const isKind = listBackends().includes(name);
-    const profile = cfg.sandbox && cfg.sandbox.profiles && cfg.sandbox.profiles[name];
-    if (!isKind && !profile) {
-      process.stderr.write(`SANDBOX_BAD_KIND: unknown sandbox kind or profile "${name}"\n`);
-      return 1;
-    }
-    let sb;
-    try {
-      const synthCfg = isKind
-        ? { sandbox: { default: name, ...cfg.sandbox } }
-        : cfg;
-      sb = resolveSandbox(synthCfg);
-    } catch (e) {
-      process.stderr.write(`${e.code || 'SANDBOX_ERR'}: ${e.message}\n`); return 1;
-    }
-    if (sb.spec.kind !== 'local' && sb.spec.kind !== 'docker') {
-      // Remote/serverless backends just construct argv in unit tests;
-      // we report "shape-ok" without actually executing.
-      process.stdout.write(`ok ${sb.spec.kind} (argv-shape)\n`);
-      return 0;
-    }
-    const sess = await sb.open();
-    try {
-      const r = await sess.exec(['echo', 'lazyclaw-sandbox-test']);
-      if (r.code !== 0 || !/lazyclaw-sandbox-test/.test(r.stdout)) {
-        process.stderr.write(`fail ${name}: exit=${r.code} stdout=${r.stdout}\n`); return 1;
-      }
-      process.stdout.write(`ok ${name}\n`);
-      return 0;
-    } finally { await sess.close(); }
-  }
-
-  if (sub === 'add') {
-    const name = args[1];
-    if (!name) { process.stderr.write('usage: lazyclaw sandbox add <name> --kind <kind> [...]\n'); return 2; }
-    const opts = {};
-    if (flags.kind) opts.kind = flags.kind;
-    if (flags.image) opts.image = flags.image;
-    if (flags.host) opts.host = flags.host;
-    if (flags.user) opts.user = flags.user;
-    if (flags.workspace) opts.workspace = flags.workspace;
-    if (flags.app) opts.app = flags.app;
-    if (flags.confiner) opts.confiner = flags.confiner;
-    if (!listBackends().includes(opts.kind)) {
-      process.stderr.write(`unknown kind "${opts.kind}"\n`); return 1;
-    }
-    const cfg = _sandboxLoadConfigOrEmpty();
-    cfg.sandbox = cfg.sandbox || {};
-    cfg.sandbox.profiles = cfg.sandbox.profiles || {};
-    cfg.sandbox.profiles[name] = opts;
-    _sandboxSaveConfig(cfg);
-    process.stdout.write(`added profile ${name} (${opts.kind})\n`);
-    return 0;
-  }
-
-  if (sub === 'use') {
-    const name = args[1];
-    if (!name) { process.stderr.write('usage: lazyclaw sandbox use <profile>\n'); return 2; }
-    const cfg = _sandboxLoadConfigOrEmpty();
-    const prof = cfg.sandbox && cfg.sandbox.profiles && cfg.sandbox.profiles[name];
-    if (!prof) { process.stderr.write(`no profile "${name}"\n`); return 1; }
-    cfg.sandbox = cfg.sandbox || {};
-    cfg.sandbox.default = prof.kind;
-    cfg.sandbox[prof.kind] = { ...(cfg.sandbox[prof.kind] || {}), ...prof, kind: undefined };
-    delete cfg.sandbox[prof.kind].kind;
-    _sandboxSaveConfig(cfg);
-    process.stdout.write(`using profile ${name} (${prof.kind})\n`);
-    return 0;
-  }
-
-  process.stderr.write(`unknown subcommand "${sub}". Try: list | test | add | use\n`);
-  return 2;
-}
-
-function _sandboxLoadConfigOrEmpty() {
-  const p = process.env.LAZYCLAW_CONFIG || configPath();
-  try {
-    return JSON.parse(fs.readFileSync(p, 'utf8'));
-  } catch { return {}; }
-}
-
-function _sandboxSaveConfig(cfg) {
-  const p = process.env.LAZYCLAW_CONFIG || configPath();
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
-}
 
 function cmdConfigGet(key) {
   const cfg = readConfig();
@@ -4099,7 +3978,7 @@ async function _dispatchMenuChoice(argv) {
       case 'onboard':      return await cmdOnboard({});
       case 'setup':        return await cmdSetup(undefined, rest, {});
       case 'workspace':    return await (await import('./commands/auth_nodes.mjs')).cmdWorkspace(rest[0], rest.slice(1), {});
-      case 'browse':       return await cmdBrowse(rest[0], {});
+      case 'browse':       return await (await import('./commands/misc.mjs')).cmdBrowse(rest[0], {});
       case 'skills':       return await (await import('./commands/skills.mjs')).cmdSkills(rest[0], rest.slice(1), {});
       case 'sessions':     return await (await import('./commands/sessions.mjs')).cmdSessions(rest[0], rest.slice(1), {});
       case 'providers':    return await cmdProviders(rest[0], rest.slice(1), {});
@@ -4651,7 +4530,7 @@ async function main() {
       break;
     }
     case 'sandbox': {
-      process.exit(await cmdSandbox(rest.positional, rest.flags));
+      process.exit(await (await import('./commands/misc.mjs')).cmdSandbox(rest.positional, rest.flags));
       break;
     }
     case 'auth': {
@@ -4680,7 +4559,7 @@ async function main() {
       break;
     }
     case 'browse': {
-      await cmdBrowse(rest.positional[0], rest.flags);
+      await (await import('./commands/misc.mjs')).cmdBrowse(rest.positional[0], rest.flags);
       break;
     }
     case 'cron': {
