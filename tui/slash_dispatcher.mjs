@@ -59,6 +59,15 @@ function splitWhitespace(s) {
   return (s || '').split(/\s+/).filter(Boolean);
 }
 
+// Parse a "provider[:model]" spec, preferring the registry's parser.
+function _parseProvModel(registry, spec) {
+  if (registry && typeof registry.parseProviderModel === 'function') return registry.parseProviderModel(spec);
+  const s = String(spec || '');
+  const i = s.indexOf(':');
+  if (i < 0) return { provider: s || null, model: null };
+  return { provider: s.slice(0, i) || null, model: s.slice(i + 1) || null };
+}
+
 // Best-effort dynamic import. Returns the resolved ctx field if the caller
 // pre-injected it (test hot path), else loads the real module. Throwing is
 // fine — handlers wrap calls in try/catch where appropriate.
@@ -1082,6 +1091,19 @@ async function _trainer(args, ctx) {
       const next = _providerLookup(registry, parsed.provider);
       if (!next) return `/trainer set: unknown provider "${parsed.provider}"`;
     }
+    // Optional `--fallback <provider[:model]>` — resolveTrainer routes here
+    // when opts.useFallback is set. Validate before persisting.
+    let fallbackSpec = null;
+    const fi = tokens.indexOf('--fallback');
+    if (fi >= 0) {
+      fallbackSpec = tokens[fi + 1];
+      if (!fallbackSpec) return 'usage: /trainer set <p:m> --fallback <p:m>';
+      const fp = _parseProvModel(registry, fallbackSpec);
+      if (!fp.provider) return `/trainer set: could not parse fallback "${fallbackSpec}"`;
+      if (fp.provider !== 'auto' && !_providerLookup(registry, fp.provider)) {
+        return `/trainer set: unknown provider "${fp.provider}"`;
+      }
+    }
     // Read-merge-write so unrelated cfg keys survive.
     const fs = await import('node:fs');
     const path = await import('node:path');
@@ -1091,10 +1113,38 @@ async function _trainer(args, ctx) {
     diskCfg.trainer = { ...(diskCfg.trainer || {}), provider: parsed.provider };
     if (parsed.model) diskCfg.trainer.model = parsed.model;
     else delete diskCfg.trainer.model;
+    if (fallbackSpec) diskCfg.trainer.fallback = fallbackSpec;
     try { fs.mkdirSync(ctx.cfgDir, { recursive: true }); } catch {}
     fs.writeFileSync(cfgPath, JSON.stringify(diskCfg, null, 2));
     if (ctx.cfg) ctx.cfg.trainer = { ...diskCfg.trainer };
-    return `✓ trainer → ${parsed.provider}${parsed.model ? ':' + parsed.model : ''}`;
+    return `✓ trainer → ${parsed.provider}${parsed.model ? ':' + parsed.model : ''}${fallbackSpec ? ` (fallback: ${fallbackSpec})` : ''}`;
+  }
+
+  if (sub === 'fallback') {
+    const spec = tokens[1];
+    if (!spec) return 'usage: /trainer fallback <provider>[:<model>]  |  clear';
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const cfgPath = path.join(ctx.cfgDir, 'config.json');
+    let diskCfg = {};
+    try { diskCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch { /* fresh */ }
+    if (spec === 'clear' || spec === 'unset') {
+      if (diskCfg.trainer) delete diskCfg.trainer.fallback;
+      try { fs.mkdirSync(ctx.cfgDir, { recursive: true }); } catch {}
+      fs.writeFileSync(cfgPath, JSON.stringify(diskCfg, null, 2));
+      if (ctx.cfg && ctx.cfg.trainer) delete ctx.cfg.trainer.fallback;
+      return '✓ trainer fallback cleared';
+    }
+    const fp = _parseProvModel(registry, spec);
+    if (!fp.provider) return `/trainer fallback: could not parse "${spec}"`;
+    if (fp.provider !== 'auto' && !_providerLookup(registry, fp.provider)) {
+      return `/trainer fallback: unknown provider "${fp.provider}"`;
+    }
+    diskCfg.trainer = { ...(diskCfg.trainer || {}), fallback: spec };
+    try { fs.mkdirSync(ctx.cfgDir, { recursive: true }); } catch {}
+    fs.writeFileSync(cfgPath, JSON.stringify(diskCfg, null, 2));
+    if (ctx.cfg) ctx.cfg.trainer = { ...diskCfg.trainer };
+    return `✓ trainer fallback → ${spec}`;
   }
 
   if (sub === 'clear' || sub === 'unset') {
