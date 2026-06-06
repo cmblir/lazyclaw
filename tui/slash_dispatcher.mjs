@@ -41,6 +41,7 @@ import { setAuthKey } from '../providers/auth_store.mjs';
 import { attachGoalCron, detachGoalCron } from '../goals_cron.mjs';
 import { loadDotenvIfAny } from '../dotenv_min.mjs';
 import { SUBCOMMAND_GROUPS } from './subcommands.mjs';
+import { redactSecrets } from '../mas/redact.mjs';
 
 // ─── helpers ─────────────────────────────────────────────────────────────
 
@@ -238,6 +239,38 @@ async function _promptText(ctx, { title, subtitle, allowEmpty } = {}) {
     return v;
   }
   return null;
+}
+
+// Yes/no confirmation modal for sensitive-tool approval. Esc (or no modal
+// available) DENIES — approval is never granted by omission.
+async function _promptConfirm(ctx, { title, subtitle } = {}) {
+  if (typeof ctx.openPicker !== 'function') return false;
+  const picked = await ctx.openPicker({
+    kind: 'menu',
+    title: title || 'Approve sensitive tool?',
+    subtitle: subtitle || 'Enter selects · Esc denies',
+    items: [
+      { id: 'approve', label: '✓ approve once', desc: 'run this tool call' },
+      { id: 'deny', label: '✗ deny', desc: 'block this tool call' },
+    ],
+  });
+  const id = picked && typeof picked === 'object' ? picked.id : picked;
+  return id === 'approve';
+}
+
+// Default in-chat approval hook: prompts the operator to confirm each
+// sensitive tool call. Used to drive the fail-closed tool runner from the
+// Ink REPL, where stdin is owned by Ink so a raw readline prompt can't run.
+function _makeInkApprove(ctx) {
+  return async function approve({ tool, args, agent }) {
+    const raw = typeof args === 'object' ? JSON.stringify(args) : String(args ?? '');
+    const summary = redactSecrets(raw).slice(0, 300);
+    const ok = await _promptConfirm(ctx, {
+      title: `Approve ${tool}?`,
+      subtitle: `agent ${agent}: ${summary}`,
+    });
+    return { approved: ok, reason: ok ? 'approved in chat' : 'denied in chat' };
+  };
 }
 
 // Register a custom OpenAI-compatible endpoint with the given fields, set it
@@ -1267,6 +1300,8 @@ async function _task(args, ctx, write) {
           configDir: ctx.cfgDir,
           apiKey, baseUrl,
           logger: (line) => { if (typeof write === 'function') { try { write(line); } catch {} } },
+          approve: _makeInkApprove(ctx),
+          security: ctx.cfg?.security,
         });
         return `✓ task ${result.task.id} → ${result.task.status} (${result.iterations} agent turn(s)${result.stoppedBy ? `, stopped by ${result.stoppedBy}` : ''})`;
       } catch (e) {

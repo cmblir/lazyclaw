@@ -21,6 +21,10 @@ async function load() {
 
 const fullAgent = { name: 'planner', tools: ['bash', 'read', 'write', 'grep'] };
 const readOnlyAgent = { name: 'auditor', tools: ['read', 'grep'] };
+// Sensitive tools (bash/write) are fail-closed in the runner: they need an
+// approval hook. These tests exercise tool *behavior*, not the gate, so they
+// approve unconditionally; the gate itself is covered by phase29 + p0-approval.
+const approve = async () => ({ approved: true });
 
 test.describe('Phase 12a — tool runner', () => {
   test('listToolSchemas returns one entry per implemented tool with JSON Schema parameters', async () => {
@@ -39,6 +43,7 @@ test.describe('Phase 12a — tool runner', () => {
       agent: fullAgent,
       tool: 'bash',
       args: { command: 'echo hi && echo "error message" 1>&2 && exit 0' },
+      approve,
     });
     expect(r.ok).toBe(true);
     expect(r.stdout).toContain('hi');
@@ -52,6 +57,7 @@ test.describe('Phase 12a — tool runner', () => {
       agent: fullAgent,
       tool: 'bash',
       args: { command: 'exit 3' },
+      approve,
     });
     expect(r1.exitCode).toBe(3);
 
@@ -59,6 +65,7 @@ test.describe('Phase 12a — tool runner', () => {
       agent: fullAgent,
       tool: 'bash',
       args: { command: 'sleep 10', timeoutMs: 250 },
+      approve,
     });
     expect(r2.timedOut).toBe(true);
   });
@@ -72,6 +79,7 @@ test.describe('Phase 12a — tool runner', () => {
       tool: 'write',
       args: { path: 'note.txt', content: 'hello world' },
       cwd: ws,
+      approve,
     });
     expect(wr.ok).toBe(true);
     expect(wr.bytesWritten).toBe(11);
@@ -152,7 +160,7 @@ test.describe('Phase 12a — tool runner', () => {
     const { runner, audit } = await load();
     const taskId = 't_20260518_audit1';
 
-    await runner.runTool({ agent: fullAgent, tool: 'write', args: { path: 'x.txt', content: 'A' }, taskId, configDir: cfgDir, cwd: ws });
+    await runner.runTool({ agent: fullAgent, tool: 'write', args: { path: 'x.txt', content: 'A' }, taskId, configDir: cfgDir, cwd: ws, approve });
     await runner.runTool({ agent: fullAgent, tool: 'read',  args: { path: 'x.txt' },                  taskId, configDir: cfgDir, cwd: ws });
 
     const entries = audit.read(taskId, cfgDir);

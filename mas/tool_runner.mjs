@@ -35,7 +35,7 @@ export function listToolSchemas(names) {
 export function isImplemented(name) { return registry.lookup(name) !== null; }
 export function knownTool(name)     { return registry.lookup(name) !== null; }
 
-export async function runTool({ agent, tool, args, taskId, configDir, cwd, approve } = {}) {
+export async function runTool({ agent, tool, args, taskId, configDir, cwd, approve, security } = {}) {
   if (!agent || !Array.isArray(agent.tools)) {
     throw new ToolError('agent record with .tools[] is required', 'TOOL_BAD_AGENT');
   }
@@ -44,12 +44,28 @@ export async function runTool({ agent, tool, args, taskId, configDir, cwd, appro
   if (!agent.tools.includes(tool)) {
     throw new ToolError(`agent "${agent.name}" is not allowed to call tool "${tool}" (whitelist=[${agent.tools.join(', ')}])`, 'TOOL_DENIED');
   }
-  if (typeof approve === 'function' && impl.sensitive) {
-    let verdict;
-    try { verdict = await approve({ tool, args, agent: agent.name }); }
-    catch (err) { verdict = { approved: false, reason: `approval error: ${err?.message || err}` }; }
-    if (!verdict || !verdict.approved) {
-      const result = { ok: false, error: `tool "${tool}" denied by operator${verdict?.reason ? `: ${verdict.reason}` : ''}`, code: 'TOOL_DENIED_APPROVAL' };
+  // Sensitive tools (shell exec, file writes, network egress, delegation)
+  // are fail-closed: they run only behind an approval hook, OR when the
+  // operator has explicitly opted into unattended execution. A missing
+  // approve hook used to mean "ungated" — that made a fresh interactive
+  // install run bash/write with no confirmation, i.e. remote-prompt-
+  // injection-to-RCE. The default is now deny.
+  if (impl.sensitive) {
+    if (typeof approve === 'function') {
+      let verdict;
+      try { verdict = await approve({ tool, args, agent: agent.name }); }
+      catch (err) { verdict = { approved: false, reason: `approval error: ${err?.message || err}` }; }
+      if (!verdict || !verdict.approved) {
+        const result = { ok: false, error: `tool "${tool}" denied by operator${verdict?.reason ? `: ${verdict.reason}` : ''}`, code: 'TOOL_DENIED_APPROVAL' };
+        audit.append({ taskId, agent: agent.name, tool, args, result, ok: false, configDir });
+        return result;
+      }
+    } else if (security && security.allowUnattendedSensitive === true) {
+      // Explicit, persisted opt-in to unattended sensitive execution.
+      // Never silent — record that the gate was bypassed by config.
+      audit.append({ taskId, agent: agent.name, tool, args, result: { ok: true, note: 'sensitive tool ran unattended (security.allowUnattendedSensitive)' }, ok: true, configDir });
+    } else {
+      const result = { ok: false, error: `tool "${tool}" is sensitive and requires operator approval, but no approval channel is configured. Run interactively, pass --approve-url, or set security.allowUnattendedSensitive=true to allow unattended use.`, code: 'TOOL_DENIED_NO_APPROVER' };
       audit.append({ taskId, agent: agent.name, tool, args, result, ok: false, configDir });
       return result;
     }

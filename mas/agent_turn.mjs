@@ -94,6 +94,7 @@ export async function runAgentTurn({
   maxIterations = DEFAULT_MAX_ITERATIONS,
   signal,
   approve,
+  security,
   // v5 (Group A — C3): trajectoryRef is OPT-OUT, not opt-in. A caller
   // that doesn't pass one but DOES pass a configDir gets a
   // default-stamped record so every production agent turn lands in
@@ -218,7 +219,7 @@ export async function runAgentTurn({
       try {
         result = await runTool({
           agent, tool: call.name, args: call.input,
-          taskId, configDir, cwd, approve,
+          taskId, configDir, cwd, approve, security,
         });
         if (result && result.ok === false) ok = false;
       } catch (err) {

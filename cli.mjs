@@ -5129,6 +5129,13 @@ async function cmdTask(sub, positional, flags = {}) {
             return { approved: false, reason: `approval request failed: ${err?.message || err}` };
           }
         };
+      } else if (process.stdin.isTTY) {
+        // No --approve-url: default to an interactive y/N approval on the
+        // controlling terminal so sensitive tools are confirmed rather than
+        // run ungated. Non-TTY leaves approve undefined → the tool runner
+        // fails closed (deny) unless security.allowUnattendedSensitive is set.
+        const { makeReadlineApprove } = await import('./tui/terminal_approve.mjs');
+        approve = makeReadlineApprove();
       }
       try {
         const result = await router.runTaskTurn({
@@ -5140,6 +5147,7 @@ async function cmdTask(sub, positional, flags = {}) {
           logger: (line) => process.stderr.write(line),
           maxAgentTurns: flags['max-turns'] ? parseInt(flags['max-turns'], 10) : undefined,
           approve,
+          security: cfg.security,
         });
         emitJson({ id: result.task.id, status: result.task.status, iterations: result.iterations, stoppedBy: result.stoppedBy });
       } catch (err) {

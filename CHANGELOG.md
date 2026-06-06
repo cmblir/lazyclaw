@@ -6,6 +6,21 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **Sensitive tools are fail-closed by default.** `bash`, `write`, `web_fetch`,
+  `browser_navigate`, `delegate`, and every other tool flagged `sensitive` used
+  to run with no confirmation whenever no approval hook was wired — which on a
+  default interactive install meant an agent, including one steered by prompt
+  injection from a fetched page, a channel message, an MCP result, or recalled
+  memory, could run arbitrary shell and write arbitrary files with no human in
+  the loop. They now **deny by default** unless an approval hook grants the
+  call or `security.allowUnattendedSensitive: true` is set in config. The
+  interactive REPL and `task tick` ship a default approval prompt (in-chat
+  confirm modal / terminal y-N); `--approve-url` remote approval is unchanged.
+  Unattended/non-TTY runs without the explicit opt-in refuse sensitive tools
+  rather than running them silently.
+
 ### Fixed
 
 - **Agent skill tools share the real skill store now.** `skill_create` /

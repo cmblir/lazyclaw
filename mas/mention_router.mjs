@@ -388,6 +388,7 @@ export async function runTaskTurn({
   maxAgentTurns = DEFAULT_MAX_AGENT_TURNS,
   signal,
   approve,
+  security,
 } = {}) {
   if (!task || !team || !agentsById) {
     throw new MentionRouterError('task, team, agentsById are required', 'ROUTER_BAD_INPUT');
@@ -450,7 +451,7 @@ export async function runTaskTurn({
         userMessage: '',
         history: ctx.history,
         taskId: current.id,
-        configDir, cwd, apiKey, fetchImpl, baseUrl, signal, approve,
+        configDir, cwd, apiKey, fetchImpl, baseUrl, signal, approve, security,
         // C9 — enable Anthropic prompt caching for the static system
         // prefix + tool definitions. Non-anthropic adapters ignore
         // the flag (it's a no-op for OpenAI/Gemini/claude-cli).
