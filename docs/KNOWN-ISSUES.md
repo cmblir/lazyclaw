@@ -36,3 +36,20 @@ job as a hard gate and remove this entry.
 `tests/phase3-goal-register.spec.ts`, `tests/phase4-terminal.spec.ts`,
 `tests/phase5-memory.spec.ts`, and the interactive tests within
 `tests/phase6-openclaw-parity.spec.ts`.
+
+## Flaky network / timing-sensitive spawn specs (same non-blocking bucket)
+
+A few Playwright specs spawn the CLI and assert on wall-clock or live network
+probes, so they flake under load / restricted networks independent of the
+interactive-stdin bug above:
+
+- `phase6-openclaw-parity.spec.ts` › `lazyclaw run --parallel executes a DAG by
+  topological level` — asserts `elapsed < 500ms`; flakes when the machine is
+  busy (passes in isolation).
+- `phase6-openclaw-parity.spec.ts` › `lazyclaw providers test (no name) …` —
+  probes every provider endpoint, so it is slow (~1.5m) and depends on outbound
+  network reachability.
+
+These ride in the non-blocking `playwright` CI job. Phase F8 will make them
+deterministic (output-driven waits, stubbed provider probes, retries on the
+spawn-heavy specs).
