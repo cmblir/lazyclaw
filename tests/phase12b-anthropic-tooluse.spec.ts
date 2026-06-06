@@ -62,7 +62,14 @@ function startMockAnthropic(): Promise<{
 
 async function loadRunner() {
   const url = pathToFileURL(path.join(REPO_ROOT, 'mas', 'agent_turn.mjs')).href;
-  return await import(url) as typeof import('../mas/agent_turn.mjs');
+  const mod = await import(url) as typeof import('../mas/agent_turn.mjs');
+  // Sensitive tools (bash/write) are fail-closed; these adapter round-trip
+  // tests exercise tool execution, not the approval gate — auto-approve unless
+  // a test passes its own approve hook.
+  return {
+    ...mod,
+    runAgentTurn: ((opts) => mod.runAgentTurn({ approve: async () => ({ approved: true }), ...opts })) as typeof mod.runAgentTurn,
+  };
 }
 
 const fullAgent = {
