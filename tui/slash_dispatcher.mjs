@@ -38,6 +38,7 @@ import { supportsLiveFetch, fetchModelsForProvider } from '../providers/model_ca
 import { providerFamilies, providerTag } from './provider_families.mjs';
 import { addCustomProvider } from '../providers/custom_provider.mjs';
 import { setAuthKey } from '../providers/auth_store.mjs';
+import { attachGoalCron, detachGoalCron } from '../goals_cron.mjs';
 
 // ─── helpers ─────────────────────────────────────────────────────────────
 
@@ -874,9 +875,23 @@ async function _goal(args, ctx) {
     if (!name) return 'usage: /goal add <name> [--desc "..."] [--cron "<spec>"]';
     try {
       const g = goalsMod.registerGoal({ name, description: desc, schedule: cron }, ctx.cfgDir);
-      // Cron attach is cli.mjs-internal (_attachGoalCron); Ink chat skips it
-      // and the operator can attach via the `lazyclaw goal add --cron` CLI.
-      const cronNote = cron ? ' (cron attach via Ink chat is not wired in v5.4 — use the CLI form)' : '';
+      let cronNote = '';
+      if (cron) {
+        // Actually attach the schedule (P3 — was a stub). Needs the config
+        // writers the Ink session wires onto ctx; fall back to a CLI hint if
+        // they're absent (non-Ink callers).
+        if (typeof ctx.readConfig === 'function' && typeof ctx.writeConfig === 'function') {
+          try {
+            const cronMod = await import('../cron.mjs');
+            const r = await attachGoalCron({ readConfig: ctx.readConfig, writeConfig: ctx.writeConfig, cron: cronMod, name: g.name, schedule: cron });
+            cronNote = r.skipped ? ' (cron recorded; backend install skipped)' : ' (cron scheduled)';
+          } catch (ce) {
+            cronNote = ` (cron attach failed: ${ce?.message || ce} — use: lazyclaw goal add ${g.name} --cron "${cron}")`;
+          }
+        } else {
+          cronNote = ' (cron recorded — attach via: lazyclaw goal add --cron)';
+        }
+      }
       return `✓ goal ${g.name} added (status: active${cron ? `, cron: ${cron}` : ''})${cronNote}`;
     } catch (e) { return `goal error: ${e?.message || e}`; }
   }
@@ -894,7 +909,17 @@ async function _goal(args, ctx) {
     if (!name) return 'usage: /goal close <name> [done|abandoned]';
     try {
       const g = goalsMod.closeGoal(name, outcome, ctx.cfgDir);
-      return `✓ goal ${g.name} closed (status: ${g.status})`;
+      // Detach any attached cron so a closed goal stops ticking (P3 — the
+      // Ink path used to leave it dangling).
+      let detachNote = '';
+      if (typeof ctx.readConfig === 'function' && typeof ctx.writeConfig === 'function') {
+        try {
+          const cronMod = await import('../cron.mjs');
+          const removed = await detachGoalCron({ readConfig: ctx.readConfig, writeConfig: ctx.writeConfig, cron: cronMod, name: g.name });
+          if (removed) detachNote = ' (cron detached)';
+        } catch { /* best-effort */ }
+      }
+      return `✓ goal ${g.name} closed (status: ${g.status})${detachNote}`;
     } catch (e) { return `goal error: ${e?.message || e}`; }
   }
   // single-arg branch: switch

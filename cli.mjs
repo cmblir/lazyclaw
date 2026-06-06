@@ -17,6 +17,8 @@ import {
 import { bucketProviders as _bucketProviders } from './tui/provider_families.mjs';
 // P2 restore: shared custom OpenAI-compat endpoint registration core.
 import { addCustomProvider } from './providers/custom_provider.mjs';
+// P3 restore: shared goal cron attach/detach (also used by the Ink /goal).
+import { attachGoalCron as _attachGoalCronCore, detachGoalCron as _detachGoalCronCore } from './goals_cron.mjs';
 // Phase G: defaultConfigDir for personality subcommand (spec §9, decision C7).
 import { defaultConfigDir as _persDefaultCfg } from './memory.mjs';
 // Group B / M6 — chat sliding window. Lives in its own module so
@@ -4626,17 +4628,7 @@ async function cmdLoops(sub, positional, flags = {}) {
 // the config-side wiring so `cron list` still reflects the entry.
 async function _attachGoalCron(name, schedule) {
   const cron = await import('./cron.mjs');
-  cron.parseCronSpec(schedule); // validate before we touch state
-  const cfg = readConfig();
-  const jobName = `goal-${name}`;
-  const cmd = ['lazyclaw', 'goal', 'tick', name];
-  cron.upsertJob(cfg, jobName, schedule, cmd);
-  writeConfig(cfg);
-  if (process.env.LAZYCLAW_SKIP_CRON_INSTALL) return { jobName, skipped: true };
-  const backend = cron.pickBackend();
-  if (backend === 'launchd') cron.installLaunchdJob(jobName, schedule, cmd);
-  else cron.installCrontabJob(jobName, schedule, cmd);
-  return { jobName, skipped: false };
+  return _attachGoalCronCore({ readConfig, writeConfig, cron, name, schedule });
 }
 
 // Mirror of _attachGoalCron's removal path. Returns true when an entry
@@ -4644,18 +4636,7 @@ async function _attachGoalCron(name, schedule) {
 // (already-clean state, safe to call unconditionally during `close`).
 async function _detachGoalCron(name) {
   const cron = await import('./cron.mjs');
-  const cfg = readConfig();
-  const jobName = `goal-${name}`;
-  if (!cfg.cron || !cfg.cron[jobName]) return false;
-  cron.removeJob(cfg, jobName);
-  writeConfig(cfg);
-  if (process.env.LAZYCLAW_SKIP_CRON_INSTALL) return true;
-  const backend = cron.pickBackend();
-  try {
-    if (backend === 'launchd') cron.uninstallLaunchdJob(jobName);
-    else cron.uninstallCrontabJob(jobName);
-  } catch { /* best-effort — cron sync recovers */ }
-  return true;
+  return _detachGoalCronCore({ readConfig, writeConfig, cron, name });
 }
 
 // Builds the user-side prompt the scheduler sends on every tick. Memory
