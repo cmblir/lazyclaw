@@ -2518,7 +2518,9 @@ async function cmdChat(flags = {}) {
       let skillGroups = [];
       try {
         const { listSkills } = await import('./skills.mjs');
-        const flat = listSkills();
+        // Use the resolved config dir, not the module default, so a
+        // LAZYCLAW_CONFIG_DIR override surfaces that install's skills.
+        const flat = listSkills(path.dirname(configPath()));
         const byGroup = new Map();
         for (const s of flat) {
           const i = s.name.indexOf('-');

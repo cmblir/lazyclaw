@@ -380,6 +380,14 @@ function _buildModelItems(info, provName, dynamicModels) {
     pinned: true,
     freeText: true,
   });
+  // Reach another provider's models (e.g. claude-cli's opus) without leaving
+  // /model — the active provider isn't the only place to pick a model.
+  items.push({
+    id: '__switch_provider__',
+    label: '⇄ pick a different provider…',
+    desc: 'switch provider (e.g. claude-cli for opus/sonnet), then its model',
+    pinned: true,
+  });
   return items;
 }
 
@@ -427,16 +435,17 @@ async function _pickModelLoop(ctx, registry, provName) {
       }
       continue;
     }
+    // Switch to a different provider's models (e.g. claude-cli's opus).
+    if (picked === '__switch_provider__') return '__switch_provider__';
     return picked;
   }
   return null;
 }
 
-// Flat provider picker used when the active provider is composite and the
-// user needs to escape it before choosing a model. Hides composites + mock,
-// mirroring the legacy wizard's filter (cli.mjs:1979). (Family grouping +
-// add-custom land in P2.)
-async function _pickProviderForModel(ctx, registry) {
+// Flat provider picker used to escape a composite/model-less active provider
+// or to switch providers from inside /model. Hides composites + mock,
+// mirroring the legacy wizard's filter (cli.mjs:1979).
+async function _pickProviderForModel(ctx, registry, subtitle) {
   const info = registry.PROVIDER_INFO || {};
   const known = Object.keys(registry.PROVIDERS || {})
     .filter((id) => id !== 'mock' && !((info[id] || {}).composite))
@@ -449,7 +458,7 @@ async function _pickProviderForModel(ctx, registry) {
   const picked = await ctx.openPicker({
     kind: 'provider',
     title: 'select provider (then a model)',
-    subtitle: `${ctx.getActiveProvName()} has no selectable models — pick a provider`,
+    subtitle: subtitle || `${ctx.getActiveProvName()} has no selectable models — pick a provider`,
     items,
   });
   return typeof picked === 'string' ? picked : null;
@@ -477,8 +486,29 @@ async function _model(args, ctx) {
         provName = pickedProv;
         info = _infoFor(registry, provName);
       }
-      const model = await _pickModelLoop(ctx, registry, provName);
-      if (model == null) {
+      // Model pick loop — the "⇄ pick a different provider" row re-enters the
+      // provider picker so models from any provider (e.g. claude-cli's opus)
+      // are reachable without leaving /model.
+      let model = null;
+      for (let guard = 0; guard < 25; guard++) {
+        model = await _pickModelLoop(ctx, registry, provName);
+        if (model === '__switch_provider__') {
+          const np = await _pickProviderForModel(ctx, registry, `current: ${provName} — pick a provider`);
+          if (!np) continue; // cancelled the switch → back to the model list
+          if (np !== provName) {
+            const next = _providerLookup(registry, np);
+            if (!next) { continue; }
+            if (ctx.setActiveProvName) ctx.setActiveProvName(np);
+            if (ctx.setProv) ctx.setProv(next);
+            switched = true;
+            provName = np;
+            info = _infoFor(registry, provName);
+          }
+          continue;
+        }
+        break;
+      }
+      if (model == null || model === '__switch_provider__') {
         return switched ? `provider → ${provName} (model unchanged)` : 'cancelled';
       }
       if (ctx.setActiveModel) ctx.setActiveModel(model);
@@ -541,6 +571,36 @@ async function _skill(args, ctx) {
   } catch (e) {
     return `skill error: ${e?.message || e}`;
   }
+}
+
+// /skills — list + pick installed skills (the v5.4 alias only forwarded to
+// _skill, which activates/clears but never *shows* what's available). With an
+// arg it activates directly (like /skill); with no arg it opens a picker (or
+// lists, or — when nothing is installed — explains how to install).
+async function _skillsList(args, ctx) {
+  if (args && args.trim()) return _skill(args, ctx);
+  const skillsMod = await _mod(ctx, 'skillsMod', () => import('../skills.mjs'));
+  let names = [];
+  try { names = (skillsMod.listSkills(ctx.cfgDir) || []).map((s) => s.name).filter(Boolean); }
+  catch (e) { return `skills unavailable: ${e?.message || e}`; }
+  if (!names.length) {
+    return [
+      'no skills installed.',
+      'install one:  lazyclaw skills install <owner>/<repo>',
+      'then /skills to pick, or /skill <name>[,<name>] to activate.',
+    ].join('\n');
+  }
+  if (typeof ctx.openPicker === 'function') {
+    const picked = await ctx.openPicker({
+      kind: 'skill',
+      title: 'activate a skill',
+      subtitle: `${names.length} installed · Enter activates · Esc cancels`,
+      items: names.map((n) => ({ id: n, label: n, desc: '' })),
+    });
+    if (!picked) return 'cancelled';
+    return _skill(typeof picked === 'string' ? picked : picked.id, ctx);
+  }
+  return `installed skills (${names.length}):\n${names.map((n) => `  · ${n}`).join('\n')}\n(activate: /skill <name>[,<name>])`;
 }
 
 async function _tools(_args) {
@@ -1407,7 +1467,7 @@ export const SLASH_HANDLERS = new Map([
   ['/provider', _provider],
   ['/model', _model],
   ['/skill', _skill],
-  ['/skills', _skill],
+  ['/skills', _skillsList],
   ['/tools', _tools],
   ['/recall', _recall],
   ['/memory', _memory],
