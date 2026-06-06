@@ -1,14 +1,19 @@
 // Bash tool — runs a shell command, captures stdout/stderr/exit.
 //
-// Workspace is constrained to the lazyclaw process cwd (spec §5.2). We
-// don't sandbox further (per §10 #6 — destructive-pattern confirmation
-// is OFF by default); the audit log captures every invocation so post-hoc
-// forensics work.
+// The command runs with cwd defaulted to the lazyclaw process cwd, but this
+// is NOT an OS sandbox — absolute paths and `cd` escape it. Two real
+// protections apply instead: (1) bash is a `sensitive` tool, so the
+// fail-closed approval gate in tool_runner requires operator confirmation
+// (or an explicit security.allowUnattendedSensitive opt-in) before it runs;
+// (2) the child env is scrubbed of secrets (scrubEnv) so a command cannot
+// exfiltrate API keys / channel tokens inherited from the parent or
+// <configDir>/.env. Every invocation is still audit-logged for forensics.
 //
 // Timeout defaults to 30s so a runaway command can't stall the whole
 // agent turn. Override via args.timeoutMs (capped at 5 minutes).
 
 import { spawn } from 'node:child_process';
+import { scrubEnv } from '../scrub_env.mjs';
 
 export const NAME = 'bash';
 export const DESCRIPTION = 'Run a shell command in the agent\'s workspace. Returns {stdout, stderr, exitCode}. Timeout 30s by default.';
@@ -34,7 +39,7 @@ export async function exec(args, { cwd = process.cwd() } = {}) {
     MAX_TIMEOUT_MS
   );
   return new Promise((resolve) => {
-    const child = spawn('sh', ['-c', args.command], { cwd, env: process.env });
+    const child = spawn('sh', ['-c', args.command], { cwd, env: scrubEnv(process.env) });
     let stdout = '', stderr = '';
     let outBytes = 0, errBytes = 0;
     let truncated = false;

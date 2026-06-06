@@ -20,6 +20,13 @@ Versioning: [SemVer](https://semver.org/).
   confirm modal / terminal y-N); `--approve-url` remote approval is unchanged.
   Unattended/non-TTY runs without the explicit opt-in refuse sensitive tools
   rather than running them silently.
+- **The `bash` tool no longer hands inherited secrets to the child.** It used to
+  spawn `sh -c` with the full `process.env`, so a model-issued command (or a
+  prompt-injected one) could `env | curl …` and exfiltrate every API key /
+  channel token, including those loaded from `<configDir>/.env`. The child env
+  is now scrubbed of secret-shaped variables (`*_API_KEY`, `*_TOKEN`,
+  `*_SECRET`, `*_PASSWORD`, `*_PRIVATE_KEY`, …) while operational vars (PATH,
+  HOME, locale) pass through.
 
 ### Fixed
 
