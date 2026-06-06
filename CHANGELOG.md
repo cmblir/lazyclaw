@@ -15,8 +15,20 @@ Versioning: [SemVer](https://semver.org/).
   is just `['orchestrator']`, with no in-REPL escape. `/model` now detects a
   composite / model-less active provider and lets you pick a real provider
   first (orchestrator + mock hidden), then its model.
+- **`/loop --use-memory` / `--recall` are no longer silent no-ops.** The Ink
+  `_loop` parsed the flags but never passed a `buildSystem` to the engine, so
+  the loop ran without the per-iteration core/episodic memory the readline
+  path injected. Restored, including the post-loop system-message restore.
+- **`/goal add --cron` actually schedules now.** It used to record the cron
+  string on the goal but never install a job (and `/goal close` left any job
+  dangling). Both now attach/detach through a shared `goals_cron.mjs`.
 
 ### Added (restored from the pre-Ink readline chat)
+
+- **`/trainer fallback` routing knob.** `resolveTrainer` honors a
+  `trainer.fallback` ("provider:model") but `/trainer set` could only write
+  provider+model. Added `/trainer set <p:m> --fallback <p:m>` and a
+  `/trainer fallback <p:m> | clear` sub.
 
 - **`/model` live model fetch + custom id.** The picker regains a pinned
   "↻ fetch live model list" row (pulls `/v1/models` for openai / ollama /
