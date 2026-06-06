@@ -2698,6 +2698,15 @@ async function cmdChat(flags = {}) {
       const ink = render(/* @__PURE__ */ React.createElement(ReplApp, {
         splashProps,
         statusInfo: { provider: activeProvName, model: activeModel },
+        // P3 — live status: read the current provider/model + token gauge so
+        // the StatusBar refreshes after a /provider or /model switch and each
+        // turn, instead of showing the values captured at mount.
+        getStatus: () => ({
+          provider: activeProvName,
+          model: activeModel,
+          ctxUsed: _inkRunningUsage ? _inkRunningUsage.totalTokens : undefined,
+          ctxTotal: CHAT_WINDOW_TOKEN_BUDGET,
+        }),
         runTurn: _inkRunTurn,
         onSlashCommand: _inkSlashHandler,
         pickerRef: _inkPickerRef,

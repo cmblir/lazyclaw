@@ -188,13 +188,21 @@ export function consumeNextTurnFirstMessage(state) {
 //   - runTurnFactory(writeFn) → runTurn(text, signal)   (sticky layout)
 //   - runTurn(text, signal)                              (legacy, stdout)
 // Legacy mode is preserved verbatim for the existing cli.mjs callsite.
-export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, onSlashCommand, statusInfo, pickerRef }) {
-  // statusInfo lets the host supply provider/model/ctx to the StatusBar
-  // independently of splashProps. Needed for the alt-buffer hand-off
-  // where splashProps is pre-printed to the primary buffer (not the
-  // alt canvas) and nulled out here to suppress the in-tree Static
-  // splash item — but the StatusBar still needs provider/model strings.
-  const _status = statusInfo || splashProps || {};
+export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, onSlashCommand, statusInfo, getStatus, pickerRef }) {
+  // statusInfo seeds the StatusBar's provider/model/ctx. getStatus (optional)
+  // returns the live values so the bar refreshes after a /provider or /model
+  // switch and after each turn (token/ctx gauge) — without it the bar would
+  // show whatever was captured at mount (stale after a slash mutates the
+  // active provider/model). v5.5.
+  const [statusState, setStatusState] = useState(() => statusInfo || splashProps || {});
+  const refreshStatus = useCallback(() => {
+    if (typeof getStatus !== 'function') return;
+    try {
+      const s = getStatus();
+      if (s) setStatusState((prev) => ({ ...prev, ...s }));
+    } catch { /* never let a status read break the turn */ }
+  }, [getStatus]);
+  const _status = statusState;
   // Splash is rendered ONCE as scrollback[0] via <Static>. Build it lazily
   // so SSR-style imports without a TTY don't crash on process.stdout.
   const splashItemRef = useRef(null);
@@ -271,6 +279,9 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
           setState((s) => onStreamChunk(s, { chunk: result }));
         }
         setState((s) => onTurnComplete(s, { reason: 'done' }));
+        // A slash like /provider or /model mutates the host's active
+        // provider/model — refresh the StatusBar so it isn't stale.
+        refreshStatus();
       } catch (err) {
         setState((s) => onTurnComplete(s, {
           reason: err && err.name === 'AbortError' ? 'aborted' : 'error',
@@ -283,12 +294,13 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
     try {
       await runTurnRef.current(trimmed, controller.signal);
       setState((s) => onTurnComplete(s, { reason: 'done' }));
+      refreshStatus();
     } catch (err) {
       setState((s) => onTurnComplete(s, {
         reason: err && err.name === 'AbortError' ? 'aborted' : 'error',
       }));
     }
-  }, [exit, onSlashCommand]);
+  }, [exit, onSlashCommand, refreshStatus]);
 
   // Auto-submit queued mid-stream-interrupt message (spec §5.8). Read
   // state.nextTurnFirstMessage so the effect re-fires when promoted.
