@@ -36,6 +36,7 @@
 import { SLASH_COMMANDS } from './slash_commands.mjs';
 import { supportsLiveFetch, fetchModelsForProvider } from '../providers/model_catalogue.mjs';
 import { providerFamilies, providerTag } from './provider_families.mjs';
+import { addCustomProvider } from '../providers/custom_provider.mjs';
 
 // ─── helpers ─────────────────────────────────────────────────────────────
 
@@ -177,7 +178,9 @@ async function _pickProviderDrillIn(ctx, registry) {
   }
 
   // ── Step 2 — provider in that family (auto-advances on a single member) ──
-  if (family.members.length === 1) return family.members[0];
+  // The API-key family also offers "+ add a custom endpoint" so NIM /
+  // OpenRouter / vLLM / etc. can be registered without leaving chat. The
+  // add-custom row is never auto-advanced past, so don't single-skip it in.
   const items = family.members.map((id) => {
     const meta = info[id] || {};
     let desc = '';
@@ -186,6 +189,15 @@ async function _pickProviderDrillIn(ctx, registry) {
     else if (meta.label && meta.label !== id) desc = meta.label;
     return { id, label: id, desc, tag: providerTag(meta) };
   });
+  if (family.id === 'api') {
+    items.push({
+      id: '__add_custom__',
+      label: '+ add a custom OpenAI-compatible endpoint…',
+      desc: 'NIM · OpenRouter · Together · Groq · vLLM · LM Studio',
+      tag: 'new',
+    });
+  }
+  if (items.length === 1) return items[0].id;
   const picked = await ctx.openPicker({
     kind: 'provider',
     title: `select provider — ${family.label}`,
@@ -195,8 +207,73 @@ async function _pickProviderDrillIn(ctx, registry) {
   return typeof picked === 'string' ? picked : null;
 }
 
+// Single free-text prompt reusing the modal's filter buffer (no dedicated
+// input widget). Returns the typed value, '' (only when allowEmpty), or null
+// on cancel / required-but-empty.
+async function _promptText(ctx, { title, subtitle, allowEmpty } = {}) {
+  if (typeof ctx.openPicker !== 'function') return null;
+  const picked = await ctx.openPicker({
+    kind: 'text',
+    title,
+    subtitle: subtitle || 'type into the filter, then pick the row · Esc cancels',
+    items: [{ id: '__text__', label: '✓ use what I typed above', desc: '', pinned: true, freeText: true }],
+  });
+  if (picked == null) return null;
+  if (typeof picked === 'object') {
+    const v = String(picked.query || '').trim();
+    if (!v && !allowEmpty) return null;
+    return v;
+  }
+  return null;
+}
+
+// Register a custom OpenAI-compatible endpoint with the given fields, set it
+// active, and return a summary string. Shared by the arg form and the
+// interactive flow.
+async function _registerCustom(ctx, registry, { name, baseUrl, apiKey }) {
+  if (typeof ctx.readConfig !== 'function' || typeof ctx.writeConfig !== 'function') {
+    return 'add custom: config writer unavailable in this session — use: lazyclaw providers add <name> <baseUrl> [apiKey]';
+  }
+  try {
+    const r = await addCustomProvider({
+      registry, readConfig: ctx.readConfig, writeConfig: ctx.writeConfig, name, baseUrl, apiKey,
+    });
+    const next = _providerLookup(registry, r.name);
+    if (next) {
+      if (ctx.setActiveProvName) ctx.setActiveProvName(r.name);
+      if (ctx.setProv) ctx.setProv(next);
+    }
+    const probe = r.probe.ok
+      ? `✓ reachable — ${r.probe.count} model(s)`
+      : `! registered, but /v1/models probe failed: ${r.probe.error}`;
+    const override = r.builtinOverride ? `\n(note: overrides built-in "${r.name}")` : '';
+    return `custom provider saved → ${r.name} (${r.baseUrl})\n${probe}${override}\nprovider → ${r.name}`;
+  } catch (e) {
+    return `add custom failed: ${e && e.message ? e.message : e}`;
+  }
+}
+
+// Interactive add-custom: collect name/baseUrl/apiKey via sequential prompts.
+async function _addCustomFlow(ctx, registry) {
+  const name = await _promptText(ctx, { title: 'custom endpoint — short id', subtitle: 'e.g. nim, openrouter, vllm (Esc cancels)' });
+  if (!name) return 'cancelled';
+  const baseUrl = await _promptText(ctx, { title: `baseUrl for ${name}`, subtitle: 'must start with http(s) and end in /v1' });
+  if (!baseUrl) return 'cancelled';
+  const apiKey = await _promptText(ctx, { title: `api-key for ${name}`, subtitle: 'leave blank for an auth-less endpoint (e.g. local vLLM)', allowEmpty: true });
+  if (apiKey === null) return 'cancelled';
+  return _registerCustom(ctx, registry, { name, baseUrl, apiKey });
+}
+
 async function _provider(args, ctx) {
   const registry = await _mod(ctx, 'registryMod', () => import('../providers/registry.mjs'));
+  // `/provider add <name> <baseUrl> [apiKey]` — register a custom OpenAI-
+  // compatible endpoint non-interactively.
+  const addMatch = args && args.match(/^add\s+(.+)$/i);
+  if (addMatch) {
+    const [name, baseUrl, apiKey] = splitWhitespace(addMatch[1]);
+    if (!name || !baseUrl) return 'usage: /provider add <name> <baseUrl> [apiKey]';
+    return _registerCustom(ctx, registry, { name, baseUrl, apiKey });
+  }
   // No arg → drill-in modal picker (family -> provider). Falls back to the
   // pre-v5.4.3 hint string when ctx.openPicker isn't available (e.g. non-Ink
   // callers or before the picker ref settles).
@@ -204,6 +281,7 @@ async function _provider(args, ctx) {
     if (typeof ctx.openPicker === 'function') {
       const picked = await _pickProviderDrillIn(ctx, registry);
       if (!picked) return 'cancelled';
+      if (picked === '__add_custom__') return _addCustomFlow(ctx, registry);
       args = picked;
     } else {
       return `provider: ${ctx.getActiveProvName()}\n(pass an arg: /provider <name>)`;

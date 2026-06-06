@@ -15,6 +15,8 @@ import {
 } from './providers/model_catalogue.mjs';
 // P2 restore: shared provider family bucketing (also used by the Ink picker).
 import { bucketProviders as _bucketProviders } from './tui/provider_families.mjs';
+// P2 restore: shared custom OpenAI-compat endpoint registration core.
+import { addCustomProvider } from './providers/custom_provider.mjs';
 // Phase G: defaultConfigDir for personality subcommand (spec §9, decision C7).
 import { defaultConfigDir as _persDefaultCfg } from './memory.mjs';
 // Group B / M6 — chat sliding window. Lives in its own module so
@@ -2422,48 +2424,29 @@ async function _addCustomProviderInteractive() {
   }
   const apiKey = (await _quickPrompt(`  ${bold('api-key')} ${dim('(blank if the endpoint is auth-less, e.g. local vLLM):')} `)).trim();
 
-  // Persist to cfg.customProviders[]. Overwrite an existing entry of the
-  // same name so re-running setup with a corrected URL just works.
-  const cfg = readConfig();
-  cfg.customProviders = Array.isArray(cfg.customProviders) ? cfg.customProviders : [];
-  const existingIdx = cfg.customProviders.findIndex((p) => p && p.name === name);
-  const entry = {
+  // Persist + hot-register + best-effort probe via the shared, unit-tested
+  // core (providers/custom_provider.mjs) so this readline wizard and the Ink
+  // /provider add flow can't drift. The interactive prompts above already
+  // validated name + baseUrl; addCustomProvider re-validates harmlessly.
+  const result = await addCustomProvider({
+    registry: _registryMod,
+    readConfig,
+    writeConfig,
     name,
-    baseUrl: baseUrlRaw.replace(/\/+$/, ''),
-    apiKey: apiKey || undefined,
-  };
-  if (existingIdx >= 0) cfg.customProviders[existingIdx] = { ...cfg.customProviders[existingIdx], ...entry };
-  else cfg.customProviders.push(entry);
-  writeConfig(cfg);
-
-  // Hot-register so the provider is callable in this same process.
-  registerCustomProviders(cfg);
-
-  // Best-effort live model probe so the user sees we can reach it. Skip
-  // silently on failure — registration still succeeds and /v1/models can
-  // be re-tried from the model picker.
-  let probeMsg = '';
-  try {
-    const list = await fetchOpenAICompatModels({ baseUrl: entry.baseUrl, apiKey: entry.apiKey || '' });
-    if (list.length) {
-      probeMsg = `  ${ok('✓')} reachable — ${list.length} model(s) advertised at ${entry.baseUrl}/models\n`;
-      // Persist the catalogue so the picker can show it without re-fetching.
-      const updated = readConfig();
-      const i = (updated.customProviders || []).findIndex((p) => p && p.name === name);
-      if (i >= 0) {
-        updated.customProviders[i].suggestedModels = list.slice(0, 50);
-        if (!updated.customProviders[i].defaultModel) updated.customProviders[i].defaultModel = list[0];
-        writeConfig(updated);
-        registerCustomProviders(updated);
-      }
-    } else {
-      probeMsg = `  ${ok('✓')} registered — /v1/models returned no entries (will rely on free-text model id).\n`;
-    }
-  } catch (e) {
-    probeMsg = `  \x1b[33m!\x1b[0m registered, but /v1/models probe failed: ${e?.message || e}\n`;
+    baseUrl: baseUrlRaw,
+    apiKey,
+  });
+  const entry = { name: result.name, baseUrl: result.baseUrl };
+  let probeMsg;
+  if (result.probe.ok && result.probe.count > 0) {
+    probeMsg = `  ${ok('✓')} reachable — ${result.probe.count} model(s) advertised at ${entry.baseUrl}/models\n`;
+  } else if (result.probe.ok) {
+    probeMsg = `  ${ok('✓')} registered — /v1/models returned no entries (will rely on free-text model id).\n`;
+  } else {
+    probeMsg = `  \x1b[33m!\x1b[0m registered, but /v1/models probe failed: ${result.probe.error}\n`;
   }
   process.stdout.write('\n');
-  process.stdout.write(`  ${ok(bold('✓ custom provider saved:'))} ${name}  ${dim('→')} ${entry.baseUrl}\n`);
+  process.stdout.write(`  ${ok(bold('✓ custom provider saved:'))} ${entry.name}  ${dim('→')} ${entry.baseUrl}\n`);
   process.stdout.write(probeMsg);
   process.stdout.write(dim(`  Removable any time via:  lazyclaw providers remove ${name}\n`));
   await _quickPrompt('  press Enter to continue ');
@@ -2668,6 +2651,10 @@ async function cmdChat(flags = {}) {
         accumulateUsage: _inkAccumulateUsage,
         resolveAuthKey: (providerName) => _resolveAuthKey(cfg, providerName),
         onCharsSent: (n) => { _inkCharsSent += Number(n) || 0; },
+        // P2 — let /provider add register a custom OpenAI-compatible endpoint
+        // by read-merge-writing config.json from inside the Ink session.
+        readConfig: () => readConfig(),
+        writeConfig: (next) => writeConfig(next),
       };
       // v5.4.3 — ReplApp exposes an openPicker(opts) → Promise<id|null>
       // via this ref. The slash dispatcher reads it through ctx.openPicker
