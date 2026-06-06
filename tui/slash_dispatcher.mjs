@@ -37,6 +37,7 @@ import { SLASH_COMMANDS } from './slash_commands.mjs';
 import { supportsLiveFetch, fetchModelsForProvider } from '../providers/model_catalogue.mjs';
 import { providerFamilies, providerTag } from './provider_families.mjs';
 import { addCustomProvider } from '../providers/custom_provider.mjs';
+import { setAuthKey } from '../providers/auth_store.mjs';
 
 // ─── helpers ─────────────────────────────────────────────────────────────
 
@@ -253,6 +254,30 @@ async function _registerCustom(ctx, registry, { name, baseUrl, apiKey }) {
   }
 }
 
+// After an interactive pick of a built-in api-key provider that has no key
+// resolved, prompt for one and persist it (mirrored in-memory so it takes
+// effect this session). No-op for keyless / custom providers, when a key
+// already resolves, or when config writers aren't wired.
+async function _maybePromptForKey(ctx, registry, provName) {
+  const meta = _infoFor(registry, provName);
+  if (!meta.requiresApiKey || meta.custom) return;
+  if (typeof ctx.readConfig !== 'function' || typeof ctx.writeConfig !== 'function') return;
+  const existing = typeof ctx.resolveAuthKey === 'function' ? ctx.resolveAuthKey(provName) : '';
+  if (existing) return;
+  const key = await _promptText(ctx, {
+    title: `${provName} needs an api key`,
+    subtitle: 'paste it now, or Esc to skip (set later via: lazyclaw auth)',
+  });
+  if (!key) return;
+  const next = setAuthKey({ readConfig: ctx.readConfig, writeConfig: ctx.writeConfig, provider: provName, key });
+  // Mirror onto the in-memory cfg so resolveAuthKey (which closes over it)
+  // sees the key on the next turn without a restart.
+  if (ctx.cfg && next) {
+    ctx.cfg.authProfiles = next.authProfiles;
+    ctx.cfg.authActiveProfile = next.authActiveProfile;
+  }
+}
+
 // Interactive add-custom: collect name/baseUrl/apiKey via sequential prompts.
 async function _addCustomFlow(ctx, registry) {
   const name = await _promptText(ctx, { title: 'custom endpoint — short id', subtitle: 'e.g. nim, openrouter, vllm (Esc cancels)' });
@@ -283,6 +308,8 @@ async function _provider(args, ctx) {
       if (!picked) return 'cancelled';
       if (picked === '__add_custom__') return _addCustomFlow(ctx, registry);
       args = picked;
+      // Built-in api-key provider with no key configured → offer to set one.
+      await _maybePromptForKey(ctx, registry, args);
     } else {
       return `provider: ${ctx.getActiveProvName()}\n(pass an arg: /provider <name>)`;
     }
