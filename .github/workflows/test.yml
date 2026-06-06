@@ -1,0 +1,38 @@
+name: Test lazyclaw
+
+# Runs the full test gate on every push and pull request to main:
+#   - node:test units  (tests/*.test.mjs)
+#   - Playwright specs (tests/*.spec.ts)
+# `npm test` chains both with `&&`, so a failure in either half fails the job.
+# This is the canonical gate the push checklist refers to; before this workflow
+# the suite ran only locally and the npm script exercised <10% of the node tests.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browser (chromium)
+        run: npx playwright install --with-deps chromium
+
+      - name: Run test gate (node:test + Playwright)
+        run: npm test

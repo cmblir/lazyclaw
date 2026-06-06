@@ -7,6 +7,10 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests',
+  // Playwright owns only the `.spec.ts` acceptance specs. The `.test.mjs`
+  // files are node:test units and run under `node --test` in the npm script;
+  // without this match Playwright's default glob would also import them.
+  testMatch: '**/*.spec.ts',
   fullyParallel: false,
   retries: 0,
   workers: 1,
