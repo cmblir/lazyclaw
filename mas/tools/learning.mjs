@@ -4,12 +4,12 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import * as skills from '../../skills.mjs';
 
 function resolveConfigDir(ctx) {
   return ctx?.configDir || process.env.LAZYCLAW_CONFIG_DIR || path.join(process.env.HOME || '.', '.lazyclaw');
 }
 
-function skillsDir(ctx) { return path.join(resolveConfigDir(ctx), 'skills'); }
 function memoryDir(ctx) { return path.join(resolveConfigDir(ctx), 'memory'); }
 function userMdPath(ctx) { return path.join(memoryDir(ctx), 'USER.md'); }
 
@@ -19,15 +19,26 @@ const skill_view = {
   parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
   async exec(args, ctx) {
     if (!args?.name) return { ok: false, error: 'skill_view: name required' };
-    const file = path.join(skillsDir(ctx), args.name, 'SKILL.md');
-    if (!fs.existsSync(file)) return { ok: false, error: `skill_view: ${args.name} not installed` };
-    return { ok: true, name: args.name, content: fs.readFileSync(file, 'utf8') };
+    const configDir = resolveConfigDir(ctx);
+    if (!skills.skillExists(args.name, configDir)) return { ok: false, error: `skill_view: ${args.name} not installed` };
+    try {
+      const content = skills.loadSkill(args.name, configDir);
+      // Record the recall so the curator can age out never-used skills.
+      // Best-effort: a usage-write hiccup must never fail the tool call.
+      try {
+        const curator = await import('../../skills_curator.mjs');
+        curator.recordUsage(args.name, configDir, Date.now());
+      } catch { /* non-fatal */ }
+      return { ok: true, name: args.name, content };
+    } catch (err) {
+      return { ok: false, error: `skill_view: ${err?.message || err}` };
+    }
   },
 };
 
 const skill_create = {
   name: 'skill_create', category: 'learning', sensitive: true,
-  description: 'Create a new skill at <configDir>/skills/<name>/SKILL.md. Fails if already exists.',
+  description: 'Create a new skill at <configDir>/skills/<name>.md. Fails if already exists.',
   parameters: {
     type: 'object',
     properties: {
@@ -39,10 +50,8 @@ const skill_create = {
   async exec(args, ctx) {
     if (!args?.name || !args?.body) return { ok: false, error: 'skill_create: name + body required' };
     if (!/^[a-z0-9][a-z0-9-]*$/.test(args.name)) return { ok: false, error: 'skill_create: kebab-case name only' };
-    const dir = path.join(skillsDir(ctx), args.name);
-    const file = path.join(dir, 'SKILL.md');
-    if (fs.existsSync(file)) return { ok: false, error: `skill_create: ${args.name} already exists; use skill_edit` };
-    fs.mkdirSync(dir, { recursive: true });
+    const configDir = resolveConfigDir(ctx);
+    if (skills.skillExists(args.name, configDir)) return { ok: false, error: `skill_create: ${args.name} already exists; use skill_edit` };
     const fm = [
       '---',
       `name: ${args.name}`,
@@ -54,7 +63,7 @@ const skill_create = {
       '---',
       '',
     ].join('\n');
-    fs.writeFileSync(file, fm + args.body + (args.body.endsWith('\n') ? '' : '\n'));
+    const file = skills.installSkill(args.name, fm + args.body + (args.body.endsWith('\n') ? '' : '\n'), configDir);
     return { ok: true, name: args.name, file };
   },
 };
@@ -68,14 +77,15 @@ const skill_edit = {
     required: ['name', 'body'],
   },
   async exec(args, ctx) {
-    const file = path.join(skillsDir(ctx), args.name, 'SKILL.md');
-    if (!fs.existsSync(file)) return { ok: false, error: `skill_edit: ${args.name} not installed` };
-    const src = fs.readFileSync(file, 'utf8');
+    if (!args?.name || !args?.body) return { ok: false, error: 'skill_edit: name + body required' };
+    const configDir = resolveConfigDir(ctx);
+    if (!skills.skillExists(args.name, configDir)) return { ok: false, error: `skill_edit: ${args.name} not installed` };
+    const src = skills.loadSkill(args.name, configDir);
     const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(src);
     if (!m) return { ok: false, error: 'skill_edit: missing frontmatter' };
     let fm = m[1];
     fm = fm.replace(/version:\s*(\d+)/, (_, v) => `version: ${Number(v) + 1}`);
-    fs.writeFileSync(file, `---\n${fm}\n---\n${args.body}${args.body.endsWith('\n') ? '' : '\n'}`);
+    skills.installSkill(args.name, `---\n${fm}\n---\n${args.body}${args.body.endsWith('\n') ? '' : '\n'}`, configDir);
     return { ok: true, name: args.name };
   },
 };
