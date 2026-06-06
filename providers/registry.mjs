@@ -12,6 +12,7 @@ import { openaiProvider } from './openai.mjs';
 import { ollamaProvider } from './ollama.mjs';
 import { geminiProvider } from './gemini.mjs';
 import { claudeCliProvider } from './claude_cli.mjs';
+import { hasClaudeCliSession } from './claude_cli_detect.mjs';
 import { makeOpenAICompatProvider, fetchOpenAICompatModels } from './openai_compat.mjs';
 import { makeOrchestratorProvider } from './orchestrator.mjs';
 
@@ -83,11 +84,10 @@ export function parseProviderModel(spec) {
 }
 
 function _defaultDetectClaudeCli() {
-  // Phase A stub: real Pro/Max session detection arrives in Phase B
-  // (it requires reading the claude-cli OAuth token cache). Until
-  // then, treat presence of CLAUDE_CODE_OAUTH_TOKEN as a positive
-  // signal so users can opt-in explicitly.
-  return Boolean(process.env.CLAUDE_CODE_OAUTH_TOKEN);
+  // Real Pro/Max session detection: env token, credential store, or the
+  // `claude` binary on PATH (a normal `claude login` does NOT export
+  // CLAUDE_CODE_OAUTH_TOKEN). See providers/claude_cli_detect.mjs.
+  return hasClaudeCliSession();
 }
 
 export function resolveTrainer(cfg, opts = {}) {

@@ -34,6 +34,7 @@ import * as userModeler from './user_modeler.mjs';
 import * as confidence from './confidence.mjs';
 import * as skills from '../skills.mjs';
 import { resolveTrainer } from '../providers/registry.mjs';
+import { hasClaudeCliSession } from '../providers/claude_cli_detect.mjs';
 
 export const TRIGGERS = Object.freeze([
   'post-task',
@@ -330,9 +331,24 @@ export async function _runPeriodicCuration(_ctx, logger) {
 
 // ── helpers ──────────────────────────────────────────────────────────
 
+let _trainerNoticed = false;
+
 function _safeResolveTrainer(cfg, agent) {
   try {
-    return resolveTrainer(cfg || { provider: agent?.provider, model: agent?.model });
+    const c = cfg || { provider: agent?.provider, model: agent?.model };
+    // Use real claude-cli session detection in production (the resolver's own
+    // default stub only checked an env var that `claude login` never sets).
+    const resolved = resolveTrainer(c, { detectClaudeCli: hasClaudeCliSession });
+    // Honesty: if the user asked for trainer.provider:'auto' but no claude-cli
+    // session was found, the learning loop bills the chat provider — say so once
+    // so the "$0 on Claude Pro" promise never fails silently.
+    if (!_trainerNoticed && c && c.trainer && c.trainer.provider === 'auto' && resolved.provider !== 'claude-cli') {
+      _trainerNoticed = true;
+      try {
+        process.stderr.write(`[trainer] no claude-cli session detected → learning will use "${resolved.provider || 'the chat provider'}" (billed per token). Run 'claude login', or set trainer.provider explicitly, to control cost.\n`);
+      } catch { /* stderr closed */ }
+    }
+    return resolved;
   } catch {
     return { provider: agent?.provider || '', model: agent?.model || '' };
   }

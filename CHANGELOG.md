@@ -53,6 +53,15 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **`trainer: auto` now actually detects a Claude session — the $0 learning
+  loop works for real subscribers.** Detection was a stub keyed on an exported
+  `CLAUDE_CODE_OAUTH_TOKEN`, which a normal `claude login` never sets (it writes
+  the keychain / `~/.claude`), so `auto` silently billed the paid chat provider
+  for every skill-synthesis / reflection / user-model call. It now also probes
+  the credential store and the `claude` binary on PATH, and when it must still
+  fall back to a paid provider it prints a one-time notice instead of charging
+  silently. Unknown short model aliases now pass through to the CLI instead of
+  being dropped to the CLI default.
 - **Agent skill tools share the real skill store now.** `skill_create` /
   `skill_view` / `skill_edit` wrote and read a private
   `skills/<name>/SKILL.md` directory, while everything else — the

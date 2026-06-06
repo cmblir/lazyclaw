@@ -65,7 +65,14 @@ const _CLI_MODEL_ALIASES = {
 function resolveModelAlias(model) {
   if (!model) return '';
   const lower = String(model).toLowerCase();
-  return _CLI_MODEL_ALIASES[lower] ?? '';
+  if (_CLI_MODEL_ALIASES[lower]) return _CLI_MODEL_ALIASES[lower];
+  // Unknown but already a bare short alias (e.g. a new tier the table doesn't
+  // enumerate yet, like a future "opusplus") → pass it through rather than
+  // dropping to '' (which makes the CLI silently ignore the user's model
+  // choice). Full canonical ids (with digits/dashes) stay mapped-or-dropped,
+  // because passing a full id to `claude --model` hangs the CLI (FF1).
+  if (/^[a-z]+$/.test(lower)) return lower;
+  return '';
 }
 
 // Flatten the chat-style messages array into a single -p prompt the
