@@ -63,6 +63,14 @@ export const ALT_BUFFER_ENTER = '\x1b[?1049h';
 export const ALT_BUFFER_LEAVE = '\x1b[?1049l';
 export const CURSOR_VISIBLE   = '\x1b[?25h';
 
+// Rendering-mode decision. Default = Static scrollback (no flicker; splash
+// prints once + scrolls naturally). Alt-buffer fullscreen is opt-in via
+// LAZYCLAW_ALT=1; LAZYCLAW_NO_ALT=1 forces it off. TTY-only either way.
+export function computeAltEnabled(env, hasTTY) {
+  const e = env || {};
+  return !!hasTTY && !!e.LAZYCLAW_ALT && !e.LAZYCLAW_NO_ALT;
+}
+
 export function FullScreen({ enabled, children }) {
   useEffect(() => {
     if (!enabled) return undefined;
@@ -214,12 +222,16 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
   const [state, setState] = useState(() => makeReplState({ splashItem: splashItemRef.current }));
   const { exit } = useApp();
 
-  // Alt-buffer eligibility — TTY only, opt-out via LAZYCLAW_NO_ALT=1.
-  // Captured in a ref so the value is stable across renders (it cannot
-  // change at runtime; isTTY + env are read once on mount).
+  // Rendering mode. Default is the Static scrollback (no full-frame redraw,
+  // so no typing flicker; the splash prints once to the primary buffer and
+  // scrolls naturally — it never hits the alt-canvas vanish/blank bugs). The
+  // alt-buffer fullscreen (sticky-bottom Editor) is opt-in via LAZYCLAW_ALT=1,
+  // and LAZYCLAW_NO_ALT=1 still forces it off. TTY-only either way.
+  // Captured in a ref so the value is stable across renders (isTTY + env are
+  // read once on mount; they cannot change at runtime).
   const altEnabledRef = useRef(null);
   if (altEnabledRef.current === null) {
-    altEnabledRef.current = !!(process.stdout && process.stdout.isTTY) && !process.env.LAZYCLAW_NO_ALT;
+    altEnabledRef.current = computeAltEnabled(process.env, process.stdout && process.stdout.isTTY);
   }
   const altEnabled = altEnabledRef.current;
 
