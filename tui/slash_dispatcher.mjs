@@ -1395,9 +1395,41 @@ async function _dashboardStop(port) {
   return `✓ stopped ${portPids.length} listener(s) on :${port}${pkilled ? ' + remaining `lazyclaw dashboard` processes via pkill' : ''}`;
 }
 
+// Parse the daemon's "listening at <url>" stdout line so /dashboard opens the
+// actually-bound port (the child may fall back to a random port on EADDRINUSE).
+export function parseDashboardUrl(text) {
+  const m = String(text || '').match(/listening at\s+(https?:\/\/\S+)/i);
+  return m ? m[1] : null;
+}
+
+// Resolve the daemon's real URL from its stdout within `timeoutMs`, or null.
+function _waitForDashboardUrl(child, timeoutMs) {
+  return new Promise((resolve) => {
+    if (!child || !child.stdout) { resolve(null); return; }
+    let buf = '';
+    let done = false;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      try { child.stdout.off('data', onData); } catch { /* ignore */ }
+      resolve(v);
+    };
+    const onData = (d) => {
+      buf += d.toString('utf8');
+      const u = parseDashboardUrl(buf);
+      if (u) finish(u);
+    };
+    child.stdout.on('data', onData);
+    setTimeout(() => finish(null), timeoutMs);
+  });
+}
+
 async function _dashboard(args) {
   const port = 19600;
   const url = `http://127.0.0.1:${port}/dashboard`;
+  // Under the node:test runner, never launch a real daemon or open a browser
+  // (it leaked a background daemon + opened a tab on every test run).
+  if (process.env.NODE_TEST_CONTEXT) return `dashboard: ${url} (spawn skipped under test)`;
   const sub = splitWhitespace(args)[0];
   if (sub === 'stop' || sub === 'kill') return _dashboardStop(port);
 
@@ -1432,16 +1464,30 @@ async function _dashboard(args) {
     const { spawn } = await import('node:child_process');
     let child;
     try {
-      child = spawn(process.execPath, [process.argv[1], 'dashboard', '--no-open'], {
-        detached: true, stdio: 'ignore', cwd: process.cwd(), env: process.env,
+      // Pass --port so the child tries 19600 first; pipe stdout so we can read
+      // the real bound URL (it may fall back to a random port on EADDRINUSE).
+      child = spawn(process.execPath, [process.argv[1], 'dashboard', '--port', String(port), '--no-open'], {
+        detached: true, stdio: ['ignore', 'pipe', 'ignore'], cwd: process.cwd(), env: process.env,
       });
-      child.unref();
       _dashboardChildPid = child.pid;
     } catch (e) {
       return `dashboard error: failed to spawn — ${e?.message || e}`;
     }
+    // Prefer the daemon's own "listening at <url>" line — it carries the
+    // actual port even after a random-port fallback.
+    const boundUrl = await _waitForDashboardUrl(child, 3000);
+    // Release the captured stdout pipe so the detached daemon doesn't keep
+    // OUR event loop alive (unref, not destroy — destroying would EPIPE the
+    // daemon on its next stdout write). Then unref the child itself.
+    try { if (child.stdout) { child.stdout.removeAllListeners('data'); child.stdout.unref(); } } catch { /* ignore */ }
+    child.unref();
+    if (boundUrl) {
+      await _openBrowser(boundUrl);
+      return `✓ started dashboard (pid ${child.pid}) — opened ${boundUrl}`;
+    }
+    // Fallback: the line never arrived — poll the default port best-effort.
     const start = Date.now();
-    while (Date.now() - start < 3000) {
+    while (Date.now() - start < 1500) {
       if (await _dashboardProbe(port)) {
         await _openBrowser(url);
         return `✓ started dashboard (pid ${child.pid}) — opened ${url}`;
