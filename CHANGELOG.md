@@ -52,6 +52,19 @@ Versioning: [SemVer](https://semver.org/).
   `/task start|tick` now echoes the exact shell command with your args.
 - **`/menu` command palette.** Browse the full subcommand catalog from chat
   (the no-arg launcher menu was hidden behind `lazyclaw menu`).
+- **No typing flicker by default.** The chat now defaults to the Static
+  scrollback, which only redraws the small live region per keystroke (the
+  alt-buffer fullscreen redrew the whole screen). The splash prints once and
+  scrolls naturally — it never hits the v5.4 alt-canvas vanish/blank. Opt back
+  into fullscreen with `LAZYCLAW_ALT=1`.
+- **First run gets the full guided setup.** A fresh install (no provider)
+  routes through the 5-step `cmdSetup` (provider+model, workspace, skills)
+  instead of just the provider picker; `chat --pick` stays a lightweight
+  re-pick, and a still-unconfigured provider says it's defaulting to claude-cli
+  instead of switching silently.
+- **`/task start` + `/task tick` run in chat.** They were stubs pointing at the
+  shell; `start` registers the task + posts the Slack kickoff, and `tick`
+  drives one multi-agent router turn (its logger output streams into the chat).
 
 ### Added (restored from the pre-Ink readline chat)
 
