@@ -165,8 +165,10 @@ export async function cmdLoop(prompt, flags = {}) {
 
   if (flags.detach) {
     const { spawn } = await import('node:child_process');
+    // This module lives in commands/, so the worker sits one level up at
+    // <repo>/scripts/loop-worker.mjs (was a sibling when cmdLoop was in cli.mjs).
     const here = path.dirname(new URL(import.meta.url).pathname);
-    const worker = path.join(here, 'scripts', 'loop-worker.mjs');
+    const worker = path.join(here, '..', 'scripts', 'loop-worker.mjs');
     const argv = [worker, '--loop-id', loopId, '--prompt', prompt,
       '--max', String(max), '--provider', provName, '--cfg-dir', cfgDir];
     if (flags.until) { argv.push('--until', String(flags.until)); }
