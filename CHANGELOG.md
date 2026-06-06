@@ -4,6 +4,40 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **`/model` no longer dead-ends on "orchestrator".** When `cfg.provider`
+  is the composite `orchestrator`, the start-up provider picker is skipped,
+  so the active provider was the orchestrator — and the Ink `/model` picker
+  only listed `PROVIDER_INFO[active].suggestedModels`, which for orchestrator
+  is just `['orchestrator']`, with no in-REPL escape. `/model` now detects a
+  composite / model-less active provider and lets you pick a real provider
+  first (orchestrator + mock hidden), then its model.
+
+### Added (restored from the pre-Ink readline chat)
+
+- **`/model` live model fetch + custom id.** The picker regains a pinned
+  "↻ fetch live model list" row (pulls `/v1/models` for openai / ollama /
+  any OpenAI-compatible endpoint) and a "… type a custom model id" row that
+  uses the typed filter buffer, so unlisted models (e.g. a local Ollama tag
+  like `qwen3.5-instruct:9b`) are reachable from the picker again. Shared
+  resolver extracted to `providers/model_catalogue.mjs`.
+- **`/provider` family drill-in + tags.** Replaces the flat alphabetical
+  list with the legacy auth-family wizard (API key / CLI-Local / Mock,
+  orchestrator excluded), with `[needs key]`/`[no key]`/`[custom]` row tags.
+  Shared bucketing in `tui/provider_families.mjs`.
+- **Register a custom OpenAI-compatible endpoint from chat.** `/provider add
+  <name> <baseUrl> [apiKey]` and an interactive "+ add a custom endpoint" row
+  (NIM / OpenRouter / Together / Groq / vLLM / LM Studio). Validate / persist /
+  hot-register / live-probe core extracted to `providers/custom_provider.mjs`;
+  the readline wizard now delegates to it too.
+- **Api-key prompt for keyless built-ins.** Picking a built-in api-key
+  provider that has no key configured now prompts for one and persists it
+  (`providers/auth_store.mjs`), mirrored in-memory so it takes effect the
+  same session.
+
 ## [5.4.4] — 2026-06-06
 
 ### Fixed
