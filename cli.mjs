@@ -19,6 +19,8 @@ import { bucketProviders as _bucketProviders } from './tui/provider_families.mjs
 import { addCustomProvider } from './providers/custom_provider.mjs';
 // P3 restore: shared goal cron attach/detach (also used by the Ink /goal).
 import { attachGoalCron as _attachGoalCronCore, detachGoalCron as _detachGoalCronCore } from './goals_cron.mjs';
+// Shared minimal .env loader (also used by the Ink /task Slack-close flow).
+import { loadDotenvIfAny as _loadDotenvShared } from './dotenv_min.mjs';
 // Phase G: defaultConfigDir for personality subcommand (spec §9, decision C7).
 import { defaultConfigDir as _persDefaultCfg } from './memory.mjs';
 // Group B / M6 — chat sliding window. Lives in its own module so
@@ -5462,19 +5464,8 @@ async function cmdAgentRegistry(sub, positional, flags = {}) {
 // Lines starting with '#' are comments; values are taken verbatim and
 // stripped of surrounding double-quotes if present.
 function _loadDotenvIfAny(cfgDir) {
-  const p = path.join(cfgDir, '.env');
-  if (!fs.existsSync(p)) return { path: p, loaded: 0 };
-  let loaded = 0;
-  const raw = fs.readFileSync(p, 'utf8');
-  for (const line of raw.split(/\r?\n/)) {
-    if (!line || line.trimStart().startsWith('#')) continue;
-    const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=\s*(.*)$/);
-    if (!m) continue;
-    let val = m[2].trim();
-    if (val.length >= 2 && val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
-    if (process.env[m[1]] === undefined) { process.env[m[1]] = val; loaded++; }
-  }
-  return { path: p, loaded };
+  // Shared with the Ink /task Slack-close flow via dotenv_min.mjs.
+  return _loadDotenvShared(cfgDir);
 }
 
 async function cmdSlack(sub, positional, flags = {}) {

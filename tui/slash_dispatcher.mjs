@@ -39,6 +39,7 @@ import { providerFamilies, providerTag } from './provider_families.mjs';
 import { addCustomProvider } from '../providers/custom_provider.mjs';
 import { setAuthKey } from '../providers/auth_store.mjs';
 import { attachGoalCron, detachGoalCron } from '../goals_cron.mjs';
+import { loadDotenvIfAny } from '../dotenv_min.mjs';
 
 // ─── helpers ─────────────────────────────────────────────────────────────
 
@@ -1125,8 +1126,8 @@ function _personalityUse(name, ctx, fs, path) {
 async function _task(args, ctx) {
   let tasksMod, loopMod;
   try {
-    tasksMod = await import('../tasks.mjs');
-    loopMod = await import('../loop-engine.mjs');
+    tasksMod = await _mod(ctx, 'tasksMod', () => import('../tasks.mjs'));
+    loopMod = await _mod(ctx, 'loopMod', () => import('../loop-engine.mjs'));
   } catch (e) { return `/task unavailable: ${e?.message || e}`; }
   let tokens;
   try { tokens = loopMod.splitArgs(args); }
@@ -1160,8 +1161,28 @@ async function _task(args, ctx) {
     }
     if (sub === 'abandon' || sub === 'done') {
       if (!id) return `usage: /task ${sub} <id>`;
-      const next = tasksMod.patchTask(id, { status: sub === 'done' ? 'done' : 'abandoned' }, ctx.cfgDir);
-      return `✓ task ${id} → ${next?.status || sub}`;
+      const target = sub === 'done' ? 'done' : 'abandoned';
+      const next = tasksMod.patchTask(id, { status: target }, ctx.cfgDir);
+      // Best-effort closing post in the original Slack thread (parity with the
+      // CLI cmdTask), so collaborators see the resolution. Never rolls back
+      // the status change.
+      let slackNote = '';
+      if (next && next.slackChannel && next.slackThreadTs) {
+        try {
+          loadDotenvIfAny(ctx.cfgDir);
+          const SlackChannel = ctx.SlackChannel || (await import('../channels/slack.mjs')).SlackChannel;
+          const slack = new SlackChannel({ requireInbound: false });
+          await slack.start(async () => '', {});
+          const threadId = `${next.slackChannel}:${next.slackThreadTs}`;
+          const msg = target === 'done'
+            ? `:white_check_mark: Task *${next.title}* marked done.`
+            : `:no_entry: Task *${next.title}* abandoned.`;
+          await slack.send(threadId, msg);
+          await slack.stop().catch(() => {});
+          slackNote = ' (posted to Slack thread)';
+        } catch (e) { slackNote = ` (Slack post failed: ${e?.message || e})`; }
+      }
+      return `✓ task ${id} → ${next?.status || target}${slackNote}`;
     }
     if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
       if (!id) return 'usage: /task remove <id>';
@@ -1169,7 +1190,11 @@ async function _task(args, ctx) {
       return `✓ removed task ${id}`;
     }
     if (sub === 'start' || sub === 'tick') {
-      return `task ${sub}: needs Slack + multi-agent router — run from the shell:\n  lazyclaw task ${sub} ...`;
+      // Full multi-agent router + Slack kickoff can't safely run inline in the
+      // Ink scrollback (blocking + stdout ownership). Echo the exact command
+      // with the user's args so it's one paste away in a shell.
+      const rest = args.replace(new RegExp(`^\\s*${sub}\\s*`), '').trim();
+      return `task ${sub} runs the multi-agent router + Slack — run it from a shell:\n  lazyclaw task ${sub}${rest ? ' ' + rest : ' ...'}`;
     }
     return `/task: unknown sub "${sub}" — list|show|transcript|abandon|done|remove (start/tick: use CLI)`;
   } catch (e) {
