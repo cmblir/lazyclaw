@@ -35,11 +35,21 @@
  * @returns {{ cost: number, currency: string, breakdown: object } | null}
  */
 export function costFromUsage(call, rates) {
-  if (!call || !rates) return null;
+  if (!call) return null;
+  const u = call.usage || {};
+  // Prefer a provider-reported dollar cost when present. claude-cli / codex-cli
+  // / gemini-cli emit total_cost_usd from the CLI's own `result` event, so this
+  // makes spend observable — and the daemon cost cap enforceable — for the
+  // subscription path even when the user has authored no rate card (the card
+  // ships zero-filled). Rate-card arithmetic is the fallback for API providers.
+  const reported = Number(u.totalCostUsd);
+  if (Number.isFinite(reported) && reported > 0) {
+    return { cost: round6(reported), currency: 'USD', breakdown: { reported: round6(reported) } };
+  }
+  if (!rates) return null;
   const key = `${call.provider}/${call.model}`;
   const r = rates[key];
   if (!r) return null;
-  const u = call.usage || {};
   const million = 1_000_000;
   const inputCost = ((Number(u.inputTokens) || 0) / million) * (Number(r.inputPer1M) || 0);
   const outputCost = ((Number(u.outputTokens) || 0) / million) * (Number(r.outputPer1M) || 0);

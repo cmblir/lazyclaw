@@ -86,6 +86,12 @@ Versioning: [SemVer](https://semver.org/).
   path skips the per-process `integrity_check` (it belongs in `doctor`), and
   `appendTurn` keeps an in-memory turn counter instead of re-reading the whole
   session file on every turn (was O(n²) over a session's life).
+- **Cost tracking works for the subscription path.** `costFromUsage` ignored the
+  `total_cost_usd` that claude-cli / codex-cli / gemini-cli report and computed
+  only from a user-authored rate card (which ships zero-filled), so subscription
+  spend showed as $0 and the daemon cost cap never tripped on it. It now prefers
+  the provider-reported dollar cost (no rate card required), falling back to the
+  rate card for API providers.
 - **Agent skill tools share the real skill store now.** `skill_create` /
   `skill_view` / `skill_edit` wrote and read a private
   `skills/<name>/SKILL.md` directory, while everything else — the
