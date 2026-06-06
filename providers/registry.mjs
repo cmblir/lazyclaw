@@ -298,7 +298,10 @@ export const PROVIDERS = {
 // it via `lazyclaw providers list`; `registerOrchestrator(...)` from
 // cli.mjs::ensureRegistry wires in the live cfg + auth-key resolver so
 // sendMessage can reach env vars / authProfiles / customProviders.
-PROVIDERS.orchestrator = makeOrchestratorProvider();
+// Inject the provider lookup so orchestrator never imports this module back
+// (one-directional dep). The closure reads PROVIDERS/PROVIDER_INFO lazily.
+const _orchestratorLookup = (p) => ({ prov: PROVIDERS[p], info: PROVIDER_INFO[p] });
+PROVIDERS.orchestrator = makeOrchestratorProvider({ lookup: _orchestratorLookup });
 
 // Wire each OpenAI-compat builtin into PROVIDERS as a callable provider.
 // Insertion is between Tier 2 (anthropic) and Tier 4 (ollama) by reordering
@@ -463,7 +466,7 @@ for (const [name, def] of Object.entries(OPENAI_COMPAT_BUILTINS)) {
  * — idempotent (overwrites the previous registration in place).
  */
 export function registerOrchestrator({ cfgGetter, keyResolver } = {}) {
-  PROVIDERS.orchestrator = makeOrchestratorProvider({ cfgGetter, keyResolver });
+  PROVIDERS.orchestrator = makeOrchestratorProvider({ cfgGetter, keyResolver, lookup: _orchestratorLookup });
 }
 
 /**

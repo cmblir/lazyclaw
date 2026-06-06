@@ -21,6 +21,10 @@ import assert from 'node:assert/strict';
 import { makeOrchestratorProvider } from '../providers/orchestrator.mjs';
 import { PROVIDERS, PROVIDER_INFO } from '../providers/registry.mjs';
 
+// orchestrator no longer imports the registry (cycle broken); callers inject
+// the provider lookup, exactly as registry.registerOrchestrator does.
+const _lookup = (p) => ({ prov: PROVIDERS[p], info: PROVIDER_INFO[p] });
+
 // Build a synthetic "delay-N" worker we register at the registry so
 // the orchestrator's _lookupProvider picks it up the same way it would
 // pick up claude-cli / openai / etc. Each worker yields a tagged chunk
@@ -79,7 +83,7 @@ test('C11 — concurrency=3 with 3 subtasks runs in parallel (~max wall-clock, n
         concurrency: 3,
       },
     };
-    const prov = makeOrchestratorProvider({ cfgGetter: () => cfg });
+    const prov = makeOrchestratorProvider({ cfgGetter: () => cfg, lookup: _lookup });
     const t0 = Date.now();
     const out = await drainStream(prov.sendMessage(
       [{ role: 'user', content: 'do three things' }],
@@ -118,7 +122,7 @@ test('C11 — concurrency=1 with 3 subtasks runs sequentially (~sum wall-clock)'
         concurrency: 1,    // explicit sequential
       },
     };
-    const prov = makeOrchestratorProvider({ cfgGetter: () => cfg });
+    const prov = makeOrchestratorProvider({ cfgGetter: () => cfg, lookup: _lookup });
     const t0 = Date.now();
     const out = await drainStream(prov.sendMessage(
       [{ role: 'user', content: 'do three things' }],
@@ -153,7 +157,7 @@ test('C11 — parallel output is flushed in plan order regardless of finish orde
         concurrency: 3,
       },
     };
-    const prov = makeOrchestratorProvider({ cfgGetter: () => cfg });
+    const prov = makeOrchestratorProvider({ cfgGetter: () => cfg, lookup: _lookup });
     const out = await drainStream(prov.sendMessage(
       [{ role: 'user', content: 'check order' }],
     ));
@@ -188,7 +192,7 @@ test('C11 — one failing subtask does not block the others', async () => {
         concurrency: 3,
       },
     };
-    const prov = makeOrchestratorProvider({ cfgGetter: () => cfg });
+    const prov = makeOrchestratorProvider({ cfgGetter: () => cfg, lookup: _lookup });
     const out = await drainStream(prov.sendMessage(
       [{ role: 'user', content: 'mixed outcome' }],
     ));

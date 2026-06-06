@@ -36,7 +36,10 @@
 // step), workers = [planner] (degenerates to a single-agent chain that
 // still benefits from plan + synthesis structure).
 
-import { PROVIDERS, PROVIDER_INFO } from './registry.mjs';
+// This module must NOT statically import ./registry.mjs — that formed a static
+// import cycle (registry → orchestrator → registry). Provider lookup is now
+// injected via makeOrchestratorProvider({ lookup }), so the dependency is
+// one-directional (registry → orchestrator only).
 
 function _parseSpec(spec) {
   if (!spec || typeof spec !== 'string') return { provider: '', model: '' };
@@ -45,11 +48,12 @@ function _parseSpec(spec) {
   return { provider: spec.slice(0, colon).trim(), model: spec.slice(colon + 1).trim() };
 }
 
-function _lookupProvider(spec) {
+function _lookupProvider(spec, lookup) {
   const { provider, model } = _parseSpec(spec);
-  const prov = PROVIDERS[provider];
+  const found = (typeof lookup === 'function' ? lookup(provider) : null) || {};
+  const prov = found.prov;
   if (!prov) return null;
-  const info = PROVIDER_INFO[provider] || {};
+  const info = found.info || {};
   return {
     name: provider,
     model: model || info.defaultModel || '',
@@ -115,6 +119,9 @@ Rules:
 export function makeOrchestratorProvider(opts = {}) {
   const cfgGetter = typeof opts.cfgGetter === 'function' ? opts.cfgGetter : () => ({});
   const keyResolver = typeof opts.keyResolver === 'function' ? opts.keyResolver : () => '';
+  // Injected provider lookup: (provider) => { prov, info }. Supplied by the
+  // registry so orchestrator never imports registry (breaks the static cycle).
+  const lookup = typeof opts.lookup === 'function' ? opts.lookup : () => ({});
 
   return {
     name: 'orchestrator',
@@ -134,7 +141,7 @@ export function makeOrchestratorProvider(opts = {}) {
       // the user's stated intent. Do a real passthrough instead.
       const hasWorkers = Array.isArray(o.workers) && o.workers.length > 0;
       if (!cfg.orchestrator || !hasWorkers) {
-        const direct = _lookupProvider(fallbackSpec);
+        const direct = _lookupProvider(fallbackSpec, lookup);
         if (!direct || direct.name === 'orchestrator') {
           yield `⚠ orchestrator: not configured and fallback provider \`${fallbackSpec}\` is not registered. ` +
             `Set \`cfg.orchestrator.planner\` + \`cfg.orchestrator.workers\`, or set \`cfg.provider\` to a real backend.\n`;
@@ -153,7 +160,7 @@ export function makeOrchestratorProvider(opts = {}) {
       const workerSpecs = o.workers.map(String);
       const maxSubtasks = Number.isFinite(o.maxSubtasks) && o.maxSubtasks > 0 ? Math.min(10, o.maxSubtasks) : 5;
 
-      const planner = _lookupProvider(plannerSpec);
+      const planner = _lookupProvider(plannerSpec, lookup);
       if (!planner) {
         yield `⚠ orchestrator: planner provider "${plannerSpec}" is not registered. ` +
           `Set cfg.orchestrator.planner to a valid "provider:model" (e.g. "claude-cli:claude-opus-4-7").\n`;
@@ -166,7 +173,7 @@ export function makeOrchestratorProvider(opts = {}) {
         yield `⚠ orchestrator: planner cannot be "orchestrator" — set cfg.orchestrator.planner to a real provider (e.g. "claude-cli:claude-opus-4-7").\n`;
         return;
       }
-      const workers = workerSpecs.map(_lookupProvider).filter(Boolean).filter(w => w.name !== 'orchestrator');
+      const workers = workerSpecs.map((s) => _lookupProvider(s, lookup)).filter(Boolean).filter(w => w.name !== 'orchestrator');
       if (workers.length === 0) {
         yield `⚠ orchestrator: no usable workers (cfg.orchestrator.workers is empty, all unknown, or only references "orchestrator" itself).\n`;
         return;

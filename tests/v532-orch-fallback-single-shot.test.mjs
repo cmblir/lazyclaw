@@ -26,6 +26,10 @@ import assert from 'node:assert/strict';
 import { makeOrchestratorProvider } from '../providers/orchestrator.mjs';
 import { PROVIDERS, PROVIDER_INFO } from '../providers/registry.mjs';
 
+// orchestrator no longer imports the registry (cycle broken); callers inject
+// the provider lookup, exactly as registry.registerOrchestrator does.
+const _lookup = (p) => ({ prov: PROVIDERS[p], info: PROVIDER_INFO[p] });
+
 function installCountingProvider(name, reply = 'hello from fake') {
   const calls = [];
   const original = PROVIDERS[name];
@@ -56,7 +60,7 @@ test('v5.3.2 — undefined cfg.orchestrator produces a single passthrough call (
   const fake = installCountingProvider('claude-cli', 'direct answer\n');
   try {
     const cfg = {}; // intentionally no orchestrator, no provider
-    const prov = makeOrchestratorProvider({ cfgGetter: () => cfg });
+    const prov = makeOrchestratorProvider({ cfgGetter: () => cfg, lookup: _lookup });
     const out = await drainStream(prov.sendMessage(
       [{ role: 'user', content: 'what tools do I have?' }],
     ));
@@ -99,7 +103,7 @@ test('v5.3.2 — cfg.orchestrator with empty workers also short-circuits to sing
         workers: [],
       },
     };
-    const prov = makeOrchestratorProvider({ cfgGetter: () => cfg });
+    const prov = makeOrchestratorProvider({ cfgGetter: () => cfg, lookup: _lookup });
     const out = await drainStream(prov.sendMessage(
       [{ role: 'user', content: 'hi' }],
     ));
@@ -121,7 +125,7 @@ test('v5.3.2 — when cfg.provider points at a real backend, single-shot uses TH
   const fakeClaude = installCountingProvider('claude-cli', 'claude reply\n');
   try {
     const cfg = { provider: 'openai', model: 'gpt-4o' };
-    const prov = makeOrchestratorProvider({ cfgGetter: () => cfg });
+    const prov = makeOrchestratorProvider({ cfgGetter: () => cfg, lookup: _lookup });
     const out = await drainStream(prov.sendMessage(
       [{ role: 'user', content: 'route me right' }],
     ));
