@@ -21,6 +21,8 @@ import { addCustomProvider } from './providers/custom_provider.mjs';
 import { attachGoalCron as _attachGoalCronCore, detachGoalCron as _detachGoalCronCore } from './goals_cron.mjs';
 // Shared minimal .env loader (also used by the Ink /task Slack-close flow).
 import { loadDotenvIfAny as _loadDotenvShared } from './dotenv_min.mjs';
+// First-run onboarding routing (fresh install → full setup vs --pick).
+import { firstRunMode as _firstRunMode } from './first_run.mjs';
 // Phase G: defaultConfigDir for personality subcommand (spec §9, decision C7).
 import { defaultConfigDir as _persDefaultCfg } from './memory.mjs';
 // Group B / M6 — chat sliding window. Lives in its own module so
@@ -2461,7 +2463,7 @@ async function cmdChat(flags = {}) {
   await ensureRegistry();
   const sessionsMod = await import('./sessions.mjs');
   const skillsMod = await import('./skills.mjs');
-  const cfg = readConfig();
+  let cfg = readConfig();
   // Mutable in-REPL state: /provider and /model edit these without
   // touching config.json on disk. The CLI flag form (`chat --provider X`)
   // would normally seed these via cfg, but we leave that to a future
@@ -2469,22 +2471,37 @@ async function cmdChat(flags = {}) {
   let activeProvName = cfg.provider || '';
   let activeModel = cfg.model || null;
   const lookupProv = (name) => _registryMod.PROVIDERS[name];
-  // Interactive picker fires when --pick is set OR no provider is
-  // configured yet (first run). Skipped when stdin isn't a TTY so
-  // automation stays predictable.
-  const shouldPick = (!!flags.pick) || (!activeProvName && process.stdin.isTTY);
-  if (shouldPick) {
+  // First-run routing: a genuine fresh install (no provider, interactive)
+  // gets the full 5-step guided setup (provider+model, workspace, skills) —
+  // not just the provider picker. `chat --pick` stays a lightweight re-pick.
+  const _mode = _firstRunMode({
+    hasProvider: !!activeProvName,
+    flagPick: !!flags.pick,
+    isTTY: !!process.stdin.isTTY,
+  });
+  if (_mode === 'setup') {
+    try { await cmdSetup(undefined, [], {}); }
+    catch (e) { if (process.env.LAZYCLAW_DEBUG) console.error('[setup] fell through:', e?.message); }
+    // Re-read the config the wizard just wrote so this session uses it.
+    cfg = readConfig();
+    activeProvName = cfg.provider || activeProvName;
+    activeModel = cfg.model || activeModel;
+  } else if (_mode === 'pick') {
     const picked = await _pickProviderInteractive();
     if (picked && picked.provider) {
       activeProvName = picked.provider;
       if (picked.model) activeModel = picked.model;
     }
   }
-  // v5.3.2 — last-resort safety net used to fall through to 'mock' (the
-  // offline echo provider), which silently degraded a wiped config into
-  // garbage replies. Default to claude-cli so the user lands on the
-  // keyless subscription path instead.
-  if (!activeProvName) activeProvName = 'claude-cli';
+  // Last-resort safety net. v5.3.2 stopped falling through to 'mock' (which
+  // silently degraded a wiped config into garbage replies); default to the
+  // keyless claude-cli, but say so instead of switching silently.
+  if (!activeProvName) {
+    if (process.stdout.isTTY) {
+      process.stdout.write('  setup not completed — defaulting to claude-cli (keyless subscription). Run `lazyclaw setup` to configure a provider/model, workspace, and skills.\n');
+    }
+    activeProvName = 'claude-cli';
+  }
   let prov = lookupProv(activeProvName);
   if (!prov) { console.error(`unknown provider: ${activeProvName}`); process.exit(2); }
 
