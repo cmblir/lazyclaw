@@ -53,6 +53,16 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **`providers test` (CLI + daemon `GET /providers/test`) no longer crashes the
+  process when the `claude` binary is absent.** The claude-cli provider spawned
+  `claude` but caught only *synchronous* spawn failures; ENOENT (no binary on
+  PATH) arrives asynchronously as a ChildProcess `'error'` event, and with no
+  listener Node escalated it to an uncaughtException — taking down the whole
+  parallel provider probe (empty CLI output / daemon socket close) on any box
+  without Claude Code installed, e.g. CI. The provider now attaches an `'error'`
+  listener and surfaces the failure as a catchable `CliMissingError`, so the
+  probe reports `claude-cli` as a normal per-provider failure (`CLI_MISSING`)
+  and the batch always returns valid JSON.
 - **`trainer: auto` now actually detects a Claude session — the $0 learning
   loop works for real subscribers.** Detection was a stub keyed on an exported
   `CLAUDE_CODE_OAUTH_TOKEN`, which a normal `claude login` never sets (it writes

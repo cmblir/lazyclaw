@@ -159,6 +159,19 @@ export const claudeCliProvider = {
     };
     if (opts.signal) opts.signal.addEventListener('abort', onAbort);
 
+    // child_process reports spawn failures (ENOENT when `claude` isn't on
+    // PATH, EACCES, ...) ASYNCHRONOUSLY via an 'error' event — the
+    // synchronous try/catch around spawn above never sees them. Without a
+    // listener Node escalates the unhandled 'error' event to an
+    // uncaughtException and crashes the whole process; on a box with no
+    // claude binary (e.g. CI) this took down `providers test` for the CLI
+    // and the daemon entirely. Capture it and surface it through the stream
+    // as a normal, catchable error so callers report it per-provider.
+    let spawnError = null;
+    const spawnErrorPromise = new Promise((resolve) => {
+      proc.once('error', (err) => { spawnError = err; resolve(); });
+    });
+
     let stderr = '';
     proc.stderr.setEncoding('utf8');
     proc.stderr.on('data', (chunk) => { stderr += chunk; });
@@ -210,7 +223,13 @@ export const claudeCliProvider = {
           if (text) yield text;
         } catch (_) { /* incomplete tail — drop */ }
       }
-      await exitPromise;
+      // Wait for either a clean exit or an async spawn error. On ENOENT
+      // the process never starts, so 'close' never fires — racing against
+      // spawnErrorPromise keeps this from hanging forever.
+      await Promise.race([exitPromise, spawnErrorPromise]);
+      if (spawnError) {
+        throw spawnError.code === 'ENOENT' ? new CliMissingError() : spawnError;
+      }
       if (exitInfo && exitInfo.code !== 0 && !opts.signal?.aborted) {
         throw new CliExitError(exitInfo.code, exitInfo.signal, stderr);
       }
