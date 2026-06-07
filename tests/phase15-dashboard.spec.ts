@@ -196,7 +196,26 @@ test.describe('Phase 15 — dashboard daemon routes', () => {
       expect(html).toContain('data-tab="agents"');
       expect(html).toContain('data-tab="teams"');
       expect(html).toContain('data-tab="tasks"');
-      expect(html).toContain('LOADERS.agents');
+      // CSS + JS are split out of the HTML shell (CLAUDE.md §7) and served
+      // as same-origin static assets — the shell only references them.
+      expect(html).toContain('href="/dashboard.css"');
+      expect(html).toContain('src="/dashboard.js"');
+    } finally { await d.stop(); }
+  });
+
+  test('GET /dashboard.css and /dashboard.js serve the split-out assets', async () => {
+    const cfg = tmpDir('p15-assets');
+    const d = await startDaemon(cfg);
+    try {
+      const css = await fetch(d.baseUrl + '/dashboard.css');
+      expect(css.ok).toBe(true);
+      expect(css.headers.get('content-type')).toContain('text/css');
+      expect(await css.text()).toContain('--bg');
+
+      const js = await fetch(d.baseUrl + '/dashboard.js');
+      expect(js.ok).toBe(true);
+      expect(js.headers.get('content-type')).toContain('javascript');
+      expect(await js.text()).toContain('LOADERS.agents');
     } finally { await d.stop(); }
   });
 });

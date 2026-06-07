@@ -2,6 +2,34 @@
 // Each handler takes the per-request dispatch context `c` and returns the
 // HTTP response. Bodies are unchanged; only the dispatch wrapper is new.
 import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, checkCostCap, accumulateMetricsFromCost, resolveProvider } from './_deps.mjs';
+import { fileURLToPath } from 'node:url';
+
+// Serve a static asset that lives alongside the dashboard HTML in web/.
+// Used for the split-out dashboard.css / dashboard.js (CLAUDE.md §7: one
+// file = one responsibility). Same loopback origin as the JSON API, so no
+// CORS handling is needed. Returns 404 (not the dashboard's 503 install
+// hint) since a missing asset is a narrower failure.
+function serveWebFile(c, filename, contentType) {
+  const { res } = c;
+  try {
+    const here = nodePath.dirname(fileURLToPath(import.meta.url));
+    const filePath = nodePath.join(here, '..', '..', 'web', filename);
+    const body = fs.readFileSync(filePath);
+    res.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-cache' });
+    return res.end(body);
+  } catch (e) {
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+    return res.end(`not found: ${filename} (${e?.message || e})\n`);
+  }
+}
+
+export async function dashboardCss(c) {
+  return serveWebFile(c, 'dashboard.css', 'text/css; charset=utf-8');
+}
+
+export async function dashboardJs(c) {
+  return serveWebFile(c, 'dashboard.js', 'text/javascript; charset=utf-8');
+}
 
 export async function dashboard(c) {
   const { res } = c;
