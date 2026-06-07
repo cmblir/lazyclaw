@@ -69,6 +69,15 @@ Versioning: [SemVer](https://semver.org/).
   automatically after each completed agent task (`mas/learning.mjs`
   `_runPostTask`), so the button and its dead route are removed and the tab now
   states plainly that there is no manual sync.
+- **The web dashboard is responsive on small viewports and keyboard-accessible.**
+  The 17-tab nav bar used a hidden horizontal scroll that overflowed even at
+  desktop width; it now wraps. The Status summary banner no longer clips its
+  right edge on phones, tab controls meet the 44px touch-target minimum, every
+  interactive control has a visible keyboard focus ring, and
+  `prefers-reduced-motion` is honoured. The dashboard's markup, CSS, and JS were
+  also split out of the former single 1964-line `web/dashboard.html` into
+  `dashboard.html` + `dashboard.css` + `dashboard.js`, served as same-origin
+  static assets.
 - **Every advertised OpenAI-compatible provider can now be an agent / trainer.**
   `resolveToolUseAdapter` had a hardcoded 4-provider switch, so onboarding on
   Groq / OpenRouter / DeepSeek / NIM / Together / xAI / Mistral / Fireworks (or
