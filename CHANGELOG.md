@@ -62,6 +62,13 @@ Versioning: [SemVer](https://semver.org/).
   fall back to a paid provider it prints a one-time notice instead of charging
   silently. Unknown short model aliases now pass through to the CLI instead of
   being dropped to the CLI default.
+- **The dashboard Trainer tab no longer shows a no-op "Sync now" button.** It
+  posted to `POST /trainer/sync`, a stub that only bumped a `syncQueued` counter
+  in `trainer-state.json` that nothing ever drained, then reported "sync queued"
+  — implying a manual trigger that did not exist. Learning already runs
+  automatically after each completed agent task (`mas/learning.mjs`
+  `_runPostTask`), so the button and its dead route are removed and the tab now
+  states plainly that there is no manual sync.
 - **Every advertised OpenAI-compatible provider can now be an agent / trainer.**
   `resolveToolUseAdapter` had a hardcoded 4-provider switch, so onboarding on
   Groq / OpenRouter / DeepSeek / NIM / Together / xAI / Mistral / Fireworks (or

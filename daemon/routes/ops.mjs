@@ -39,30 +39,6 @@ export async function trainerStatus(c) {
           });
 }
 
-export async function trainerSync(c) {
-  const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
-          // Stub: a real trainer scheduler lands in v5.1. For now we
-          // record the trigger in trainer-state.json so the dashboard's
-          // "Sync now" button has feedback, and a future trainer reads
-          // the queue. Surfacing it here keeps the API stable across the
-          // transition.
-          try {
-            const dir = gwConfigDir || skillsDefaultConfigDir();
-            fs.mkdirSync(dir, { recursive: true });
-            const statePath = nodePath.join(dir, 'trainer-state.json');
-            let st = {};
-            if (fs.existsSync(statePath)) {
-              try { st = JSON.parse(fs.readFileSync(statePath, 'utf8')); } catch { st = {}; }
-            }
-            st.lastSyncRequestAt = new Date().toISOString();
-            st.syncQueued = (st.syncQueued || 0) + 1;
-            fs.writeFileSync(statePath, JSON.stringify(st, null, 2));
-            return writeJson(res, 200, { ok: true, message: 'sync queued', queued: st.syncQueued });
-          } catch (e) {
-            return writeJson(res, 500, { error: e?.message || String(e) });
-          }
-}
-
 export async function recall(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
           // GET /recall?q=...&scope=sessions|skills|trajectories|memories|all&k=N

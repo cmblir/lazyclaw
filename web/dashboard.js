@@ -1197,28 +1197,11 @@
           <div class="row"><div class="name">Recipe</div><div class="dim" style="margin-left:auto;">${escHtml(r.recipe || 'inherit')}</div></div>
           <div class="row"><div class="name">Calls today</div><div class="dim" style="margin-left:auto;">${r.callsToday ?? 0}${r.budget ? ` / ${r.budget} (${pct}%)` : ''}</div></div>
         </div>
-        <div class="toolbar" style="margin-top:10px;">
-          <button class="btn" onclick="trainerSync()">Sync now</button>
-          <span class="dim" id="trainer-sync-result"></span>
-        </div>`;
+        <p class="dim" style="margin-top:10px;font-size:13px;line-height:1.4;max-width:60ch;">Learning runs automatically after each completed agent task — trajectories are distilled into skills using the trainer provider above. There is no manual sync.</p>`;
       } catch (e) {
         root.innerHTML = `<div class="empty">⚠ ${escHtml(e.message)}</div>`;
       }
     };
-    async function trainerSync() {
-      const out = document.getElementById('trainer-sync-result');
-      out.textContent = '⏳ syncing…';
-      try {
-        const r = await fetch('/trainer/sync', { method: 'POST' });
-        const body = await r.json().catch(() => ({}));
-        out.style.color = r.ok ? 'var(--ok)' : 'var(--err)';
-        out.textContent = r.ok ? '✓ ' + (body.message || 'queued') : '✗ ' + (body.error || r.statusText);
-      } catch (e) {
-        out.style.color = 'var(--err)';
-        out.textContent = '✗ ' + e.message;
-      }
-    }
-
     LOADERS.recall = async function loadRecall() {
       const root = document.getElementById('recall-list');
       const meta = document.getElementById('recall-meta');

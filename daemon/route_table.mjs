@@ -86,7 +86,6 @@ export const ROUTES = [
   { m: (c) => c.req.method === 'DELETE' && /^\/tasks\/([^/]+)$/.test(c.url.pathname), h: registry.taskDelete },
   { m: (c) => c.req.method === 'POST' && /^\/tasks\/([^/]+)\/(done|abandon)$/.test(c.url.pathname), h: registry.taskAction },
   { m: (c) => c.route === 'GET /trainer/status', h: ops.trainerStatus },
-  { m: (c) => c.route === 'POST /trainer/sync', h: ops.trainerSync },
   { m: (c) => c.route === 'GET /recall', h: ops.recall },
   { m: (c) => c.route === 'GET /sandbox', h: ops.sandboxList },
   { m: (c) => c.req.method === 'POST' && /^\/sandbox\/([^/]+)\/test$/.test(c.url.pathname), h: ops.sandboxTest },
