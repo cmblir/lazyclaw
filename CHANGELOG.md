@@ -63,6 +63,14 @@ Versioning: [SemVer](https://semver.org/).
   listener and surfaces the failure as a catchable `CliMissingError`, so the
   probe reports `claude-cli` as a normal per-provider failure (`CLI_MISSING`)
   and the batch always returns valid JSON.
+- **The orchestrator now honours `concurrency` as a real bound on parallel
+  subtask dispatch.** The parallel execute path fired every planned subtask at
+  once through a single `Promise.all`, so a large plan opened N simultaneous
+  provider streams regardless of `cfg.orchestrator.concurrency` —
+  over-subscribing provider rate limits and buffering every worker's output at
+  the same time. It now runs at most `concurrency` subtasks at a time via a
+  bounded pool; plans with `<= concurrency` subtasks are unchanged (still start
+  immediately), and output is still flushed in plan order.
 - **`trainer: auto` now actually detects a Claude session — the $0 learning
   loop works for real subscribers.** Detection was a stub keyed on an exported
   `CLAUDE_CODE_OAUTH_TOKEN`, which a normal `claude login` never sets (it writes

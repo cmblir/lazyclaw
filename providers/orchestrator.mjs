@@ -313,8 +313,22 @@ export function makeOrchestratorProvider(opts = {}) {
           }
           return { sub, worker, chunks, error };
         }
-        const settled = await Promise.all(
-          trimmed.map((sub, i) => _runSubtask(sub, workers[i % workers.length])),
+        // Bounded worker pool (E1): run at most `concurrency` subtasks at
+        // once instead of firing all of them via one Promise.all. A large
+        // plan would otherwise open N simultaneous provider streams —
+        // over-subscribing rate limits and buffering every worker's chunks
+        // at the same time. Results are stored by index so the plan-order
+        // flush below is unchanged; for plans with <= concurrency subtasks
+        // every subtask still starts immediately (identical to before).
+        const settled = new Array(trimmed.length);
+        let nextIdx = 0;
+        async function _poolWorker() {
+          for (let i = nextIdx++; i < trimmed.length; i = nextIdx++) {
+            settled[i] = await _runSubtask(trimmed[i], workers[i % workers.length]);
+          }
+        }
+        await Promise.all(
+          Array.from({ length: Math.min(concurrency, trimmed.length) }, () => _poolWorker()),
         );
         // Flush in plan order so the synthesis prompt + user view see
         // subtask 1, then 2, etc.

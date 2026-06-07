@@ -207,3 +207,47 @@ test('C11 — one failing subtask does not block the others', async () => {
     removeWorker('w-also');
   }
 });
+
+test('E1 — concurrency bounds the parallel fan-out (4 subtasks, pool of 2 → ~2 batches)', async () => {
+  // The parallel path used to Promise.all over EVERY subtask at once,
+  // ignoring cfg.orchestrator.concurrency for batching — so a large plan
+  // could fire N simultaneous provider calls and over-subscribe rate
+  // limits / memory. With a bounded pool, 4 subtasks at concurrency=2 run
+  // in two batches: wall-clock ≈ 2 × per-subtask, NOT 1× (unbounded) and
+  // NOT 4× (sequential).
+  installFakePlanner([
+    { id: 1, task: 'a', rationale: 'A' },
+    { id: 2, task: 'b', rationale: 'B' },
+    { id: 3, task: 'c', rationale: 'C' },
+    { id: 4, task: 'd', rationale: 'D' },
+  ]);
+  installDelayWorker('w1', 150);
+  installDelayWorker('w2', 150);
+  try {
+    const cfg = {
+      orchestrator: {
+        planner: 'fake-planner',
+        workers: ['w1', 'w2'],
+        concurrency: 2,
+      },
+    };
+    const prov = makeOrchestratorProvider({ cfgGetter: () => cfg, lookup: _lookup });
+    const t0 = Date.now();
+    const out = await drainStream(prov.sendMessage(
+      [{ role: 'user', content: 'do four things' }],
+    ));
+    const elapsed = Date.now() - t0;
+    assert.ok(out.includes('parallel'), 'header should mention parallel mode');
+    for (const n of [1, 2, 3, 4]) {
+      assert.ok(out.includes(`Subtask ${n}`), `subtask ${n} present`);
+    }
+    // 4 × 150ms in a pool of 2 → ~300ms. >250ms rules out the old
+    // all-at-once behaviour (~150ms); <520ms rules out sequential (~600ms).
+    assert.ok(elapsed >= 250 && elapsed < 520,
+      `bounded run took ${elapsed}ms; expected ~300ms (2 batches of 150ms), not ~150ms (unbounded) or ~600ms (sequential)`);
+  } finally {
+    removeWorker('fake-planner');
+    removeWorker('w1');
+    removeWorker('w2');
+  }
+});
