@@ -25,19 +25,26 @@ iterator. Verified in a `node:20` container and on the real CI run for
 `b479886`: the previously-silent interactive specs pass; CI playwright went from
 ~35 failures to 6 (the unrelated network bucket below).
 
-## Flaky network / timing-sensitive spawn specs (same non-blocking bucket)
+## Provider-probe specs crashed without a `claude` binary — RESOLVED
 
-A few Playwright specs spawn the CLI and assert on wall-clock or live network
-probes, so they flake under load / restricted networks independent of the
-interactive-stdin bug above:
+**Status:** resolved in `b9050be` (F8) · **Severity:** was a real product crash
+(not just a test issue)
 
-- `phase6-openclaw-parity.spec.ts` › `lazyclaw run --parallel executes a DAG by
-  topological level` — asserts `elapsed < 500ms`; flakes when the machine is
-  busy (passes in isolation).
-- `phase6-openclaw-parity.spec.ts` › `lazyclaw providers test (no name) …` —
-  probes every provider endpoint, so it is slow (~1.5m) and depends on outbound
-  network reachability.
+The last 6 CI playwright failures were the `lazyclaw providers test` (CLI) and
+daemon `GET /providers/test` specs. They probe every registered provider in
+parallel. The claude-cli provider spawned the `claude` binary and only caught
+**synchronous** spawn failures — but a missing binary (ENOENT) surfaces
+**asynchronously** as a ChildProcess `'error'` event. With no listener, Node
+escalated it to an uncaughtException and killed the process mid-probe: the CLI
+exited with empty stdout (`Unexpected end of JSON input`) and the daemon dropped
+the socket (`other side closed`). It only reproduced where no `claude` binary
+exists — i.e. CI, not a dev box — which is why it lingered.
 
-These ride in the non-blocking `playwright` CI job. Phase F8 will make them
-deterministic (output-driven waits, stubbed provider probes, retries on the
-spawn-heavy specs).
+**Fix:** the provider attaches a `proc.once('error', …)` listener and surfaces
+the failure as a catchable `CliMissingError` (code `CLI_MISSING`); the probe
+now reports `claude-cli` as a normal per-provider failure and the batch returns
+valid JSON. The flaky `--parallel ... by topological level` timing assertion was
+also widened (250ms node sleeps, 650ms ceiling) so spawn jitter can't trip it.
+
+With these fixed the suite is green offline, so **the `playwright` CI job is now
+a hard gate** (F8) — `continue-on-error` removed.

@@ -1,16 +1,14 @@
 name: Test lazyclaw
 
-# Two-tier gate:
-#   - node:  the node:test unit suite (tests/*.test.mjs) — the HARD gate.
-#            590 tests, green on Linux.
-#   - playwright: the .spec.ts acceptance suite. Runs for visibility but is
-#            non-blocking (continue-on-error). The ~35 interactive chat/loop/
-#            goal failures were fixed in D7 (b479886); the suite is now 666
-#            pass / 6 fail on this runner, and the remaining 6 are the
-#            phase6 providers/test specs that probe REAL external provider
-#            endpoints (no API keys / network on CI). See docs/KNOWN-ISSUES.md.
-#            Flip playwright to a hard gate once those 6 are made offline-safe
-#            (skip-when-no-key or stubbed probes) — Phase F8.
+# Two-tier gate — BOTH hard:
+#   - node:       the node:test unit suite (tests/*.test.mjs).
+#   - playwright: the .spec.ts acceptance suite. Promoted to a hard gate in
+#                 F8. History: the ~35 interactive chat/loop/goal failures
+#                 were a node-20 readline race fixed in D7 (b479886); the
+#                 last 6 (phase6 provider-probe specs) crashed when no
+#                 `claude` binary was present because the claude-cli provider
+#                 left the async spawn 'error' event unhandled — fixed in
+#                 b9050be. The suite is now green offline, so it blocks.
 
 on:
   push:
@@ -37,9 +35,8 @@ jobs:
         run: node --test tests/*.test.mjs
 
   playwright:
-    name: Playwright specs (non-blocking — see docs/KNOWN-ISSUES.md)
+    name: Playwright acceptance specs (hard gate)
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

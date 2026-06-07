@@ -283,17 +283,19 @@ test.describe('Phase 6 — OpenClaw parity', () => {
 
   test('lazyclaw run --parallel executes a DAG by topological level', () => {
     const dir = tmpConfigDir();
-    // Workflow file with a fan-out / fan-in shape. Sleeps 80ms in each
-    // independent node so a sequential runner would take 240ms+ for the
-    // fan-out level alone; --parallel completes that level in ~80ms.
+    // Workflow file with a fan-out / fan-in shape. Sleeps 250ms in each
+    // independent node so a sequential runner would take 750ms+ for the
+    // fan-out level alone; --parallel completes that level in ~250ms. The
+    // wide gap keeps the timing assertion robust against process-spawn
+    // jitter on a hard-gated CI runner (F8).
     const wfPath = path.join(dir, 'wf.mjs');
     fs.writeFileSync(wfPath,
       `const sleep = ms => new Promise(r => setTimeout(r, ms));
        export const nodes = [
          { id: 'fetch',    type: 't', deps: [],                        async execute() { return 'csv'; } },
-         { id: 'embed',    type: 't', deps: ['fetch'],                 async execute() { await sleep(80); return 'E'; } },
-         { id: 'classify', type: 't', deps: ['fetch'],                 async execute() { await sleep(80); return 'C'; } },
-         { id: 'tag',      type: 't', deps: ['fetch'],                 async execute() { await sleep(80); return 'T'; } },
+         { id: 'embed',    type: 't', deps: ['fetch'],                 async execute() { await sleep(250); return 'E'; } },
+         { id: 'classify', type: 't', deps: ['fetch'],                 async execute() { await sleep(250); return 'C'; } },
+         { id: 'tag',      type: 't', deps: ['fetch'],                 async execute() { await sleep(250); return 'T'; } },
          { id: 'merge',    type: 't', deps: ['embed','classify','tag'], async execute(input) { return Object.keys(input).length; } },
        ];`,
     );
@@ -307,8 +309,11 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     const out = JSON.parse(r.stdout);
     expect(out.mode).toBe('parallel');
     expect(out.executedNodes).toEqual(expect.arrayContaining(['fetch', 'embed', 'classify', 'tag', 'merge']));
-    // 240ms+ sequential vs ~80ms parallel for the fan-out — generous CI ceiling
-    expect(elapsed).toBeLessThan(500);
+    // ~750ms sequential fan-out vs ~250ms parallel. Ceiling sits between
+    // the two with margin for spawn/CI jitter on both sides: a regression
+    // to sequential execution (~750ms + spawn) blows past it; the parallel
+    // path (~250ms + spawn) clears it comfortably.
+    expect(elapsed).toBeLessThan(650);
   });
 
   test('lazyclaw run --parallel-persistent runs a DAG with state persistence', () => {
