@@ -280,11 +280,11 @@ async function postTypingPlaceholder({ task, agentRecord, logger = () => {}, sen
   if (agentRecord?.iconEmoji)   sendOpts.icon_emoji = agentRecord.iconEmoji;
   try {
     const res = await slack.send(threadId, `_:hourglass_flowing_sand: thinking…_`, sendOpts);
-    return { ts: res?.ts || null, sender: owned ? slack : null, channel: task.slackChannel };
+    return { ts: res?.ts || null, sender: slack, owned, channel: task.slackChannel };
   } catch (err) {
     logger(`[router] slack typing post failed: ${err?.message || err}\n`);
     if (owned) await slack.stop().catch(() => {});
-    return { ts: null, sender: null };
+    return { ts: null, sender: null, owned: false };
   }
 }
 
@@ -360,12 +360,12 @@ async function autoSynthSkills({ task, agentsById, apiKey, baseUrl, fetchImpl, c
 }
 
 async function clearTypingPlaceholder(placeholder, logger) {
-  if (!placeholder?.ts || !placeholder?.channel) return;
+  if (!placeholder?.ts || !placeholder?.channel || !placeholder?.sender) return;
   const slack = placeholder.sender;
-  if (!slack) return;  // sender wasn't owned by us; skip
   try { await slack.deleteMessage(placeholder.channel, placeholder.ts); }
   catch (err) { logger(`[router] slack typing delete failed: ${err?.message || err}\n`); }
-  finally { await slack.stop().catch(() => {}); }
+  // Only stop a client we created here; a shared sender is closed once by run().
+  finally { if (placeholder.owned) await slack.stop().catch(() => {}); }
 }
 
 // Run agents in this team until the queue empties or budget runs out.
@@ -389,6 +389,10 @@ export async function runTaskTurn({
   signal,
   approve,
   security,
+  // E3 — a long-lived caller (e.g. the daemon) can pass a pre-started
+  // SlackChannel to reuse across many task turns; run() then neither
+  // creates nor stops it. When omitted, run() opens + closes its own.
+  slackSender: providedSender,
 } = {}) {
   if (!task || !team || !agentsById) {
     throw new MentionRouterError('task, team, agentsById are required', 'ROUTER_BAD_INPUT');
@@ -411,11 +415,30 @@ export async function runTaskTurn({
     current = tasksMod.patchTask(current.id, { status: 'running' }, configDir);
   }
 
+  // E3 — open ONE Slack client for the whole run and reuse it for every
+  // thread post + typing placeholder, instead of constructing + starting +
+  // stopping a fresh SlackChannel (a network auth handshake) on each of the
+  // ~3-4 posts per agent turn. Posts fall back to a per-call owned client
+  // when no shared sender is available (no thread, or start failure).
+  let slackSender = providedSender || null;
+  let ownSlackSender = false;
+  if (!slackSender && current.slackChannel && current.slackThreadTs) {
+    try {
+      const { SlackChannel } = await import('../channels/slack.mjs');
+      slackSender = new SlackChannel({ requireInbound: false });
+      await slackSender.start(async () => '', {});
+      ownSlackSender = true;
+    } catch (err) {
+      logger(`[router] slack start failed, falling back to per-post clients: ${err?.message || err}\n`);
+      slackSender = null;
+    }
+  }
+
   // Seed: append the user message if provided, and (also) push it to
   // Slack so anyone reading the thread sees the prompt.
   if (userMessage && String(userMessage).trim()) {
     current = tasksMod.appendTurn(current.id, { agent: 'user', text: String(userMessage), ts: new Date().toISOString() }, configDir);
-    await postToThread({ task: current, agentRecord: null, text: `*User*: ${userMessage}`, logger });
+    await postToThread({ task: current, agentRecord: null, text: `*User*: ${userMessage}`, logger, sender: slackSender });
   }
 
   const queue = [team.lead];
@@ -438,7 +461,7 @@ export async function runTaskTurn({
     // up the turn before the LLM finishes. Cleared right after the
     // real reply lands so we never leave a stale placeholder in the
     // thread.
-    const typing = await postTypingPlaceholder({ task: current, agentRecord, logger });
+    const typing = await postTypingPlaceholder({ task: current, agentRecord, logger, sender: slackSender });
 
     let result;
     try {
@@ -471,11 +494,11 @@ export async function runTaskTurn({
 
     // Slack mirror — only the user-visible text, with the agent name
     // prefixed so a human reader can follow who said what.
-    if (replyText) await postToThread({ task: current, agentRecord, text: replyText, logger });
+    if (replyText) await postToThread({ task: current, agentRecord, text: replyText, logger, sender: slackSender });
 
     if (replyText.includes(DONE_MARKER)) {
       current = tasksMod.patchTask(current.id, { status: 'done' }, configDir);
-      await postToThread({ task: current, agentRecord: null, text: `:white_check_mark: ${DONE_MARKER} — task closed by *${agentRecord.displayName || speaker}*.`, logger });
+      await postToThread({ task: current, agentRecord: null, text: `:white_check_mark: ${DONE_MARKER} — task closed by *${agentRecord.displayName || speaker}*.`, logger, sender: slackSender });
       stoppedBy = 'done';
       // Phase 18: fire one reflection LLM call per participating agent
       // whose memoryWrite is 'auto'. We pick "participating" off the
@@ -509,5 +532,9 @@ export async function runTaskTurn({
   }
 
   if (iterations >= maxAgentTurns) stoppedBy = 'budget';
+  // Close the Slack client once for the whole run — but only if WE opened
+  // it. A caller-provided sender is left running for the caller to reuse.
+  // All exit paths (done/budget/abort/idle) fall through to this return.
+  if (ownSlackSender && slackSender) await slackSender.stop().catch(() => {});
   return { task: current, iterations, stoppedBy };
 }

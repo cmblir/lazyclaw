@@ -186,6 +186,61 @@ test.describe('Phase 13 — mention router', () => {
     await mock.close();
   });
 
+  test('E3 — runTaskTurn reuses one provided Slack sender and never stops it', async () => {
+    const cfgDir = tmpDir('p13-slack-reuse');
+    fs.mkdirSync(path.join(cfgDir, 'tasks'), { recursive: true });
+    // A task WITH a live Slack thread so the post path actually runs.
+    const task = { ...makeTask('shop', 'planner'), slackChannel: 'C123', slackThreadTs: '1700000000.0001' };
+    fs.writeFileSync(path.join(cfgDir, 'tasks', `${task.id}.json`), JSON.stringify(task, null, 2));
+
+    const mock = await startMockAnthropic();
+    mock.queue.push({
+      json: {
+        id: 'msg_1', type: 'message', role: 'assistant',
+        content: [{ type: 'text', text: 'all done [[TASK_DONE]]' }],
+        stop_reason: 'end_turn',
+      },
+    });
+
+    // Counting fake Slack client. A caller-provided sender must be reused
+    // for every post and left running (the caller owns its lifecycle) —
+    // run() must neither start nor stop it, and must NOT construct a fresh
+    // client per post (the pre-E3 behaviour).
+    let sendCalls = 0, deleteCalls = 0, stopCalls = 0, startCalls = 0;
+    const fakeSender = {
+      async start() { startCalls++; },
+      async send() { sendCalls++; return { ts: `${sendCalls}.0` }; },
+      async deleteMessage() { deleteCalls++; },
+      async stop() { stopCalls++; },
+    };
+
+    const { runTaskTurn } = await loadRouter();
+    const r = await runTaskTurn({
+      task,
+      team: makeTeam('shop', ['planner', 'backend'], 'planner'),
+      agentsById: {
+        planner: makeAgent('planner', 'You are the planner.'),
+        backend: makeAgent('backend', 'You are the backend.'),
+      },
+      userMessage: 'go',
+      configDir: cfgDir,
+      apiKey: 'sk-test',
+      baseUrl: mock.baseUrl,
+      slackSender: fakeSender,
+    });
+
+    expect(r.stoppedBy).toBe('done');
+    // user echo + typing placeholder + reply + done marker — all four posts
+    // go through the single provided sender.
+    expect(sendCalls).toBeGreaterThanOrEqual(4);
+    // the typing placeholder was cleared through the same sender.
+    expect(deleteCalls).toBeGreaterThanOrEqual(1);
+    // caller-owned sender: run() neither starts nor stops it.
+    expect(startCalls).toBe(0);
+    expect(stopCalls).toBe(0);
+    await mock.close();
+  });
+
   test('lead → @backend → lead handoff records all three turns and closes via the lead', async () => {
     const cfgDir = tmpDir('p13-handoff');
     fs.mkdirSync(path.join(cfgDir, 'tasks'), { recursive: true });

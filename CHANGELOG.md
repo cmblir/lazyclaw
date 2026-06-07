@@ -71,6 +71,13 @@ Versioning: [SemVer](https://semver.org/).
   the same time. It now runs at most `concurrency` subtasks at a time via a
   bounded pool; plans with `<= concurrency` subtasks are unchanged (still start
   immediately), and output is still flushed in plan order.
+- **The mention router reuses a single Slack client per task run.** Each thread
+  post and "thinking…" placeholder used to construct, start, and stop its own
+  `SlackChannel` — a fresh auth handshake on every one of the ~3-4 posts per
+  agent turn. `runTaskTurn` now opens one client for the whole run, threads it
+  through every post, and closes it once; a long-lived caller can pass its own
+  client (via `slackSender`) to reuse across runs, in which case the router
+  leaves the caller to manage its lifecycle.
 - **`trainer: auto` now actually detects a Claude session — the $0 learning
   loop works for real subscribers.** Detection was a stub keyed on an exported
   `CLAUDE_CODE_OAUTH_TOKEN`, which a normal `claude login` never sets (it writes
