@@ -1,0 +1,83 @@
+// HTTP request/response helpers for the daemon: body readers, JSON/SSE
+// writers, provider-error status mapping, and a small fs existence check.
+// Pure — no daemon state — so any route module can import these freely.
+
+import fs from 'node:fs';
+
+export async function fileExists(p) {
+  try { await fs.promises.access(p); return true; }
+  catch { return false; }
+}
+
+export function readJson(req) {
+  return new Promise((resolve, reject) => {
+    let buf = '';
+    req.setEncoding('utf8');
+    req.on('data', d => { buf += d; if (buf.length > 5 * 1024 * 1024) { reject(new Error('body too large')); req.destroy(); } });
+    req.on('end', () => {
+      if (!buf) return resolve({});
+      try { resolve(JSON.parse(buf)); }
+      catch (e) { reject(new Error(`invalid JSON body: ${e.message}`)); }
+    });
+    req.on('error', reject);
+  });
+}
+
+// Raw body reader — used for `PUT /skills/<name>` where the body is
+// markdown rather than JSON. Same 1 MiB cap as the CLI's `--from-url`
+// path so HTTP can't sneak past the safeguard the CLI enforces.
+export const SKILL_MAX_BYTES = 1_048_576;
+export function readTextBody(req, maxBytes = SKILL_MAX_BYTES) {
+  return new Promise((resolve, reject) => {
+    let buf = '';
+    req.setEncoding('utf8');
+    req.on('data', d => {
+      buf += d;
+      if (buf.length > maxBytes) {
+        reject(new Error(`body exceeds ${maxBytes} bytes`));
+        req.destroy();
+      }
+    });
+    req.on('end', () => resolve(buf));
+    req.on('error', reject);
+  });
+}
+
+export function writeJson(res, status, obj, extraHeaders = {}) {
+  const body = JSON.stringify(obj);
+  res.writeHead(status, {
+    'content-type': 'application/json; charset=utf-8',
+    'content-length': Buffer.byteLength(body),
+    ...extraHeaders,
+  });
+  res.end(body);
+}
+
+// Map provider error codes to HTTP statuses so clients can branch on
+// res.status instead of parsing error messages. Returns
+// { status, headers? } so 429 can attach a Retry-After.
+//
+// Exported for unit testing without spinning up an actual provider that
+// would only fail under live network conditions.
+export function statusForProviderError(err) {
+  if (err?.code === 'INVALID_KEY') return { status: 401 };
+  if (err?.code === 'RATE_LIMIT') {
+    const retrySeconds = Math.max(1, Math.ceil((err.retryAfterMs || 1000) / 1000));
+    return { status: 429, headers: { 'retry-after': String(retrySeconds) } };
+  }
+  if (err?.status && err.status >= 400 && err.status < 600) return { status: err.status };
+  return { status: 502 };
+}
+
+export function writeSseHead(res) {
+  res.writeHead(200, {
+    'content-type': 'text/event-stream; charset=utf-8',
+    'cache-control': 'no-cache, no-transform',
+    'connection': 'close',
+  });
+}
+
+export function writeSse(res, event, data) {
+  if (event) res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
+}
