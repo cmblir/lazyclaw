@@ -487,21 +487,16 @@ async function cmdChat(flags = {}) {
   // and ghost-text autocomplete (below) can render. Falls back to the
   // plain non-terminal mode for piped/non-TTY callers.
   const useTerminal = !!process.stdin.isTTY;
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: useTerminal ? process.stdout : undefined,
-    terminal: useTerminal,
-    prompt: useTerminal ? '\x1b[38;5;208m›\x1b[0m ' : '',
-  });
+  // The readline interface is created *adjacent* to the for-await loop below
+  // (after all the async setup), not here. On node 20 a piped (non-TTY)
+  // stdin emits its lines + EOF during the `await import(...)` setup that
+  // runs before the loop; if the interface already exists, the async
+  // iterator hasn't attached yet and those lines are dropped — the chat
+  // produced no output on Linux CI (node 20) while passing on macOS (node
+  // 22, which tolerates the gap). Declaring rl/_ghost here keeps handleSlash's
+  // closures resolvable; the actual createInterface happens just-in-time.
+  let rl;
   let _ghost = { dispose: () => {}, suspend: () => {}, resume: () => {} };
-  if (useTerminal) {
-    // Cursor-style ghost autocomplete: when the buffer starts with `/`,
-    // render the longest matching command after the cursor in dim grey.
-    // Right-arrow at end-of-line accepts. Tab still cycles via the
-    // existing handleSlash branch; this only adds the inline preview.
-    _ghost = _attachGhostAutocomplete(rl) || _ghost;
-    rl.prompt();
-  }
 
   // --sandbox docker:<image> wraps subprocess-providers (claude-cli)
   // in a docker container. Parsed once up front so a slash-command
@@ -1285,6 +1280,23 @@ async function cmdChat(flags = {}) {
     }
   };
 
+  // Create the readline interface here — immediately before iterating, with
+  // no `await` between — so a non-TTY pipe's buffered lines reach the async
+  // iterator (see the note at the rl/_ghost declaration above).
+  rl = readline.createInterface({
+    input: process.stdin,
+    output: useTerminal ? process.stdout : undefined,
+    terminal: useTerminal,
+    prompt: useTerminal ? '\x1b[38;5;208m›\x1b[0m ' : '',
+  });
+  if (useTerminal) {
+    // Cursor-style ghost autocomplete: when the buffer starts with `/`,
+    // render the longest matching command after the cursor in dim grey.
+    // Right-arrow at end-of-line accepts. Tab still cycles via the existing
+    // handleSlash branch; this only adds the inline preview.
+    _ghost = _attachGhostAutocomplete(rl) || _ghost;
+    rl.prompt();
+  }
   try { for await (const line of rl) {
     const text = line.trim();
     if (!text) { if (useTerminal) rl.prompt(); continue; }
