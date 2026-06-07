@@ -28,6 +28,9 @@ import { applyChatWindow as _applyChatWindow, CHAT_WINDOW_TURNS, CHAT_WINDOW_TOK
 import { makeRunTurn as _chatRunTurnFactory } from './tui/run_turn.mjs';
 // v5.4: full slash-command dispatcher (24 commands) for the Ink branch.
 import { dispatchSlash as _dispatchSlash, parseSlashLine as _parseSlashLine } from './tui/slash_dispatcher.mjs';
+// D6: single canonical slash catalog. The /help dump in the legacy readline
+// loop reads this same list the Ink path (_help) and the popup use.
+import { SLASH_COMMANDS } from './tui/slash_commands.mjs';
 
 // --- Phase G: personality subcommand (spec §9, decision C7) -------------
 
@@ -95,21 +98,6 @@ async function cmdOnboard(flags) {
 }
 
 
-const SLASH_COMMANDS = [
-  { cmd: '/help',   help: 'list available slash commands' },
-  { cmd: '/status', help: 'print current provider, model, masked key' },
-  { cmd: '/new',    help: 'clear conversation and start over' },
-  { cmd: '/reset',  help: 'alias for /new' },
-  { cmd: '/usage',  help: 'show message count + chars sent so far' },
-  { cmd: '/skill',  help: 'switch active skills: /skill review,style (no arg → clear)' },
-  { cmd: '/provider', help: 'switch provider: /provider openai (no arg → print current)' },
-  { cmd: '/model',  help: 'switch model: /model gpt-4.1 or anthropic/claude-opus-4-7' },
-  { cmd: '/loop',   help: 'repeat one prompt: /loop "fix lint" [--max N] [--until "<regex>"]' },
-  { cmd: '/goal',   help: 'register/switch goal: /goal add NAME [--desc "..."] / /goal NAME / /goal list' },
-  { cmd: '/memory', help: 'show layered memory: /memory [core|recent|episodic [topic]]' },
-  { cmd: '/dream',  help: 'consolidate recent memory into per-topic episodic files' },
-  { cmd: '/exit',   help: 'leave the chat' },
-];
 
 
 
