@@ -2,13 +2,15 @@ name: Test lazyclaw
 
 # Two-tier gate:
 #   - node:  the node:test unit suite (tests/*.test.mjs) — the HARD gate.
-#            552 assertions, green on Linux.
+#            590 tests, green on Linux.
 #   - playwright: the .spec.ts acceptance suite. Runs for visibility but is
-#            non-blocking (continue-on-error) because ~35 interactive
-#            chat/loop/goal specs fail on Linux/non-TTY today — a pre-existing
-#            defect in the legacy readline chat loop, tracked in
-#            docs/KNOWN-ISSUES.md and slated for the Phase D rewrite. Flip
-#            playwright to a hard gate once that lands.
+#            non-blocking (continue-on-error). The ~35 interactive chat/loop/
+#            goal failures were fixed in D7 (b479886); the suite is now 666
+#            pass / 6 fail on this runner, and the remaining 6 are the
+#            phase6 providers/test specs that probe REAL external provider
+#            endpoints (no API keys / network on CI). See docs/KNOWN-ISSUES.md.
+#            Flip playwright to a hard gate once those 6 are made offline-safe
+#            (skip-when-no-key or stubbed probes) — Phase F8.
 
 on:
   push:
