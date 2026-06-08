@@ -1698,6 +1698,8 @@ export const SLASH_HANDLERS = new Map([
   ['/trainer', _trainer],
   ['/dashboard', _dashboard],
   ['/menu', _menu],
+  // /config — unmount and let chat.mjs run the setup wizard (ctx.requestSetup).
+  ['/config', async (_a, ctx) => { ctx.requestSetup = true; return 'EXIT'; }],
   ['/exit', async () => 'EXIT'],
   ['/quit', async () => 'EXIT'],
 ]);

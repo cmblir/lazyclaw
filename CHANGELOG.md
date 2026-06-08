@@ -8,6 +8,12 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **`/config` slash command.** Typing `/config` in the chat REPL leaves the
+  conversation and re-runs the setup wizard (provider, model, channels). Ink
+  owns stdin, so the slash signals the host (`ctx.requestSetup`) and unmounts;
+  the wizard then runs once the REPL exits. Wired into both the Ink path and the
+  legacy readline path (via a shared `legacySlashRoute` seam).
+
 - **Hermes-style first-run setup.** `lazyclaw setup` (and the first-run path)
   is now phased: pick a provider + model (with a ≥64k-context tip), verify one
   clean chat, then optionally connect a channel/gateway — Slack, Telegram,
@@ -45,6 +51,11 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Changed
 
+- **The setup wizard now shows the full lazyclaw splash.** `lazyclaw setup` (and
+  the first-run welcome) rendered a small figlet banner; they now render the same
+  sloth + wordmark + subcommands splash the chat REPL shows. The dynamic props
+  (tool + skill groups) are gathered by a shared `tui/splash_props.mjs` so the two
+  surfaces can't drift.
 - **Dashboard: dropped the header mascot and recolored the accent to a terminal
   amber.** Removed the pixel mascot SVG (and its CSS) from the header, leaving
   the `lazyclaw` wordmark. The accent moved from coral `#d97757` to amber-gold

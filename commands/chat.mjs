@@ -21,6 +21,26 @@ import { makeRunTurn as _chatRunTurnFactory } from '../tui/run_turn.mjs';
 import { dispatchSlash as _dispatchSlash, parseSlashLine as _parseSlashLine } from '../tui/slash_dispatcher.mjs';
 import { SLASH_COMMANDS } from '../tui/slash_commands.mjs';
 
+// Legacy (non-Ink) slash routing for dispatcher-style, ctx-only commands.
+// The Ink REPL routes every slash through _dispatchSlash/SLASH_HANDLERS, but
+// the legacy readline path uses a hand-written switch (in cmdChat). Commands
+// like /config only mutate ctx and return a sentinel, so we keep that wiring
+// in one exported helper that BOTH the legacy switch and the regression test
+// drive — this is the seam that proves /config reaches setup on the legacy
+// path (the post-loop guard re-runs cmdSetup when ctx.requestSetup is set).
+// Returns 'EXIT' when the loop must break, or undefined when the command is
+// not one this helper owns (caller falls through to its own handling).
+export function legacySlashRoute(cmd, ctx) {
+  switch (cmd) {
+    case '/config':
+      // Mirror tui/slash_dispatcher.mjs '/config': signal the host, unmount.
+      ctx.requestSetup = true;
+      return 'EXIT';
+    default:
+      return undefined;
+  }
+}
+
 export async function cmdChat(flags = {}) {
   await ensureRegistry();
   const sessionsMod = await import('../sessions.mjs');
@@ -82,38 +102,11 @@ export async function cmdChat(flags = {}) {
       // narrow-terminal fallback: <60 cols falls back to v4
       if ((process.stdout.columns || 80) < 60) throw new Error('narrow-terminal');
 
-      // Tool groups — read the v5 registry and collapse to one row per category.
-      let toolGroups = [];
-      try {
-        const registry = await import('../mas/tools/registry.mjs');
-        const byCat = registry.byCategory();
-        toolGroups = Object.entries(byCat).map(([category, items]) => ({
-          category,
-          sensitive: items.some(t => t.sensitive),
-          verbs: items.map(t => t.name.replace(/^[a-z]+_/, '')).slice(0, 6),
-        })).sort((a, b) => a.category.localeCompare(b.category));
-      } catch { /* registry unavailable → empty list */ }
-
-      // Skill groups — group installed skills by filename hyphen-prefix
-      // (canonical C5 fallback: <group>-<name>.md → group; bare names → 'general').
-      let skillGroups = [];
-      try {
-        const { listSkills } = await import('../skills.mjs');
-        // Use the resolved config dir, not the module default, so a
-        // LAZYCLAW_CONFIG_DIR override surfaces that install's skills.
-        const flat = listSkills(path.dirname(configPath()));
-        const byGroup = new Map();
-        for (const s of flat) {
-          const i = s.name.indexOf('-');
-          const group = i > 0 ? s.name.slice(0, i) : 'general';
-          const sub = i > 0 ? s.name.slice(i + 1) : s.name;
-          if (!byGroup.has(group)) byGroup.set(group, []);
-          byGroup.get(group).push(sub);
-        }
-        skillGroups = [...byGroup.entries()]
-          .map(([group, names]) => ({ group, names: names.slice(0, 6) }))
-          .sort((a, b) => a.group.localeCompare(b.group));
-      } catch { /* skills dir unavailable → empty list */ }
+      // Tool + skill groups for the splash panel — shared with the setup
+      // wizard via tui/splash_props.mjs so both surfaces render the same panel.
+      const { gatherToolAndSkillGroups } = await import('../tui/splash_props.mjs');
+      const { tools: toolGroups, skills: skillGroups } =
+        await gatherToolAndSkillGroups(path.dirname(configPath()));
 
       const splashProps = {
         provider: activeProvName, model: activeModel,
@@ -298,6 +291,9 @@ export async function cmdChat(flags = {}) {
         pickerRef: _inkPickerRef,
       }), { exitOnCtrlC: true, patchConsole: true });
       await ink.waitUntilExit();
+      // /config asks to (re)run the wizard: now that Ink has released stdin,
+      // run setup, then return to the shell (re-launch `lazyclaw` to chat).
+      if (_inkCtx.requestSetup) await (await import('./setup.mjs')).cmdSetup(undefined, [], {});
       return;
     } catch (e) {
       // Fall through to legacy path on any ink failure (missing import,
@@ -1100,6 +1096,16 @@ export async function cmdChat(flags = {}) {
         } catch { /* /exit must never hang or throw */ }
         return 'EXIT';
       }
+      case '/config': {
+        // Route through the shared legacySlashRoute helper (covered by
+        // tests/f-config-slash-splash.test.mjs) so the legacy path's /config
+        // wiring is the exact code the regression test exercises. It sets
+        // _legacyCtx.requestSetup and returns 'EXIT'; the post-loop guard at the
+        // bottom of cmdChat re-runs the setup wizard when requestSetup is set.
+        // Without this case the legacy readline path fell through to `default:`
+        // and printed "unknown slash" instead of launching setup.
+        return legacySlashRoute(cmd, _legacyCtx);
+      }
       default:
         process.stdout.write(`unknown slash: ${cmd} (try /help)\n`);
         return true;
@@ -1176,6 +1182,8 @@ export async function cmdChat(flags = {}) {
     try { process.stdin.pause(); } catch (_) {}
     try { process.stdin.unref(); } catch (_) {}
   }
+  // /config in the legacy path: re-run the wizard after the readline loop closes.
+  if (_legacyCtx.requestSetup) await (await import('./setup.mjs')).cmdSetup(undefined, [], {});
 }
 
 // Light wrapper around the daemon — meant for users who installed

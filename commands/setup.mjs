@@ -23,6 +23,7 @@ import { makeRunTurn as _chatRunTurnFactory } from '../tui/run_turn.mjs';
 import { dispatchSlash as _dispatchSlash, parseSlashLine as _parseSlashLine } from '../tui/slash_dispatcher.mjs';
 import { SLASH_COMMANDS } from '../tui/slash_commands.mjs';
 import { runChannelStep, runWebhookStep } from './setup_channels.mjs';
+import { splashPropsForSetup, renderSplashToString } from '../tui/splash_props.mjs';
 
 function applyOnboardConfig(currentCfg, flags) {
   // Honors the OpenClaw-style unified provider/model string ("anthropic/claude-opus-4-7")
@@ -196,7 +197,7 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
 
   // Header.
   if (process.stdout.isTTY) process.stdout.write('\x1b[2J\x1b[H');
-  _renderBanner(readVersionFromRepo()).forEach((l) => process.stdout.write(l + '\n'));
+  process.stdout.write(renderSplashToString(await splashPropsForSetup({ version: readVersionFromRepo() })) + '\n');
   process.stdout.write('\n');
   process.stdout.write(`  ${bold('🔧 Setup wizard')}\n`);
   process.stdout.write(`  ${dim('Get one clean chat working first, then optionally add a channel, workspace, or skills. Press Enter to accept the default; type "skip" or "n" to bypass an optional step.')}\n\n`);
@@ -320,7 +321,7 @@ async function _runFirstTimeOnboard() {
   const dim    = (s) => `\x1b[2m${s}\x1b[0m`;
   const bold   = (s) => `\x1b[1m${s}\x1b[0m`;
   process.stdout.write('\x1b[2J\x1b[H');
-  _renderBanner(readVersionFromRepo()).forEach((l) => process.stdout.write(l + '\n'));
+  process.stdout.write(renderSplashToString(await splashPropsForSetup({ version: readVersionFromRepo() })) + '\n');
   process.stdout.write('\n');
   process.stdout.write(`  ${bold('👋 Welcome — first-time setup')}\n\n`);
   process.stdout.write(`  ${dim('No provider configured yet at')} ${configPath()}\n`);
