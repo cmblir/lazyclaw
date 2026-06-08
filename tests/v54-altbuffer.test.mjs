@@ -180,20 +180,21 @@ test('ReplApp alt-buffer branch does NOT use <Static/> for scrollback (v5.4.2)',
     'alt-buffer arm must NOT use <Static items=.../>');
 });
 
-test('cli.mjs passes splashProps to ReplApp and uses exitOnCtrlC (v5.4.1)', async () => {
+test('commands/chat.mjs passes splashProps to ReplApp and uses exitOnCtrlC (v5.4.1)', async () => {
   // v5.4.1 contract: splashProps reaches ReplApp directly so the
   // Static scrollback renders the splash INSIDE the alt-buffer.
   // The v5.4.0 pre-print gate is intentionally removed (it caused
-  // a blank-screen-on-mount bug).
+  // a blank-screen-on-mount bug). cmdChat (and its Ink path) moved out
+  // of cli.mjs into commands/chat.mjs in D7.
   const fs = await import('node:fs');
   const url = await import('node:url');
   const path = await import('node:path');
   const here = path.dirname(url.fileURLToPath(import.meta.url));
-  const cli = fs.readFileSync(path.join(here, '..', 'cli.mjs'), 'utf8');
-  assert.ok(/ReplApp[\s\S]{0,400}splashProps,/.test(cli),
-    'cli.mjs must pass splashProps to ReplApp');
-  assert.ok(cli.includes('exitOnCtrlC: true'),
+  const chat = fs.readFileSync(path.join(here, '..', 'commands', 'chat.mjs'), 'utf8');
+  assert.ok(/ReplApp[\s\S]{0,400}splashProps,/.test(chat),
+    'commands/chat.mjs must pass splashProps to ReplApp');
+  assert.ok(chat.includes('exitOnCtrlC: true'),
     'render() must be called with exitOnCtrlC: true');
-  assert.ok(!cli.includes('_altWillMount'),
-    'cli.mjs must NOT reintroduce the v5.4.0 pre-print gate');
+  assert.ok(!chat.includes('_altWillMount'),
+    'commands/chat.mjs must NOT reintroduce the v5.4.0 pre-print gate');
 });
