@@ -35,6 +35,13 @@ Versioning: [SemVer](https://semver.org/).
   section stacked and no JS. The references are now relative (`dashboard.css`,
   `dashboard.js`), which resolves correctly from the daemon root, a subpath, and
   `file://`.
+- **The first run always reaches setup — a `mock`/blank provider no longer counts
+  as configured.** First-run routing keyed on `!!cfg.provider`, so a config left
+  on the placeholder `mock` provider (canned replies, never a real choice)
+  registered as "configured" and dropped straight into chat, skipping the guided
+  setup. `hasConfiguredProvider()` now treats blank and `mock` as not-configured,
+  so the first real launch lands in setup and only a genuine saved provider skips
+  it on later runs.
 
 ### Changed
 

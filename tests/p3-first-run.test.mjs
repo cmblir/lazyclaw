@@ -5,10 +5,27 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { firstRunMode } from '../first_run.mjs';
+import { firstRunMode, hasConfiguredProvider } from '../first_run.mjs';
 
 test('fresh install on a TTY runs the full setup funnel', () => {
   assert.equal(firstRunMode({ hasProvider: false, flagPick: false, isTTY: true }), 'setup');
+});
+
+test('hasConfiguredProvider treats blank and mock as not configured', () => {
+  assert.equal(hasConfiguredProvider(''), false);
+  assert.equal(hasConfiguredProvider(undefined), false);
+  assert.equal(hasConfiguredProvider(null), false);
+  assert.equal(hasConfiguredProvider('   '), false);
+  assert.equal(hasConfiguredProvider('mock'), false);
+  assert.equal(hasConfiguredProvider('MOCK'), false);
+  assert.equal(hasConfiguredProvider('anthropic'), true);
+  assert.equal(hasConfiguredProvider('claude-cli'), true);
+});
+
+test('a mock or blank provider on a TTY still routes to first-run setup', () => {
+  assert.equal(firstRunMode({ hasProvider: hasConfiguredProvider('mock'), flagPick: false, isTTY: true }), 'setup');
+  assert.equal(firstRunMode({ hasProvider: hasConfiguredProvider(''), flagPick: false, isTTY: true }), 'setup');
+  assert.equal(firstRunMode({ hasProvider: hasConfiguredProvider('anthropic'), flagPick: false, isTTY: true }), 'none');
 });
 
 test('explicit --pick stays a lightweight provider/model pick', () => {

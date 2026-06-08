@@ -15,7 +15,7 @@ import {
   _pickModelInteractive, _pickProviderInteractive, _printChatBanner,
   _quickPrompt, _renderBanner, _renderV5Banner,
 } from '../tui/pickers.mjs';
-import { firstRunMode as _firstRunMode } from '../first_run.mjs';
+import { firstRunMode as _firstRunMode, hasConfiguredProvider } from '../first_run.mjs';
 import { applyChatWindow as _applyChatWindow, CHAT_WINDOW_TURNS, CHAT_WINDOW_TOKEN_BUDGET } from '../chat_window.mjs';
 import { makeRunTurn as _chatRunTurnFactory } from '../tui/run_turn.mjs';
 import { dispatchSlash as _dispatchSlash, parseSlashLine as _parseSlashLine } from '../tui/slash_dispatcher.mjs';
@@ -37,7 +37,7 @@ export async function cmdChat(flags = {}) {
   // gets the full 5-step guided setup (provider+model, workspace, skills) —
   // not just the provider picker. `chat --pick` stays a lightweight re-pick.
   const _mode = _firstRunMode({
-    hasProvider: !!activeProvName,
+    hasProvider: hasConfiguredProvider(activeProvName),
     flagPick: !!flags.pick,
     isTTY: !!process.stdin.isTTY,
   });
