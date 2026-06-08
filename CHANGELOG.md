@@ -6,6 +6,17 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Assistant replies no longer vanish in the interactive chat REPL.** The Ink
+  REPL was wired with the legacy `runTurn` prop, whose writeFn wrote streamed
+  chunks straight to `process.stdout`. Those bytes landed in Ink's live frame
+  and were erased on the next render (status refresh, next keystroke), so each
+  assistant reply flashed and disappeared while the user's own lines — `<Static>`
+  scrollback items — survived. The chat path now goes through `runTurnFactory`,
+  so chunks flow into React state and commit to the `<Static>` scrollback on
+  turn-complete (the long-standing v5.1 TODO); replies persist across re-renders.
+
 ## [6.0.1] - 2026-06-08
 
 ### Fixed

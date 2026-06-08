@@ -255,14 +255,14 @@ export async function cmdChat(flags = {}) {
           ? api.openPicker(opts)
           : Promise.resolve(null);
       };
-      // v5.0.10: write streamed chunks straight to process.stdout. Ink
-      // owns the screen, so interleaved stdout writes can produce some
-      // visual jank — accepted trade for unblocking the chat loop. v5.1
-      // TODO: route through a ref'd scrollback <Static/> region in
-      // ReplApp so Ink owns all output.
-      const _inkRunTurn = _chatRunTurnFactory({
+      // Route streamed chunks through ReplApp's injected writeFn: chunks
+      // land in React state (liveAssistant) → live region → committed to
+      // the <Static/> scrollback on turn-complete, so Ink owns all output.
+      // Writing straight to process.stdout (the old v5.1 hack) put replies
+      // in Ink's live frame, which the next render erased — replies vanished.
+      const _inkRunTurnFactory = (writeFn) => _chatRunTurnFactory({
         ctx: _inkCtx,
-        writeFn: (chunk) => process.stdout.write(chunk),
+        writeFn,
       });
       // v5.4: full slash-command dispatch via tui/slash_dispatcher.mjs.
       // Dispatcher returns a string (rendered to scrollback by ReplApp),
@@ -293,7 +293,7 @@ export async function cmdChat(flags = {}) {
           ctxUsed: _inkRunningUsage ? _inkRunningUsage.totalTokens : undefined,
           ctxTotal: CHAT_WINDOW_TOKEN_BUDGET,
         }),
-        runTurn: _inkRunTurn,
+        runTurnFactory: _inkRunTurnFactory,
         onSlashCommand: _inkSlashHandler,
         pickerRef: _inkPickerRef,
       }), { exitOnCtrlC: true, patchConsole: true });
