@@ -1,7 +1,15 @@
 // Daemon route handlers (conversation), extracted verbatim from makeHandler (D5).
 // Each handler takes the per-request dispatch context `c` and returns the
 // HTTP response. Bodies are unchanged; only the dispatch wrapper is new.
-import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, checkCostCap, accumulateMetricsFromCost, resolveProvider } from './_deps.mjs';
+import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, checkCostCap, accumulateMetricsFromCost, resolveProvider, openThreads, handoffWithRollback } from './_deps.mjs';
+import { randomBytes } from 'node:crypto';
+
+// F5 — mint a fresh session id for a newly-seen channel:externalId binding.
+// Kept filename-local (threads.mjs's newThreadId isn't exported); the `ib_`
+// hex form satisfies sessions.mjs sessionPath validation (no / \ . ..).
+function newInboundSessionId() {
+  return 'ib_' + randomBytes(8).toString('hex');
+}
 
 export async function execRequest(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
@@ -149,16 +157,49 @@ export async function inbound(c) {
           const provName = body.provider || cfg.provider || 'mock';
           const resolved = resolveProvider(body, provName, cachedByName, logger);
           if (resolved.error) return writeJson(res, 400, { error: resolved.error });
+          // F5 — when the relaying bot identifies its channel + external
+          // conversation id, bind {channel, externalId} -> a persistent
+          // session so context follows across channels (and across a
+          // /handoff). Without those fields we keep the original stateless
+          // one-shot behavior, byte-compatible with existing callers.
+          const cfgDir = ctx.sessionsDirGetter();
+          const channel = (typeof body.channel === 'string' && body.channel) ? body.channel : null;
+          const externalId = (body.externalId != null && String(body.externalId)) ? String(body.externalId) : null;
+          let threads = null;
+          let bound = null;
+          let sessionId = null;
+          if (channel && externalId) {
+            threads = openThreads(cfgDir);
+            bound = threads.findByExternal(channel, externalId);
+            if (bound) {
+              sessionId = bound.sessionId;
+            } else {
+              sessionId = newInboundSessionId();
+              threads.upsert({ channel, externalId, sessionId });
+              bound = threads.findByExternal(channel, externalId);
+            }
+          }
+          // Hydrate prior turns for a bound session (mirrors POST /agent).
+          const messages = sessionId
+            ? ctx.sessionsMod.loadTurns(sessionId, cfgDir).map((t) => ({ role: t.role, content: t.content }))
+            : [];
+          messages.push({ role: 'user', content: text });
+          if (sessionId) ctx.sessionsMod.appendTurn(sessionId, 'user', text, cfgDir);
           let acc = '';
           let inboundUsage = null;
           try {
             for await (const chunk of resolved.provider.sendMessage(
-              [{ role: 'user', content: text }],
+              messages,
               { apiKey: cfg['api-key'], model: body.model || cfg.model, onUsage: (u) => { inboundUsage = u; } },
             )) acc += chunk;
           } catch (err) {
             const m = statusForProviderError(err);
             return writeJson(res, m.status, { error: err?.message || String(err), code: err?.code || null }, m.headers || {});
+          }
+          if (sessionId) {
+            ctx.sessionsMod.appendTurn(sessionId, 'assistant', acc, cfgDir);
+            // Refresh lastTurnAt on the binding.
+            threads.upsert({ channel, externalId, sessionId, threadId: bound.threadId });
           }
           // Feed the running spend total so the cost cap can actually trip
           // on /inbound traffic (mirrors POST /agent / POST /chat).
@@ -168,7 +209,43 @@ export async function inbound(c) {
               if (c) accumulateMetricsFromCost(metrics, inboundUsage, c);
             } catch { /* cost is best-effort; never block a reply on it */ }
           }
-          return writeJson(res, 200, { reply: acc, threadId: body.threadId || null });
+          const out = { reply: acc, threadId: bound ? bound.threadId : (body.threadId || null) };
+          if (sessionId) out.sessionId = sessionId;
+          return writeJson(res, 200, out);
+}
+
+export async function handoff(c) {
+  const { ctx, res, req } = c;
+          // F6 — re-point a thread to a new channel/externalId so a later
+          // inbound on the target resumes the SAME session (context follows).
+          // The daemon has no live per-channel send map, so it migrates the
+          // binding directly with no notifier; once a send adapter is injected,
+          // a failed target notify rolls the binding back (channels/handoff.mjs).
+          let body;
+          try { body = await readJson(req); }
+          catch (e) { return writeJson(res, 400, { error: `invalid JSON body: ${e.message}` }); }
+          const threadId = typeof body.threadId === 'string' ? body.threadId.trim() : '';
+          const target = typeof body.target === 'string' ? body.target.trim() : '';
+          const externalId = body.externalId != null ? String(body.externalId).trim() : '';
+          if (!threadId || !target || !externalId) {
+            return writeJson(res, 400, { error: 'threadId, target, and externalId are required' });
+          }
+          const cfgDir = ctx.sessionsDirGetter();
+          const threads = openThreads(cfgDir);
+          try {
+            const next = await handoffWithRollback({
+              threads, threadId, target, externalId,
+              note: typeof body.note === 'string' ? body.note : '',
+            });
+            return writeJson(res, 200, {
+              threadId: next.threadId, channel: next.channel,
+              externalId: next.externalId, sessionId: next.sessionId,
+            });
+          } catch (err) {
+            if (err?.code === 'THREAD_NOT_FOUND') return writeJson(res, 404, { error: err.message, code: 'THREAD_NOT_FOUND' });
+            if (err?.code === 'HANDOFF_SEND_FAILED') return writeJson(res, 502, { error: err.message, code: 'HANDOFF_SEND_FAILED' });
+            return writeJson(res, 400, { error: err?.message || String(err) });
+          }
 }
 
 export async function agent(c) {

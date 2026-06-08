@@ -66,6 +66,7 @@ export const ROUTES = [
   { m: (c) => c.req.method === 'DELETE' && !!c.workflowMatch, h: workflows.workflowDelete },
   { m: (c) => c.route === 'POST /chat', h: conversation.chat },
   { m: (c) => c.route === 'POST /inbound', h: conversation.inbound },
+  { m: (c) => c.route === 'POST /handoff', h: conversation.handoff },
   { m: (c) => c.route === 'POST /agent', h: conversation.agent },
   { m: (c) => c.route === 'GET /agents', h: registry.agentsList },
   { m: (c) => c.route === 'POST /agents', h: registry.agentsCreate },

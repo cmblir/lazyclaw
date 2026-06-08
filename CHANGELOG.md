@@ -53,6 +53,19 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **Cross-channel handoff actually carries context now (daemon relay path).**
+  The "context follows" marquee feature was dead: `channels/threads.mjs` (the
+  threadId ↔ session store) had zero production callers, and `POST /inbound`
+  was a stateless one-shot relay. Now, when a relaying bot includes `channel`
+  + `externalId`, `POST /inbound` binds them to a persistent thread/session,
+  hydrates prior turns, and persists each turn — so a conversation survives
+  across messages. A new `POST /handoff` re-points a thread to another channel
+  (preserving the session); the next inbound on the target resumes the SAME
+  session, so context follows across the channel boundary. A rollback helper
+  restores the source binding if a target notification fails. (Inbound with no
+  `channel`/`externalId` stays byte-compatibly stateless. The CLI `/handoff`
+  slash and per-channel listener auto-binding remain separate follow-ups; this
+  wires the daemon relay path that external bots use.)
 - **`providers test` (CLI + daemon `GET /providers/test`) no longer crashes the
   process when the `claude` binary is absent.** The claude-cli provider spawned
   `claude` but caught only *synchronous* spawn failures; ENOENT (no binary on
