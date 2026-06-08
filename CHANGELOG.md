@@ -6,6 +6,8 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-06-08
+
 ### Security
 
 - **Sensitive tools are fail-closed by default.** `bash`, `write`, `web_fetch`,
