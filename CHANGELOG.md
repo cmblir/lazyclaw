@@ -16,6 +16,14 @@ Versioning: [SemVer](https://semver.org/).
   scrollback items — survived. The chat path now goes through `runTurnFactory`,
   so chunks flow into React state and commit to the `<Static>` scrollback on
   turn-complete (the long-standing v5.1 TODO); replies persist across re-renders.
+- **Dashboard renders styled when served from a subpath or opened directly.**
+  `dashboard.html` referenced its split-out assets with absolute paths
+  (`/dashboard.css`, `/dashboard.js`), so any context where the page is not at
+  the host root — a reverse-proxy subpath, or opening `web/dashboard.html` as a
+  local file — 404'd both, leaving a completely unstyled page with every tab
+  section stacked and no JS. The references are now relative (`dashboard.css`,
+  `dashboard.js`), which resolves correctly from the daemon root, a subpath, and
+  `file://`.
 
 ### Changed
 
