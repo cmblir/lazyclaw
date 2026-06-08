@@ -33,6 +33,8 @@ jobs:
       - run: npm ci
       - name: File-size lint gate (D8 — locks module sizes)
         run: node scripts/lint-file-size.mjs
+      - name: Pack-completeness gate (every relative import must be shipped)
+        run: node scripts/check-pack.mjs
       - name: Run node:test suite
         run: node --test tests/*.test.mjs
 

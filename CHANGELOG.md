@@ -6,6 +6,22 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.0.1] - 2026-06-08
+
+### Fixed
+
+- **The published package now actually installs and runs.** 6.0.0 shipped a
+  `package.json` `files` whitelist that predated the Phase D refactor, so the
+  npm tarball was missing `lib/`, `commands/`, `daemon/`, and several root
+  modules (`first_run.mjs`, `dotenv_min.mjs`, `goals_cron.mjs`,
+  `secure_write.mjs`) — a global install crashed immediately with
+  `ERR_MODULE_NOT_FOUND: …/lib/config.mjs imported from …/cli.mjs`. The repo
+  tests never caught it because they run from the source tree where every file
+  exists. Added the missing paths (plus the `channels-*` platform dirs) and a
+  new `scripts/check-pack.mjs` gate (wired into CI) that resolves every
+  relative import in the would-be-published file set and fails if any target
+  isn't shipped, so a published-but-broken release can't happen again.
+
 ## [6.0.0] - 2026-06-08
 
 ### Security

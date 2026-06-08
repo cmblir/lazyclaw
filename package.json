@@ -1,6 +1,6 @@
 {
   "name": "lazyclaw",
-  "version": "6.0.0",
+  "version": "6.0.1",
   "description": "Lazy, elegant terminal CLI for chatting with Claude / OpenAI / Gemini / Ollama, orchestrating multi-step LLM workflows, and running multi-agent Slack teams with cross-task memory. Banner-on-launch, slash-command ghost autocomplete, persistent sessions, local HTTP gateway.",
   "keywords": [
     "claude",
@@ -33,6 +33,7 @@
   "scripts": {
     "test": "node --test tests/*.test.mjs && playwright test",
     "lint:size": "node scripts/lint-file-size.mjs",
+    "lint:pack": "node scripts/check-pack.mjs",
     "test:bench": "node scripts/bench-providers.mjs",
     "test:bench:index": "node --test tests/index_store.bench.mjs",
     "test:perf": "node --test tests/phaseH-perf.test.mjs tests/index_store.bench.mjs",
@@ -42,6 +43,18 @@
   "files": [
     "cli.mjs",
     "daemon.mjs",
+    "daemon/",
+    "lib/",
+    "commands/",
+    "first_run.mjs",
+    "dotenv_min.mjs",
+    "goals_cron.mjs",
+    "secure_write.mjs",
+    "channels-discord/",
+    "channels-email/",
+    "channels-signal/",
+    "channels-voice/",
+    "channels-whatsapp/",
     "sessions.mjs",
     "skills.mjs",
     "logger.mjs",
