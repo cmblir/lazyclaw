@@ -31,6 +31,8 @@ jobs:
           node-version: "20"
           cache: npm
       - run: npm ci
+      - name: File-size lint gate (D8 — locks module sizes)
+        run: node scripts/lint-file-size.mjs
       - name: Run node:test suite
         run: node --test tests/*.test.mjs
 
