@@ -119,6 +119,26 @@ test('abort mid-stream keeps partial output with [aborted] suffix', () => {
   assert.ok(last.text.startsWith('partial-reply'), `expected partial prefix, got: ${last.text}`);
 });
 
+test('error mid-turn surfaces the message in an [error: ...] suffix (F3)', () => {
+  let s = makeReplState();
+  const ctrl = { abort: () => {} };
+  s = onUserInput(s, { text: 'do thing', controller: ctrl });
+  s = onStreamChunk(s, { chunk: 'partial-' });
+  s = onTurnComplete(s, { reason: 'error', error: 'rate limit exceeded' });
+  const last = s.scrollback[s.scrollback.length - 1];
+  assert.equal(last.kind, 'error');
+  assert.ok(last.text.endsWith('[error: rate limit exceeded]'),
+    `expected the error message in the suffix, got: ${last.text}`);
+
+  // Back-compat: a missing message still renders the bare badge.
+  let s2 = makeReplState();
+  s2 = onUserInput(s2, { text: 'x', controller: ctrl });
+  s2 = onTurnComplete(s2, { reason: 'error' });
+  const last2 = s2.scrollback[s2.scrollback.length - 1];
+  assert.ok(last2.text.endsWith('[error]'),
+    `expected bare badge fallback, got: ${last2.text}`);
+});
+
 test('onEscape drops live partial output and clears streaming', () => {
   let aborted = false;
   const ctrl = { abort: () => { aborted = true; } };

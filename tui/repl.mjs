@@ -159,10 +159,10 @@ export function onStreamChunk(state, { chunk }) {
   return { ...state, liveAssistant: state.liveAssistant + chunk };
 }
 
-export function onTurnComplete(state, { reason } = {}) {
+export function onTurnComplete(state, { reason, error } = {}) {
   const promoted = state.pendingPrepend;
   const suffix = reason === 'aborted' ? ' [aborted]'
-              : reason === 'error'   ? ' [error]'
+              : reason === 'error'   ? (error ? ` [error: ${error}]` : ' [error]')
               : '';
   const text = (state.liveAssistant || '') + suffix;
   // Commit any accumulated live text to scrollback. If the turn produced
@@ -298,7 +298,7 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
         refreshStatus();
       } catch (err) {
         setState((s) => onTurnComplete(s, {
-          reason: err && err.name === 'AbortError' ? 'aborted' : 'error',
+          reason: err && err.name === 'AbortError' ? 'aborted' : 'error', error: err?.message || String(err),
         }));
       }
       return;

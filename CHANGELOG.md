@@ -78,6 +78,11 @@ Versioning: [SemVer](https://semver.org/).
   through every post, and closes it once; a long-lived caller can pass its own
   client (via `slackSender`) to reuse across runs, in which case the router
   leaves the caller to manage its lifecycle.
+- **The chat REPL surfaces the actual error instead of a bare `[error]`.** When
+  a turn failed, the Ink REPL appended only ` [error]` to the transcript,
+  hiding the cause (rate limit, auth, network, …). It now renders
+  ` [error: <message>]` with the thrown message, falling back to the bare
+  badge only when no message is available.
 - **`trainer: auto` now actually detects a Claude session — the $0 learning
   loop works for real subscribers.** Detection was a stub keyed on an exported
   `CLAUDE_CODE_OAUTH_TOKEN`, which a normal `claude login` never sets (it writes
