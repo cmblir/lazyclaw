@@ -4,7 +4,8 @@
       --border: #2a2a36;
       --text: #e8e8ea;
       --dim: #a8a8b8;
-      --accent: #d97757;
+      --accent: #d9b35a;
+      --accent-ink: #1a1610;
       --ok: #4ade80;
       --warn: #f59e0b;
       --err: #ef4444;
@@ -27,14 +28,7 @@
       gap: 14px;
     }
     .logo { font-weight: 700; font-size: 16px; color: var(--accent); display: flex; align-items: center; gap: 10px; }
-    .logo .mascot { width: 44px; height: 44px; flex: none; image-rendering: pixelated; image-rendering: crisp-edges; }
     .ver  { color: var(--dim); font-size: 11px; }
-    /* lazyclaw 16x16 pixel mascot — Claude Design handoff (mascot sheet
-       v0.1, "claude original" palette). Claude's asterisk star (#d97757)
-       worn under a crustacean helmet (#c33d2a) with two antenna-claws.
-       Idle pose (sleepy slits). Hover gently brightens the helmet. */
-    .mascot { transition: filter 0.2s ease; }
-    .logo:hover .mascot { filter: drop-shadow(0 0 6px rgba(217, 119, 87, 0.45)); }
     nav.tabs {
       display: flex;
       flex-wrap: wrap;
@@ -81,7 +75,7 @@
     .dim { color: var(--dim); font-size: 12px; }
     button.btn {
       background: var(--accent);
-      color: #fff;
+      color: var(--accent-ink);
       border: 0;
       border-radius: 6px;
       padding: 8px 14px;
@@ -119,7 +113,7 @@
       gap: 14px;
     }
     .msg { padding: 8px 12px; border-radius: 6px; max-width: 90%; white-space: pre-wrap; word-wrap: break-word; }
-    .msg.user { align-self: flex-end; background: rgba(217, 119, 87, 0.15); border: 1px solid rgba(217, 119, 87, 0.3); }
+    .msg.user { align-self: flex-end; background: rgba(217, 179, 90, 0.15); border: 1px solid rgba(217, 179, 90, 0.3); }
     .msg.assistant { align-self: flex-start; background: rgba(74, 222, 128, 0.06); border: 1px solid rgba(74, 222, 128, 0.18); }
     .msg.error { align-self: stretch; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); color: #ffd3d3; }
     .input-row {
@@ -230,9 +224,9 @@
     .modal-body { padding: 16px 18px; overflow-y: auto; flex: 1; }
     .modal-foot { padding: 12px 18px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; }
     .clickable { cursor: pointer; }
-    .clickable:hover { background: rgba(217, 119, 87, 0.05); }
+    .clickable:hover { background: rgba(217, 179, 90, 0.05); }
     .turn { padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; white-space: pre-wrap; word-wrap: break-word; font-size: 13px; }
-    .turn.user      { background: rgba(217, 119, 87, 0.10); border: 1px solid rgba(217, 119, 87, 0.25); }
+    .turn.user      { background: rgba(217, 179, 90, 0.10); border: 1px solid rgba(217, 179, 90, 0.25); }
     .turn.assistant { background: rgba(74, 222, 128, 0.06); border: 1px solid rgba(74, 222, 128, 0.18); }
     .turn.system    { background: rgba(245, 158, 11, 0.06); border: 1px solid rgba(245, 158, 11, 0.20); }
     .turn .role-tag { display: block; color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }

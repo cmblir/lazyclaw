@@ -17,6 +17,15 @@ Versioning: [SemVer](https://semver.org/).
   so chunks flow into React state and commit to the `<Static>` scrollback on
   turn-complete (the long-standing v5.1 TODO); replies persist across re-renders.
 
+### Changed
+
+- **Dashboard: dropped the header mascot and recolored the accent to a terminal
+  amber.** Removed the pixel mascot SVG (and its CSS) from the header, leaving
+  the `lazyclaw` wordmark. The accent moved from coral `#d97757` to amber-gold
+  `#d9b35a`; primary buttons now use dark text (`--accent-ink`) for AA contrast
+  on the lighter accent. Verified across the mobile / small-window / desktop
+  viewports.
+
 ## [6.0.1] - 2026-06-08
 
 ### Fixed

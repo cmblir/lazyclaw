@@ -153,7 +153,7 @@
             ? `<span class="pill ok" title="trained by ${escHtml(s.trainedBy || 'trainer')}">trained: ${escHtml(s.trainedBy || 'on')}</span>`
             : '';
           const tagAgent = s.agentName
-            ? `<span class="pill" style="background:rgba(217,119,87,0.18);color:var(--accent);">@${escHtml(s.agentName)}</span>`
+            ? `<span class="pill" style="background:rgba(217,179,90,0.18);color:var(--accent);">@${escHtml(s.agentName)}</span>`
             : '';
           const trajBtn = s.trajectoryId
             ? `<button class="btn btn-secondary btn-sm" data-action="trajectory" data-traj="${escHtml(s.trajectoryId)}">Trajectory</button>`
@@ -391,7 +391,7 @@
           const tag = p.requiresApiKey
             ? '<span class="pill warn">api key</span>'
             : '<span class="pill ok">no key</span>';
-          const customTag = p.custom ? ' <span class="pill" style="background:rgba(217,119,87,0.18);color:var(--accent);">custom</span>' : '';
+          const customTag = p.custom ? ' <span class="pill" style="background:rgba(217,179,90,0.18);color:var(--accent);">custom</span>' : '';
           const builtinCompat = p.builtinOpenAICompat ? ' <span class="pill" style="background:rgba(74,222,128,0.12);color:var(--ok);">openai-compat</span>' : '';
           const models = (p.suggestedModels || []).slice(0, 6).join(' · ') || '<span class="dim">(default)</span>';
           const removeBtn = p.custom
@@ -1221,7 +1221,7 @@
           const label = md.session_id || md.skill_name || md.trajectory_id || md.topic || '—';
           return `<div class="card">
             <div class="row" style="border:0;padding:0;">
-              <span class="pill" style="background:rgba(217,119,87,0.18);color:var(--accent);">${escHtml(h.scope)}</span>
+              <span class="pill" style="background:rgba(217,179,90,0.18);color:var(--accent);">${escHtml(h.scope)}</span>
               <div class="name" style="margin-left:8px;">${escHtml(String(label))}</div>
               <div class="dim row-actions">bm25 ${Number(h.bm25 || 0).toFixed(2)}</div>
             </div>
