@@ -6,6 +6,17 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Hermes-style first-run setup.** `lazyclaw setup` (and the first-run path)
+  is now phased: pick a provider + model (with a ≥64k-context tip), verify one
+  clean chat, then optionally connect a channel/gateway — Slack, Telegram,
+  Matrix, or HTTP built in, plus Discord, Email, Signal, Voice, and WhatsApp via
+  plugin packages (the wizard prints the install command and never pretends an
+  uninstalled channel is ready). Channel credentials are written to
+  `<configDir>/.env` at 0600 (tokens masked on screen); `cfg.channels.<name>`
+  records which channels are enabled for the daemon and dashboard to read.
+
 ### Fixed
 
 - **Assistant replies no longer vanish in the interactive chat REPL.** The Ink
