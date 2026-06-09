@@ -3,6 +3,15 @@
 import path from 'node:path';
 import { ensureRegistry } from '../lib/registry_boot.mjs';
 import { configPath, readConfig, writeConfig, readVersionFromRepo } from '../lib/config.mjs';
+import { assertUnattendedSafe, installCrashHandlers } from '../lib/gateway_guard.mjs';
+
+// Fail closed before binding the HTTP surface: the daemon/dashboard serve
+// POST /inbound + /agent, so the global unattended-sensitive override must
+// not be on while they are exposed.
+function _bootGuard(surface) {
+  try { assertUnattendedSafe(readConfig(), { surface }); }
+  catch (e) { console.error(e.message); process.exit(2); }
+}
 
 export async function _killPortOccupant(port) {
   if (process.platform === 'win32') return false;
@@ -35,6 +44,7 @@ export async function _killPortOccupant(port) {
 
 export async function cmdDashboard(flags = {}) {
   await ensureRegistry();
+  _bootGuard('dashboard');
   const sessionsMod = await import('../sessions.mjs');
   const { startDaemon } = await import('../daemon.mjs');
   const port = flags.port !== undefined ? parseInt(flags.port, 10) : 19600;
@@ -110,6 +120,7 @@ export async function cmdDashboard(flags = {}) {
   // Forward SIGINT/SIGTERM to a graceful shutdown so Ctrl-C doesn't
   // strand a port-bound server. Same shape cmdDaemon uses.
   const { gracefulShutdown } = await import('../daemon.mjs');
+  installCrashHandlers({ label: 'dashboard', stop: () => gracefulShutdown(d.server, 5_000) });
   let shuttingDown = false;
   const shutdown = async () => {
     if (shuttingDown) return process.exit(1);
@@ -124,6 +135,7 @@ export async function cmdDashboard(flags = {}) {
 
 export async function cmdDaemon(flags) {
   await ensureRegistry();
+  _bootGuard('daemon');
   const sessionsMod = await import('../sessions.mjs');
   const { startDaemon } = await import('../daemon.mjs');
   const port = flags.port !== undefined ? parseInt(flags.port, 10) : 0;
@@ -239,6 +251,9 @@ export async function cmdDaemon(flags) {
     // mean it" signal.
     const { gracefulShutdown } = await import('../daemon.mjs');
     const timeoutMs = flags['shutdown-timeout-ms'] ? parseInt(flags['shutdown-timeout-ms'], 10) : 10_000;
+    // Always-on: make an unhandled crash observable + drain sockets, then
+    // exit non-zero so a service manager restarts us (vs. silent death).
+    installCrashHandlers({ label: 'daemon', logger, stop: () => gracefulShutdown(d.server, timeoutMs) });
     let shuttingDown = false;
     const shutdown = async () => {
       if (shuttingDown) {

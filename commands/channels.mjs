@@ -4,9 +4,17 @@ import { configPath, readConfig, writeConfig, _resolveAuthKey } from '../lib/con
 import { ensureRegistry, getRegistry } from '../lib/registry_boot.mjs';
 import { loadDotenvIfAny as _loadDotenvShared } from '../dotenv_min.mjs';
 import { channelStatusList, channelSetEnabled, KNOWN_CHANNELS } from '../config_features.mjs';
+import { assertUnattendedSafe, installCrashHandlers } from '../lib/gateway_guard.mjs';
 
 // Thin .env loader wrapper kept local so the module stays self-contained.
 export function _loadDotenvIfAny(cfgDir) { return _loadDotenvShared(cfgDir); }
+
+// Fail closed before opening a listener socket: refuse to expose a remote
+// inbound surface while the global unattended-sensitive tool override is on.
+function _bootGuard(cfg, surface) {
+  try { assertUnattendedSafe(cfg, { surface }); }
+  catch (e) { console.error(e.message); process.exit(2); }
+}
 
 export async function cmdSlack(sub, positional, flags = {}) {
   if (sub !== 'listen') {
@@ -15,6 +23,7 @@ export async function cmdSlack(sub, positional, flags = {}) {
   }
   await ensureRegistry();
   const cfg = readConfig();
+  _bootGuard(cfg, 'slack');
   const cfgDir = path.dirname(configPath());
 
   const envInfo = _loadDotenvIfAny(cfgDir);
@@ -82,6 +91,7 @@ export async function cmdSlack(sub, positional, flags = {}) {
     process.exit(2);
   }
   process.stderr.write(`[slack] listening. Ctrl-C to stop.\n`);
+  installCrashHandlers({ label: 'slack', stop: () => ch.stop() });
 
   await new Promise((resolve) => {
     const onSig = async () => {
@@ -107,6 +117,7 @@ export async function cmdTelegram(sub, positional, flags = {}) {
   }
   await ensureRegistry();
   const cfg = readConfig();
+  _bootGuard(cfg, 'telegram');
   const cfgDir = path.dirname(configPath());
 
   const envInfo = _loadDotenvIfAny(cfgDir);
@@ -164,6 +175,7 @@ export async function cmdTelegram(sub, positional, flags = {}) {
     process.exit(2);
   }
   process.stderr.write(`[telegram] listening. Ctrl-C to stop.\n`);
+  installCrashHandlers({ label: 'telegram', stop: () => ch.stop() });
 
   await new Promise((resolve) => {
     const onSig = async () => {
@@ -186,6 +198,7 @@ export async function cmdMatrix(sub, positional, flags = {}) {
   }
   await ensureRegistry();
   const cfg = readConfig();
+  _bootGuard(cfg, 'matrix');
   const cfgDir = path.dirname(configPath());
 
   const envInfo = _loadDotenvIfAny(cfgDir);
@@ -241,6 +254,7 @@ export async function cmdMatrix(sub, positional, flags = {}) {
     process.exit(2);
   }
   process.stderr.write(`[matrix] listening. Ctrl-C to stop.\n`);
+  installCrashHandlers({ label: 'matrix', stop: () => ch.stop() });
 
   await new Promise((resolve) => {
     const onSig = async () => {
