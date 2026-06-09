@@ -1,7 +1,5 @@
 # lazyclaw
 
-<img src="docs/assets/sleepy-sloth-source.png" alt="lazyclaw sloth" width="110" align="right">
-
 **A terminal agent that learns on your Claude subscription — for $0 — and reaches you on every channel.**
 
 Chat in the terminal. Let the background learning loop distil your conversations into reusable skills on `claude-cli` (your Pro/Max subscription — no API bill). Wire it to Slack, Telegram, Discord, Matrix, Email, Signal, WhatsApp, or Voice. Fan a hard task out to a planner + workers. One small, auditable Node core — no daemon you can't read.
