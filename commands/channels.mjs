@@ -75,7 +75,7 @@ export async function cmdSlack(sub, positional, flags = {}) {
   } catch (err) {
     if (err?.code === 'SLACK_MISSING_ENV') {
       console.error(`slack: missing env vars: ${(err.missing || []).join(', ')}`);
-      console.error(`hint: set them in ${path.join(cfgDir, '.env')} (uncomment SLACK_APP_TOKEN / SLACK_SIGNING_SECRET)`);
+      console.error(`hint: set SLACK_APP_TOKEN (xapp-…, Socket Mode) in ${path.join(cfgDir, '.env')}`);
     } else {
       console.error(`slack: ${err?.message || err}`);
     }

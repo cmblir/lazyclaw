@@ -28,6 +28,7 @@ export const SLASH_COMMANDS = [
   { cmd: '/menu',        help: 'browse the full subcommand catalog (command palette)' },
   { cmd: '/config',      help: 'leave chat and re-run the setup wizard (provider, model, channels)' },
   { cmd: '/channels',    help: 'view configured channels; /channels <name> on|off to toggle' },
+  { cmd: '/orchestrator', help: 'multi-agent: status | on | off | planner <spec> | worker add|remove <spec>' },
   { cmd: '/loop',        help: 'repeat one prompt: /loop "fix lint" [--max N] [--until "<regex>"]' },
   { cmd: '/goal',        help: 'register/switch goal: /goal add NAME | /goal list' },
   { cmd: '/memory',      help: 'show layered memory: /memory [core|recent|episodic [topic]]' },

@@ -8,6 +8,18 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **Turn on multi-agent orchestration from setup or chat.** The setup wizard
+  has an optional final step to enable orchestration (pick a planner + workers);
+  a new `/orchestrator` slash views/edits it (`status | on | off | planner
+  <spec> | worker add|remove <spec> | maxsubtasks <N>`). Both reuse shared
+  `config_features.{orchestratorGet,orchestratorSet,orchestratorEnable}` so the
+  setup wizard, the slash, and `lazyclaw orchestrator` agree.
+
+- **Setup collects the Slack app-level token for inbound.** The channel step now
+  asks for `SLACK_APP_TOKEN` (xapp-…, Socket Mode) in addition to the bot token,
+  so `lazyclaw slack listen` (receiving messages) is configurable from the
+  wizard, not just outbound.
+
 - **View and edit channel settings: `/channels` slash + `lazyclaw channels`.**
   The CLI `lazyclaw channels` now lists configured built-in channels
   (`cfg.channels.<name>` — enabled/disabled, bound agent) alongside installed
@@ -35,6 +47,12 @@ Versioning: [SemVer](https://semver.org/).
   records which channels are enabled for the daemon and dashboard to read.
 
 ### Fixed
+
+- **Slack inbound (Socket Mode) no longer requires `SLACK_SIGNING_SECRET`.**
+  `lazyclaw slack listen` demanded the signing secret, but Socket Mode
+  authenticates the WebSocket with the app-level token — the signing secret is
+  only for the (unused) HTTP Events API. Requiring it blocked socket-mode setups
+  that only had the bot + app tokens; it is now optional.
 
 - **The setup wizard no longer exits after the verify step.** Step 2 ran the
   provider ping via `lazyclaw providers test`, which calls `process.exit` — fine

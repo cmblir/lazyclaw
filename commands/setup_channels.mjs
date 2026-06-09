@@ -17,7 +17,10 @@ import { messageAdd } from '../config_features.mjs';
 // masks it on echo; .optional lets the user skip it.
 export const CHANNEL_CATALOG = [
   { name: 'slack',    builtin: true,  label: 'Slack',
-    fields: [{ key: 'token', env: 'SLACK_BOT_TOKEN', prompt: 'Bot token (xoxb-…)', secret: true }] },
+    fields: [
+      { key: 'token', env: 'SLACK_BOT_TOKEN', prompt: 'Bot token (xoxb-…)', secret: true },
+      { key: 'appToken', env: 'SLACK_APP_TOKEN', prompt: 'App-level token (xapp-…, for inbound / Socket Mode)', secret: true, optional: true },
+    ] },
   { name: 'telegram', builtin: true,  label: 'Telegram',
     fields: [{ key: 'token', env: 'TELEGRAM_BOT_TOKEN', prompt: 'Bot token (from @BotFather)', secret: true }] },
   { name: 'matrix',   builtin: true,  label: 'Matrix',
@@ -140,4 +143,26 @@ export async function runWebhookStep({ prompt, colors, write = (s) => process.st
     write(`  ${warn('skipped:')} ${e?.message || e}\n\n`);
     return { skipped: true };
   }
+}
+
+// Optional orchestration step: enable the multi-agent planner+workers pipeline.
+// Defaults the planner to the configured provider and workers to [planner];
+// the user can layer more workers later via /orchestrator or the CLI.
+export async function runOrchestratorStep({ prompt, colors, write = (s) => process.stdout.write(s) }) {
+  const { dim, ok } = colors;
+  const cf = await import('../config_features.mjs');
+  write(`  ${dim('Multi-agent: a planner splits your task into subtasks and workers run them in parallel, then a synthesis step merges the results. Skip for a single agent.')}\n\n`);
+  const yn = (await prompt('  enable orchestration? [y/N] ')).trim().toLowerCase();
+  if (yn !== 'y' && yn !== 'yes') { write(`  ${dim('— skipped —')}\n\n`); return { skipped: true }; }
+  const cfg = readConfig();
+  const base = cfg.provider && cfg.provider !== 'orchestrator' ? cfg.provider : 'claude-cli';
+  const planner = (await prompt(`  planner provider[:model] (Enter = ${base}): `)).trim() || base;
+  const workersRaw = (await prompt(`  workers, comma-separated (Enter = ${planner}): `)).trim();
+  const workers = workersRaw ? workersRaw.split(',').map((s) => s.trim()).filter(Boolean) : [planner];
+  cf.orchestratorSet(cfg, { planner, workers });
+  cf.orchestratorEnable(cfg, true);
+  writeConfig(cfg);
+  write(`  ${ok('✓ orchestration enabled:')} planner ${planner} · workers ${workers.join(', ')}\n`);
+  write(`  ${dim('toggle later with /orchestrator off  or  lazyclaw config set provider <name>')}\n\n`);
+  return { skipped: false, planner, workers };
 }

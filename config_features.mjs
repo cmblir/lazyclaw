@@ -285,3 +285,46 @@ export function channelSetEnabled(cfg, name, enabled) {
   cfg.channels[name] = { ...(cfg.channels[name] || {}), enabled: !!enabled };
   return cfg;
 }
+
+// ── Orchestrator — multi-agent config (cfg.orchestrator) ────────────────
+// Shared by the setup wizard, the /orchestrator slash, and the CLI so the
+// "planner + workers" config has one shape. Orchestration is ACTIVE only when
+// cfg.provider === 'orchestrator' AND there is at least one worker.
+export function orchestratorGet(cfg) {
+  const o = (cfg.orchestrator && typeof cfg.orchestrator === 'object') ? cfg.orchestrator : {};
+  const workers = Array.isArray(o.workers) ? o.workers : [];
+  return {
+    planner: o.planner || null,
+    workers,
+    maxSubtasks: Number.isFinite(o.maxSubtasks) ? o.maxSubtasks : 5,
+    active: cfg.provider === 'orchestrator' && workers.length > 0,
+  };
+}
+
+// Merge planner / workers / maxSubtasks into cfg.orchestrator (only the keys
+// provided). Returns cfg.
+export function orchestratorSet(cfg, { planner, workers, maxSubtasks } = {}) {
+  cfg.orchestrator = (cfg.orchestrator && typeof cfg.orchestrator === 'object') ? cfg.orchestrator : {};
+  if (planner !== undefined) cfg.orchestrator.planner = planner;
+  if (workers !== undefined) cfg.orchestrator.workers = workers;
+  if (maxSubtasks !== undefined) cfg.orchestrator.maxSubtasks = maxSubtasks;
+  return cfg;
+}
+
+// Turn orchestration on/off by routing cfg.provider. Enabling stashes the
+// previous real provider so disabling can restore it (else falls back to the
+// planner's base provider, then claude-cli).
+export function orchestratorEnable(cfg, enabled) {
+  if (enabled) {
+    if (cfg.provider && cfg.provider !== 'orchestrator') {
+      cfg.orchestrator = (cfg.orchestrator && typeof cfg.orchestrator === 'object') ? cfg.orchestrator : {};
+      cfg.orchestrator._prevProvider = cfg.provider;
+    }
+    cfg.provider = 'orchestrator';
+  } else {
+    const o = (cfg.orchestrator && typeof cfg.orchestrator === 'object') ? cfg.orchestrator : {};
+    const plannerBase = String(o.planner || '').split(':')[0];
+    cfg.provider = o._prevProvider || plannerBase || 'claude-cli';
+  }
+  return cfg;
+}

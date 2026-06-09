@@ -45,7 +45,7 @@ export function legacySlashRoute(cmd, ctx) {
 // _dispatchSlash. Kept to ctx-safe handlers only (no _inkCtx-only setters /
 // openPicker / version), so legacy doesn't silently degrade. /channels has a
 // lib/config fallback so it's safe; add others only after confirming ctx-safety.
-const LEGACY_DELEGATED_SLASHES = new Set(['/channels']);
+const LEGACY_DELEGATED_SLASHES = new Set(['/channels', '/orchestrator']);
 
 export async function cmdChat(flags = {}) {
   await ensureRegistry();

@@ -22,7 +22,7 @@ import { applyChatWindow as _applyChatWindow, CHAT_WINDOW_TURNS, CHAT_WINDOW_TOK
 import { makeRunTurn as _chatRunTurnFactory } from '../tui/run_turn.mjs';
 import { dispatchSlash as _dispatchSlash, parseSlashLine as _parseSlashLine } from '../tui/slash_dispatcher.mjs';
 import { SLASH_COMMANDS } from '../tui/slash_commands.mjs';
-import { runChannelStep, runWebhookStep } from './setup_channels.mjs';
+import { runChannelStep, runWebhookStep, runOrchestratorStep } from './setup_channels.mjs';
 import { splashPropsForSetup, renderSplashToString } from '../tui/splash_props.mjs';
 
 function applyOnboardConfig(currentCfg, flags) {
@@ -160,7 +160,7 @@ const HELP_DETAILS = {
   workspace: 'Usage: lazyclaw workspace <list | init <name> | show <name> [<file>] | remove <name> | path <name>>\n  Workspace = a directory under <configDir>/workspaces/<name>/ containing AGENTS.md, SOUL.md, TOOLS.md.\n  When `chat` or `agent` is invoked with --workspace <name>, the three files are stitched into a single system prompt at the head of the conversation. Missing files are skipped silently.\n  init scaffolds the three files with short stubs you replace.\n  show prints the composed prompt; show <name> AGENTS.md (etc) prints just one file.',
   browse: 'Usage: lazyclaw browse <url> [--max-bytes <N>] [--timeout-ms <N>] [--user-agent <ua>] [--meta]\n  Fetches the URL and emits Markdown on stdout. Pipes cleanly into `agent`:\n      lazyclaw browse https://example.com/docs | lazyclaw agent -\n  Strips <script>/<style>/<svg>/comments, prefers <main>/<article>, falls back to <body>.\n  --max-bytes caps the body read (default 2 MB) so a misconfigured upstream can\'t OOM the process.\n  --meta prints { url, title, bytes, truncated } as JSON to stderr alongside the markdown on stdout.',
   cron: 'Usage: lazyclaw cron <list | add <name> "<cron-spec>" -- <cmd> ... | remove <name> | show <name> | sync | run <name>>\n  Schedule recurring agent runs. macOS uses launchd (~/Library/LaunchAgents/com.lazyclaw.<name>.plist); Linux / WSL uses the user crontab.\n  Cron spec is the standard 5-field form (minute hour dom month dow). Supports *, range a-b, list a,b,c, step */N.\n  add: pass the command after `--`. Typical use:\n      lazyclaw cron add daily-summary "0 9 * * 1-5" -- lazyclaw agent "Summarise today\'s TODOs"\n  list / show: read from cfg.cron[name] (config is the source of truth).\n  sync: re-installs every job in cfg.cron into the system scheduler — handy after a reinstall.\n  run: one-shot in-process execution of the named job; the OS scheduler does the same thing on its trigger.\n  Logs: ~/.lazyclaw/logs/cron-<name>.{out,err}.log (macOS launchd path).',
-  setup: 'Usage: lazyclaw setup [--skip-test]\n  Hermes-style phased first-run wizard — get one clean chat working first,\n  then optionally add the rest. Walks through:\n    1. Provider + model + api-key (delegates to onboard --pick; ≥64k-context tip)\n    2. Verify the provider responds (1-token ping; --skip-test bypasses)\n    3. Optional channel / gateway (Slack / Telegram / Matrix / HTTP built in;\n       Discord / Email / Signal / Voice / WhatsApp via plugin packages)\n    4. Optional workspace init  (AGENTS.md / SOUL.md / TOOLS.md)\n    5. Optional skill bundle install from GitHub\n    6. Optional outbound webhook (Slack / Discord)\n  Each optional step takes Enter or "skip" to bypass. Re-runnable safely.\n  Also fires automatically on first run when `lazyclaw` is invoked with no config.',
+  setup: 'Usage: lazyclaw setup [--skip-test]\n  Hermes-style phased first-run wizard — get one clean chat working first,\n  then optionally add the rest. Walks through:\n    1. Provider + model + api-key (delegates to onboard --pick; ≥64k-context tip)\n    2. Verify the provider responds (1-token ping; --skip-test bypasses)\n    3. Optional channel / gateway (Slack / Telegram / Matrix / HTTP built in;\n       Discord / Email / Signal / Voice / WhatsApp via plugin packages)\n    4. Optional workspace init  (AGENTS.md / SOUL.md / TOOLS.md)\n    5. Optional skill bundle install from GitHub\n    6. Optional outbound webhook (Slack / Discord)\n    7. Optional multi-agent orchestration (planner + workers)\n  Each optional step takes Enter or "skip" to bypass. Re-runnable safely.\n  Also fires automatically on first run when `lazyclaw` is invoked with no config.',
   dashboard: 'Usage: lazyclaw dashboard [--port <N>] [--no-open]\n  Launches the lazyclaw-only web UI on http://127.0.0.1:<port> (default 19600) and opens it in the default browser.\n  Wraps `lazyclaw daemon` + a static HTML; no Python / lazyclaude dashboard required.\n  See web/dashboard.html for the current tab set (v5: Chat / Sessions / Workflows / Skills / Providers / Rates / Metrics / Doctor / Config / Status / Agents / Teams / Tasks / Trainer / Recall / Sandbox / Channels).\n  --no-open keeps the browser closed (handy for SSH / headless / dev). The bound URL is always printed to stdout.',
   orchestrator: 'Usage: lazyclaw orchestrator <status | set-planner <provider[:model]> | workers add <spec> | workers remove <spec> | workers set <spec,spec,...> | workers clear | set-max-subtasks <N> | clear>\n  Read/write cfg.orchestrator without editing config.json by hand.\n  status               — print {planner, workers, maxSubtasks} as JSON; lists registered providers for reference.\n  set-planner          — replace the planner spec ("provider" or "provider:model"). "orchestrator" itself is rejected (self-recursion).\n  workers add          — append a worker (idempotent — duplicates skipped).\n  workers remove       — drop a worker by exact match. Idempotent.\n  workers set          — replace the whole list (comma-separated specs).\n  workers clear        — empty the workers list.\n  set-max-subtasks <N> — cap subtasks per request, clamped 1..10 (default 5).\n  clear                — delete the cfg.orchestrator block entirely.\n  Pair with: `lazyclaw config set provider orchestrator` to route chats through it.',
 };
@@ -206,8 +206,8 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
   const cfgDir = path.dirname(configPath());
   const colors = { accent, bold, dim, ok, warn };
 
-  // ── Step 1/6: Provider + model (mandatory) ──────────────────
-  process.stdout.write(`  ${accent('Step 1/6 ·')} ${bold('Pick a provider + model')}\n`);
+  // ── Step 1/7: Provider + model (mandatory) ──────────────────
+  process.stdout.write(`  ${accent('Step 1/7 ·')} ${bold('Pick a provider + model')}\n`);
   process.stdout.write(`  ${dim('Opens the arrow-key picker. Tip: pick a model with ≥64k context — small windows can\'t hold multi-step tool-calling state.')}\n\n`);
   await _quickPrompt('  ▶ press Enter to open the picker ');
   try {
@@ -233,9 +233,9 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
   }
   process.stdout.write(`\n  ${ok('✓ provider:')} ${cfgAfterOnboard.provider}  ${dim('model:')} ${cfgAfterOnboard.model || '(default)'}\n\n`);
 
-  // ── Step 2/6: Verify one clean chat works ───────────────────
+  // ── Step 2/7: Verify one clean chat works ───────────────────
   // Hermes rule: get a clean reply before layering on channels/skills.
-  process.stdout.write(`  ${accent('Step 2/6 ·')} ${bold('Verify the provider responds')}\n`);
+  process.stdout.write(`  ${accent('Step 2/7 ·')} ${bold('Verify the provider responds')}\n`);
   process.stdout.write(`  ${dim('Sends a 1-token "ping" via `lazyclaw providers test`. Confirm a clean reply before layering on channels/skills.')}\n\n`);
   const wantPing = !flags['skip-test'] && (await _quickPrompt('  test now? [Y/n] ')).trim().toLowerCase() !== 'n';
   if (wantPing) {
@@ -255,12 +255,12 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
     process.stdout.write(`  ${dim('— skipped —')}\n\n`);
   }
 
-  // ── Step 3/6: Channel / gateway (optional) ──────────────────
-  process.stdout.write(`  ${accent('Step 3/6 ·')} ${bold('Where will you run it?')} ${dim('(optional)')}\n`);
+  // ── Step 3/7: Channel / gateway (optional) ──────────────────
+  process.stdout.write(`  ${accent('Step 3/7 ·')} ${bold('Where will you run it?')} ${dim('(optional)')}\n`);
   await runChannelStep({ cfgDir, prompt: _quickPrompt, colors });
 
-  // ── Step 4/6: Optional workspace ────────────────────────────
-  process.stdout.write(`  ${accent('Step 4/6 ·')} ${bold('Initialise a workspace?')} ${dim('(optional)')}\n`);
+  // ── Step 4/7: Optional workspace ────────────────────────────
+  process.stdout.write(`  ${accent('Step 4/7 ·')} ${bold('Initialise a workspace?')} ${dim('(optional)')}\n`);
   process.stdout.write(`  ${dim('A workspace is a folder of AGENTS.md / SOUL.md / TOOLS.md prompt files that auto-inject into chat / agent. Skip if you don\'t need project-specific personas yet.')}\n\n`);
   const wsName = (await _quickPrompt('  workspace name (Enter to skip): ')).trim();
   if (wsName && /^[A-Za-z0-9_.-]+$/.test(wsName)) {
@@ -278,8 +278,8 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
     process.stdout.write(`  ${dim('— skipped —')}\n\n`);
   }
 
-  // ── Step 5/6: Optional skill bundle install ─────────────────
-  process.stdout.write(`  ${accent('Step 5/6 ·')} ${bold('Install a skill bundle from GitHub?')} ${dim('(optional)')}\n`);
+  // ── Step 5/7: Optional skill bundle install ─────────────────
+  process.stdout.write(`  ${accent('Step 5/7 ·')} ${bold('Install a skill bundle from GitHub?')} ${dim('(optional)')}\n`);
   process.stdout.write(`  ${dim('Format: <user>/<repo>[@<ref>]. Skills are .md prompt fragments that compose into the system prompt via --skill.')}\n\n`);
   const skillSpec = (await _quickPrompt('  github spec (Enter to skip): ')).trim();
   if (skillSpec) {
@@ -299,9 +299,13 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
     process.stdout.write(`  ${dim('— skipped —')}\n\n`);
   }
 
-  // ── Step 6/6: Optional outbound webhook ─────────────────────
-  process.stdout.write(`  ${accent('Step 6/6 ·')} ${bold('Add an outbound webhook?')} ${dim('(optional)')}\n`);
+  // ── Step 6/7: Optional outbound webhook ─────────────────────
+  process.stdout.write(`  ${accent('Step 6/7 ·')} ${bold('Add an outbound webhook?')} ${dim('(optional)')}\n`);
   await runWebhookStep({ prompt: _quickPrompt, colors });
+
+  // ── Step 7/7: Optional multi-agent orchestration ────────────
+  process.stdout.write(`  ${accent('Step 7/7 ·')} ${bold('Enable multi-agent orchestration?')} ${dim('(optional)')}\n`);
+  await runOrchestratorStep({ prompt: _quickPrompt, colors });
 
   // ── Wrap up ─────────────────────────────────────────────────
   process.stdout.write('\n');

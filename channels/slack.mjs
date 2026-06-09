@@ -74,11 +74,14 @@ function validateEnv(env, { requireInbound = false } = {}) {
     throw new SlackError('SLACK_BOT_TOKEN must start with "xoxb-"', 'SLACK_BAD_TOKEN', ['SLACK_BOT_TOKEN']);
   }
   if (requireInbound) {
+    // Socket Mode (the inbound path) authenticates the WebSocket with the
+    // app-level token; SLACK_SIGNING_SECRET is only needed for the HTTP Events
+    // API (request-signature verification), which this adapter does not use, so
+    // it is NOT required here — requiring it blocked socket-mode setups.
     if (!env.appToken) missing.push('SLACK_APP_TOKEN');
     else if (!env.appToken.startsWith('xapp-')) {
       throw new SlackError('SLACK_APP_TOKEN must start with "xapp-"', 'SLACK_BAD_TOKEN', ['SLACK_APP_TOKEN']);
     }
-    if (!env.signingSecret) missing.push('SLACK_SIGNING_SECRET');
   }
   if (missing.length) {
     throw new SlackError(`missing Slack env vars: ${missing.join(', ')}`, 'SLACK_MISSING_ENV', missing);

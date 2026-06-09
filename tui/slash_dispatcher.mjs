@@ -1709,6 +1709,45 @@ async function _channels(args, ctx = {}) {
   return lines.join('\n');
 }
 
+// /orchestrator — view/edit multi-agent config. `status` (default), `on`/`off`,
+// `planner <spec>`, `worker add|remove <spec>`, `maxsubtasks <N>`. ctx-or-
+// lib/config fallback so it works on both REPL paths.
+async function _orchestrator(args, ctx = {}) {
+  const cf = await import('../config_features.mjs');
+  const cfgMod = await import('../lib/config.mjs');
+  const read = typeof ctx.readConfig === 'function' ? ctx.readConfig : cfgMod.readConfig;
+  const write = typeof ctx.writeConfig === 'function' ? ctx.writeConfig : cfgMod.writeConfig;
+  const persist = (cfg) => { write(cfg); if (ctx.cfg) ctx.cfg = cfg; };
+  const parts = (args || '').trim().split(/\s+/).filter(Boolean);
+  const sub = (parts[0] || 'status').toLowerCase();
+  const fmt = () => {
+    const s = cf.orchestratorGet(read());
+    return `orchestrator: ${s.active ? 'ON' : 'off'}  ·  planner: ${s.planner || '(default)'}  ·  workers: ${s.workers.length ? s.workers.join(', ') : '(none)'}  ·  maxSubtasks: ${s.maxSubtasks}`;
+  };
+  if (sub === 'status') return fmt();
+  const cfg = read();
+  if (sub === 'on' || sub === 'enable') {
+    if (!cf.orchestratorGet(cfg).planner) {
+      const base = cfg.provider && cfg.provider !== 'orchestrator' ? cfg.provider : 'claude-cli';
+      cf.orchestratorSet(cfg, { planner: base });
+    }
+    cf.orchestratorEnable(cfg, true); persist(cfg);
+    const after = cf.orchestratorGet(read());
+    return after.workers.length ? 'orchestration ON.\n' + fmt() : 'orchestration ON — but no workers yet. Add one: /orchestrator worker add <provider[:model]>';
+  }
+  if (sub === 'off' || sub === 'disable') { cf.orchestratorEnable(cfg, false); persist(cfg); return 'orchestration off. provider → ' + read().provider; }
+  if (sub === 'planner') { if (!parts[1]) return 'usage: /orchestrator planner <provider[:model]>'; cf.orchestratorSet(cfg, { planner: parts[1] }); persist(cfg); return 'planner → ' + parts[1]; }
+  if (sub === 'maxsubtasks') { const n = parseInt(parts[1], 10); if (!Number.isFinite(n)) return 'usage: /orchestrator maxsubtasks <N>'; cf.orchestratorSet(cfg, { maxSubtasks: Math.max(1, Math.min(10, n)) }); persist(cfg); return fmt(); }
+  if (sub === 'worker') {
+    const action = (parts[1] || '').toLowerCase(); const spec = parts[2];
+    const workers = [...cf.orchestratorGet(cfg).workers];
+    if (action === 'add' && spec) { if (!workers.includes(spec)) workers.push(spec); cf.orchestratorSet(cfg, { workers }); persist(cfg); return 'workers: ' + workers.join(', '); }
+    if ((action === 'remove' || action === 'rm') && spec) { const next = workers.filter((w) => w !== spec); cf.orchestratorSet(cfg, { workers: next }); persist(cfg); return 'workers: ' + (next.join(', ') || '(none)'); }
+    return 'usage: /orchestrator worker add|remove <provider[:model]>';
+  }
+  return 'usage: /orchestrator [status|on|off|planner <spec>|worker add|remove <spec>|maxsubtasks <N>]';
+}
+
 // ─── dispatch table ──────────────────────────────────────────────────────
 
 export const SLASH_HANDLERS = new Map([
@@ -1738,6 +1777,7 @@ export const SLASH_HANDLERS = new Map([
   ['/dashboard', _dashboard],
   ['/menu', _menu],
   ['/channels', _channels],
+  ['/orchestrator', _orchestrator],
   // /config — unmount and let chat.mjs run the setup wizard (ctx.requestSetup).
   ['/config', async (_a, ctx) => { ctx.requestSetup = true; return 'EXIT'; }],
   ['/exit', async () => 'EXIT'],

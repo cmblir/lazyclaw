@@ -81,9 +81,11 @@ test.describe('Phase 8 — Slack adapter', () => {
     expect(err).toBeTruthy();
     expect(err.code).toBe('SLACK_MISSING_ENV');
     // Tokens list must surface so the operator knows what to provision.
+    // Socket Mode needs the bot + app tokens; SLACK_SIGNING_SECRET is only for
+    // the (unused) HTTP Events API, so it is NOT required.
     expect(err.missing).toContain('SLACK_BOT_TOKEN');
     expect(err.missing).toContain('SLACK_APP_TOKEN');
-    expect(err.missing).toContain('SLACK_SIGNING_SECRET');
+    expect(err.missing).not.toContain('SLACK_SIGNING_SECRET');
   });
 
   test('inbound _simulateInbound runs handler and posts reply via Web API', async () => {
