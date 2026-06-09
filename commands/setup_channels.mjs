@@ -151,18 +151,32 @@ export async function runWebhookStep({ prompt, colors, write = (s) => process.st
 export async function runOrchestratorStep({ prompt, colors, write = (s) => process.stdout.write(s) }) {
   const { dim, ok } = colors;
   const cf = await import('../config_features.mjs');
-  write(`  ${dim('Multi-agent: a planner splits your task into subtasks and workers run them in parallel, then a synthesis step merges the results. Skip for a single agent.')}\n\n`);
+  // Reuse the same searchable provider/model picker as the model step, so
+  // planner + workers are chosen from a list (arrow keys / filter), not typed.
+  const { _pickProviderInteractive } = await import('../tui/pickers.mjs');
+  const toSpec = (p) => (p && p.provider) ? (p.model ? `${p.provider}:${p.model}` : p.provider) : null;
+  write(`  ${dim('Multi-agent: a planner splits your task into subtasks, workers run them in parallel, then a synthesis step merges the results. Skip for a single agent.')}\n\n`);
   const yn = (await prompt('  enable orchestration? [y/N] ')).trim().toLowerCase();
   if (yn !== 'y' && yn !== 'yes') { write(`  ${dim('— skipped —')}\n\n`); return { skipped: true }; }
   const cfg = readConfig();
   const base = cfg.provider && cfg.provider !== 'orchestrator' ? cfg.provider : 'claude-cli';
-  const planner = (await prompt(`  planner provider[:model] (Enter = ${base}): `)).trim() || base;
-  const workersRaw = (await prompt(`  workers, comma-separated (Enter = ${planner}): `)).trim();
-  const workers = workersRaw ? workersRaw.split(',').map((s) => s.trim()).filter(Boolean) : [planner];
+  // Planner — pick from the provider/model list (Esc keeps the default).
+  write(`  ${dim('Pick the PLANNER (decomposes the task):')}\n`);
+  const planner = toSpec(await _pickProviderInteractive()) || base;
+  // Workers — pick one or more from the same list.
+  const workers = [];
+  let more = true;
+  while (more) {
+    write(`  ${dim(`Pick a WORKER (runs the subtasks)${workers.length ? ` — ${workers.length} added` : ''}:`)}\n`);
+    const spec = toSpec(await _pickProviderInteractive());
+    if (spec && !workers.includes(spec)) workers.push(spec);
+    more = ((await prompt('  add another worker? [y/N] ')).trim().toLowerCase().startsWith('y'));
+  }
+  if (!workers.length) workers.push(planner);
   cf.orchestratorSet(cfg, { planner, workers });
   cf.orchestratorEnable(cfg, true);
   writeConfig(cfg);
   write(`  ${ok('✓ orchestration enabled:')} planner ${planner} · workers ${workers.join(', ')}\n`);
-  write(`  ${dim('toggle later with /orchestrator off  or  lazyclaw config set provider <name>')}\n\n`);
+  write(`  ${dim('change later: /orchestrator  or  lazyclaw orchestrator status')}\n\n`);
   return { skipped: false, planner, workers };
 }
