@@ -115,10 +115,10 @@ export class SlackChannel extends Channel {
   // handler that decided to stay silent — e.g. the listener dropping
   // an empty-after-mention-strip inbound — doesn't leak a "(empty
   // reply)" placeholder into the channel.
-  async _simulateInbound(text, threadId) {
+  async _simulateInbound(text, threadId, senderId = null) {
     let reply;
     try {
-      reply = await this._processInbound({ threadId, text, gateInput: {} });
+      reply = await this._processInbound({ threadId, text, gateInput: { key: senderId, senderId } });
     } catch (err) {
       if (err instanceof ChannelGated || err?.code === 'CHANNEL_GATED') {
         await this.send(threadId, `(gated: ${err.message})`);
@@ -129,6 +129,29 @@ export class SlackChannel extends Channel {
     }
     if (reply == null || (typeof reply === 'string' && reply.trim() === '')) return;
     await this.send(threadId, reply);
+  }
+
+  // The base _processInbound forwards { channel, threadId, text }; we enrich
+  // the event with senderId (the Slack user id) so the listener bridge can
+  // pass it to the daemon's /inbound pairing gate — without it, Slack is the
+  // one channel that can never be pairing-gated. Mirrors telegram/matrix;
+  // adds a field, never drops one.
+  async _processInbound({ threadId, text, gateInput }) {
+    if (this._gate) {
+      const verdict = this._gate.check(gateInput || {});
+      if (!verdict.ok) {
+        const err = new Error(verdict.reason || 'denied');
+        err.code = 'CHANNEL_GATED';
+        throw err;
+      }
+    }
+    if (!this._handler) throw new Error(`channel "${this.name}" has no handler`);
+    return await this._handler({
+      channel: this.name,
+      threadId,
+      text,
+      senderId: gateInput && gateInput.senderId != null ? gateInput.senderId : null,
+    });
   }
 
   // Translate a target spec like `slack:#deploys` or `slack:U012345` into
@@ -287,6 +310,7 @@ export class SlackChannel extends Channel {
       // get app_mention events. Either way we have channel + ts.
       const text = typeof event.text === 'string' ? event.text : '';
       const channel = event.channel;
+      const senderId = event.user != null ? String(event.user) : null;  // the human who sent it
       const sourceTs = event.ts;                       // the message we react to
       const replyTs = event.thread_ts || event.ts;     // the thread root for replies
       if (!channel || !sourceTs) return;
@@ -303,7 +327,7 @@ export class SlackChannel extends Channel {
       const eyesOk = await this._ackInbound(channel, sourceTs, logger);
 
       try {
-        await this._simulateInbound(text, threadId);
+        await this._simulateInbound(text, threadId, senderId);
         if (eyesOk) {
           // Swap the "working" reaction for a "done" one so the user can
           // tell at a glance which messages have been answered.

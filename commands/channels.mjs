@@ -43,9 +43,8 @@ export async function cmdSlack(sub, positional, flags = {}) {
   const { daemonUrl, daemonToken } = _daemonTarget(flags);
   // Bridge every inbound through the daemon's session-bearing /inbound so
   // chat + dashboard + all channels share one session/memory (single agent).
-  // NOTE: Slack does not yet capture the sender id (lands in a later phase),
-  // so a configured pairing allowlist will 403 Slack messages until then —
-  // run Slack with an empty pairing list, or pair via telegram/matrix.
+  // Slack captures the sender id (event.user) and forwards it, so a configured
+  // pairing allowlist gates Slack the same as telegram/matrix.
   const handler = makeInboundHandler({ channel: 'slack', daemonUrl, daemonToken, provider: flags.provider, model: flags.model });
 
   const { SlackChannel } = await import('../channels/slack.mjs');
