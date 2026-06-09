@@ -57,6 +57,13 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **Backspacing no longer eats the output above the input box.** The cursor
+  anchor could move the terminal cursor up several times between redraws (fast
+  typing / backspace); the eraseLines shim only compensated for the last move,
+  so log-update walked up into and erased the scrollback above the editor (only
+  visible in the default Static layout, not the fixed alt-buffer canvas). The
+  anchor now undoes any not-yet-consumed offset before re-anchoring, so it
+  always re-bases from below the frame.
 - **The input cursor is now visible at the caret, and CJK/Hangul IME pre-edit
   stays inside the box, in the default REPL layout.** The terminal-cursor anchor
   (which parks the cursor at the typing position so you can see it and so an IME

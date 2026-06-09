@@ -408,9 +408,19 @@ export function Editor({
     const prefixWidth = rowInEditor === 0 ? PROMPT_WIDTH : CONTINUATION_WIDTH;
     const colTarget = 3 + prefixWidth + colInLine;
     _installAnchorShim();
+    // If a previous anchor moved the cursor up and NO render's eraseLines has
+    // consumed that offset yet (two state updates between redraws — e.g. fast
+    // typing or backspace), the cursor is still parked up inside the editor.
+    // Undo that move first (\x1b[<pending>B) so we re-anchor from the true
+    // "below the frame" baseline. Without this the moves stacked, the shim
+    // only compensated for the LAST one, and eraseLines walked up into — and
+    // erased — the scrollback above the editor (corruption was invisible in
+    // the fixed alt-buffer canvas, visible in the default Static layout).
+    const pending = _anchorState.offset;
+    const undo = pending > 0 ? `\x1b[${pending}B\r` : '';
     _anchorState.offset = rowsUp;
     try {
-      process.stdout.write(`\x1b[${rowsUp}A\x1b[${colTarget}G\x1b[?25h`);
+      process.stdout.write(`${undo}\x1b[${rowsUp}A\x1b[${colTarget}G\x1b[?25h`);
     } catch { /* stdout closed — swallow */ }
   }, [state.buffer, state.cursor, altEnabled]);
 
