@@ -22,7 +22,7 @@ import { applyChatWindow as _applyChatWindow, CHAT_WINDOW_TURNS, CHAT_WINDOW_TOK
 import { makeRunTurn as _chatRunTurnFactory } from '../tui/run_turn.mjs';
 import { dispatchSlash as _dispatchSlash, parseSlashLine as _parseSlashLine } from '../tui/slash_dispatcher.mjs';
 import { SLASH_COMMANDS } from '../tui/slash_commands.mjs';
-import { runChannelStep, runWebhookStep, runOrchestratorStep } from './setup_channels.mjs';
+import { runChannelStep, runWebhookStep, runOrchestratorStep, runContextStep } from './setup_channels.mjs';
 import { splashPropsForSetup, renderSplashToString } from '../tui/splash_props.mjs';
 
 function applyOnboardConfig(currentCfg, flags) {
@@ -232,6 +232,10 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
     return;
   }
   process.stdout.write(`\n  ${ok('✓ provider:')} ${cfgAfterOnboard.provider}  ${dim('model:')} ${cfgAfterOnboard.model || '(default)'}\n\n`);
+
+  // Context window — asked right after the model pick (optional; Enter keeps
+  // defaults). Not a numbered step: it's part of the core model setup.
+  await runContextStep({ prompt: _quickPrompt, colors });
 
   // ── Step 2/7: Verify one clean chat works ───────────────────
   // Hermes rule: get a clean reply before layering on channels/skills.

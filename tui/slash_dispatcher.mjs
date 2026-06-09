@@ -1748,6 +1748,25 @@ async function _orchestrator(args, ctx = {}) {
   return 'usage: /orchestrator [status|on|off|planner <spec>|worker add|remove <spec>|maxsubtasks <N>]';
 }
 
+// /context — view/set the chat history window (turns + token budget). This is
+// the sliding history budget sent each turn, NOT the model's hard context
+// limit. ctx-or-lib/config fallback so it works on both REPL paths.
+async function _context(args, ctx = {}) {
+  const cf = await import('../config_features.mjs');
+  const cfgMod = await import('../lib/config.mjs');
+  const read = typeof ctx.readConfig === 'function' ? ctx.readConfig : cfgMod.readConfig;
+  const write = typeof ctx.writeConfig === 'function' ? ctx.writeConfig : cfgMod.writeConfig;
+  const persist = (cfg) => { write(cfg); if (ctx.cfg) ctx.cfg = cfg; };
+  const parts = (args || '').trim().split(/\s+/).filter(Boolean);
+  const sub = (parts[0] || 'status').toLowerCase();
+  const fmt = () => { const w = cf.chatWindowGet(read()); return `context window: ${w.turns} turns · ${w.tokens} tokens  (history budget — not the model's hard limit)`; };
+  if (sub === 'status') return fmt();
+  const n = parseInt(parts[1], 10);
+  if (sub === 'turns') { if (!Number.isFinite(n) || n < 1) return 'usage: /context turns <N>'; const cfg = read(); cf.chatWindowSet(cfg, { turns: n }); persist(cfg); return fmt(); }
+  if (sub === 'tokens') { if (!Number.isFinite(n) || n < 256) return 'usage: /context tokens <N>  (min 256)'; const cfg = read(); cf.chatWindowSet(cfg, { tokens: n }); persist(cfg); return fmt(); }
+  return 'usage: /context [status | turns <N> | tokens <N>]';
+}
+
 // ─── dispatch table ──────────────────────────────────────────────────────
 
 export const SLASH_HANDLERS = new Map([
@@ -1778,6 +1797,7 @@ export const SLASH_HANDLERS = new Map([
   ['/menu', _menu],
   ['/channels', _channels],
   ['/orchestrator', _orchestrator],
+  ['/context', _context],
   // /config — unmount and let chat.mjs run the setup wizard (ctx.requestSetup).
   ['/config', async (_a, ctx) => { ctx.requestSetup = true; return 'EXIT'; }],
   ['/exit', async () => 'EXIT'],

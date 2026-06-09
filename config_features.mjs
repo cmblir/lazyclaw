@@ -286,6 +286,23 @@ export function channelSetEnabled(cfg, name, enabled) {
   return cfg;
 }
 
+// ── Chat context window (cfg.chat.window{Turns,Tokens}) ─────────────────
+// The sliding history budget sent to the model each turn (NOT the model's hard
+// context limit). Shared by the /context slash, the setup step, the status bar,
+// and applyChatWindow so all four agree. Defaults mirror chat_window.mjs.
+const _CTX_DEFAULT_TURNS = Number(process.env.LAZYCLAW_CHAT_WINDOW_TURNS) || 20;
+const _CTX_DEFAULT_TOKENS = Number(process.env.LAZYCLAW_CHAT_WINDOW_TOKENS) || 8000;
+export function chatWindowGet(cfg) {
+  const c = (cfg && cfg.chat && typeof cfg.chat === 'object') ? cfg.chat : {};
+  return { turns: Number(c.windowTurns) || _CTX_DEFAULT_TURNS, tokens: Number(c.windowTokens) || _CTX_DEFAULT_TOKENS };
+}
+export function chatWindowSet(cfg, { turns, tokens } = {}) {
+  cfg.chat = (cfg.chat && typeof cfg.chat === 'object') ? cfg.chat : {};
+  if (turns !== undefined) cfg.chat.windowTurns = turns;
+  if (tokens !== undefined) cfg.chat.windowTokens = tokens;
+  return cfg;
+}
+
 // ── Orchestrator — multi-agent config (cfg.orchestrator) ────────────────
 // Shared by the setup wizard, the /orchestrator slash, and the CLI so the
 // "planner + workers" config has one shape. Orchestration is ACTIVE only when

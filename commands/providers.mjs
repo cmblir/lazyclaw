@@ -406,6 +406,16 @@ export async function cmdOrchestrator(sub, positional, _flags = {}) {
       }, null, 2));
       return;
     }
+    case 'on':
+    case 'off': {
+      // Route cfg.provider to/from 'orchestrator' (shared with /orchestrator).
+      const cf = await import('../config_features.mjs');
+      cf.orchestratorEnable(cfg, sub === 'on');
+      writeConfig(cfg);
+      const w = Array.isArray(orch.workers) ? orch.workers.length : 0;
+      console.log(JSON.stringify({ ok: true, enabled: sub === 'on', provider: cfg.provider, ...(sub === 'on' && w === 0 ? { warning: 'no workers configured — add one: lazyclaw orchestrator workers add <provider[:model]>' } : {}) }, null, 2));
+      return;
+    }
     case 'set-planner': {
       try {
         const spec = validateSpec(positional[0]);

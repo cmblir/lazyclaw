@@ -145,6 +145,31 @@ export async function runWebhookStep({ prompt, colors, write = (s) => process.st
   }
 }
 
+// Context-window step (asked right after the model pick): how much past
+// conversation to keep each turn — a sliding history budget, NOT the model's
+// hard limit. Enter on both prompts keeps the defaults.
+export async function runContextStep({ prompt, colors, write = (s) => process.stdout.write(s) }) {
+  const { dim, ok } = colors;
+  const cf = await import('../config_features.mjs');
+  const cur = cf.chatWindowGet(readConfig());
+  write(`  ${dim(`Context window — how much past conversation to send each turn (sliding budget, not the model's hard limit). Now: ${cur.turns} turns · ${cur.tokens} tokens.`)}\n\n`);
+  const turnsRaw = (await prompt(`  turns to keep (Enter = ${cur.turns}): `)).trim();
+  const tokensRaw = (await prompt(`  token budget (Enter = ${cur.tokens}): `)).trim();
+  if (!turnsRaw && !tokensRaw) { write(`  ${dim('— kept defaults —')}\n\n`); return { skipped: true }; }
+  const turns = parseInt(turnsRaw, 10);
+  const tokens = parseInt(tokensRaw, 10);
+  const cfg = readConfig();
+  cf.chatWindowSet(cfg, {
+    ...(Number.isFinite(turns) && turns > 0 ? { turns } : {}),
+    ...(Number.isFinite(tokens) && tokens >= 256 ? { tokens } : {}),
+  });
+  writeConfig(cfg);
+  const w = cf.chatWindowGet(cfg);
+  write(`  ${ok('✓ context window:')} ${w.turns} turns · ${w.tokens} tokens\n`);
+  write(`  ${dim('change later: /context turns <N> | tokens <N>')}\n\n`);
+  return { skipped: false, ...w };
+}
+
 // Optional orchestration step: enable the multi-agent planner+workers pipeline.
 // Defaults the planner to the configured provider and workers to [planner];
 // the user can layer more workers later via /orchestrator or the CLI.

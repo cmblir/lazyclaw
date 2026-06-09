@@ -8,6 +8,15 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **Adjust the chat context window.** `/context` slash (`status | turns <N> |
+  tokens <N>`) and a setup prompt right after the model pick set
+  `cfg.chat.window{Turns,Tokens}` — the sliding history budget sent each turn
+  (not the model's hard limit). Backed by shared
+  `config_features.{chatWindowGet,chatWindowSet}`; default 20 turns / 8000 tokens.
+- **`lazyclaw orchestrator on|off`** (CLI parity with the `/orchestrator on|off`
+  slash) routes `cfg.provider` to/from `orchestrator`, restoring the previous
+  provider on `off`.
+
 - **Turn on multi-agent orchestration from setup or chat.** The setup wizard
   has an optional final step to enable orchestration (pick a planner + workers);
   a new `/orchestrator` slash views/edits it (`status | on | off | planner
@@ -47,6 +56,10 @@ Versioning: [SemVer](https://semver.org/).
   records which channels are enabled for the daemon and dashboard to read.
 
 ### Fixed
+
+- **The status bar's `ctx N/M` now reflects the configured context window.** The
+  total `M` was hardcoded to the 8000 default; it now reads
+  `cfg.chat.windowTokens`.
 
 - **Long streaming replies no longer spill below the chat input box.** In the
   REPL's non-alt (Static) layout the whole reply was held in a growing live
