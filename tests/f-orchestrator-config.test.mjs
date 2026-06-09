@@ -49,6 +49,20 @@ test('/orchestrator slash: worker add then on toggles provider', async () => {
   assert.equal(cfg.provider, 'claude-cli');
 });
 
+test('/orchestrator (bare) opens a picker and applies the pick', async () => {
+  const cfg = { provider: 'claude-cli', orchestrator: { planner: 'claude-cli', workers: ['mock'] } };
+  const ctx = { readConfig: () => cfg, writeConfig: (c) => Object.assign(cfg, c), openPicker: async () => 'off' };
+  const r = await dispatchSlash('/orchestrator', '', ctx, () => {});
+  assert.match(r, /orchestration off/, 'picking "off" disables');
+  assert.equal(cfg.provider, 'claude-cli', 'provider restored on off');
+});
+
+test('/orchestrator (bare) without a picker falls back to status text', async () => {
+  const ctx = { readConfig: () => ({ provider: 'claude-cli' }), writeConfig: () => {} };
+  const r = await dispatchSlash('/orchestrator', '', ctx, () => {});
+  assert.match(r, /orchestrator: (ON|off)/, 'legacy/no-picker path shows status');
+});
+
 test('/orchestrator is in the slash catalog', () => {
   assert.ok(SLASH_COMMANDS.some((c) => c.cmd === '/orchestrator'));
 });

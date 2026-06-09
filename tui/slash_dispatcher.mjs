@@ -1719,11 +1719,27 @@ async function _orchestrator(args, ctx = {}) {
   const write = typeof ctx.writeConfig === 'function' ? ctx.writeConfig : cfgMod.writeConfig;
   const persist = (cfg) => { write(cfg); if (ctx.cfg) ctx.cfg = cfg; };
   const parts = (args || '').trim().split(/\s+/).filter(Boolean);
-  const sub = (parts[0] || 'status').toLowerCase();
   const fmt = () => {
     const s = cf.orchestratorGet(read());
     return `orchestrator: ${s.active ? 'ON' : 'off'}  ·  planner: ${s.planner || '(default)'}  ·  workers: ${s.workers.length ? s.workers.join(', ') : '(none)'}  ·  maxSubtasks: ${s.maxSubtasks}`;
   };
+  // Bare `/orchestrator` → arrow-key picker (Ink). Pick ON/OFF/Status instead
+  // of typing the subcommand. Legacy path (no openPicker) shows status text.
+  if (parts.length === 0 && typeof ctx.openPicker === 'function') {
+    const s = cf.orchestratorGet(read());
+    const picked = await ctx.openPicker({
+      title: 'Orchestration',
+      subtitle: `now ${s.active ? 'ON' : 'off'} · planner ${s.planner || '(default)'} · ${s.workers.length} worker(s)`,
+      items: [
+        { id: 'on', label: 'Turn ON', desc: 'route chats through planner + workers' },
+        { id: 'off', label: 'Turn OFF', desc: 'back to a single provider' },
+        { id: 'status', label: 'Status', desc: 'show current config' },
+      ],
+    });
+    if (!picked || typeof picked !== 'string') return fmt();
+    return _orchestrator(picked, ctx);
+  }
+  const sub = (parts[0] || 'status').toLowerCase();
   if (sub === 'status') return fmt();
   const cfg = read();
   if (sub === 'on' || sub === 'enable') {

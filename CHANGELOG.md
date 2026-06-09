@@ -126,6 +126,10 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Changed
 
+- **Bare  opens an arrow-key picker** (Turn ON / Turn OFF /
+  Status) so toggling orchestration is point-and-pick, not typed; the legacy
+  no-picker path still prints status text. ( and
+   continue to work directly.)
 - **The setup wizard accent is the terminal amber.** The wizard's step
   headers/prompts were printed in orange (xterm-256 #208); they now use the same
   amber-gold (`#d9b35a`, 24-bit) as the dashboard accent.
