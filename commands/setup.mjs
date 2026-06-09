@@ -62,7 +62,7 @@ export async function cmdOnboard(flags) {
     const ask = q => new Promise(resolve => rl.question(q, resolve));
     if (!flags.provider) {
       const provs = Object.keys(getRegistry().PROVIDERS).join('|');
-      const noKeyHint = '\x1b[38;5;208mclaude-cli\x1b[0m (subscription, no key) is the default';
+      const noKeyHint = '\x1b[38;2;217;179;90mclaude-cli\x1b[0m (subscription, no key) is the default';
       process.stdout.write(`hint: ${noKeyHint}\n`);
       flags.provider = (await ask(`provider [${provs}]: `)).trim() || 'claude-cli';
     }
@@ -189,7 +189,7 @@ export function cmdHelp(name) {
 
 export async function cmdSetup(_sub, _positional, flags = {}) {
   await ensureRegistry();
-  const accent = (s) => `\x1b[38;5;208m${s}\x1b[0m`;
+  const accent = (s) => `\x1b[38;2;217;179;90m${s}\x1b[0m`;
   const bold   = (s) => `\x1b[1m${s}\x1b[0m`;
   const dim    = (s) => `\x1b[2m${s}\x1b[0m`;
   const ok     = (s) => `\x1b[32m${s}\x1b[0m`;
@@ -240,12 +240,15 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
   const wantPing = !flags['skip-test'] && (await _quickPrompt('  test now? [Y/n] ')).trim().toLowerCase() !== 'n';
   if (wantPing) {
     try {
-      // Reuse the existing providers-test path so behaviour matches
-      // a manual `lazyclaw providers test`.
-      await (await import('../commands/providers.mjs')).cmdProviders('test', [cfgAfterOnboard.provider], {});
+      // No-exit probe (providers/probe.mjs) — the CLI `providers test` calls
+      // process.exit, which would kill the rest of this wizard. Render one
+      // concise line instead of the full JSON dump and keep going.
+      const { probeProvider } = await import('../providers/probe.mjs');
+      const r = await probeProvider({ name: cfgAfterOnboard.provider, model: cfgAfterOnboard.model || undefined });
+      if (r.ok) process.stdout.write(`  ${ok('✓ ' + (r.reply || 'ok'))}  ${dim(`· ${r.model || cfgAfterOnboard.provider} · ${r.durationMs}ms`)}\n`);
+      else process.stdout.write(`  ${warn('✗ ' + (r.error || 'no reply'))}  ${dim(`· retry: lazyclaw providers test ${cfgAfterOnboard.provider}`)}\n`);
     } catch (e) {
       process.stdout.write(`  ${warn('test errored:')} ${e?.message || e}\n`);
-      process.stdout.write(`  ${dim('Setup still continues; retry later with:')} lazyclaw providers test ${cfgAfterOnboard.provider}\n`);
     }
     process.stdout.write('\n');
   } else {
@@ -317,7 +320,7 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
 // exits politely instead of dropping into a menu where every option
 // would error.
 async function _runFirstTimeOnboard() {
-  const accent = (s) => `\x1b[38;5;208m${s}\x1b[0m`;
+  const accent = (s) => `\x1b[38;2;217;179;90m${s}\x1b[0m`;
   const dim    = (s) => `\x1b[2m${s}\x1b[0m`;
   const bold   = (s) => `\x1b[1m${s}\x1b[0m`;
   process.stdout.write('\x1b[2J\x1b[H');
@@ -503,7 +506,7 @@ export async function cmdLauncher() {
     { id: 'quit',         label: 'Quit',         desc: 'exit lazyclaw',                                 argv: null },
   ];
 
-  const accent = (s) => `\x1b[38;5;208m${s}\x1b[0m`;
+  const accent = (s) => `\x1b[38;2;217;179;90m${s}\x1b[0m`;
   const dim    = (s) => `\x1b[2m${s}\x1b[0m`;
   const bold   = (s) => `\x1b[1m${s}\x1b[0m`;
   const ok     = (s) => `\x1b[32m${s}\x1b[0m`;

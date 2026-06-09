@@ -3,6 +3,7 @@
 import { readConfig, writeConfig } from '../lib/config.mjs';
 import { ensureRegistry, getRegistry } from '../lib/registry_boot.mjs';
 import { _fetchModelsForProvider } from '../tui/pickers.mjs';
+import { probeProvider } from '../providers/probe.mjs';
 
 export async function cmdRates(sub, positional, flags = {}) {
   // Manage cfg.rates without hand-editing JSON. Same shape as
@@ -234,47 +235,15 @@ export async function cmdProviders(sub, positional, flags = {}) {
       }
       // cfg already declared above for the all-mode branch; reuse it.
       const meta = getRegistry().PROVIDER_INFO[name] || {};
-      // --model / --prompt come in via the parsed flags map (parseArgs
-      // lifted them out of positional). --model wins over config.model
-      // wins over PROVIDER_INFO.defaultModel.
+      // --model wins over config.model wins over PROVIDER_INFO.defaultModel.
       const model = flags.model || cfg.model || meta.defaultModel || 'unknown';
       const prompt = flags.prompt || 'ping';
       const apiKey = cfg['api-key'] || '';
-      const t0 = Date.now();
-      try {
-        // Drain the streaming response (every provider yields chunks of
-        // string). For mock this is instant; for real providers it's
-        // bounded by the prompt length and provider latency. We don't
-        // support a timeout flag here — the user can SIGINT if a
-        // provider hangs.
-        let reply = '';
-        const stream = provider.sendMessage([{ role: 'user', content: prompt }], { apiKey, model });
-        for await (const chunk of stream) {
-          if (typeof chunk === 'string') reply += chunk;
-        }
-        const durationMs = Date.now() - t0;
-        const ok = reply.length > 0;
-        console.log(JSON.stringify({
-          ok,
-          provider: name,
-          model,
-          durationMs,
-          replyLength: reply.length,
-          reply: reply.slice(0, 200) + (reply.length > 200 ? '…' : ''),
-        }, null, 2));
-        process.exit(ok ? 0 : 1);
-      } catch (err) {
-        const durationMs = Date.now() - t0;
-        console.log(JSON.stringify({
-          ok: false,
-          provider: name,
-          model,
-          durationMs,
-          error: err?.message || String(err),
-          code: err?.code || null,
-        }, null, 2));
-        process.exit(1);
-      }
+      // Shared, no-exit probe (providers/probe.mjs). The CLI prints JSON and
+      // exits; the setup wizard renders one line and keeps going.
+      const result = await probeProvider({ name, model, prompt, apiKey });
+      console.log(JSON.stringify(result, null, 2));
+      process.exit(result.ok ? 0 : 1);
     }
     case 'add': {
       // Register an OpenAI-compatible custom endpoint non-interactively.

@@ -25,6 +25,14 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **The setup wizard no longer exits after the verify step.** Step 2 ran the
+  provider ping via `lazyclaw providers test`, which calls `process.exit` — fine
+  when the ping was the last step, but after the phased reorder moved it to Step
+  2 that exit killed the rest of the wizard (channels/workspace/skills never
+  ran). The verify step now uses a shared no-exit `providers/probe.mjs` and
+  prints one concise line (`✓ <reply> · <model> · <ms>`) instead of dumping the
+  full JSON, so it no longer scrolls the splash away or quits mid-wizard.
+
 - **Assistant replies no longer vanish in the interactive chat REPL.** The Ink
   REPL was wired with the legacy `runTurn` prop, whose writeFn wrote streamed
   chunks straight to `process.stdout`. Those bytes landed in Ink's live frame
@@ -51,6 +59,9 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Changed
 
+- **The setup wizard accent is the terminal amber.** The wizard's step
+  headers/prompts were printed in orange (xterm-256 #208); they now use the same
+  amber-gold (`#d9b35a`, 24-bit) as the dashboard accent.
 - **The setup wizard now shows the full lazyclaw splash.** `lazyclaw setup` (and
   the first-run welcome) rendered a small figlet banner; they now render the same
   sloth + wordmark + subcommands splash the chat REPL shows. The dynamic props

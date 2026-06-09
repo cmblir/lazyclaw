@@ -34,7 +34,7 @@ const ALLOW = {
   'tui/slash_dispatcher.mjs': 1717,
   'commands/chat.mjs': 1225,
   'tui/pickers.mjs': 917,
-  'commands/setup.mjs': 731,
+  'commands/setup.mjs': 734,
   'commands/agents.mjs': 669,
   'gateway/device_auth.mjs': 664,
   'commands/workflow.mjs': 661,
@@ -42,7 +42,6 @@ const ALLOW = {
   'providers/registry.mjs': 623,
   'commands/automation.mjs': 582,
   'mas/mention_router.mjs': 540,
-  'commands/providers.mjs': 511,
 };
 
 function walk(dir, out) {
