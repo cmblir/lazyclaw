@@ -314,6 +314,11 @@ async function main() {
       await (await import('./commands/channels.mjs')).cmdChannels(sub, rest.positional.slice(1), rest.flags);
       break;
     }
+    case 'service': {
+      const sub = rest.positional[0];
+      await (await import('./commands/service.mjs')).cmdService(sub, rest.positional.slice(1), rest.flags);
+      break;
+    }
     case 'daemon': {
       await (await import('./commands/daemon.mjs')).cmdDaemon(rest.flags);
       break;

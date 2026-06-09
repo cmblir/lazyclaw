@@ -81,6 +81,21 @@ lazyclaw channels install @lazyclaw/channel-discord
 
 Inbound runs over Slack Socket Mode (no public URL, just an app-level `xapp-` token); outbound `message send` posts via Incoming Webhooks. Set it all up from the wizard's channel step, or `/channels` in chat.
 
+## Run it always-on
+
+The daemon is the agent core — one provider path and one session/memory store on `127.0.0.1`. Install it as a real OS service so it survives a terminal close or a reboot:
+
+```bash
+lazyclaw service install                 # launchd (macOS) · systemd user unit (Linux) · detached pidfile fallback
+lazyclaw service status
+lazyclaw service uninstall
+```
+
+The backend is auto-detected (override with `--backend launchd|systemd|fallback`); daemon flags pass through, e.g. `lazyclaw service install --port 19600 --auth-token "$TOK"`.
+
+> [!NOTE]
+> A channel listener or the daemon refuses to start while `security.allowUnattendedSensitive=true` — that flag bypasses the fail-closed tool-approval gate for *every* inbound message, so an always-on surface plus that flag is a remote-code-execution path. Keep sensitive-tool approval interactive.
+
 ## Multi-agent orchestration
 
 Set the provider to `orchestrator` and a hard request becomes **Plan → Delegate → Synthesise**: a planner decomposes the task, workers run the subtasks in parallel, then the planner merges the results. Workers are real agents with the tool registry.

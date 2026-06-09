@@ -44,6 +44,20 @@ lazyclaw channels enable|disable slack
 
 수신은 Slack Socket Mode(공개 URL 불요, app-level `xapp-` 토큰), 송신은 `message send`(Incoming Webhook). 위저드 채널 단계나 chat `/channels`로 설정.
 
+## 상시 가동 (always-on)
+
+데몬 = 에이전트 코어(`127.0.0.1`에 단일 provider 경로 + 세션/메모리 스토어). OS 서비스로 설치하면 터미널 종료·재부팅에도 살아있음:
+
+```bash
+lazyclaw service install                 # launchd(macOS) · systemd user unit(Linux) · detached pidfile fallback
+lazyclaw service status
+lazyclaw service uninstall
+```
+
+백엔드 자동 감지(`--backend launchd|systemd|fallback`로 override), 데몬 플래그 통과(`lazyclaw service install --port 19600 --auth-token "$TOK"`).
+
+> ⚠️ `security.allowUnattendedSensitive=true`이면 채널 리스너/데몬이 **부팅 거부** — 이 플래그는 모든 inbound에 대해 fail-closed tool 승인 게이트를 우회하므로 상시 표면 + 이 플래그 = RCE 경로. 민감 tool 승인은 인터랙티브로 유지.
+
 ## 멀티 에이전트 오케스트레이션
 
 provider를 `orchestrator`로 → **Plan → Delegate → Synthesise**. planner가 분해, workers가 병렬 실행, planner가 병합.
