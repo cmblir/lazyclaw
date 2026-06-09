@@ -1,10 +1,11 @@
 // Slack / Telegram / Matrix listener commands, extracted from cli.mjs (D3).
 import path from 'node:path';
-import { configPath, readConfig, writeConfig, _resolveAuthKey } from '../lib/config.mjs';
-import { ensureRegistry, getRegistry } from '../lib/registry_boot.mjs';
+import { configPath, readConfig, writeConfig } from '../lib/config.mjs';
+import { ensureRegistry } from '../lib/registry_boot.mjs';
 import { loadDotenvIfAny as _loadDotenvShared } from '../dotenv_min.mjs';
 import { channelStatusList, channelSetEnabled, KNOWN_CHANNELS } from '../config_features.mjs';
 import { assertUnattendedSafe, installCrashHandlers } from '../lib/gateway_guard.mjs';
+import { makeInboundHandler } from '../lib/inbound_client.mjs';
 
 // Thin .env loader wrapper kept local so the module stays self-contained.
 export function _loadDotenvIfAny(cfgDir) { return _loadDotenvShared(cfgDir); }
@@ -14,6 +15,16 @@ export function _loadDotenvIfAny(cfgDir) { return _loadDotenvShared(cfgDir); }
 function _bootGuard(cfg, surface) {
   try { assertUnattendedSafe(cfg, { surface }); }
   catch (e) { console.error(e.message); process.exit(2); }
+}
+
+// Resolve the daemon the listener forwards to. Defaults to the dashboard/
+// daemon loopback port; override with --daemon-url or LAZYCLAW_DAEMON_URL.
+const DEFAULT_DAEMON_URL = 'http://127.0.0.1:19600';
+function _daemonTarget(flags) {
+  return {
+    daemonUrl: flags['daemon-url'] || process.env.LAZYCLAW_DAEMON_URL || DEFAULT_DAEMON_URL,
+    daemonToken: flags['auth-token'] || process.env.LAZYCLAW_AUTH_TOKEN || null,
+  };
 }
 
 export async function cmdSlack(sub, positional, flags = {}) {
@@ -29,55 +40,17 @@ export async function cmdSlack(sub, positional, flags = {}) {
   const envInfo = _loadDotenvIfAny(cfgDir);
   process.stderr.write(`[slack] .env: ${envInfo.loaded} keys loaded from ${envInfo.path}\n`);
 
-  const provName = flags.provider || cfg.provider || 'mock';
-  const prov = getRegistry().PROVIDERS[provName];
-  if (!prov) { console.error(`unknown provider: ${provName}`); process.exit(2); }
-  const model = flags.model || cfg.model;
-
-  // Per-thread rolling chat history so multi-turn coherence works
-  // without committing to on-disk sessions. Capped at MAX_TURNS to
-  // bound the prompt size.
-  const threadMsgs = new Map();
-  const MAX_TURNS = 20;
-
-  const handler = async ({ threadId, text }) => {
-    const cleaned = String(text || '').replace(/<@[A-Z0-9]+>/g, '').trim();
-    // Phase 19.2: never post a placeholder ("(empty message)" / "(empty
-    // reply)") into the thread — those leaked through as visible noise
-    // when listener self-message echoes happened. Return null and let
-    // _simulateInbound's guard drop the send. Real provider errors
-    // still surface so the operator knows something went wrong.
-    if (!cleaned) {
-      process.stderr.write('[slack] dropping empty inbound (after mention strip)\n');
-      return null;
-    }
-    const msgs = threadMsgs.get(threadId) || [];
-    msgs.push({ role: 'user', content: cleaned });
-    let acc = '';
-    try {
-      for await (const chunk of prov.sendMessage(msgs, {
-        apiKey: _resolveAuthKey(cfg, provName),
-        model,
-      })) acc += chunk;
-    } catch (err) {
-      msgs.pop();
-      const why = err?.message || String(err);
-      process.stderr.write(`[slack] provider error: ${why}\n`);
-      return `(provider error: ${why})`;
-    }
-    msgs.push({ role: 'assistant', content: acc });
-    if (msgs.length > MAX_TURNS) msgs.splice(0, msgs.length - MAX_TURNS);
-    threadMsgs.set(threadId, msgs);
-    if (!acc.trim()) {
-      process.stderr.write('[slack] provider returned empty text — not posting\n');
-      return null;
-    }
-    return acc;
-  };
+  const { daemonUrl, daemonToken } = _daemonTarget(flags);
+  // Bridge every inbound through the daemon's session-bearing /inbound so
+  // chat + dashboard + all channels share one session/memory (single agent).
+  // NOTE: Slack does not yet capture the sender id (lands in a later phase),
+  // so a configured pairing allowlist will 403 Slack messages until then —
+  // run Slack with an empty pairing list, or pair via telegram/matrix.
+  const handler = makeInboundHandler({ channel: 'slack', daemonUrl, daemonToken, provider: flags.provider, model: flags.model });
 
   const { SlackChannel } = await import('../channels/slack.mjs');
   const ch = new SlackChannel();
-  process.stderr.write(`[slack] provider=${provName} model=${model || '(default)'}\n`);
+  process.stderr.write(`[slack] bridging to daemon ${daemonUrl}${flags.provider ? ` (provider=${flags.provider})` : ''}\n`);
   try {
     await ch.start(handler);
     await ch._connectSocketMode({ logger: (line) => process.stderr.write(line) });
@@ -123,36 +96,11 @@ export async function cmdTelegram(sub, positional, flags = {}) {
   const envInfo = _loadDotenvIfAny(cfgDir);
   process.stderr.write(`[telegram] .env: ${envInfo.loaded} keys loaded from ${envInfo.path}\n`);
 
-  const provName = flags.provider || cfg.provider || 'mock';
-  const prov = getRegistry().PROVIDERS[provName];
-  if (!prov) { console.error(`unknown provider: ${provName}`); process.exit(2); }
-  const model = flags.model || cfg.model;
+  const { daemonUrl, daemonToken } = _daemonTarget(flags);
+  const handler = makeInboundHandler({ channel: 'telegram', daemonUrl, daemonToken, provider: flags.provider, model: flags.model });
 
-  const threadMsgs = new Map();
-  const MAX_TURNS = 20;
-
-  const handler = async ({ threadId, text }) => {
-    const cleaned = String(text || '').trim();
-    if (!cleaned) { process.stderr.write('[telegram] dropping empty inbound\n'); return null; }
-    const msgs = threadMsgs.get(threadId) || [];
-    msgs.push({ role: 'user', content: cleaned });
-    let acc = '';
-    try {
-      for await (const chunk of prov.sendMessage(msgs, { apiKey: _resolveAuthKey(cfg, provName), model })) acc += chunk;
-    } catch (err) {
-      msgs.pop();
-      const why = err?.message || String(err);
-      process.stderr.write(`[telegram] provider error: ${why}\n`);
-      return `(provider error: ${why})`;
-    }
-    msgs.push({ role: 'assistant', content: acc });
-    if (msgs.length > MAX_TURNS) msgs.splice(0, msgs.length - MAX_TURNS);
-    threadMsgs.set(threadId, msgs);
-    if (!acc.trim()) { process.stderr.write('[telegram] provider returned empty text — not posting\n'); return null; }
-    return acc;
-  };
-
-  // The pairing allowlist doubles as the Telegram sender allowlist.
+  // The pairing allowlist doubles as the Telegram sender allowlist (a
+  // channel-level gate complementary to the daemon's /inbound pairing check).
   const allowlist = (cfg.pairing || []).map((p) => String(p.id));
   const { TelegramChannel } = await import('../channels/telegram.mjs');
   let ch;
@@ -162,7 +110,7 @@ export async function cmdTelegram(sub, positional, flags = {}) {
     console.error(`telegram: ${err?.message || err}`);
     process.exit(2);
   }
-  process.stderr.write(`[telegram] provider=${provName} model=${model || '(default)'} allowlist=${allowlist.length || 'open'}\n`);
+  process.stderr.write(`[telegram] bridging to daemon ${daemonUrl} allowlist=${allowlist.length || 'open'}${flags.provider ? ` (provider=${flags.provider})` : ''}\n`);
   try {
     await ch.start(handler, { poll: true, logger: (line) => process.stderr.write(line) });
   } catch (err) {
@@ -204,33 +152,8 @@ export async function cmdMatrix(sub, positional, flags = {}) {
   const envInfo = _loadDotenvIfAny(cfgDir);
   process.stderr.write(`[matrix] .env: ${envInfo.loaded} keys loaded from ${envInfo.path}\n`);
 
-  const provName = flags.provider || cfg.provider || 'mock';
-  const prov = getRegistry().PROVIDERS[provName];
-  if (!prov) { console.error(`unknown provider: ${provName}`); process.exit(2); }
-  const model = flags.model || cfg.model;
-
-  const threadMsgs = new Map();
-  const MAX_TURNS = 20;
-  const handler = async ({ threadId, text }) => {
-    const cleaned = String(text || '').trim();
-    if (!cleaned) { process.stderr.write('[matrix] dropping empty inbound\n'); return null; }
-    const msgs = threadMsgs.get(threadId) || [];
-    msgs.push({ role: 'user', content: cleaned });
-    let acc = '';
-    try {
-      for await (const chunk of prov.sendMessage(msgs, { apiKey: _resolveAuthKey(cfg, provName), model })) acc += chunk;
-    } catch (err) {
-      msgs.pop();
-      const why = err?.message || String(err);
-      process.stderr.write(`[matrix] provider error: ${why}\n`);
-      return `(provider error: ${why})`;
-    }
-    msgs.push({ role: 'assistant', content: acc });
-    if (msgs.length > MAX_TURNS) msgs.splice(0, msgs.length - MAX_TURNS);
-    threadMsgs.set(threadId, msgs);
-    if (!acc.trim()) { process.stderr.write('[matrix] provider returned empty text — not posting\n'); return null; }
-    return acc;
-  };
+  const { daemonUrl, daemonToken } = _daemonTarget(flags);
+  const handler = makeInboundHandler({ channel: 'matrix', daemonUrl, daemonToken, provider: flags.provider, model: flags.model });
 
   const allowlist = (cfg.pairing || []).map((p) => String(p.id));
   const { MatrixChannel } = await import('../channels/matrix.mjs');
@@ -241,7 +164,7 @@ export async function cmdMatrix(sub, positional, flags = {}) {
     console.error(`matrix: ${err?.message || err}`);
     process.exit(2);
   }
-  process.stderr.write(`[matrix] provider=${provName} model=${model || '(default)'} allowlist=${allowlist.length || 'open'}\n`);
+  process.stderr.write(`[matrix] bridging to daemon ${daemonUrl} allowlist=${allowlist.length || 'open'}${flags.provider ? ` (provider=${flags.provider})` : ''}\n`);
   try {
     await ch.start(handler, { poll: true, logger: (line) => process.stderr.write(line) });
   } catch (err) {

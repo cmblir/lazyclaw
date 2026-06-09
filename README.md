@@ -67,19 +67,22 @@ After every turn, a fire-and-forget loop records the trajectory and distils reus
 
 ## Talk to it anywhere
 
-Connect a channel and the same agent answers there. Slack, Telegram, Matrix, and HTTP are built in; Discord, Email, Signal, Voice, and WhatsApp install as `@lazyclaw/channel-*` plugins.
+Connect a channel and **the same agent** answers there — every listener forwards into the always-on daemon's shared session store, so chat, the dashboard, and all channels are one agent with one memory (and context follows across channels). Slack, Telegram, Matrix, and HTTP are built in; Discord, Email, Signal, Voice, and WhatsApp install as `@lazyclaw/channel-*` plugins.
 
 ```bash
-# Slack (Socket Mode): set SLACK_BOT_TOKEN + SLACK_APP_TOKEN in ~/.lazyclaw/.env
-lazyclaw slack listen                 # receive @mentions, reply in-thread
+lazyclaw service install              # 1) the always-on daemon (the shared brain)
+
+# 2) point a listener at it (Slack Socket Mode: SLACK_BOT_TOKEN + SLACK_APP_TOKEN in ~/.lazyclaw/.env)
+lazyclaw slack listen                 # forwards inbound to the daemon, replies in-thread
 lazyclaw slack listen --provider orchestrator   # …and orchestrate the reply
+lazyclaw slack listen --daemon-url http://127.0.0.1:19600   # non-default daemon
 
 lazyclaw channels                     # view configured channels
 lazyclaw channels enable|disable slack
 lazyclaw channels install @lazyclaw/channel-discord
 ```
 
-Inbound runs over Slack Socket Mode (no public URL, just an app-level `xapp-` token); outbound `message send` posts via Incoming Webhooks. Set it all up from the wizard's channel step, or `/channels` in chat.
+A listener is a thin forwarder: it owns the channel socket (Slack Socket Mode needs no public URL, just an app-level `xapp-` token) and POSTs each message to the daemon's `/inbound`, which binds the conversation to a persistent session and runs the provider. It needs a reachable daemon (`lazyclaw service install`, or `lazyclaw daemon`); override the target with `--daemon-url` / `LAZYCLAW_DAEMON_URL`. Set it all up from the wizard's channel step, or `/channels` in chat.
 
 ## Run it always-on
 

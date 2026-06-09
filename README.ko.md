@@ -34,15 +34,20 @@ lazyclaw                    # 새 설치 → 가이드 셋업 후 chat
 
 ## 어디서나 대화
 
+모든 리스너는 상시 데몬의 **공유 세션 스토어**로 forward → chat·대시보드·전 채널이 메모리 하나를 쓰는 단일 에이전트(컨텍스트가 채널 간 따라옴).
+
 ```bash
-# Slack (Socket Mode): ~/.lazyclaw/.env 에 SLACK_BOT_TOKEN + SLACK_APP_TOKEN
-lazyclaw slack listen                            # @멘션 수신, 스레드 응답
+lazyclaw service install                         # 1) 상시 데몬(공유 brain)
+
+# 2) 리스너를 데몬에 연결 (Slack Socket Mode: .env에 SLACK_BOT_TOKEN + SLACK_APP_TOKEN)
+lazyclaw slack listen                            # inbound를 데몬으로 forward, 스레드 응답
 lazyclaw slack listen --provider orchestrator    # …오케스트레이션 응답
+lazyclaw slack listen --daemon-url http://127.0.0.1:19600   # 비기본 데몬
 lazyclaw channels                                # 설정된 채널 보기
 lazyclaw channels enable|disable slack
 ```
 
-수신은 Slack Socket Mode(공개 URL 불요, app-level `xapp-` 토큰), 송신은 `message send`(Incoming Webhook). 위저드 채널 단계나 chat `/channels`로 설정.
+리스너는 thin forwarder: 채널 소켓을 소유(Slack Socket Mode는 공개 URL 불요, app-level `xapp-` 토큰)하고 각 메시지를 데몬 `/inbound`로 POST → 데몬이 영속 세션에 바인딩 후 provider 실행. **데몬이 떠 있어야 함**(`lazyclaw service install` 또는 `lazyclaw daemon`); 타깃은 `--daemon-url`/`LAZYCLAW_DAEMON_URL`로 override. 위저드 채널 단계나 chat `/channels`로 설정.
 
 ## 상시 가동 (always-on)
 
