@@ -48,6 +48,14 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **Long streaming replies no longer spill below the chat input box.** In the
+  REPL's non-alt (Static) layout the whole reply was held in a growing live
+  region; once it was taller than the terminal it overflowed past the sticky
+  editor. `onStreamChunk` now commits completed lines to the `<Static>`
+  scrollback as they stream (so they scroll up above the editor) and keeps only
+  the in-progress partial line live — the editor stays pinned at the bottom.
+  Newline-free chunks still accumulate, so short replies are unchanged.
+
 - **Slack inbound (Socket Mode) no longer requires `SLACK_SIGNING_SECRET`.**
   `lazyclaw slack listen` demanded the signing secret, but Socket Mode
   authenticates the WebSocket with the app-level token — the signing secret is

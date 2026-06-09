@@ -154,9 +154,25 @@ export function onEscape(state) {
   };
 }
 
-// New reducer: stream chunk arrives, accumulate in liveAssistant.
+// Stream chunk arrives. Completed lines are committed to the <Static>
+// scrollback immediately (so they scroll up ABOVE the sticky editor), and only
+// the in-progress trailing partial stays in the live region. Without this, a
+// reply taller than the terminal grew the live frame past the viewport and
+// spilled BELOW the input box (long orchestrator replies). Chunks without a
+// newline still just accumulate (the prior behaviour), so short replies and the
+// existing reducer tests are unchanged.
 export function onStreamChunk(state, { chunk }) {
-  return { ...state, liveAssistant: state.liveAssistant + chunk };
+  const buf = state.liveAssistant + chunk;
+  const nl = buf.lastIndexOf('\n');
+  if (nl < 0) return { ...state, liveAssistant: buf };
+  const complete = buf.slice(0, nl);          // one or more whole lines
+  const remainder = buf.slice(nl + 1);        // trailing partial (may be '')
+  const id = `as-${state.turnCounter}-${state.scrollback.length}`;
+  return {
+    ...state,
+    scrollback: [...state.scrollback, { kind: 'assistant', id, text: complete }],
+    liveAssistant: remainder,
+  };
 }
 
 export function onTurnComplete(state, { reason, error } = {}) {
