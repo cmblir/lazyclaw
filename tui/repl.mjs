@@ -479,10 +479,15 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
   const modalOpen = !!modal;
 
   // Slash popup is suppressed whenever a modal picker is active so the
-  // overlays don't stack.
+  // overlays don't stack, AND once the buffer has a space (the user is typing
+  // ARGS, e.g. `/orchestrator off`). Without the space guard the popup stayed
+  // open as a one-row hint and the editor treated Enter as "fill the matched
+  // command", which dropped the args and reverted the buffer to the bare
+  // command. With args, Enter must submit the full line instead.
   const showSlashPopup =
     !modalOpen &&
-    bufferPeek.startsWith('/') && filtered.length > 0 && !_exactOnly;
+    bufferPeek.startsWith('/') && bufferPeek.indexOf(' ') < 0 &&
+    filtered.length > 0 && !_exactOnly;
 
   // Outer column height: pinned to rows-1 in alt-buffer mode so the
   // Editor truly sticks to the bottom. Non-alt keeps content-sized layout

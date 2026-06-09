@@ -57,6 +57,7 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **Slash commands with arguments now run with their args (e.g. /orchestrator off).** The slash popup stayed open as a one-row hint while you typed args, and the editor treated Enter as fill-the-matched-command — so it dropped the args and reverted the buffer to the bare command. The interactive popup is now hidden once the buffer has a space, so Enter submits the full line; this affected every slash command that takes an argument.
 - **Backspacing no longer eats the output above the input box.** The cursor
   anchor could move the terminal cursor up several times between redraws (fast
   typing / backspace); the eraseLines shim only compensated for the last move,
