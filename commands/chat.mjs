@@ -41,6 +41,12 @@ export function legacySlashRoute(cmd, ctx) {
   }
 }
 
+// Dispatcher commands the legacy readline path's default branch may delegate to
+// _dispatchSlash. Kept to ctx-safe handlers only (no _inkCtx-only setters /
+// openPicker / version), so legacy doesn't silently degrade. /channels has a
+// lib/config fallback so it's safe; add others only after confirming ctx-safety.
+const LEGACY_DELEGATED_SLASHES = new Set(['/channels']);
+
 export async function cmdChat(flags = {}) {
   await ensureRegistry();
   const sessionsMod = await import('../sessions.mjs');
@@ -572,7 +578,15 @@ export async function cmdChat(flags = {}) {
         return true;
       }
       case '/new':
-      case '/reset': {
+      case '/reset':
+      case '/clear': {
+        // /clear is dispatcher-only (no explicit legacy case before this),
+        // so without it /clear fell through to `default:` → _dispatchSlash →
+        // _newReset, which clears via ctx.set* setters that _legacyCtx does
+        // NOT expose — returning 'cleared' while the closure's messages/
+        // charsSent/runningUsage stayed intact (a lying no-op). Alias /clear
+        // to the /new+/reset direct-mutation body, matching the dispatcher's
+        // /clear → /new/reset session-reset aliasing.
         messages = [];
         charsSent = 0;
         runningUsage = null;
@@ -1106,9 +1120,23 @@ export async function cmdChat(flags = {}) {
         // and printed "unknown slash" instead of launching setup.
         return legacySlashRoute(cmd, _legacyCtx);
       }
-      default:
+      default: {
+        // Delegate ONLY ctx-safe dispatcher commands to the shared handler.
+        // _legacyCtx is intentionally thin (no setters / openPicker / version),
+        // so a blanket delegation would silently degrade picker- or setter-
+        // driven handlers (/menu, /clear, /version, …). /channels is ctx-safe
+        // (it has a lib/config fallback); everything else stays an honest
+        // "unknown slash". 'EXIT' breaks the loop; a returned string prints.
+        if (LEGACY_DELEGATED_SLASHES.has(cmd)) {
+          const { args } = _parseSlashLine(line);
+          const r = await _dispatchSlash(cmd, args, _legacyCtx, (s) => process.stdout.write(s));
+          if (r === 'EXIT') return 'EXIT';
+          if (typeof r === 'string' && r.length) process.stdout.write(r + '\n');
+          return true;
+        }
         process.stdout.write(`unknown slash: ${cmd} (try /help)\n`);
         return true;
+      }
     }
   };
 

@@ -1,8 +1,9 @@
 // Slack / Telegram / Matrix listener commands, extracted from cli.mjs (D3).
 import path from 'node:path';
-import { configPath, readConfig, _resolveAuthKey } from '../lib/config.mjs';
+import { configPath, readConfig, writeConfig, _resolveAuthKey } from '../lib/config.mjs';
 import { ensureRegistry, getRegistry } from '../lib/registry_boot.mjs';
 import { loadDotenvIfAny as _loadDotenvShared } from '../dotenv_min.mjs';
+import { channelStatusList, channelSetEnabled, KNOWN_CHANNELS } from '../config_features.mjs';
 
 // Thin .env loader wrapper kept local so the module stays self-contained.
 export function _loadDotenvIfAny(cfgDir) { return _loadDotenvShared(cfgDir); }
@@ -250,6 +251,68 @@ export async function cmdMatrix(sub, positional, flags = {}) {
     process.once('SIGINT', onSig);
     process.once('SIGTERM', onSig);
   });
+}
+
+// `lazyclaw channels [list|enable <name>|disable <name>|install <pkg>|remove <pkg>]`
+// list   — configured built-in channels (cfg.channels.<name>) + installed plugins.
+// enable/disable — toggle cfg.channels.<name>.enabled (view/edit the setting).
+// install/remove — manage @lazyclaw/channel-* plugin packages.
+export async function cmdChannels(sub, positional = [], flags = {}) {
+  const cfgDir = path.dirname(configPath());
+  const { createLoader, listInstalled } = await import('../channels/loader.mjs');
+  const loader = createLoader({ configDir: cfgDir });
+
+  if (sub === 'install') {
+    const name = positional[0];
+    if (!name) { process.stderr.write('usage: lazyclaw channels install <@lazyclaw/channel-name>\n'); process.exit(2); }
+    const info = await loader.install(name);
+    process.stdout.write(`installed ${info.name}@${info.version}\n`);
+    return;
+  }
+  if (sub === 'remove' || sub === 'uninstall') {
+    const name = positional[0];
+    if (!name) { process.stderr.write('usage: lazyclaw channels remove <@lazyclaw/channel-name>\n'); process.exit(2); }
+    await loader.remove(name);
+    process.stdout.write(`removed ${name}\n`);
+    return;
+  }
+  if (sub === 'enable' || sub === 'disable') {
+    const name = (positional[0] || '').toLowerCase();
+    if (!name) { process.stderr.write(`usage: lazyclaw channels ${sub} <name>\n`); process.exit(2); }
+    const cfg = readConfig();
+    // Reject unknown names so a typo can't silently create a bogus
+    // cfg.channels.<name> section that then leaks into the list view.
+    // Stay permissive for pre-existing custom sections.
+    const existing = (cfg.channels && typeof cfg.channels === 'object') ? cfg.channels : {};
+    if (!KNOWN_CHANNELS.includes(name) && !(name in existing)) {
+      process.stderr.write(`unknown channel: ${name} (known: ${KNOWN_CHANNELS.join(', ')})\n`);
+      process.exit(2);
+    }
+    channelSetEnabled(cfg, name, sub === 'enable');
+    writeConfig(cfg);
+    process.stdout.write(JSON.stringify({ ok: true, channel: name, enabled: sub === 'enable' }) + '\n');
+    return;
+  }
+
+  // list (default): configured built-in channels + installed plugins.
+  const cfg = readConfig();
+  const configured = channelStatusList(cfg);
+  const plugins = listInstalled(cfgDir);
+  if (flags.json) {
+    process.stdout.write(JSON.stringify({ configured, plugins }, null, 2) + '\n');
+    return;
+  }
+  process.stdout.write('configured channels:\n');
+  if (configured.length === 0) {
+    process.stdout.write('  (none — run `lazyclaw setup` or `/config` in chat to add one)\n');
+  } else {
+    for (const ch of configured) {
+      const agent = ch.boundAgent ? ` · agent: ${ch.boundAgent}` : '';
+      process.stdout.write(`  ${ch.name}\t${ch.enabled ? 'enabled' : 'disabled'}${agent}\n`);
+    }
+  }
+  process.stdout.write(`plugins: ${plugins.length ? plugins.map((p) => `${p.name}@${p.version}`).join(', ') : '(none installed)'}\n`);
+  process.stdout.write('\ntoggle: lazyclaw channels <enable|disable> <name>  ·  add creds: lazyclaw setup\n');
 }
 
 

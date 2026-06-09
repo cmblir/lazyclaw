@@ -3,10 +3,11 @@
 // HTTP response. Bodies are unchanged; only the dispatch wrapper is new.
 import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, checkCostCap, accumulateMetricsFromCost, resolveProvider } from './_deps.mjs';
 
-// Known built-in channel names (matches channels/ + channels-*). Single
-// source of truth shared with the first-run setup catalog and its tests so
-// the two cannot drift apart silently.
-export const KNOWN_CHANNELS = ['slack', 'matrix', 'telegram', 'discord', 'email', 'signal', 'whatsapp', 'voice', 'http'];
+// Channel meta + status now live in config_features.mjs (single source for the
+// daemon route, the CLI `channels` command, and the /channels slash). Re-export
+// KNOWN_CHANNELS so existing importers (the drift-guard test) keep working.
+export { KNOWN_CHANNELS } from '../../config_features.mjs';
+import { channelStatusList } from '../../config_features.mjs';
 
 export async function trainerStatus(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
@@ -143,36 +144,10 @@ export async function sandboxUse(c) {
 
 export async function channels(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
-          // Aggregate cfg.channels.<name> + any channel-specific runtime
-          // state we expose. Keeps the dashboard from having to know
-          // each channel module's shape.
+          // Aggregate cfg.channels.<name> via the shared status helper so the
+          // dashboard, CLI, and /channels slash all report identically.
           const cfg = ctx.readConfig();
-          const chCfg = (cfg.channels && typeof cfg.channels === 'object') ? cfg.channels : {};
-          // Known built-in channel names (matches channels/ + channels-*).
-          const KNOWN = KNOWN_CHANNELS;
-          const out = [];
-          for (const name of KNOWN) {
-            const sec = chCfg[name];
-            if (!sec && !cfg[`${name}-bot-token`] && !cfg[`${name}-token`]) continue;
-            out.push({
-              name,
-              enabled: !!(sec && (sec.enabled !== false)),
-              lastInboundAt: sec?.lastInboundAt || null,
-              boundAgent: sec?.agent || sec?.boundAgent || null,
-            });
-          }
-          // Surface any additional configured channels we didn't enumerate.
-          for (const name of Object.keys(chCfg)) {
-            if (KNOWN.includes(name)) continue;
-            const sec = chCfg[name] || {};
-            out.push({
-              name,
-              enabled: sec.enabled !== false,
-              lastInboundAt: sec.lastInboundAt || null,
-              boundAgent: sec.agent || sec.boundAgent || null,
-            });
-          }
-          return writeJson(res, 200, { channels: out });
+          return writeJson(res, 200, { channels: channelStatusList(cfg) });
 }
 
 export async function indexRebuild(c) {

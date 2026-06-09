@@ -189,6 +189,43 @@ test('/reset is alias for /new', async () => {
   assert.equal(ctx.getMessages().length, 0);
 });
 
+test('/clear is alias for /new (clears via setters)', async () => {
+  const ctx = makeMockCtx();
+  ctx.setMessages([{ role: 'user', content: 'hi' }]);
+  ctx.setCharsSent(99);
+  ctx.setRunningUsage({ inputTokens: 10 });
+  const out = await dispatchSlash('/clear', '', ctx);
+  assert.match(out, /cleared/);
+  assert.equal(ctx.getMessages().length, 0);
+  assert.equal(ctx.getCharsSent(), 0);
+  assert.equal(ctx.getRunningUsage(), null);
+});
+
+// Regression guard for the legacy-REPL `/clear` lying no-op (Finding 1).
+// The dispatcher's _newReset clears state via the ctx.set* setters. A
+// legacy-shaped ctx exposes ONLY getters (getMessages, …) and NO setters —
+// the exact shape of _legacyCtx in commands/chat.mjs. So if the legacy
+// readline switch were to delegate `/clear` to the dispatcher (the old
+// behavior), it would return 'cleared — new conversation' while leaving the
+// conversation fully intact. This test pins that dispatcher-on-getters-only
+// behavior so we don't forget WHY the legacy switch must own `/clear`
+// directly (aliased to /new + /reset) instead of delegating it.
+test('/clear via dispatcher is a no-op on a getters-only (legacy) ctx — why the legacy switch must own it', async () => {
+  const messages = [{ role: 'user', content: 'hi' }];
+  const legacyShapedCtx = {
+    cfg: {}, cfgDir: tmpCfgDir(),
+    sessionsMod: { resetSession: () => {} },
+    getMessages: () => messages,          // getter only
+    getSessionId: () => null,
+    getCharsSent: () => 7,
+    getRunningUsage: () => ({ inputTokens: 5 }),
+    // NO setMessages / setCharsSent / setRunningUsage — like _legacyCtx.
+  };
+  const out = await dispatchSlash('/clear', '', legacyShapedCtx, () => {});
+  assert.match(out, /cleared — new conversation/, 'still CLAIMS it cleared');
+  assert.equal(messages.length, 1, 'but the conversation is NOT actually cleared');
+});
+
 // ─── /provider + /model ───────────────────────────────────────────────────
 
 test('/provider with arg mutates ctx', async () => {

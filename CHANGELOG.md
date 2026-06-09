@@ -8,6 +8,17 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **View and edit channel settings: `/channels` slash + `lazyclaw channels`.**
+  The CLI `lazyclaw channels` now lists configured built-in channels
+  (`cfg.channels.<name>` — enabled/disabled, bound agent) alongside installed
+  plugins, instead of only ever printing "no channel plugins installed";
+  `lazyclaw channels enable|disable <name>` toggles one. In chat, `/channels`
+  lists them and `/channels <name> on|off` toggles. A new shared
+  `config_features.{KNOWN_CHANNELS,channelStatusList,channelSetEnabled}` is the
+  single source the daemon `/channels` route, the CLI, and the slash all read,
+  so the three views can't drift. Unknown channel names are rejected (no config
+  pollution).
+
 - **`/config` slash command.** Typing `/config` in the chat REPL leaves the
   conversation and re-runs the setup wizard (provider, model, channels). Ink
   owns stdin, so the slash signals the host (`ctx.requestSetup`) and unmounts;

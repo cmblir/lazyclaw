@@ -311,27 +311,7 @@ async function main() {
     }
     case 'channels': {
       const sub = (rest.positional[0] || 'list').toLowerCase();
-      const { createLoader, listInstalled } = await import('./channels/loader.mjs');
-      const cfgDir = path.dirname(configPath());
-      const loader = createLoader({ configDir: cfgDir });
-      if (sub === 'install') {
-        const name = rest.positional[1];
-        if (!name) { process.stderr.write('usage: lazyclaw channels install <@lazyclaw/channel-name>\n'); process.exit(2); }
-        const info = await loader.install(name);
-        process.stdout.write(`installed ${info.name}@${info.version}\n`);
-        break;
-      }
-      if (sub === 'remove' || sub === 'uninstall') {
-        const name = rest.positional[1];
-        if (!name) { process.stderr.write('usage: lazyclaw channels remove <@lazyclaw/channel-name>\n'); process.exit(2); }
-        await loader.remove(name);
-        process.stdout.write(`removed ${name}\n`);
-        break;
-      }
-      // list
-      const rows = listInstalled(cfgDir);
-      if (!rows.length) { process.stdout.write('no channel plugins installed\n'); break; }
-      for (const r of rows) process.stdout.write(`${r.name}\t${r.version}\n`);
+      await (await import('./commands/channels.mjs')).cmdChannels(sub, rest.positional.slice(1), rest.flags);
       break;
     }
     case 'daemon': {

@@ -239,3 +239,49 @@ export async function messageSend(cfg, name, text, opts = {}) {
   }
   return { ok: true, kind: hook.kind, status: res.status };
 }
+
+// ── Channels — built-in channel config (cfg.channels.<name>) ────────────
+// KNOWN_CHANNELS mirrors channels/ (built-in) + channels-* (plugins). Single
+// source of truth: the daemon /channels route, the CLI `channels` command, and
+// the in-chat /channels slash all read it so the three views can't drift.
+export const KNOWN_CHANNELS = ['slack', 'matrix', 'telegram', 'discord', 'email', 'signal', 'whatsapp', 'voice', 'http'];
+
+// A channel counts as "configured" when it has a cfg.channels.<name> section
+// or a legacy <name>-bot-token / <name>-token key. Returns one row per
+// configured channel: { name, enabled, boundAgent, lastInboundAt }. Matches
+// the daemon /channels route's enabled semantics exactly.
+export function channelStatusList(cfg) {
+  const chCfg = (cfg.channels && typeof cfg.channels === 'object') ? cfg.channels : {};
+  const out = [];
+  for (const name of KNOWN_CHANNELS) {
+    const sec = chCfg[name];
+    if (!sec && !cfg[`${name}-bot-token`] && !cfg[`${name}-token`]) continue;
+    out.push({
+      name,
+      enabled: !!(sec && (sec.enabled !== false)),
+      boundAgent: sec?.agent || sec?.boundAgent || null,
+      lastInboundAt: sec?.lastInboundAt || null,
+    });
+  }
+  // Surface any additional configured channels not in the known list.
+  for (const name of Object.keys(chCfg)) {
+    if (KNOWN_CHANNELS.includes(name)) continue;
+    const sec = chCfg[name] || {};
+    out.push({
+      name,
+      enabled: sec.enabled !== false,
+      boundAgent: sec.agent || sec.boundAgent || null,
+      lastInboundAt: sec.lastInboundAt || null,
+    });
+  }
+  return out;
+}
+
+// Enable/disable a channel. Mutates cfg.channels.<name>.enabled; the caller
+// persists via writeConfig. Returns cfg for chaining.
+export function channelSetEnabled(cfg, name, enabled) {
+  if (!name) throw new Error('channel name is required');
+  cfg.channels = (cfg.channels && typeof cfg.channels === 'object') ? cfg.channels : {};
+  cfg.channels[name] = { ...(cfg.channels[name] || {}), enabled: !!enabled };
+  return cfg;
+}

@@ -1670,6 +1670,45 @@ async function _menu(args, ctx) {
   ].join('\n');
 }
 
+// /channels — view configured channels and toggle them. `/channels` lists;
+// `/channels <name> on|off` enables/disables. Reads/writes cfg via ctx when
+// available, else lib/config directly, so it works on both REPL paths.
+async function _channels(args, ctx = {}) {
+  const cf = await import('../config_features.mjs');
+  const cfgMod = await import('../lib/config.mjs');
+  const read = typeof ctx.readConfig === 'function' ? ctx.readConfig : cfgMod.readConfig;
+  const write = typeof ctx.writeConfig === 'function' ? ctx.writeConfig : cfgMod.writeConfig;
+  const [name, action] = (args || '').trim().split(/\s+/).filter(Boolean);
+  if (name && /^(on|off|enable|disable)$/i.test(action || '')) {
+    const en = /^(on|enable)$/i.test(action);
+    const cfg = read();
+    const key = name.toLowerCase();
+    // Reject unknown names so a typo can't silently create a bogus
+    // cfg.channels.<name> section (which would then leak into the list).
+    // Stay permissive for pre-existing custom sections.
+    const existing = (cfg.channels && typeof cfg.channels === 'object') ? cfg.channels : {};
+    if (!cf.KNOWN_CHANNELS.includes(key) && !(key in existing)) {
+      return `unknown channel: ${key} (known: ${cf.KNOWN_CHANNELS.join(', ')})`;
+    }
+    cf.channelSetEnabled(cfg, key, en); write(cfg);
+    // Legacy fallback path: the readline ctx (_legacyCtx) has no
+    // readConfig/writeConfig, so we read/wrote disk above against a fresh
+    // cfg object. Mirror the toggle onto the in-session ctx.cfg so a
+    // follow-up `/channels` (list) or other in-session read stays
+    // consistent instead of showing the stale pre-toggle value.
+    if (ctx.cfg && ctx.cfg !== cfg && typeof ctx.cfg === 'object') {
+      cf.channelSetEnabled(ctx.cfg, key, en);
+    }
+    return `channel ${key} → ${en ? 'enabled' : 'disabled'}`;
+  }
+  const rows = cf.channelStatusList(read());
+  if (!rows.length) return 'no channels configured. add creds with /config (re-runs setup) or `lazyclaw setup`.';
+  const lines = ['configured channels:'];
+  for (const c of rows) lines.push(`  ${c.name}  ${c.enabled ? 'enabled' : 'disabled'}${c.boundAgent ? ' · agent: ' + c.boundAgent : ''}`);
+  lines.push('toggle: /channels <name> on|off   ·   add creds: /config');
+  return lines.join('\n');
+}
+
 // ─── dispatch table ──────────────────────────────────────────────────────
 
 export const SLASH_HANDLERS = new Map([
@@ -1698,6 +1737,7 @@ export const SLASH_HANDLERS = new Map([
   ['/trainer', _trainer],
   ['/dashboard', _dashboard],
   ['/menu', _menu],
+  ['/channels', _channels],
   // /config — unmount and let chat.mjs run the setup wizard (ctx.requestSetup).
   ['/config', async (_a, ctx) => { ctx.requestSetup = true; return 'EXIT'; }],
   ['/exit', async () => 'EXIT'],
