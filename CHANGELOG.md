@@ -57,6 +57,16 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **The input cursor is now visible at the caret, and CJK/Hangul IME pre-edit
+  stays inside the box, in the default REPL layout.** The terminal-cursor anchor
+  (which parks the cursor at the typing position so you can see it and so an IME
+  draws its composing text there) only ran in the opt-in alt-buffer layout; in
+  the default non-alt layout the cursor parked below the box, so you couldn't
+  tell where you were typing and a half-composed Hangul syllable (e.g. "하"
+  while typing "한") leaked onto the row below. The anchor now runs in both
+  layouts (the editor is the last element either way, so the geometry math is
+  identical). Opt out with `LAZYCLAW_NO_CURSOR_ANCHOR=1`.
+
 - **The status bar's `ctx N/M` now reflects the configured context window.** The
   total `M` was hardcoded to the 8000 default; it now reads
   `cfg.chat.windowTokens`.
