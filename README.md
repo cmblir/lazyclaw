@@ -14,7 +14,7 @@ Chat in the terminal. Let the background learning loop distil your conversations
 npx lazyclaw          # first run walks you through setup, then drops into chat
 ```
 
-<img src="docs/screenshots/chat-orchestrator.png" alt="lazyclaw chat REPL running a multi-agent orchestration" width="760">
+<img width="1871" height="1146" alt="image" src="https://github.com/user-attachments/assets/365d05ac-cd24-4451-96b1-01fe82582a2b" />
 
 *한국어: [README.ko.md](./README.ko.md)*
 
