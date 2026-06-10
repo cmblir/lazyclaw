@@ -143,6 +143,10 @@ test('cmdService._buildSpec: wraps `daemon` with flags + injects config dir', as
   });
   assert.deepEqual(spec.args, ['/x/cli.mjs', 'daemon', '--port', '19610', '--log', 'info']);
   assert.equal(spec.backend, 'fallback');
+
+  // No --port -> defaults to 19600, the port the channel listeners dial.
+  const dflt = _buildSpec('daemon', { backend: 'fallback' }, '/cfg', { hasSystemctl: () => false, cliPath: () => '/x/cli.mjs' });
+  assert.deepEqual(dflt.args, ['/x/cli.mjs', 'daemon', '--port', '19600']);
   assert.equal(spec.configDir, '/cfg');
   assert.equal(spec.workingDir, '/w');
   assert.equal(spec.env.LAZYCLAW_CONFIG_DIR, '/cfg');

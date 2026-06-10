@@ -31,7 +31,11 @@ function cliPath() {
 export function _buildSpec(surface, flags = {}, cfgDir = '', deps = {}) {
   const hasSystemd = typeof deps.hasSystemctl === 'function' ? deps.hasSystemctl() : hasSystemctl();
   const args = [deps.cliPath ? deps.cliPath() : cliPath(), 'daemon'];
-  if (flags.port !== undefined) args.push('--port', String(flags.port));
+  // Default the service daemon to the well-known port the channel listeners
+  // dial (the LAZYCLAW_DAEMON_URL default), so `service install` + `* listen`
+  // work together out of the box. Bare `lazyclaw daemon` still defaults to a
+  // random port for ad-hoc / scripted use.
+  args.push('--port', flags.port !== undefined ? String(flags.port) : '19600');
   if (flags['auth-token']) args.push('--auth-token', String(flags['auth-token']));
   if (flags.log) args.push('--log', String(flags.log));
   return {
@@ -73,6 +77,15 @@ export async function cmdService(sub, positional = [], flags = {}) {
       emit({ ok: true, action: 'install', ...r });
       if (r.backend === 'fallback') {
         process.stderr.write('note: no service manager detected — running detached with a pidfile. This survives the terminal but NOT a reboot. Re-run `lazyclaw service install` after reboot, or install launchd/systemd.\n');
+        // The detached child's fate is invisible (stdio ignored), so verify it
+        // actually stayed up — a daemon that hit EADDRINUSE (port already in
+        // use) exits within ~200ms. Surface that instead of a false "ok".
+        await new Promise((s) => setTimeout(s, 800));
+        const st = serviceStatus(spec);
+        if (!st.running) {
+          const port = flags.port !== undefined ? String(flags.port) : '19600';
+          process.stderr.write(`warning: the daemon did not stay up — port ${port} may already be in use (a daemon is already running?). Check: lsof -ti tcp:${port}. Free it or pass --port, then re-run.\n`);
+        }
       }
       return;
     }
