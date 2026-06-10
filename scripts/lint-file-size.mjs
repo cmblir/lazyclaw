@@ -39,7 +39,6 @@ const ALLOW = {
   'gateway/device_auth.mjs': 664,
   'commands/workflow.mjs': 661,
   'tui/repl.mjs': 661,
-  'providers/registry.mjs': 623,
   'commands/automation.mjs': 582,
   'mas/mention_router.mjs': 540,
 };

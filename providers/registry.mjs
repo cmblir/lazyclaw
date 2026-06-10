@@ -12,9 +12,12 @@ import { openaiProvider } from './openai.mjs';
 import { ollamaProvider } from './ollama.mjs';
 import { geminiProvider } from './gemini.mjs';
 import { claudeCliProvider } from './claude_cli.mjs';
+import { geminiCliProvider } from './gemini_cli.mjs';
+import { codexCliProvider } from './codex_cli.mjs';
 import { hasClaudeCliSession } from './claude_cli_detect.mjs';
 import { makeOpenAICompatProvider, fetchOpenAICompatModels } from './openai_compat.mjs';
 import { makeOrchestratorProvider } from './orchestrator.mjs';
+import { OPENAI_COMPAT_BUILTINS } from './compat_vendors.mjs';
 
 /**
  * @typedef {{ role: 'user'|'assistant'|'system', content: string }} ChatMessage
@@ -116,163 +119,10 @@ export function resolveTrainer(cfg, opts = {}) {
   return { provider: t.provider, model: t.model || chatModel };
 }
 
-// Built-in OpenAI-compatible vendors. Same wire format → one factory call
-// each. The picker treats these like first-class providers so users don't
-// have to walk through "+ Add a custom endpoint" for the popular ones.
-//
-// Each entry must define baseUrl + envKey (the env var the chat path
-// consults when no api-key is configured) + suggestedModels (curated list
-// shown before the user fetches the live /v1/models catalogue).
-//
-// Adding a new vendor: drop a row here. The PROVIDERS / PROVIDER_INFO loops
-// below pick it up automatically.
-export const OPENAI_COMPAT_BUILTINS = {
-  nim: {
-    label: 'NVIDIA NIM',
-    baseUrl: 'https://integrate.api.nvidia.com/v1',
-    envKey: 'NVIDIA_API_KEY',
-    altEnvKeys: ['NIM_API_KEY'],
-    keyPrefix: 'nvapi-',
-    docs: 'NVIDIA NIM hosted catalogue (Llama 3.x, Nemotron, DeepSeek-R1, Mixtral, Phi-3, Qwen, etc.). Auth: NVIDIA_API_KEY env var or in-app api-key. Endpoint speaks the OpenAI v1 wire format.',
-    defaultModel: 'meta/llama-3.1-405b-instruct',
-    suggestedModels: [
-      'meta/llama-3.1-405b-instruct',
-      'meta/llama-3.1-70b-instruct',
-      'meta/llama-3.1-8b-instruct',
-      'nvidia/llama-3.1-nemotron-70b-instruct',
-      'nvidia/nemotron-mini-4b-instruct',
-      'nvidia/llama-3.3-nemotron-super-49b-v1',
-      'mistralai/mistral-nemo-12b-instruct',
-      'mistralai/mixtral-8x22b-instruct-v0.1',
-      'microsoft/phi-3-medium-4k-instruct',
-      'deepseek-ai/deepseek-r1',
-      'qwen/qwen2.5-7b-instruct',
-      'qwen/qwen2.5-coder-32b-instruct',
-    ],
-  },
-  openrouter: {
-    label: 'OpenRouter',
-    baseUrl: 'https://openrouter.ai/api/v1',
-    envKey: 'OPENROUTER_API_KEY',
-    keyPrefix: 'sk-or-',
-    docs: 'OpenRouter unified gateway — 200+ models behind one OpenAI-compatible endpoint. Auth: OPENROUTER_API_KEY env var or in-app api-key. Uses x-title/HTTP-Referer headers for attribution.',
-    defaultModel: 'anthropic/claude-3.5-sonnet',
-    headers: { 'http-referer': 'https://github.com/cmblir/lazyclaude', 'x-title': 'lazyclaw' },
-    suggestedModels: [
-      'anthropic/claude-3.5-sonnet',
-      'anthropic/claude-3-opus',
-      'openai/gpt-4o',
-      'openai/gpt-4o-mini',
-      'openai/o1-preview',
-      'meta-llama/llama-3.1-405b-instruct',
-      'meta-llama/llama-3.3-70b-instruct',
-      'google/gemini-2.0-flash-exp:free',
-      'google/gemini-pro-1.5',
-      'deepseek/deepseek-chat',
-      'deepseek/deepseek-r1',
-      'qwen/qwen-2.5-coder-32b-instruct',
-      'mistralai/mistral-large',
-    ],
-  },
-  groq: {
-    label: 'Groq',
-    baseUrl: 'https://api.groq.com/openai/v1',
-    envKey: 'GROQ_API_KEY',
-    keyPrefix: 'gsk_',
-    docs: 'Groq LPU inference — fastest-token-per-second tier for Llama / Mixtral / Gemma. Auth: GROQ_API_KEY env var or in-app api-key.',
-    defaultModel: 'llama-3.3-70b-versatile',
-    suggestedModels: [
-      'llama-3.3-70b-versatile',
-      'llama-3.1-70b-versatile',
-      'llama-3.1-8b-instant',
-      'llama-3.2-90b-vision-preview',
-      'mixtral-8x7b-32768',
-      'gemma2-9b-it',
-      'qwen-2.5-coder-32b',
-      'qwen-2.5-32b',
-      'deepseek-r1-distill-llama-70b',
-    ],
-  },
-  together: {
-    label: 'Together AI',
-    baseUrl: 'https://api.together.xyz/v1',
-    envKey: 'TOGETHER_API_KEY',
-    docs: 'Together AI hosted inference for open-weight models (Llama, Mixtral, Qwen, DeepSeek, etc.). Auth: TOGETHER_API_KEY env var or in-app api-key.',
-    defaultModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
-    suggestedModels: [
-      'meta-llama/Llama-3.3-70B-Instruct-Turbo',
-      'meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo',
-      'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo',
-      'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo',
-      'mistralai/Mixtral-8x22B-Instruct-v0.1',
-      'mistralai/Mixtral-8x7B-Instruct-v0.1',
-      'Qwen/Qwen2.5-72B-Instruct-Turbo',
-      'Qwen/Qwen2.5-Coder-32B-Instruct',
-      'deepseek-ai/DeepSeek-V3',
-      'deepseek-ai/DeepSeek-R1',
-    ],
-  },
-  xai: {
-    label: 'xAI (Grok)',
-    baseUrl: 'https://api.x.ai/v1',
-    envKey: 'XAI_API_KEY',
-    altEnvKeys: ['GROK_API_KEY'],
-    keyPrefix: 'xai-',
-    docs: 'xAI Grok models. Auth: XAI_API_KEY env var or in-app api-key.',
-    defaultModel: 'grok-2-latest',
-    suggestedModels: [
-      'grok-2-latest',
-      'grok-2-1212',
-      'grok-2-vision-1212',
-      'grok-beta',
-      'grok-vision-beta',
-    ],
-  },
-  deepseek: {
-    label: 'DeepSeek',
-    baseUrl: 'https://api.deepseek.com/v1',
-    envKey: 'DEEPSEEK_API_KEY',
-    keyPrefix: 'sk-',
-    docs: 'DeepSeek (deepseek-chat / deepseek-reasoner). Auth: DEEPSEEK_API_KEY env var or in-app api-key.',
-    defaultModel: 'deepseek-chat',
-    suggestedModels: [
-      'deepseek-chat',
-      'deepseek-reasoner',
-      'deepseek-coder',
-    ],
-  },
-  mistral: {
-    label: 'Mistral La Plateforme',
-    baseUrl: 'https://api.mistral.ai/v1',
-    envKey: 'MISTRAL_API_KEY',
-    docs: 'Mistral La Plateforme (mistral-large, codestral, ministral, pixtral). Auth: MISTRAL_API_KEY env var or in-app api-key.',
-    defaultModel: 'mistral-large-latest',
-    suggestedModels: [
-      'mistral-large-latest',
-      'mistral-small-latest',
-      'codestral-latest',
-      'ministral-8b-latest',
-      'ministral-3b-latest',
-      'pixtral-large-latest',
-      'open-mistral-nemo',
-    ],
-  },
-  fireworks: {
-    label: 'Fireworks AI',
-    baseUrl: 'https://api.fireworks.ai/inference/v1',
-    envKey: 'FIREWORKS_API_KEY',
-    docs: 'Fireworks AI hosted models. Auth: FIREWORKS_API_KEY env var or in-app api-key.',
-    defaultModel: 'accounts/fireworks/models/llama-v3p3-70b-instruct',
-    suggestedModels: [
-      'accounts/fireworks/models/llama-v3p3-70b-instruct',
-      'accounts/fireworks/models/llama-v3p1-405b-instruct',
-      'accounts/fireworks/models/qwen2p5-coder-32b-instruct',
-      'accounts/fireworks/models/deepseek-r1',
-      'accounts/fireworks/models/deepseek-v3',
-      'accounts/fireworks/models/mixtral-8x22b-instruct',
-    ],
-  },
-};
+// Built-in OpenAI-compatible vendor catalogue — moved to
+// providers/compat_vendors.mjs (pure data; add new vendors THERE).
+// Re-exported below so existing importers keep working.
+export { OPENAI_COMPAT_BUILTINS } from './compat_vendors.mjs';
 
 // Insertion order is the picker order. The list goes first-to-last in
 // rough "user-familiar / popular" order so a first-time onboard lands
@@ -280,8 +130,11 @@ export const OPENAI_COMPAT_BUILTINS = {
 // user feedback ("gemini, codex 이런거 먼저 나오게끔").
 export const PROVIDERS = {
   // Tier 1 — popular / brand-name vendors users come in looking for.
+  // Keyless CLI variants sit next to their API siblings.
   gemini: geminiProvider,
+  'gemini-cli': geminiCliProvider,   // keyless — local `gemini` CLI login
   openai: openaiProvider,        // surfaces gpt-5-codex / gpt-5 / o3-pro etc.
+  'codex-cli': codexCliProvider,     // keyless — local `codex` CLI (ChatGPT plan)
   // Tier 2 — Claude. CLI variant first because it's keyless.
   'claude-cli': claudeCliProvider,
   anthropic: anthropicProvider,
@@ -350,6 +203,22 @@ export const PROVIDER_INFO = {
       'sonnet',
       'haiku',
     ],
+  },
+  'gemini-cli': {
+    name: 'gemini-cli',
+    requiresApiKey: false,
+    docs: 'Google Gemini via the local `gemini` CLI (free Google-account login). No API key — auth flows through whatever account `gemini` is logged in with. Requires @google/gemini-cli installed.',
+    endpoint: 'subprocess: gemini -p',
+    defaultModel: 'gemini-2.5-pro',
+    suggestedModels: ['gemini-2.5-pro', 'gemini-2.5-flash', 'pro', 'flash'],
+  },
+  'codex-cli': {
+    name: 'codex-cli',
+    requiresApiKey: false,
+    docs: 'OpenAI via the local `codex` CLI (ChatGPT Plus/Pro subscription). No API key — auth flows through `codex` login. Requires the codex CLI installed.',
+    endpoint: 'subprocess: codex exec',
+    defaultModel: 'gpt-5-codex',
+    suggestedModels: ['gpt-5-codex', 'gpt-5', 'o3'],
   },
   anthropic: {
     name: 'anthropic',

@@ -417,13 +417,13 @@ export async function _arrowMenu({ title, subtitle, footer, items, defaultIdx = 
 // here (rather than registry.mjs) because it's a UX concept, not
 // an intrinsic provider attribute.
 export function _providerFamilies() {
-  // Membership (api/cli/mock, orchestrator excluded) is shared with the Ink
-  // picker via tui/provider_families.mjs so both paths bucket identically.
-  // The ANSI tags below are readline-specific, so they're applied here.
+  // Membership (api/cli/meta/mock) is shared with the Ink picker via
+  // tui/provider_families.mjs; the ANSI tags below are readline-specific.
   const b = _bucketProviders(getRegistry());
   return {
     api: { label: 'API key', desc: 'paste an sk-... key during setup',  tag: '\x1b[38;5;245m[needs key]\x1b[0m', members: b.api },
     cli: { label: 'CLI / Local', desc: 'keyless — uses an existing CLI login or a local daemon', tag: '\x1b[38;5;208m[no key]\x1b[0m', members: b.cli },
+    meta: { label: 'Multi-agent', desc: 'orchestrator — fan a task out to a planner + workers (advanced)', tag: '\x1b[38;5;245m[meta]\x1b[0m', members: b.meta },
     mock: { label: 'Mock', desc: 'offline echo, only useful for testing', tag: '\x1b[38;5;245m[test]\x1b[0m', members: b.mock },
   };
 }

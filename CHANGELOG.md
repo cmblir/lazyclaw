@@ -15,6 +15,16 @@ Versioning: [SemVer](https://semver.org/).
   openai/ollama/OpenAI-compat vendors already could, so newly released
   models (e.g. `claude-fable-5`) appear the day they ship.
 
+- **`gemini-cli` and `codex-cli` are now selectable providers.** Both keyless
+  CLI adapters were fully implemented but never registered, so they were
+  invisible in `/provider` and the setup wizard. The CLI/Local family now
+  offers claude-cli, gemini-cli (local `gemini` login), codex-cli (local
+  `codex` / ChatGPT plan), and ollama.
+- **The orchestrator is pickable again.** It was excluded from the provider
+  picker entirely; it now appears in its own "Multi-agent" family — visible
+  and selectable, but still never a wizard default. (`/orchestrator on|off`
+  keeps working as before.)
+
 ### Changed
 
 - **Refreshed curated model lists.** `claude-cli` and `anthropic` suggest

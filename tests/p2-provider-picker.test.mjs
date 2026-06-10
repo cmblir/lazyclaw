@@ -28,11 +28,14 @@ const REGISTRY = {
 
 // ─── pure bucketing ────────────────────────────────────────────────────────
 
-test('bucketProviders splits api / cli / mock and excludes orchestrator', () => {
+test('bucketProviders splits api / cli / meta / mock; orchestrator is meta-only', () => {
   const b = bucketProviders(REGISTRY);
   assert.deepEqual(b.api.sort(), ['anthropic', 'mylab', 'openai']);
   assert.deepEqual(b.cli.sort(), ['claude-cli', 'ollama']);
   assert.deepEqual(b.mock, ['mock']);
+  // orchestrator is pickable again (its own Multi-agent family) but never
+  // lands in the default-facing api/cli buckets.
+  assert.deepEqual(b.meta, ['orchestrator']);
   assert.ok(!b.api.includes('orchestrator') && !b.cli.includes('orchestrator'));
 });
 
@@ -40,8 +43,10 @@ test('providerFamilies carries labels, plain tags, and members', () => {
   const f = providerFamilies(REGISTRY);
   assert.equal(f.api.tag, 'needs key');
   assert.equal(f.cli.tag, 'no key');
+  assert.equal(f.meta.tag, 'meta');
   assert.equal(f.mock.tag, 'test');
   assert.ok(f.api.members.includes('openai'));
+  assert.ok(f.meta.members.includes('orchestrator'));
 });
 
 test('providerTag reflects custom / api-key / keyless', () => {

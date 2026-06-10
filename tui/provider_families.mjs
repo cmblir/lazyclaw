@@ -5,17 +5,18 @@
 // (API key / CLI-Local / Mock) as shared, unit-testable data so both the
 // readline picker (cli.mjs) and the Ink dispatcher use one bucketing rule.
 
-// Bucket every registered provider into one of three auth families.
-// orchestrator is excluded entirely (strictly opt-in; never a wizard
-// default — see cli.mjs v5.3.2 note). Returns { api:[], cli:[], mock:[] }
-// of provider-id strings.
+// Bucket every registered provider into one of four auth families.
+// orchestrator sits in its own `meta` family — visible and pickable, but
+// never a wizard default (the cursor always starts on api/cli — see the
+// cli.mjs v5.3.2 note). Returns { api:[], cli:[], mock:[], meta:[] } of
+// provider-id strings.
 export function bucketProviders(registry) {
   const info = (registry && registry.PROVIDER_INFO) || {};
   const all = Object.keys((registry && registry.PROVIDERS) || {});
-  const out = { api: [], cli: [], mock: [] };
+  const out = { api: [], cli: [], mock: [], meta: [] };
   for (const name of all) {
     if (name === 'mock') out.mock.push(name);
-    else if (name === 'orchestrator') continue;
+    else if (name === 'orchestrator') out.meta.push(name);
     else if ((info[name] || {}).requiresApiKey) out.api.push(name);
     else out.cli.push(name);
   }
@@ -29,6 +30,7 @@ export function providerFamilies(registry) {
   return {
     api: { id: 'api', label: 'API key', desc: 'paste an sk-... key', tag: 'needs key', members: b.api },
     cli: { id: 'cli', label: 'CLI / Local', desc: 'keyless — an existing CLI login or a local daemon', tag: 'no key', members: b.cli },
+    meta: { id: 'meta', label: 'Multi-agent', desc: 'orchestrator — fan a task out to a planner + workers (advanced)', tag: 'meta', members: b.meta },
     mock: { id: 'mock', label: 'Mock', desc: 'offline echo, only useful for testing', tag: 'test', members: b.mock },
   };
 }
