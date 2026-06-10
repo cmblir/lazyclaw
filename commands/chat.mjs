@@ -23,17 +23,16 @@ import { SLASH_COMMANDS } from '../tui/slash_commands.mjs';
 
 // Legacy (non-Ink) slash routing for dispatcher-style, ctx-only commands.
 // The Ink REPL routes every slash through _dispatchSlash/SLASH_HANDLERS, but
-// the legacy readline path uses a hand-written switch (in cmdChat). Commands
-// like /config only mutate ctx and return a sentinel, so we keep that wiring
-// in one exported helper that BOTH the legacy switch and the regression test
-// drive — this is the seam that proves /config reaches setup on the legacy
-// path (the post-loop guard re-runs cmdSetup when ctx.requestSetup is set).
-// Returns 'EXIT' when the loop must break, or undefined when the command is
-// not one this helper owns (caller falls through to its own handling).
+// the legacy readline path uses a hand-written switch (in cmdChat). This
+// exported helper is the wiring BOTH that switch and the regression test
+// drive. Returns 'EXIT' to break the loop, undefined when not owned here.
 export function legacySlashRoute(cmd, ctx) {
   switch (cmd) {
+    // Legacy readline path has no modal picker, so BOTH /setup and /config
+    // route to the full wizard here (the Ink path gives /config its
+    // single-setting picker via tui/config_picker.mjs).
     case '/config':
-      // Mirror tui/slash_dispatcher.mjs '/config': signal the host, unmount.
+    case '/setup':
       ctx.requestSetup = true;
       return 'EXIT';
     default:
@@ -297,9 +296,13 @@ export async function cmdChat(flags = {}) {
         pickerRef: _inkPickerRef,
       }), { exitOnCtrlC: true, patchConsole: true });
       await ink.waitUntilExit();
-      // /config asks to (re)run the wizard: now that Ink has released stdin,
-      // run setup, then return to the shell (re-launch `lazyclaw` to chat).
+      // /setup → full wizard (then shell). /config single step → run JUST
+      // that step now that Ink released stdin, then re-enter chat.
       if (_inkCtx.requestSetup) await (await import('./setup.mjs')).cmdSetup(undefined, [], {});
+      else if (_inkCtx.requestConfigStep) {
+        await (await import('./config_step.mjs')).runConfigStep(_inkCtx.requestConfigStep);
+        return cmdChat(flags);
+      }
       return;
     } catch (e) {
       // Fall through to legacy path on any ink failure (missing import,
@@ -1110,14 +1113,10 @@ export async function cmdChat(flags = {}) {
         } catch { /* /exit must never hang or throw */ }
         return 'EXIT';
       }
-      case '/config': {
-        // Route through the shared legacySlashRoute helper (covered by
-        // tests/f-config-slash-splash.test.mjs) so the legacy path's /config
-        // wiring is the exact code the regression test exercises. It sets
-        // _legacyCtx.requestSetup and returns 'EXIT'; the post-loop guard at the
-        // bottom of cmdChat re-runs the setup wizard when requestSetup is set.
-        // Without this case the legacy readline path fell through to `default:`
-        // and printed "unknown slash" instead of launching setup.
+      case '/config':
+      case '/setup': {
+        // Shared legacySlashRoute wiring (tests/f-config-slash-splash.test.mjs):
+        // sets requestSetup + 'EXIT'; the post-loop guard runs the wizard.
         return legacySlashRoute(cmd, _legacyCtx);
       }
       default: {

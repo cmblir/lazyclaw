@@ -6,6 +6,21 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`/setup` vs `/config` split.** `/setup` is the first-run / full re-setup
+  command (every wizard step — what `/config` used to do). `/config` is now a
+  settings editor: pick ONE item — provider, model, context window, trainer,
+  orchestrator (handled in-chat), or channel credentials / outbound webhook
+  (leaves chat for the secret prompts, runs just that step, and returns to
+  chat) — so changing e.g. a webhook URL no longer means re-walking the
+  whole wizard. The legacy readline path routes both to the full wizard.
+- **Always-visible caret in the input box.** An inverse-video cell marks the
+  typing position at all times — including an empty box before anything is
+  typed — and the terminal-cursor IME anchor now re-applies after every
+  render, so streaming output or status-bar updates can no longer leave the
+  box apparently cursor-less while idle.
+
 ## [6.2.0] - 2026-06-10
 
 ### Added

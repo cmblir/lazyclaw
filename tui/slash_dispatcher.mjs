@@ -1,8 +1,6 @@
 // tui/slash_dispatcher.mjs — single source of slash-command routing for the
 // Ink chat REPL (v5.4). Lifted from cli.mjs's legacy readline handler so the
-// Ink branch stops shipping the "not yet wired" placeholder and so future
-// channels (Slack/Telegram inline commands, /handoff cross-channel control)
-// can share one dispatch table.
+// Ink branch and future channel surfaces share one dispatch table.
 //
 // Contract:
 //   dispatchSlash(cmd, args, ctx, write) → Promise<string|'EXIT'|void>
@@ -1814,17 +1812,18 @@ export const SLASH_HANDLERS = new Map([
   ['/channels', _channels],
   ['/orchestrator', _orchestrator],
   ['/context', _context],
-  // /config — unmount and let chat.mjs run the setup wizard (ctx.requestSetup).
-  ['/config', async (_a, ctx) => { ctx.requestSetup = true; return 'EXIT'; }],
+  // /setup — full wizard (every step); /config — pick ONE setting to change
+  // (in-chat where possible; credential steps unmount, run, re-enter chat).
+  ['/setup', async (_a, ctx) => { ctx.requestSetup = true; return 'EXIT'; }],
+  ['/config', async (a, ctx) => (await import('./config_picker.mjs')).runConfigSlash(a, ctx, SLASH_HANDLERS)],
   ['/exit', async () => 'EXIT'],
   ['/quit', async () => 'EXIT'],
 ]);
 
 /**
- * Primary entry point. Resolves the command name to a handler in
- * SLASH_HANDLERS and invokes it. Unknown commands return a friendly
- * "unknown" string (caller renders to scrollback) rather than throwing,
- * so the user sees feedback instead of an error toast.
+ * Primary entry point. Resolves the command name to a SLASH_HANDLERS entry
+ * and invokes it. Unknown commands return a friendly "unknown" string
+ * (rendered to scrollback) rather than throwing.
  */
 export async function dispatchSlash(cmd, args, ctx, write) {
   const handler = SLASH_HANDLERS.get(cmd);
