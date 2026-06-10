@@ -197,9 +197,12 @@ test.describe('Phase 15 — dashboard daemon routes', () => {
       expect(html).toContain('data-tab="teams"');
       expect(html).toContain('data-tab="tasks"');
       // CSS + JS are split out of the HTML shell (CLAUDE.md §7) and served
-      // as same-origin static assets — the shell only references them.
-      expect(html).toContain('href="/dashboard.css"');
-      expect(html).toContain('src="/dashboard.js"');
+      // as same-origin static assets. The references are RELATIVE (no
+      // leading slash) so the dashboard also styles correctly when served
+      // from a subpath or behind a prefixing proxy.
+      expect(html).toContain('href="dashboard.css"');
+      expect(html).toContain('src="dashboard.js"');
+      expect(html).not.toContain('href="/dashboard.css"');
     } finally { await d.stop(); }
   });
 
