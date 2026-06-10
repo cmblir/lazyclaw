@@ -145,3 +145,11 @@ test('makeInboundHandler: empty daemon reply -> null', async () => {
   );
   assert.equal(await handler({ threadId: 't', text: 'hi', senderId: '@a:b' }), null);
 });
+
+test('makeInboundHandler: duplicate replay -> silent null (no double-post on redelivery)', async () => {
+  const handler = makeInboundHandler(
+    { channel: 'telegram', daemonUrl: 'http://d' },
+    { postInbound: async () => ({ reply: 'already answered this', duplicate: true }), log: () => {} },
+  );
+  assert.equal(await handler({ threadId: 't', text: 'hi', senderId: '42', messageId: 'c:u1' }), null);
+});

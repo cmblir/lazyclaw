@@ -157,12 +157,19 @@ export class TelegramChannel extends Channel {
         // base.mjs's bucket gate reads req.token || req.key, so the sender
         // id rides under `key`: an authToken gate compares against it and a
         // rate-limit gate keys per-sender. We also keep senderId for
-        // downstream handler context, plus the chat-scoped message id
-        // (message_id is only unique per chat) for daemon-side dedup.
+        // downstream handler context, plus a dedup id for the daemon.
+        // PREFER update_id: it is stable when getUpdates redelivers the same
+        // update (offset is memory-only, so a restart replays the batch) but
+        // DISTINCT for an edit — an edited_message carries the ORIGINAL
+        // message_id, so keying on message_id would replay the stale answer
+        // instead of processing the edit. chatId-scoped message_id is only
+        // the fallback for direct _simulateInbound callers without update_id.
         gateInput: {
           key: evt.senderId,
           senderId: evt.senderId,
-          messageId: evt.messageId ? `${evt.chatId}:${evt.messageId}` : null,
+          messageId: evt.updateId != null
+            ? `${evt.chatId}:u${evt.updateId}`
+            : (evt.messageId ? `${evt.chatId}:${evt.messageId}` : null),
         },
       });
     } catch (err) {
@@ -254,6 +261,12 @@ export class TelegramChannel extends Channel {
     const timeoutMs = typeof opts.timeoutMs === 'number' ? opts.timeoutMs : 15000;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    // opts.track exposes this call's AbortController so stop() can cut a
+    // held-open long-poll short instead of waiting out the ~60s window
+    // (which can overrun a service manager's SIGTERM grace and get us
+    // SIGKILLed mid-drain). Only getUpdates opts in — aborting an in-flight
+    // send would drop a reply.
+    if (opts.track) this._inflightAbort = controller;
     let res;
     try {
       res = await fetch(url, {
@@ -269,6 +282,7 @@ export class TelegramChannel extends Channel {
       throw new TelegramError(`telegram ${method} transport error: ${err?.message || err}`, 'TELEGRAM_TRANSPORT');
     } finally {
       clearTimeout(timer);
+      if (opts.track) this._inflightAbort = null;
     }
     if (!res.ok) {
       throw new TelegramError(`telegram ${method} failed: HTTP ${res.status}`, 'TELEGRAM_HTTP_FAIL');
@@ -294,7 +308,8 @@ export class TelegramChannel extends Channel {
           const updates = await this._fetchUpdates();
           await this._processBatch(updates, () => stopped);
         } catch (err) {
-          logger(`[telegram] poll error: ${err?.message || err}\n`);
+          // A shutdown abort is a clean exit, not an error worth logging.
+          if (!stopped) logger(`[telegram] poll error: ${err?.message || err}\n`);
           // On a transport/API error, back off a beat so we don't spin
           // hot against a failing endpoint even when pollIntervalMs is 0.
           if (!stopped) await new Promise((r) => setTimeout(r, Math.max(pollIntervalMs, 500)));
@@ -305,11 +320,14 @@ export class TelegramChannel extends Channel {
         if (pollIntervalMs > 0) await new Promise((r) => setTimeout(r, pollIntervalMs));
       }
     };
-    // Fire and forget — stop() flips `stopped` and the loop exits.
+    // Fire and forget — stop() flips `stopped`, aborts the held-open
+    // getUpdates (prompt shutdown instead of waiting out the ~60s
+    // long-poll), and the loop exits.
     const promise = loop();
     this._pollHandle = {
       stop: async () => {
         stopped = true;
+        try { this._inflightAbort?.abort(); } catch { /* already settled */ }
         try { await promise; } catch { /* best-effort */ }
       },
     };
@@ -353,7 +371,7 @@ export class TelegramChannel extends Channel {
     const json = await this._apiCall(
       'getUpdates',
       { offset: this._offset, timeout: LONG_POLL_SECONDS },
-      { timeoutMs: (LONG_POLL_SECONDS + 10) * 1000 }
+      { timeoutMs: (LONG_POLL_SECONDS + 10) * 1000, track: true }
     );
     return Array.isArray(json.result) ? json.result : [];
   }

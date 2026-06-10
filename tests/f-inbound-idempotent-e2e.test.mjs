@@ -69,6 +69,14 @@ test('e2e: /inbound dedups by messageId and fires the learning loop', async () =
     assert.equal(r3.json.duplicate, undefined);
     assert.equal(r3.json.sessionId, r1.json.sessionId);
 
+    // The SAME messageId from a DIFFERENT conversation must NOT replay —
+    // the dedup key is conversation-scoped, so a colliding/forged id can't
+    // leak another thread's reply or sessionId.
+    const other = await post(port, { channel: 'slack', externalId: 'C2:other', senderId: 'U1', messageId: 'C1:100.1', text: 'unrelated convo' });
+    assert.equal(other.json.duplicate, undefined, 'cross-conversation id collision is not a duplicate');
+    assert.notEqual(other.json.sessionId, r1.json.sessionId);
+    assert.ok(other.json.reply.includes('unrelated convo'));
+
     // The session holds exactly 2 user+2 assistant turns (duplicate appended nothing).
     const sessFile = path.join(cfgDir, 'sessions', `${r1.json.sessionId}.jsonl`);
     const turns = fs.readFileSync(sessFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));

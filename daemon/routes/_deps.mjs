@@ -37,3 +37,6 @@ export { handoffWithRollback } from '../../channels/handoff.mjs';
 // Phase 4 — /inbound idempotency: dedup retried/redelivered channel messages
 // by their native message id so the provider runs once per message.
 export { openDedup } from '../lib/inbound_dedup.mjs';
+// Phase 4 — serialised, depth-capped runner for the /inbound learning hook
+// (a message burst must not fan out unbounded trainer calls).
+export { enqueueLearning } from '../lib/learn_queue.mjs';

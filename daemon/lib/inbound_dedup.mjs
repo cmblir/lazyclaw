@@ -17,6 +17,9 @@ import path from 'node:path';
 
 const DEFAULT_CAP = 500;
 const DEFAULT_PENDING_TTL_MS = 120_000;
+// Replays only need enough of the reply to repost it; cap what we persist so
+// a pathological multi-MB reply can't balloon the store.
+const MAX_PERSISTED_REPLY = 16_384;
 
 // One instance per config dir — the daemon is long-lived and the store keeps
 // its working set in memory; reopening per request would re-read the file.
@@ -39,6 +42,7 @@ export function openDedup(cfgDir, { cap = DEFAULT_CAP, pendingTtlMs = DEFAULT_PE
     catch { return; }
     for (const line of raw.split('\n')) {
       if (!line.trim()) continue;
+      appendedLines++;
       let rec;
       try { rec = JSON.parse(line); } catch { continue; } // skip corrupt lines
       if (!rec || typeof rec.key !== 'string') continue;
@@ -55,17 +59,18 @@ export function openDedup(cfgDir, { cap = DEFAULT_CAP, pendingTtlMs = DEFAULT_PE
     }
   };
 
+  // Appended-lines counter (seeded by load) instead of re-reading the file on
+  // every record — the store may see one append per inbound message.
+  let appendedLines = 0;
   const compactIfNeeded = () => {
-    let lines = 0;
-    try {
-      const raw = fs.readFileSync(file, 'utf8');
-      for (let i = 0; i < raw.length; i++) if (raw[i] === '\n') lines++;
-    } catch { return; }
-    if (lines <= cap * 4) return;
+    if (appendedLines <= cap * 4) return;
     const out = [...entries.entries()]
       .map(([key, e]) => JSON.stringify({ key, ...e }))
       .join('\n') + '\n';
-    try { fs.writeFileSync(file, out, { mode: 0o600 }); } catch { /* compaction is best-effort */ }
+    try {
+      fs.writeFileSync(file, out, { mode: 0o600 });
+      appendedLines = entries.size;
+    } catch { /* compaction is best-effort */ }
   };
 
   const store = {
@@ -81,12 +86,16 @@ export function openDedup(cfgDir, { cap = DEFAULT_CAP, pendingTtlMs = DEFAULT_PE
     },
     record(key, { reply = '', threadId = null, sessionId = null } = {}) {
       pending.delete(key);
-      const entry = { reply, threadId, sessionId, at: now() };
+      const bounded = String(reply).length > MAX_PERSISTED_REPLY
+        ? String(reply).slice(0, MAX_PERSISTED_REPLY) + '\n…(truncated for replay)'
+        : reply;
+      const entry = { reply: bounded, threadId, sessionId, at: now() };
       entries.delete(key);
       entries.set(key, entry);
       trim();
       try {
         fs.appendFileSync(file, JSON.stringify({ key, ...entry }) + '\n', { mode: 0o600 });
+        appendedLines++;
       } catch { /* persistence is best-effort; memory dedup still holds */ }
       compactIfNeeded();
     },

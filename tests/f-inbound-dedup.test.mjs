@@ -97,6 +97,17 @@ test('dedup file is written owner-only (0600)', () => {
   assert.equal(mode, 0o600);
 });
 
+test('record() bounds the persisted reply (multi-MB replies cannot balloon the store)', () => {
+  const dir = tmpDir();
+  const d = openDedup(dir);
+  d.claim('big');
+  d.record('big', { reply: 'x'.repeat(100_000), threadId: 't', sessionId: 's' });
+  const c = d.claim('big');
+  assert.equal(c.dup, true);
+  assert.ok(c.entry.reply.length < 20_000, `stored reply is capped (got ${c.entry.reply.length})`);
+  assert.match(c.entry.reply, /truncated for replay/);
+});
+
 test('corrupt lines in the persisted file are skipped, not fatal', () => {
   const dir = tmpDir();
   fs.writeFileSync(path.join(dir, 'inbound_seen.jsonl'),
