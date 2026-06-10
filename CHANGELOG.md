@@ -38,6 +38,17 @@ Versioning: [SemVer](https://semver.org/).
   message — RCE with an always-on surface), and long-running processes now
   install crash handlers (structured log + socket drain + non-zero exit so a
   service manager restarts them).
+- **Gateway hardening (adversarial-review pass).** The gateway authenticates
+  by default (token minted + persisted 0600 to `~/.lazyclaw/gateway.token`;
+  `--no-auth` opts out); dedup keys are conversation-scoped (a colliding or
+  forged messageId can't replay another conversation's reply/sessionId);
+  Telegram edits are processed instead of replaying the stale answer
+  (update_id-keyed dedup); listeners stay silent on duplicate redeliveries;
+  the /inbound learning hook is serialised + depth-capped; Slack Socket Mode
+  reconnect survives failed renegotiation and crashes loudly on permanent
+  death instead of going silently deaf; Telegram shutdown aborts the held-open
+  long-poll; handoff resume markers no longer leak session ids and sanitize
+  the note.
 - **Adjust the chat context window.** `/context` slash (`status | turns <N> |
   tokens <N>`) and a setup prompt right after the model pick set
   `cfg.chat.window{Turns,Tokens}` — the sliding history budget sent each turn
