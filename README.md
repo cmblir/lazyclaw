@@ -86,15 +86,25 @@ A listener is a thin forwarder: it owns the channel socket (Slack Socket Mode ne
 
 ## Run it always-on
 
-The daemon is the agent core — one provider path and one session/memory store on `127.0.0.1`. Install it as a real OS service so it survives a terminal close or a reboot:
+**One process, every channel:** `lazyclaw gateway` runs the daemon core *and* your configured channel transports (Slack Socket Mode / Telegram long-poll / Matrix sync) in a single process — and because the channels live in-process, `/handoff` can notify the target channel with a resume marker (a failed notify rolls the handoff back).
 
 ```bash
-lazyclaw service install                 # launchd (macOS) · systemd user unit (Linux) · detached pidfile fallback
+lazyclaw gateway                          # daemon core + every enabled channel, one process
+lazyclaw gateway --channels slack         # explicit channel set
+lazyclaw service install gateway          # …and keep it alive across reboots
+```
+
+Or run pieces separately: the daemon is the agent core — one provider path and one session/memory store on `127.0.0.1` — and `* listen` commands are standalone single-channel forwarders.
+
+```bash
+lazyclaw service install                 # daemon only: launchd (macOS) · systemd user unit (Linux) · pidfile fallback
 lazyclaw service status
 lazyclaw service uninstall
 ```
 
-The backend is auto-detected (override with `--backend launchd|systemd|fallback`); daemon flags pass through, e.g. `lazyclaw service install --port 19600 --auth-token "$TOK"`.
+The backend is auto-detected (override with `--backend launchd|systemd|fallback`); flags pass through, e.g. `lazyclaw service install gateway --port 19600 --auth-token "$TOK" --channels slack`.
+
+Inbound channel messages are **idempotent**: each message's native id (Slack `channel:ts`, Telegram `chat:message_id`, Matrix `event_id`) is deduplicated by the daemon — a redelivery or listener-restart replay returns the recorded reply instead of running the provider twice. And every session-bound channel turn feeds the same post-task **learning loop** as the chat REPL (trainer `auto` → your Claude subscription, $0).
 
 > [!NOTE]
 > A channel listener or the daemon refuses to start while `security.allowUnattendedSensitive=true` — that flag bypasses the fail-closed tool-approval gate for *every* inbound message, so an always-on surface plus that flag is a remote-code-execution path. Keep sensitive-tool approval interactive.

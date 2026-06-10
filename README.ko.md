@@ -51,15 +51,17 @@ lazyclaw channels enable|disable slack
 
 ## 상시 가동 (always-on)
 
-데몬 = 에이전트 코어(`127.0.0.1`에 단일 provider 경로 + 세션/메모리 스토어). OS 서비스로 설치하면 터미널 종료·재부팅에도 살아있음:
+**한 프로세스, 모든 채널:** `lazyclaw gateway` = 데몬 코어 + 설정된 채널 transport(Slack Socket Mode/Telegram long-poll/Matrix sync)를 단일 프로세스로. 채널이 in-process라 `/handoff`가 타깃 채널에 resume 마커 통지 가능(통지 실패 시 handoff 롤백).
 
 ```bash
-lazyclaw service install                 # launchd(macOS) · systemd user unit(Linux) · detached pidfile fallback
-lazyclaw service status
-lazyclaw service uninstall
+lazyclaw gateway                          # 데몬 코어 + 활성 채널 전부, 한 프로세스
+lazyclaw gateway --channels slack         # 채널 명시
+lazyclaw service install gateway          # 재부팅에도 살아있게
 ```
 
-백엔드 자동 감지(`--backend launchd|systemd|fallback`로 override), 데몬 플래그 통과(`lazyclaw service install --port 19600 --auth-token "$TOK"`).
+분리 실행도 가능: 데몬만(`lazyclaw service install`) + 채널별 `* listen` forwarder.
+
+인바운드 메시지는 **idempotent** — 채널 native id(Slack `channel:ts`, Telegram `chat:message_id`, Matrix `event_id`)로 dedup, 재전송/리스너 재시작 replay는 기록된 응답 반환(provider 재실행 없음). 세션 바인딩된 채널 턴은 chat REPL과 동일한 post-task **학습 루프**에 공급(trainer `auto` → Claude 구독 $0).
 
 > ⚠️ `security.allowUnattendedSensitive=true`이면 채널 리스너/데몬이 **부팅 거부** — 이 플래그는 모든 inbound에 대해 fail-closed tool 승인 게이트를 우회하므로 상시 표면 + 이 플래그 = RCE 경로. 민감 tool 승인은 인터랙티브로 유지.
 

@@ -265,9 +265,11 @@ export async function handoff(c) {
   const { ctx, res, req } = c;
           // F6 — re-point a thread to a new channel/externalId so a later
           // inbound on the target resumes the SAME session (context follows).
-          // The daemon has no live per-channel send map, so it migrates the
-          // binding directly with no notifier; once a send adapter is injected,
-          // a failed target notify rolls the binding back (channels/handoff.mjs).
+          // When the in-process gateway registered a live sender for the
+          // target channel (ctx.channelSenders), the target gets a resume
+          // marker and a FAILED notify rolls the binding back (502). Without
+          // a sender (bare daemon) the migration persists silently — the
+          // session still follows on the next inbound.
           let body;
           try { body = await readJson(req); }
           catch (e) { return writeJson(res, 400, { error: `invalid JSON body: ${e.message}` }); }
@@ -279,10 +281,14 @@ export async function handoff(c) {
           }
           const cfgDir = ctx.sessionsDirGetter();
           const threads = openThreads(cfgDir);
+          const liveSend = (ctx.channelSenders && typeof ctx.channelSenders.get === 'function')
+            ? ctx.channelSenders.get(target)
+            : undefined;
           try {
             const next = await handoffWithRollback({
               threads, threadId, target, externalId,
               note: typeof body.note === 'string' ? body.note : '',
+              send: liveSend,
             });
             return writeJson(res, 200, {
               threadId: next.threadId, channel: next.channel,

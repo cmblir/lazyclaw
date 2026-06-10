@@ -147,6 +147,11 @@ test('cmdService._buildSpec: wraps `daemon` with flags + injects config dir', as
   // No --port -> defaults to 19600, the port the channel listeners dial.
   const dflt = _buildSpec('daemon', { backend: 'fallback' }, '/cfg', { hasSystemctl: () => false, cliPath: () => '/x/cli.mjs' });
   assert.deepEqual(dflt.args, ['/x/cli.mjs', 'daemon', '--port', '19600']);
+
+  // The gateway surface wraps `gateway` (not `daemon`) and forwards --channels.
+  const gw = _buildSpec('gateway', { backend: 'fallback', channels: 'slack,telegram' }, '/cfg', { hasSystemctl: () => false, cliPath: () => '/x/cli.mjs' });
+  assert.deepEqual(gw.args, ['/x/cli.mjs', 'gateway', '--port', '19600', '--channels', 'slack,telegram']);
+  assert.equal(gw.name, 'gateway');
   assert.equal(spec.configDir, '/cfg');
   assert.equal(spec.workingDir, '/w');
   assert.equal(spec.env.LAZYCLAW_CONFIG_DIR, '/cfg');

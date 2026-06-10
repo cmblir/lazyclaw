@@ -13,7 +13,7 @@ import { configPath, readConfig } from '../lib/config.mjs';
 import { assertUnattendedSafe, assertServicePairing } from '../lib/gateway_guard.mjs';
 import { detectBackend, installService, uninstallService, serviceStatus } from '../lib/service_install.mjs';
 
-const SUPPORTED_SURFACES = new Set(['daemon']);
+const SUPPORTED_SURFACES = new Set(['daemon', 'gateway']);
 
 function hasSystemctl() {
   try {
@@ -30,14 +30,15 @@ function cliPath() {
 // any side effects.
 export function _buildSpec(surface, flags = {}, cfgDir = '', deps = {}) {
   const hasSystemd = typeof deps.hasSystemctl === 'function' ? deps.hasSystemctl() : hasSystemctl();
-  const args = [deps.cliPath ? deps.cliPath() : cliPath(), 'daemon'];
-  // Default the service daemon to the well-known port the channel listeners
-  // dial (the LAZYCLAW_DAEMON_URL default), so `service install` + `* listen`
+  const args = [deps.cliPath ? deps.cliPath() : cliPath(), surface];
+  // Default the service to the well-known port the channel listeners dial
+  // (the LAZYCLAW_DAEMON_URL default), so `service install` + `* listen`
   // work together out of the box. Bare `lazyclaw daemon` still defaults to a
   // random port for ad-hoc / scripted use.
   args.push('--port', flags.port !== undefined ? String(flags.port) : '19600');
   if (flags['auth-token']) args.push('--auth-token', String(flags['auth-token']));
   if (flags.log) args.push('--log', String(flags.log));
+  if (flags.channels) args.push('--channels', String(flags.channels));
   return {
     name: surface,
     surface,
@@ -107,6 +108,6 @@ export async function cmdService(sub, positional = [], flags = {}) {
     process.exit(2);
   }
 
-  console.error('Usage: lazyclaw service <install|uninstall|status|restart> [daemon] [--port N] [--auth-token T] [--log LEVEL] [--backend launchd|systemd|fallback]');
+  console.error('Usage: lazyclaw service <install|uninstall|status|restart> [daemon|gateway] [--port N] [--auth-token T] [--log LEVEL] [--channels a,b] [--backend launchd|systemd|fallback]');
   process.exit(2);
 }

@@ -8,6 +8,36 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **`lazyclaw gateway` — the single-process always-on agent.** One process
+  runs the daemon core AND the configured channel transports (Slack Socket
+  Mode / Telegram long-poll / Matrix sync); every inbound goes through the
+  session-bearing `POST /inbound`, and each channel registers a live sender
+  so `POST /handoff` finally notifies the target channel with a resume marker
+  (a failed notify rolls the binding back). `lazyclaw service install gateway`
+  keeps it alive across reboots.
+- **Always-on service install.** `lazyclaw service <install|uninstall|status|
+  restart> [daemon|gateway]` wraps the surface as a launchd plist
+  (RunAtLoad+KeepAlive), a systemd user unit (Restart=always), or a detached
+  pidfile fallback; backend auto-detected, override with `--backend`.
+- **Channel listeners now bridge through the daemon (single agent).**
+  `slack|telegram|matrix listen` POST every inbound to the daemon's
+  `POST /inbound` instead of calling the provider inline, so chat, the
+  dashboard, and every channel share one on-disk session/memory store and
+  cross-channel handoff works. Slack now forwards the sender id, so the
+  pairing allowlist gates all three channels symmetrically.
+- **Inbound idempotency.** Channels thread their native message id (Slack
+  `channel:ts`, Telegram `chat:message_id`, Matrix `event_id`); the daemon
+  dedups on it — a redelivery replays the recorded reply (no second provider
+  call, no duplicate session turns) and the store survives a restart.
+- **Channel turns feed the learning loop.** Session-bound `/inbound` turns
+  fire the same fire-and-forget post-task learning hook as the chat REPL
+  (trainer `auto` → claude-cli, $0).
+- **Fail-closed always-on guards.** A channel listener, the daemon/dashboard,
+  or the gateway refuses to boot while `security.allowUnattendedSensitive=true`
+  (that flag bypasses the sensitive-tool approval gate for every inbound
+  message — RCE with an always-on surface), and long-running processes now
+  install crash handlers (structured log + socket drain + non-zero exit so a
+  service manager restarts them).
 - **Adjust the chat context window.** `/context` slash (`status | turns <N> |
   tokens <N>`) and a setup prompt right after the model pick set
   `cfg.chat.window{Turns,Tokens}` — the sliding history budget sent each turn

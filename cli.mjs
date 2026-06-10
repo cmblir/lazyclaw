@@ -319,6 +319,10 @@ async function main() {
       await (await import('./commands/service.mjs')).cmdService(sub, rest.positional.slice(1), rest.flags);
       break;
     }
+    case 'gateway': {
+      await (await import('./commands/gateway.mjs')).cmdGateway(rest.flags);
+      break;
+    }
     case 'daemon': {
       await (await import('./commands/daemon.mjs')).cmdDaemon(rest.flags);
       break;
