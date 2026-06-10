@@ -158,7 +158,7 @@ export class MatrixChannel extends Channel {
     if (typeof opts.since === 'string') this._since = opts.since;
     this._timeoutMs = typeof opts.timeoutMs === 'number' ? opts.timeoutMs : LONG_POLL_MS;
     const poll = opts.poll !== false; // default true
-    if (poll) this._startPollLoop({ logger: this._logger });
+    if (poll) this._startPollLoop({ logger: this._logger, onDead: opts.onDead });
     return this;
   }
 
@@ -322,8 +322,16 @@ export class MatrixChannel extends Channel {
   // backs off rather than crashing the daemon. The in-flight AbortController
   // is held so stop() can abort the ~30s held-open request for prompt
   // shutdown.
-  _startPollLoop({ logger }) {
+  _startPollLoop({ logger, onDead }) {
     let stopped = false;
+    // Abnormal loop death must be VISIBLE to a live process: a gateway whose
+    // matrix poll silently exits looks healthy while being deaf on that
+    // channel. Default: throw from a fresh tick so the process crash
+    // handlers fire (and a service manager restarts it).
+    const dead = (err) => {
+      if (typeof onDead === 'function') return onDead(err);
+      setImmediate(() => { throw err; });
+    };
     const loop = async () => {
       while (!stopped) {
         try {
@@ -337,12 +345,20 @@ export class MatrixChannel extends Channel {
           }
         } catch (err) {
           if (stopped) break;
-          if (err?.name === 'AbortError' || err?.code === 'MATRIX_ABORTED') break;
+          if (err?.name === 'AbortError' || err?.code === 'MATRIX_ABORTED') {
+            // Aborted while NOT stopping = some other actor killed the
+            // in-flight sync — that's a dead listener, not a clean exit.
+            logger(`[matrix] sync aborted outside shutdown — stopping listener\n`);
+            this._fatal = err;
+            dead(err);
+            break;
+          }
           // A dead/forbidden token will never recover — stop the listener
           // and surface it rather than spinning forever on a 500ms back-off.
           if (err?.code === 'MATRIX_AUTH_FATAL') {
             logger(`[matrix] FATAL: ${err.message} — stopping listener\n`);
             this._fatal = err;
+            dead(err);
             break;
           }
           logger(`[matrix] poll error: ${err?.message || err}\n`);

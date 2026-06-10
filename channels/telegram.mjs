@@ -130,6 +130,7 @@ export class TelegramChannel extends Channel {
         // backoff between iterations (default 0 — no extra sleep).
         pollIntervalMs: typeof opts.pollIntervalMs === 'number' ? opts.pollIntervalMs : 0,
         logger: this._logger,
+        onDead: opts.onDead,
       });
     }
     return this;
@@ -284,6 +285,10 @@ export class TelegramChannel extends Channel {
       clearTimeout(timer);
       if (opts.track) this._inflightAbort = null;
     }
+    if (res.status === 401 || res.status === 403) {
+      // A dead/revoked token never recovers — fatal, not retryable.
+      throw new TelegramError(`telegram ${method} auth failed: HTTP ${res.status} (check TELEGRAM_BOT_TOKEN)`, 'TELEGRAM_AUTH_FATAL');
+    }
     if (!res.ok) {
       throw new TelegramError(`telegram ${method} failed: HTTP ${res.status}`, 'TELEGRAM_HTTP_FAIL');
     }
@@ -300,14 +305,28 @@ export class TelegramChannel extends Channel {
   // hands the batch to _processBatch which advances the ack offset only
   // for updates it processes successfully. Errors are logged and the loop
   // backs off rather than crashing the daemon.
-  _startPollLoop({ pollIntervalMs, logger }) {
+  _startPollLoop({ pollIntervalMs, logger, onDead }) {
     let stopped = false;
+    // Mirror matrix: abnormal loop death is surfaced (default: throw on a
+    // fresh tick -> crash handlers -> service-manager restart), never silent.
+    const dead = (err) => {
+      if (typeof onDead === 'function') return onDead(err);
+      setImmediate(() => { throw err; });
+    };
     const loop = async () => {
       while (!stopped) {
         try {
           const updates = await this._fetchUpdates();
           await this._processBatch(updates, () => stopped);
         } catch (err) {
+          // A dead/revoked token never recovers — stop and surface instead
+          // of hammering the API on a 500ms back-off forever.
+          if (!stopped && err?.code === 'TELEGRAM_AUTH_FATAL') {
+            logger(`[telegram] FATAL: ${err.message} — stopping listener\n`);
+            this._fatal = err;
+            dead(err);
+            break;
+          }
           // A shutdown abort is a clean exit, not an error worth logging.
           if (!stopped) logger(`[telegram] poll error: ${err?.message || err}\n`);
           // On a transport/API error, back off a beat so we don't spin
