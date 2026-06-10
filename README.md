@@ -94,6 +94,8 @@ lazyclaw gateway --channels slack         # explicit channel set
 lazyclaw service install gateway          # …and keep it alive across reboots
 ```
 
+The gateway is **authenticated by default**: it mints a bearer token on first run and persists it to `~/.lazyclaw/gateway.token` (0600, never logged). Its own channels use it automatically; external callers read it from the file (`--auth-token`/`--no-auth` to override).
+
 Or run pieces separately: the daemon is the agent core — one provider path and one session/memory store on `127.0.0.1` — and `* listen` commands are standalone single-channel forwarders.
 
 ```bash

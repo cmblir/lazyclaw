@@ -59,6 +59,8 @@ lazyclaw gateway --channels slack         # 채널 명시
 lazyclaw service install gateway          # 재부팅에도 살아있게
 ```
 
+gateway는 **기본 인증** — 첫 실행 시 bearer 토큰을 만들어 `~/.lazyclaw/gateway.token`(0600, 로그 안 남김)에 영속. 자기 채널은 자동 사용, 외부 호출자는 파일에서 읽음(`--auth-token`/`--no-auth`로 override).
+
 분리 실행도 가능: 데몬만(`lazyclaw service install`) + 채널별 `* listen` forwarder.
 
 인바운드 메시지는 **idempotent** — 채널 native id(Slack `channel:ts`, Telegram `chat:message_id`, Matrix `event_id`)로 dedup, 재전송/리스너 재시작 replay는 기록된 응답 반환(provider 재실행 없음). 세션 바인딩된 채널 턴은 chat REPL과 동일한 post-task **학습 루프**에 공급(trainer `auto` → Claude 구독 $0).

@@ -90,33 +90,35 @@ test('gateway e2e: inbound through the core, live handoff notify + rollback', as
     // 2) Unpaired sender is silently dropped (daemon 403 -> handler null).
     assert.equal(await slack.state.handler({ threadId: 'C9:1.1', text: 'sneak', senderId: 'U-stranger', messageId: 'C9:1.2' }), null);
 
-    // 3) Duplicate messageId is replayed by the core; handler returns the same text.
+    // 3) Duplicate messageId: the core replays internally, but the LISTENER
+    //    stays silent (the channel already has the reply — reposting would
+    //    double-post on redelivery).
     const dup = await slack.state.handler({ threadId: 'C9:1.1', text: 'hello via gateway', senderId: 'U1', messageId: 'C9:1.1' });
-    assert.equal(dup, reply);
+    assert.equal(dup, null);
 
     // Bound thread for handoff tests.
     const inbound = await fetch(`http://127.0.0.1:${gw.port}/inbound`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + gw.authToken },
       body: JSON.stringify({ channel: 'slack', externalId: 'C9:1.1', senderId: 'U1', text: 'where am i' }),
     }).then((r) => r.json());
     assert.ok(inbound.threadId && inbound.sessionId);
 
     // 4) Handoff to a channel whose send FAILS -> 502 + binding rolled back.
     const bad = await fetch(`http://127.0.0.1:${gw.port}/handoff`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + gw.authToken },
       body: JSON.stringify({ threadId: inbound.threadId, target: 'telegram', externalId: 'tg:777' }),
     });
     assert.equal(bad.status, 502);
     assert.equal((await bad.json()).code, 'HANDOFF_SEND_FAILED');
     const stillSlack = await fetch(`http://127.0.0.1:${gw.port}/inbound`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + gw.authToken },
       body: JSON.stringify({ channel: 'slack', externalId: 'C9:1.1', senderId: 'U1', text: 'still here?' }),
     }).then((r) => r.json());
     assert.equal(stillSlack.sessionId, inbound.sessionId, 'rollback kept the slack binding');
 
     // 5) Handoff to a HEALTHY channel -> 200, resume marker delivered, context follows.
     const good = await fetch(`http://127.0.0.1:${gw.port}/handoff`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + gw.authToken },
       body: JSON.stringify({ threadId: inbound.threadId, target: 'slack', externalId: 'C9:NEW' }),
     });
     assert.equal(good.status, 200);
@@ -124,7 +126,7 @@ test('gateway e2e: inbound through the core, live handoff notify + rollback', as
     assert.equal(slack.state.sent[0][0], 'C9:NEW');
     assert.match(slack.state.sent[0][1], /resumed from slack/);
     const followed = await fetch(`http://127.0.0.1:${gw.port}/inbound`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + gw.authToken },
       body: JSON.stringify({ channel: 'slack', externalId: 'C9:NEW', senderId: 'U1', text: 'did you follow me' }),
     }).then((r) => r.json());
     assert.equal(followed.sessionId, inbound.sessionId, 'context followed the handoff');

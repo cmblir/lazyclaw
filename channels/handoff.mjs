@@ -4,6 +4,16 @@
 // Pure function over (threads store, live channel map) — the CLI slash
 // and the daemon HTTP route both call this.
 
+// The note rides inside a message posted INTO a channel, and /handoff callers
+// control it — strip control characters (no ANSI/newline injection into
+// channel messages) and bound the length. Session ids are internal state and
+// never belong in user-visible text.
+function sanitizeNote(note) {
+  // eslint-disable-next-line no-control-regex
+  const cleaned = String(note || '').replace(/[\x00-\x1f\x7f]/g, ' ').trim();
+  return cleaned.length > 200 ? cleaned.slice(0, 200) + '…' : cleaned;
+}
+
 export async function runHandoff({ threads, channels, threadId, target, externalId, note = '' }) {
   const cur = threads.findByThread(threadId);
   if (!cur) {
@@ -23,7 +33,8 @@ export async function runHandoff({ threads, channels, threadId, target, external
   const next = threads.handoff(threadId, { channel: target, externalId });
 
   // 2. Notify source (best-effort) so the human knows where the convo went.
-  const tail = note ? ` — ${note}` : '';
+  const cleanNote = sanitizeNote(note);
+  const tail = cleanNote ? ` — ${cleanNote}` : '';
   if (channels[srcChannel] && typeof channels[srcChannel].send === 'function') {
     try {
       await channels[srcChannel].send(srcExternal,
@@ -33,9 +44,10 @@ export async function runHandoff({ threads, channels, threadId, target, external
     }
   }
 
-  // 3. Notify target with a resume marker.
+  // 3. Notify target with a resume marker. (No session id — internal state
+  // never belongs in user-visible channel text.)
   await channels[target].send(externalId,
-    `resumed from ${srcChannel} (session ${next.sessionId})${tail}`);
+    `resumed from ${srcChannel}${tail}`);
 
   return next;
 }
@@ -62,8 +74,9 @@ export async function handoffWithRollback({ threads, threadId, target, externalI
   const next = threads.handoff(threadId, { channel: target, externalId: String(externalId) });
   if (typeof send === 'function') {
     try {
-      const tail = note ? ` — ${note}` : '';
-      await send(String(externalId), `resumed from ${prior.channel} (session ${next.sessionId})${tail}`);
+      const cleanNote = sanitizeNote(note);
+      const tail = cleanNote ? ` — ${cleanNote}` : '';
+      await send(String(externalId), `resumed from ${prior.channel}${tail}`);
     } catch (e) {
       // Target never got the resume marker — roll the binding back so the
       // session isn't stranded on a channel that can't be reached.

@@ -12,6 +12,8 @@
 // binding back (channels/handoff.mjs). `slack|telegram|matrix listen` remain
 // supported as standalone single-channel forwarders.
 import path from 'node:path';
+import fs from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { configPath, readConfig, writeConfig, readVersionFromRepo } from '../lib/config.mjs';
 import { ensureRegistry } from '../lib/registry_boot.mjs';
 import { loadDotenvIfAny } from '../dotenv_min.mjs';
@@ -68,7 +70,23 @@ export async function runGateway(flags = {}, deps = {}) {
   const cfgDir = path.dirname(configPath());
   loadDotenvIfAny(cfgDir);
 
-  const authToken = flags['auth-token'] || process.env.LAZYCLAW_AUTH_TOKEN || null;
+  // The gateway is session-bearing AND sits on a well-known always-on port,
+  // so unlike the ad-hoc daemon it does not run unauthenticated by default:
+  // resolve --auth-token > env > the persisted gateway.token, else mint one
+  // and persist it 0600 (so `service install gateway` restarts keep the same
+  // token and the operator can read it from the file — it is never logged).
+  // --no-auth opts back into the historical open-loopback posture.
+  let authToken = flags['auth-token'] || process.env.LAZYCLAW_AUTH_TOKEN || null;
+  const tokenFile = path.join(cfgDir, 'gateway.token');
+  if (!authToken && !flags['no-auth']) {
+    try { authToken = fs.readFileSync(tokenFile, 'utf8').trim() || null; } catch { /* not minted yet */ }
+    if (!authToken) {
+      authToken = randomBytes(24).toString('hex');
+      fs.writeFileSync(tokenFile, authToken + '\n', { mode: 0o600 });
+    }
+    log(`[gateway] auth token active (read it from ${tokenFile}; external callers need Authorization: Bearer)\n`);
+  }
+  if (!authToken) log('[gateway] warning: --no-auth — any local process can drive the agent on this port.\n');
   const allowlistArr = (cfg.pairing || []).map((p) => String(p.id));
   if (allowlistArr.length === 0) {
     log('[gateway] warning: pairing allowlist is empty — the agent will answer ANYONE who can reach a connected channel. Pair senders with `lazyclaw pairing add <id>`.\n');
@@ -131,10 +149,16 @@ export async function runGateway(flags = {}, deps = {}) {
       try { await ch.stop(); } catch { /* best-effort drain */ }
       channelSenders.delete(name);
     }
-    await d.close();
+    // A wedged in-flight request must not hang shutdown forever — the crash
+    // handler awaits stop() before exiting, and a hang there would leave a
+    // crashed gateway alive-but-dead with no service-manager restart.
+    await Promise.race([
+      d.close(),
+      new Promise((r) => setTimeout(r, 8_000)),
+    ]);
   };
 
-  return { port: d.port, channels, channelSenders, skipped, stop };
+  return { port: d.port, channels, channelSenders, skipped, stop, authToken };
 }
 
 export async function cmdGateway(flags = {}) {

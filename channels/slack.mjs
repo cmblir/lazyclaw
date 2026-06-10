@@ -19,17 +19,10 @@
 // Phase 8 spec can point the adapter at a local mock HTTP server.
 
 import { Channel, ChannelGated } from './base.mjs';
+import { SlackError, readSlackEnv, validateEnv } from './slack_env.mjs';
 
-const DEFAULT_API_BASE = 'https://slack.com/api';
-
-export class SlackError extends Error {
-  constructor(message, code, missing) {
-    super(message);
-    this.name = 'SlackError';
-    this.code = code || 'SLACK_ERR';
-    if (Array.isArray(missing)) this.missing = missing;
-  }
-}
+// Re-exported for compatibility (split out under the file-size ratchet).
+export { SlackError, readSlackEnv } from './slack_env.mjs';
 
 // Decide whether a Socket Mode event should drive a handler call.
 // Pulled out of dispatchEvent so we can unit-test the filter without
@@ -55,37 +48,6 @@ export function shouldDispatchEvent(event, { selfUserId = null, selfBotId = null
   const text = typeof event.text === 'string' ? event.text : '';
   if (text.trim() === '') return false;
   return true;
-}
-
-export function readSlackEnv(env = process.env) {
-  const out = {
-    botToken: env.SLACK_BOT_TOKEN || null,
-    appToken: env.SLACK_APP_TOKEN || null,
-    signingSecret: env.SLACK_SIGNING_SECRET || null,
-    apiBase: env.SLACK_API_BASE || DEFAULT_API_BASE,
-  };
-  return out;
-}
-
-function validateEnv(env, { requireInbound = false } = {}) {
-  const missing = [];
-  if (!env.botToken) missing.push('SLACK_BOT_TOKEN');
-  else if (!env.botToken.startsWith('xoxb-')) {
-    throw new SlackError('SLACK_BOT_TOKEN must start with "xoxb-"', 'SLACK_BAD_TOKEN', ['SLACK_BOT_TOKEN']);
-  }
-  if (requireInbound) {
-    // Socket Mode (the inbound path) authenticates the WebSocket with the
-    // app-level token; SLACK_SIGNING_SECRET is only needed for the HTTP Events
-    // API (request-signature verification), which this adapter does not use, so
-    // it is NOT required here — requiring it blocked socket-mode setups.
-    if (!env.appToken) missing.push('SLACK_APP_TOKEN');
-    else if (!env.appToken.startsWith('xapp-')) {
-      throw new SlackError('SLACK_APP_TOKEN must start with "xapp-"', 'SLACK_BAD_TOKEN', ['SLACK_APP_TOKEN']);
-    }
-  }
-  if (missing.length) {
-    throw new SlackError(`missing Slack env vars: ${missing.join(', ')}`, 'SLACK_MISSING_ENV', missing);
-  }
 }
 
 export class SlackChannel extends Channel {
@@ -211,7 +173,11 @@ export class SlackChannel extends Channel {
   // opts.logger?: (line: string) => void — diagnostic sink (stderr in
   //   the CLI, no-op in tests).
   // opts.maxReconnects?: number — cap reconnect attempts (default ∞).
-  async _connectSocketMode({ logger = () => {}, maxReconnects = Infinity } = {}) {
+  // opts.onDead?: (err) => void — called when the reconnect chain gives up
+  //   for good. Default THROWS on the next tick so an always-on process
+  //   crashes loudly (and a service manager restarts it) instead of sitting
+  //   alive with a permanently dead socket.
+  async _connectSocketMode({ logger = () => {}, maxReconnects = Infinity, onDead } = {}) {
     validateEnv(this._env, { requireInbound: true });
     if (typeof globalThis.WebSocket !== 'function') {
       throw new SlackError(
@@ -348,17 +314,51 @@ export class SlackChannel extends Channel {
       }
     };
 
+    const dead = (err) => {
+      if (typeof onDead === 'function') return onDead(err);
+      // Surface the permanent failure instead of staying alive-but-deaf:
+      // throwing from a fresh tick reaches the process crash handlers.
+      setImmediate(() => { throw err; });
+    };
+
+    // Reschedule after ANY reconnect failure — including apps.connections.open
+    // rejecting — so one bad negotiation can't permanently kill the chain.
+    const scheduleReconnect = () => {
+      if (closed) return;
+      attempts++;
+      if (attempts > maxReconnects) {
+        logger(`[slack] giving up after ${attempts - 1} reconnect attempts\n`);
+        dead(new SlackError(`socket-mode reconnect gave up after ${attempts - 1} attempts`, 'SLACK_SOCKET_DEAD'));
+        return;
+      }
+      const backoff = Math.min(30000, 1000 * Math.pow(2, Math.min(attempts, 5)));
+      logger(`[slack] reconnecting in ${backoff}ms (attempt ${attempts})\n`);
+      setTimeout(() => {
+        if (closed) return;
+        connectOnce().catch((e) => {
+          logger(`[slack] reconnect failed: ${e?.message || e}\n`);
+          scheduleReconnect();
+        });
+      }, backoff);
+    };
+
     const connectOnce = () => new Promise((resolve, reject) => {
+      // Settle exactly once: a socket that closes (or errors) before 'open'
+      // REJECTS instead of leaving the promise pending forever — the initial
+      // caller surfaces it as a start failure; the reconnect path's .catch
+      // schedules the next attempt.
+      let settled = false;
       let wsUrl;
       openConnection()
         .then((u) => { wsUrl = u; })
-        .catch(reject)
+        .catch((e) => { settled = true; reject(e); })
         .then(() => {
           if (!wsUrl) return;
           logger(`[slack] socket-mode dialing wss gateway\n`);
           ws = new WebSocket(wsUrl);
           ws.addEventListener('open', () => {
             attempts = 0;
+            settled = true;
             logger(`[slack] socket-mode connected\n`);
             resolve();
           });
@@ -394,15 +394,16 @@ export class SlackChannel extends Channel {
           });
           ws.addEventListener('close', () => {
             logger(`[slack] socket closed\n`);
-            if (closed) return;
-            attempts++;
-            if (attempts > maxReconnects) {
-              logger(`[slack] giving up after ${attempts} reconnect attempts\n`);
+            if (!settled) {
+              // Closed before 'open': settle the pending connect attempt.
+              // The caller's .catch (initial start OR scheduleReconnect)
+              // decides what happens next — never double-schedule here.
+              settled = true;
+              reject(new SlackError('socket closed before open', 'SLACK_SOCKET_CLOSED_EARLY'));
               return;
             }
-            const backoff = Math.min(30000, 1000 * Math.pow(2, Math.min(attempts, 5)));
-            logger(`[slack] reconnecting in ${backoff}ms (attempt ${attempts})\n`);
-            setTimeout(() => { if (!closed) connectOnce().catch((e) => logger(`[slack] reconnect failed: ${e?.message || e}\n`)); }, backoff);
+            if (closed) return;
+            scheduleReconnect();
           });
           ws.addEventListener('error', (ev) => {
             // The 'error' event fires before 'close'; we let 'close' drive
