@@ -6,6 +6,8 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.2.0] - 2026-06-10
+
 ### Added
 
 - **Live model lists for the keyless CLI providers.** `claude-cli`,
@@ -39,9 +41,16 @@ Versioning: [SemVer](https://semver.org/).
   the current Claude lineup (`claude-fable-5`, `claude-opus-4-8`,
   `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6`,
   `claude-haiku-4-5`); retired models (`claude-3-5-*`, `gemini-1.5-*`)
-  no longer appear as suggestions. claude-cli has no catalogue endpoint
-  (keyless subprocess), so its curated list is the source there — the
-  free-text "type a custom model id" row still accepts anything.
+  no longer appear as suggestions. (claude-cli's curated list is the
+  offline fallback; the live list needs a credential — see Added.)
+
+### Fixed
+
+- **`providers test` crashed on boxes without the `gemini`/`codex` CLIs.**
+  A missing binary surfaces as an async ChildProcess `error` event; the
+  gemini-cli/codex-cli adapters only caught the sync throw, so the
+  unlistened event killed the whole process mid-probe. They now surface a
+  per-provider `CLI_MISSING` error exactly like claude-cli.
 
 ## [6.1.0] - 2026-06-10
 
