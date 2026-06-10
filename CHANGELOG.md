@@ -6,6 +6,8 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.1.0] - 2026-06-10
+
 ### Added
 
 - **`lazyclaw gateway` — the single-process always-on agent.** One process
