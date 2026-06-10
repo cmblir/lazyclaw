@@ -6,6 +6,19 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.3.1] - 2026-06-10
+
+### Fixed
+
+- **Chat crashed at boot on the legacy readline path** (`ReferenceError:
+  SLASH_COMMANDS is not defined` in the ghost-autocomplete) — a missing
+  import that only fired on a real TTY, so tests/CI never caught it. Any
+  terminal where the Ink UI was unavailable (narrow window, node incompat)
+  hit it immediately.
+- **Retired the v4 figlet banner.** The legacy path now shows the same v5
+  sloth splash as the Ink UI, and the ink→legacy fallback prints the reason
+  in one dim line instead of silently downgrading.
+
 ## [6.3.0] - 2026-06-10
 
 ### Added
