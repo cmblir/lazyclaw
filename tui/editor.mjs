@@ -422,7 +422,12 @@ export function Editor({
     try {
       process.stdout.write(`${undo}\x1b[${rowsUp}A\x1b[${colTarget}G\x1b[?25h`);
     } catch { /* stdout closed — swallow */ }
-  }, [state.buffer, state.cursor, altEnabled]);
+  });
+  // ^ NO dependency array — re-anchor after EVERY commit. Renders triggered
+  // by OTHER components (status-bar ticks, streaming output) redraw the
+  // frame and park the terminal cursor below it; with buffer-only deps the
+  // anchor didn't re-run and the cursor drifted out of the box whenever the
+  // user wasn't typing. The pending-offset undo above makes repeats safe.
 
   const lines = state.buffer.split('\n');
   // Ink's <Text wrap="wrap"> uses wrap-ansi (string-width aware) but the
@@ -445,6 +450,17 @@ export function Editor({
         text: wrapped[wi],
       });
     }
+  }
+  // Always-visible caret: an inverse-video cell drawn AT the cursor (the
+  // editor has no mid-line cursor movement, so the cursor is always at the
+  // end of the buffer — including column 0 of an empty box). The real
+  // terminal cursor is anchored to the same cell for IME pre-edit; this
+  // glyph keeps the position visible even between anchor writes (e.g.
+  // while another component renders). Hidden while a modal picker owns
+  // the keyboard so it can't masquerade as an active prompt.
+  if (!modalOpen && renderedLines.length > 0) {
+    const last = renderedLines[renderedLines.length - 1];
+    last.text = `${last.text}\x1b[7m \x1b[27m`;
   }
   return React.createElement(
     Box,
