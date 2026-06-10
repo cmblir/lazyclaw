@@ -191,8 +191,9 @@ export class MatrixChannel extends Channel {
           // base.mjs's bucket gate reads req.token || req.key, so the sender
           // id rides under `key`: an authToken gate compares against it and a
           // rate-limit gate keys per-sender. We keep senderId for downstream
-          // handler context too.
-          gateInput: { key: evt.senderId, senderId: evt.senderId },
+          // handler context, and the globally-unique event_id for daemon-
+          // side dedup.
+          gateInput: { key: evt.senderId, senderId: evt.senderId, messageId: evt.eventId },
         });
       } catch (err) {
         if (err instanceof ChannelGated || err?.code === 'CHANNEL_GATED') {
@@ -253,6 +254,7 @@ export class MatrixChannel extends Channel {
       threadId,
       text,
       senderId: gateInput && gateInput.senderId != null ? gateInput.senderId : null,
+      messageId: gateInput && gateInput.messageId != null ? gateInput.messageId : null,
     });
   }
 

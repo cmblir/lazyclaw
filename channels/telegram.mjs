@@ -157,8 +157,13 @@ export class TelegramChannel extends Channel {
         // base.mjs's bucket gate reads req.token || req.key, so the sender
         // id rides under `key`: an authToken gate compares against it and a
         // rate-limit gate keys per-sender. We also keep senderId for
-        // downstream handler context.
-        gateInput: { key: evt.senderId, senderId: evt.senderId },
+        // downstream handler context, plus the chat-scoped message id
+        // (message_id is only unique per chat) for daemon-side dedup.
+        gateInput: {
+          key: evt.senderId,
+          senderId: evt.senderId,
+          messageId: evt.messageId ? `${evt.chatId}:${evt.messageId}` : null,
+        },
       });
     } catch (err) {
       if (err instanceof ChannelGated || err?.code === 'CHANNEL_GATED') {
@@ -201,6 +206,7 @@ export class TelegramChannel extends Channel {
       threadId,
       text,
       senderId: gateInput && gateInput.senderId != null ? gateInput.senderId : null,
+      messageId: gateInput && gateInput.messageId != null ? gateInput.messageId : null,
     });
   }
 

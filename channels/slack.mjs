@@ -115,10 +115,10 @@ export class SlackChannel extends Channel {
   // handler that decided to stay silent — e.g. the listener dropping
   // an empty-after-mention-strip inbound — doesn't leak a "(empty
   // reply)" placeholder into the channel.
-  async _simulateInbound(text, threadId, senderId = null) {
+  async _simulateInbound(text, threadId, senderId = null, messageId = null) {
     let reply;
     try {
-      reply = await this._processInbound({ threadId, text, gateInput: { key: senderId, senderId } });
+      reply = await this._processInbound({ threadId, text, gateInput: { key: senderId, senderId, messageId } });
     } catch (err) {
       if (err instanceof ChannelGated || err?.code === 'CHANNEL_GATED') {
         await this.send(threadId, `(gated: ${err.message})`);
@@ -151,6 +151,7 @@ export class SlackChannel extends Channel {
       threadId,
       text,
       senderId: gateInput && gateInput.senderId != null ? gateInput.senderId : null,
+      messageId: gateInput && gateInput.messageId != null ? gateInput.messageId : null,
     });
   }
 
@@ -319,6 +320,10 @@ export class SlackChannel extends Channel {
         return;
       }
       const threadId = `${channel}:${replyTs}`;
+      // Native message id for daemon-side dedup: ts is unique per channel,
+      // so channel:ts is unique bot-wide (and identical for the app_mention
+      // and message events of the same message — exactly what dedup wants).
+      const messageId = `${channel}:${sourceTs}`;
       logger(`[slack] inbound ${event.type} from ${channel} (${text.length} chars)\n`);
 
       // Immediate acknowledgement. _ackInbound is silent when
@@ -327,7 +332,7 @@ export class SlackChannel extends Channel {
       const eyesOk = await this._ackInbound(channel, sourceTs, logger);
 
       try {
-        await this._simulateInbound(text, threadId, senderId);
+        await this._simulateInbound(text, threadId, senderId, messageId);
         if (eyesOk) {
           // Swap the "working" reaction for a "done" one so the user can
           // tell at a glance which messages have been answered.

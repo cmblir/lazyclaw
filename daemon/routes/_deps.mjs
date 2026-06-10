@@ -34,3 +34,6 @@ export { resolveProvider } from '../lib/provider.mjs';
 // persistent thread/session and re-point them across channels.
 export { openThreads } from '../../channels/threads.mjs';
 export { handoffWithRollback } from '../../channels/handoff.mjs';
+// Phase 4 — /inbound idempotency: dedup retried/redelivered channel messages
+// by their native message id so the provider runs once per message.
+export { openDedup } from '../lib/inbound_dedup.mjs';

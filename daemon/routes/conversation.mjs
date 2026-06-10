@@ -1,7 +1,7 @@
 // Daemon route handlers (conversation), extracted verbatim from makeHandler (D5).
 // Each handler takes the per-request dispatch context `c` and returns the
 // HTTP response. Bodies are unchanged; only the dispatch wrapper is new.
-import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, checkCostCap, accumulateMetricsFromCost, resolveProvider, openThreads, handoffWithRollback } from './_deps.mjs';
+import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, checkCostCap, accumulateMetricsFromCost, resolveProvider, openThreads, handoffWithRollback, openDedup } from './_deps.mjs';
 import { randomBytes } from 'node:crypto';
 
 // F5 — mint a fresh session id for a newly-seen channel:externalId binding.
@@ -165,6 +165,26 @@ export async function inbound(c) {
           const cfgDir = ctx.sessionsDirGetter();
           const channel = (typeof body.channel === 'string' && body.channel) ? body.channel : null;
           const externalId = (body.externalId != null && String(body.externalId)) ? String(body.externalId) : null;
+          // Phase 4 — idempotency. When the relay supplies the native message
+          // id, claim `${channel}:${messageId}` BEFORE any turn is persisted:
+          // a recorded duplicate replays the prior reply (no provider call,
+          // no double appendTurn); an in-flight duplicate answers empty so
+          // the listener stays silent while the first request finishes.
+          const messageId = (body.messageId != null && String(body.messageId)) ? String(body.messageId) : null;
+          let dedup = null;
+          let dedupKey = null;
+          if (channel && messageId) {
+            dedup = openDedup(cfgDir);
+            dedupKey = `${channel}:${messageId}`;
+            const seen = dedup.claim(dedupKey);
+            if (seen.dup) {
+              if (seen.pending) return writeJson(res, 200, { reply: '', threadId: body.threadId || null, duplicate: true });
+              const e = seen.entry;
+              const dupOut = { reply: e.reply, threadId: e.threadId, duplicate: true };
+              if (e.sessionId) dupOut.sessionId = e.sessionId;
+              return writeJson(res, 200, dupOut);
+            }
+          }
           let threads = null;
           let bound = null;
           let sessionId = null;
@@ -193,6 +213,9 @@ export async function inbound(c) {
               { apiKey: cfg['api-key'], model: body.model || cfg.model, onUsage: (u) => { inboundUsage = u; } },
             )) acc += chunk;
           } catch (err) {
+            // Free the idempotency claim — a provider failure must stay
+            // retryable, not poison the message id.
+            if (dedup) dedup.release(dedupKey);
             const m = statusForProviderError(err);
             return writeJson(res, m.status, { error: err?.message || String(err), code: err?.code || null }, m.headers || {});
           }
@@ -211,6 +234,30 @@ export async function inbound(c) {
           }
           const out = { reply: acc, threadId: bound ? bound.threadId : (body.threadId || null) };
           if (sessionId) out.sessionId = sessionId;
+          if (dedup) dedup.record(dedupKey, { reply: acc, threadId: out.threadId, sessionId });
+          if (sessionId) {
+            // Phase 4 — close the post-task learning loop on channel turns,
+            // mirroring the chat REPL's fire-and-forget hook (run_turn.mjs).
+            // Only session-bound turns learn (a stateless one-shot relay is
+            // not a conversation); trainer resolution inside runLearning
+            // handles cfg.trainer 'auto' -> claude-cli ($0) routing. The
+            // dedup short-circuit above guarantees at most one learning
+            // pass per native message id.
+            const learnTurns = [
+              { agent: 'user', text, ts: new Date().toISOString() },
+              { agent: 'chat', text: acc, ts: new Date().toISOString() },
+            ];
+            queueMicrotask(() => {
+              import('../../mas/learning.mjs')
+                .then((mod) => mod.runLearning('post-task', {
+                  agent: { name: 'chat', provider: provName, model: body.model || cfg.model, role: '' },
+                  task: { id: sessionId, title: '(channel turn)', turns: learnTurns },
+                  configDir: cfgDir,
+                  cfg,
+                }))
+                .catch(() => { /* learning loop is best-effort */ });
+            });
+          }
           return writeJson(res, 200, out);
 }
 
