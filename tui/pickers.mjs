@@ -1,8 +1,8 @@
-// Interactive TUI helpers — readline pickers, banner/mascot renderers,
-// arrow-key menu, provider/model selection, and the _quickPrompt line reader.
-// Extracted from cli.mjs in Phase D4. Lives in tui/ so banner asset imports
-// are siblings (./banner.generated.mjs, ./wordmark.mjs).
+// Interactive TUI helpers — readline pickers, banner renderers, arrow-key
+// menu, provider/model selection, _quickPrompt. Extracted from cli.mjs (D4);
+// lives in tui/ so banner asset imports are siblings.
 import { readConfig, writeConfig, _resolveAuthKey } from '../lib/config.mjs';
+import { SLASH_COMMANDS } from './slash_commands.mjs';
 import { ensureRegistry, getRegistry } from '../lib/registry_boot.mjs';
 import { bucketProviders as _bucketProviders } from './provider_families.mjs';
 import { addCustomProvider } from '../providers/custom_provider.mjs';
@@ -13,13 +13,11 @@ import {
 } from '../providers/model_catalogue.mjs';
 
 export function _attachGhostAutocomplete(rl) {
-  // Returns `{ dispose, suspend, resume }`. Dispose detaches the
-  // keypress + rl 'line' listeners (failure to do so leaks the
-  // event-loop ref, which is exactly the slow-exit bug v3.92
-  // fixed). Suspend / resume gate the keypress handler so the
-  // streaming chat output isn't interleaved with `\x1b[s\x1b[K\x1b[u`
-  // ghost-render escapes — that interleaving is what surfaces as
-  // visible gaps between Korean characters in long replies.
+  // Returns `{ dispose, suspend, resume }`. Dispose detaches the keypress +
+  // rl 'line' listeners (leaking them is the v3.92 slow-exit bug). Suspend /
+  // resume gate the keypress handler so streaming chat output isn't
+  // interleaved with `\x1b[s\x1b[K\x1b[u` ghost-render escapes — that
+  // interleaving surfaced as visible gaps between Korean characters.
   const noop = () => {};
   if (!process.stdout.isTTY) return { dispose: noop, suspend: noop, resume: noop };
   const cmds = SLASH_COMMANDS.map((c) => c.cmd);
@@ -219,15 +217,16 @@ export async function _renderV5Banner(version) {
   return rows;
 }
 
-export function _printChatBanner(activeProvName, activeModel, version) {
+export async function _printChatBanner(activeProvName, activeModel, version) {
   if (!process.stdout.isTTY) return;
-  // Single-hue header: labels dim-orange, values/emphasis full-orange, so the
-  // four caption rows below the box read as part of the same warm badge.
+  // Single-hue header: labels dim-orange, values/emphasis full-orange. Uses
+  // the v5 sloth splash (NOT the retired v4 figlet box — see _renderV5Banner;
+  // figlet remains only as the missing-asset last resort).
   const dimOrange = (s) => `\x1b[2m\x1b[38;2;${_ORANGE_RGB}m${s}\x1b[0m`;
   const orange = _orange;
   const lines = [
     '',
-    ..._renderBanner(version),
+    ...(await _renderV5Banner(version)),
     '',
     `  ${dimOrange('provider ·')} ${orange(activeProvName)}`,
     `  ${dimOrange('model    ·')} ${orange(activeModel || '(default)')}`,

@@ -305,13 +305,14 @@ export async function cmdChat(flags = {}) {
       }
       return;
     } catch (e) {
-      // Fall through to legacy path on any ink failure (missing import,
-      // narrow terminal, sandboxed stdout).
-      if (process.env.LAZYCLAW_DEBUG) console.error('[ink] fallback:', e.message);
+      // Fall through to the legacy readline path on any ink failure. ALWAYS
+      // say why, in one dim line — the silent downgrade made real-terminal
+      // failures (node incompat, <60-col windows) undiagnosable from reports.
+      process.stderr.write(`\x1b[2m(ink UI unavailable: ${e?.message || e} — using the legacy reader)\x1b[0m\n`);
     }
   }
   // ─── legacy v4 path (unchanged) ─────────────────────────────────
-  _printChatBanner(activeProvName, activeModel, readVersionFromRepo());
+  await _printChatBanner(activeProvName, activeModel, readVersionFromRepo());
 
   const readline = await import('node:readline');
   // Use terminal:true when we're attached to a TTY so the prompt shows
