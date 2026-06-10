@@ -78,13 +78,24 @@ test('/model no-arg lists models with live-fetch + custom-id sentinel rows', asy
 test('/model no-arg for a non-fetchable provider omits the fetch row but keeps custom', async () => {
   let seenItems = null;
   const ctx = makeCtx({
-    provName: 'anthropic',
-    openPicker: async (opts) => { seenItems = opts.items; return 'claude-sonnet-4-6'; },
+    provName: 'orchestrator',
+    openPicker: async (opts) => { seenItems = opts.items; return 'orchestrator'; },
   });
   await dispatchSlash('/model', '', ctx);
   const ids = seenItems.map((i) => i.id);
-  assert.ok(!ids.includes('__fetch_models__'), 'anthropic has no /v1/models fetch');
+  assert.ok(!ids.includes('__fetch_models__'), 'orchestrator (meta-provider) has no catalogue endpoint');
   assert.ok(ids.includes('__custom_model__'));
+});
+
+test('/model no-arg for anthropic now INCLUDES the live fetch row (native /v1/models)', async () => {
+  let seenItems = null;
+  const ctx = makeCtx({
+    provName: 'anthropic',
+    openPicker: async (opts) => { seenItems = opts.items; return 'claude-fable-5'; },
+  });
+  await dispatchSlash('/model', '', ctx);
+  const ids = seenItems.map((i) => i.id);
+  assert.ok(ids.includes('__fetch_models__'), 'anthropic gained a live model list');
 });
 
 // ─── custom-type-in ────────────────────────────────────────────────────────

@@ -6,6 +6,25 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Live model lists for anthropic and gemini.** The model picker (setup
+  wizard + `/model`) can now pull the up-to-date catalogue from the
+  provider's native list endpoint — Anthropic `GET /v1/models`, Gemini
+  `GET /v1beta/models` (chat-capable entries only) — exactly like
+  openai/ollama/OpenAI-compat vendors already could, so newly released
+  models (e.g. `claude-fable-5`) appear the day they ship.
+
+### Changed
+
+- **Refreshed curated model lists.** `claude-cli` and `anthropic` suggest
+  the current Claude lineup (`claude-fable-5`, `claude-opus-4-8`,
+  `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6`,
+  `claude-haiku-4-5`); retired models (`claude-3-5-*`, `gemini-1.5-*`)
+  no longer appear as suggestions. claude-cli has no catalogue endpoint
+  (keyless subprocess), so its curated list is the source there — the
+  free-text "type a custom model id" row still accepts anything.
+
 ## [6.1.0] - 2026-06-10
 
 ### Added

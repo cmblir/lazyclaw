@@ -33,8 +33,12 @@ test('supportsLiveFetch is true for openai, ollama, builtin-compat, and any base
   assert.equal(supportsLiveFetch(REGISTRY.PROVIDER_INFO.mylab, 'mylab'), true);
 });
 
-test('supportsLiveFetch is false for anthropic, claude-cli, orchestrator', () => {
-  assert.equal(supportsLiveFetch(REGISTRY.PROVIDER_INFO.anthropic, 'anthropic'), false);
+test('supportsLiveFetch: anthropic/gemini are now live (native endpoints); claude-cli/orchestrator are not', () => {
+  // anthropic + gemini gained native list endpoints (GET /v1/models,
+  // GET /v1beta/models) so new models appear without a curated-list update.
+  assert.equal(supportsLiveFetch(REGISTRY.PROVIDER_INFO.anthropic, 'anthropic'), true);
+  assert.equal(supportsLiveFetch(REGISTRY.PROVIDER_INFO.gemini, 'gemini'), true);
+  // keyless subprocess / meta-provider still have no catalogue endpoint.
   assert.equal(supportsLiveFetch(REGISTRY.PROVIDER_INFO['claude-cli'], 'claude-cli'), false);
   assert.equal(supportsLiveFetch(REGISTRY.PROVIDER_INFO.orchestrator, 'orchestrator'), false);
 });

@@ -340,7 +340,10 @@ export const PROVIDER_INFO = {
     endpoint: 'subprocess: claude -p',
     defaultModel: 'claude-opus-4-7',
     suggestedModels: [
+      'claude-fable-5',
+      'claude-opus-4-8',
       'claude-opus-4-7',
+      'claude-opus-4-6',
       'claude-sonnet-4-6',
       'claude-haiku-4-5',
       'opus',
@@ -356,13 +359,13 @@ export const PROVIDER_INFO = {
     endpoint: 'https://api.anthropic.com/v1/messages',
     defaultModel: 'claude-opus-4-7',
     suggestedModels: [
+      'claude-fable-5',
+      'claude-opus-4-8',
       'claude-opus-4-7',
       'claude-opus-4-6',
       'claude-sonnet-4-6',
       'claude-sonnet-4-5',
       'claude-haiku-4-5',
-      'claude-3-5-sonnet-20241022',
-      'claude-3-5-haiku-20241022',
     ],
   },
   openai: {
@@ -395,9 +398,6 @@ export const PROVIDER_INFO = {
       'gemini-2.5-pro',
       'gemini-2.5-flash',
       'gemini-2.0-flash',
-      'gemini-2.0-flash-thinking-exp',
-      'gemini-1.5-pro',
-      'gemini-1.5-flash',
     ],
   },
   ollama: {
