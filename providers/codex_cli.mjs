@@ -144,6 +144,16 @@ export const codexCliProvider = {
     const onAbort = () => { try { proc.kill('SIGTERM'); } catch (_) { /* ignore */ } };
     if (opts.signal) opts.signal.addEventListener('abort', onAbort);
 
+    // A missing binary surfaces as an ASYNC ChildProcess 'error' event on
+    // some platforms (the sync try/catch above doesn't see it). Without a
+    // listener that's an uncaughtException that kills the WHOLE process mid
+    // `providers test` — capture it and surface a per-provider CliMissingError
+    // instead (same fix claude_cli.mjs received in F8).
+    let spawnError = null;
+    const spawnErrorPromise = new Promise((resolve) => {
+      proc.once('error', (err) => { spawnError = err; resolve(); });
+    });
+
     let stderr = '';
     proc.stderr.setEncoding('utf8');
     proc.stderr.on('data', (chunk) => { stderr += chunk; });
@@ -184,7 +194,13 @@ export const codexCliProvider = {
           if (text) yield text;
         } catch (_) { /* incomplete tail — drop */ }
       }
-      await exitPromise;
+      // Wait for either a clean exit or an async spawn error. On ENOENT the
+      // process never starts, so 'close' never fires — racing against
+      // spawnErrorPromise keeps this from hanging forever.
+      await Promise.race([exitPromise, spawnErrorPromise]);
+      if (spawnError) {
+        throw spawnError.code === 'ENOENT' ? new CliMissingError() : spawnError;
+      }
       if (exitInfo && exitInfo.code !== 0 && !opts.signal?.aborted) {
         throw new CliExitError(exitInfo.code, exitInfo.signal, stderr);
       }

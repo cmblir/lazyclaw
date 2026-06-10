@@ -133,6 +133,16 @@ export const geminiCliProvider = {
     const onAbort = () => { try { proc.kill('SIGTERM'); } catch (_) { /* ignore */ } };
     if (opts.signal) opts.signal.addEventListener('abort', onAbort);
 
+    // A missing binary surfaces as an ASYNC ChildProcess 'error' event on
+    // some platforms (the sync try/catch above doesn't see it). Without a
+    // listener that's an uncaughtException that kills the WHOLE process mid
+    // `providers test` — capture it and surface a per-provider CliMissingError
+    // instead (same fix claude_cli.mjs received in F8).
+    let spawnError = null;
+    const spawnErrorPromise = new Promise((resolve) => {
+      proc.once('error', (err) => { spawnError = err; resolve(); });
+    });
+
     let stdout = '';
     let stderr = '';
     proc.stdout.setEncoding('utf8');
@@ -140,9 +150,15 @@ export const geminiCliProvider = {
     proc.stdout.on('data', (c) => { stdout += c; });
     proc.stderr.on('data', (c) => { stderr += c; });
 
-    const exitInfo = await new Promise((resolve) => {
-      proc.on('close', (code, signal) => resolve({ code, signal }));
-    });
+    const exitInfo = await Promise.race([
+      new Promise((resolve) => { proc.on('close', (code, signal) => resolve({ code, signal })); }),
+      spawnErrorPromise.then(() => null),
+    ]);
+    if (spawnError) {
+      if (opts.signal) opts.signal.removeEventListener('abort', onAbort);
+      if (spawnError.code === 'ENOENT') throw new CliMissingError();
+      throw spawnError;
+    }
 
     try {
       if (opts.signal?.aborted) throw new AbortError('aborted mid-run');
