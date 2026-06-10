@@ -6,6 +6,8 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.3.0] - 2026-06-10
+
 ### Added
 
 - **`/setup` vs `/config` split.** `/setup` is the first-run / full re-setup
