@@ -11,6 +11,10 @@
 // Dependency-injected (no cli.mjs internals) so it stays import-light and
 // unit-testable with no network.
 
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 /**
  * Whether a provider exposes a model catalogue we can live-fetch. True for
  * openai, ollama, any builtin OpenAI-compat vendor (nim / openrouter / groq /
@@ -31,6 +35,13 @@ export function supportsLiveFetch(meta, providerId) {
     || providerId === 'ollama'
     || providerId === 'anthropic'
     || providerId === 'gemini'
+    // Keyless CLI providers borrow the credential their vendor accepts
+    // (anthropic key / Claude Code OAuth token; gemini key; openai key or
+    // a plain key stored in ~/.codex/auth.json) — best-effort with an
+    // honest, actionable error when none is available.
+    || providerId === 'claude-cli'
+    || providerId === 'gemini-cli'
+    || providerId === 'codex-cli'
     || !!m.builtinOpenAICompat;
 }
 
@@ -42,12 +53,17 @@ export function supportsLiveFetch(meta, providerId) {
  * @param {{apiKey:string, fetchImpl?:typeof fetch}} opts
  * @returns {Promise<string[]>}
  */
-export async function fetchAnthropicModels({ apiKey, fetchImpl } = {}) {
-  if (!apiKey) throw new Error('anthropic model listing requires an api key (set ANTHROPIC_API_KEY or configure the provider)');
+export async function fetchAnthropicModels({ apiKey, oauthToken, fetchImpl } = {}) {
+  if (!apiKey && !oauthToken) throw new Error('anthropic model listing requires an api key (set ANTHROPIC_API_KEY or configure the provider)');
   const f = fetchImpl || globalThis.fetch;
+  // OAuth tokens (Claude Code subscription login) authenticate with a Bearer
+  // header plus the documented oauth beta header; api keys use x-api-key.
+  const auth = apiKey
+    ? { 'x-api-key': apiKey }
+    : { 'authorization': `Bearer ${oauthToken}`, 'anthropic-beta': 'oauth-2025-04-20' };
   const res = await f('https://api.anthropic.com/v1/models?limit=1000', {
     method: 'GET',
-    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'accept': 'application/json' },
+    headers: { ...auth, 'anthropic-version': '2023-06-01', 'accept': 'application/json' },
   });
   if (!res.ok) throw new Error(`anthropic /v1/models returned HTTP ${res.status}`);
   const obj = await res.json();
@@ -125,9 +141,44 @@ export function modelCatalogueFor({ cfg, registryMod, resolveAuthKey, providerId
  * @param {object} deps  same shape as {@link modelCatalogueFor}
  * @returns {Promise<string[]>}
  */
+// Claude Code OAuth token from the credential store `claude login` writes on
+// Linux / non-keychain setups. On macOS the token lives in the OS Keychain
+// (no file), so this returns null there — the caller falls through to its
+// honest "set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN" error. Read-only;
+// the token is only ever sent to api.anthropic.com, never logged.
+export function _claudeCodeOAuthToken({ home, readFileSync } = {}) {
+  const h = home || os.homedir();
+  const read = readFileSync || fs.readFileSync;
+  for (const rel of ['.claude/.credentials.json', '.config/claude/.credentials.json']) {
+    try {
+      const j = JSON.parse(read(path.join(h, rel), 'utf8'));
+      const tok = j?.claudeAiOauth?.accessToken || j?.accessToken || j?.access_token;
+      if (typeof tok === 'string' && tok) return tok;
+    } catch { /* missing / unreadable / not JSON — try the next location */ }
+  }
+  return null;
+}
+
+// A plain API key stored by `codex login --api-key` in ~/.codex/auth.json.
+// ChatGPT-OAuth logins store an empty OPENAI_API_KEY object plus OAuth
+// tokens — those do NOT authenticate the platform /v1/models endpoint, so
+// they are deliberately ignored.
+export function _codexStoredApiKey({ home, readFileSync } = {}) {
+  const h = home || os.homedir();
+  const read = readFileSync || fs.readFileSync;
+  try {
+    const j = JSON.parse(read(path.join(h, '.codex/auth.json'), 'utf8'));
+    const k = j?.OPENAI_API_KEY;
+    if (typeof k === 'string' && k) return k;
+    if (k && typeof k === 'object' && typeof k.value === 'string' && k.value) return k.value;
+  } catch { /* missing / unreadable */ }
+  return null;
+}
+
 export async function fetchModelsForProvider(deps) {
   const providerId = deps && deps.providerId;
   const key = (id) => (typeof deps?.resolveAuthKey === 'function' ? deps.resolveAuthKey(id) : '') || '';
+  const credReader = deps?._credReader; // test seam: () => token|null per helper
   // Native-API providers list through their own endpoints (they are not
   // OpenAI-compatible). Env fallbacks cover the common keyless-config case.
   if (providerId === 'anthropic') {
@@ -135,6 +186,29 @@ export async function fetchModelsForProvider(deps) {
   }
   if (providerId === 'gemini') {
     return fetchGeminiModels({ apiKey: key('gemini') || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '', fetchImpl: deps?.fetchImpl });
+  }
+  // Keyless CLI providers: borrow the credential their vendor accepts.
+  if (providerId === 'claude-cli') {
+    const apiKey = key('claude-cli') || key('anthropic') || process.env.ANTHROPIC_API_KEY || '';
+    if (apiKey) return fetchAnthropicModels({ apiKey, fetchImpl: deps?.fetchImpl });
+    const oauthToken = process.env.CLAUDE_CODE_OAUTH_TOKEN
+      || (credReader ? credReader('claude') : _claudeCodeOAuthToken());
+    if (oauthToken) return fetchAnthropicModels({ oauthToken, fetchImpl: deps?.fetchImpl });
+    throw new Error('claude-cli model listing needs a credential: set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN (on macOS the `claude` login lives in the Keychain, which is not readable here)');
+  }
+  if (providerId === 'gemini-cli') {
+    const apiKey = key('gemini-cli') || key('gemini') || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
+    if (apiKey) return fetchGeminiModels({ apiKey, fetchImpl: deps?.fetchImpl });
+    throw new Error('gemini-cli model listing needs a credential: set GEMINI_API_KEY or GOOGLE_API_KEY (the `gemini` CLI login token cannot list models)');
+  }
+  if (providerId === 'codex-cli') {
+    const apiKey = key('codex-cli') || key('openai') || process.env.OPENAI_API_KEY
+      || (credReader ? credReader('codex') : _codexStoredApiKey()) || '';
+    if (apiKey) {
+      const { fetchOpenAICompatModels } = await import('./openai_compat.mjs');
+      return fetchOpenAICompatModels({ baseUrl: 'https://api.openai.com/v1', apiKey, fetch: deps?.fetchImpl });
+    }
+    throw new Error('codex-cli model listing needs a credential: set OPENAI_API_KEY (a ChatGPT-plan `codex` login has no platform API key)');
   }
   const c = modelCatalogueFor(deps);
   if (!c) {

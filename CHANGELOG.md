@@ -8,6 +8,14 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **Live model lists for the keyless CLI providers.** `claude-cli`,
+  `gemini-cli`, and `codex-cli` can now populate the model picker by
+  borrowing the credential their vendor accepts: an anthropic key or a
+  Claude Code OAuth token (`CLAUDE_CODE_OAUTH_TOKEN` / the Linux credential
+  store) for claude-cli; `GEMINI_API_KEY`/`GOOGLE_API_KEY` for gemini-cli;
+  an OpenAI key (env / profile / a plain key in `~/.codex/auth.json`) for
+  codex-cli. When no credential is available the picker shows an honest,
+  actionable message and falls back to the curated list.
 - **Live model lists for anthropic and gemini.** The model picker (setup
   wizard + `/model`) can now pull the up-to-date catalogue from the
   provider's native list endpoint — Anthropic `GET /v1/models`, Gemini

@@ -24,7 +24,7 @@ test('supportsLiveFetch: anthropic and gemini are now live-fetchable', () => {
   assert.equal(supportsLiveFetch({}, 'openai'), true);
   assert.equal(supportsLiveFetch({}, 'ollama'), true);
   assert.equal(supportsLiveFetch({ builtinOpenAICompat: true }, 'groq'), true);
-  assert.equal(supportsLiveFetch({}, 'claude-cli'), false, 'keyless CLI has no catalogue endpoint');
+  assert.equal(supportsLiveFetch({}, 'claude-cli'), true, 'borrows an anthropic key / Claude Code OAuth token');
   assert.equal(supportsLiveFetch({}, 'mock'), false);
   assert.equal(supportsLiveFetch({}, 'orchestrator'), false);
 });
@@ -89,6 +89,8 @@ test('fetchModelsForProvider routes anthropic/gemini to the native fetchers', as
   });
   assert.deepEqual(await fetchModelsForProvider(deps('anthropic')), ['claude-fable-5']);
   assert.deepEqual(await fetchModelsForProvider(deps('gemini')), ['gemini-2.5-pro']);
-  // claude-cli still has no catalogue — unchanged error path
-  await assert.rejects(() => fetchModelsForProvider(deps('claude-cli')), /does not expose/);
+  // claude-cli now borrows the anthropic credential and lists too
+  assert.deepEqual(await fetchModelsForProvider(deps('claude-cli')), ['claude-fable-5']);
+  // truly catalogue-less providers keep the honest error
+  await assert.rejects(() => fetchModelsForProvider(deps('orchestrator')), /does not expose/);
 });
