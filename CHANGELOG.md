@@ -21,6 +21,13 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **Web dashboard rendered unstyled with every tab stuck on "Loading…".** The
+  HTML referenced its CSS/JS by relative path (`href="dashboard.css"`), but the
+  daemon serves the page at `/dashboard` **and** `/dashboard/`; under the
+  trailing-slash URL the browser resolved the assets to `/dashboard/dashboard.css`
+  → 404, so neither the stylesheet (page unstyled, all panels stacked) nor the
+  script (no tab populated) loaded. Asset refs are now absolute (`/dashboard.css`,
+  `/dashboard.js`) and the daemon also serves the page at the trailing-slash URL.
 - **`/model` "fetch live" failed for a logged-in `codex-cli` / `gemini-cli`**
   ("fetch failed: codex-cli model listing needs a credential: set OPENAI_API_KEY").
   A ChatGPT-plan / Google-account login has no platform API key to list

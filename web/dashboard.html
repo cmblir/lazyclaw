@@ -14,7 +14,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LazyClaw</title>
-  <link rel="stylesheet" href="dashboard.css">
+  <!-- Absolute paths: the daemon serves this page at /dashboard AND /dashboard/
+       (and /), so a relative href would resolve to /dashboard/dashboard.css and
+       404 — leaving the page unstyled with every tab stuck on "Loading…". -->
+  <link rel="stylesheet" href="/dashboard.css">
+  <link rel="icon" href="data:,">
 </head>
 <body>
   <header>
@@ -244,6 +248,6 @@
     </div>
   </div>
 
-  <script src="dashboard.js"></script>
+  <script src="/dashboard.js"></script>
 </body>
 </html>
