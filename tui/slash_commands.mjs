@@ -23,6 +23,7 @@ export const SLASH_COMMANDS = [
   { cmd: '/provider',    help: 'pick provider from a list (or pass a name: /provider openai)' },
   { cmd: '/login',       help: 'connect a keyless CLI provider (codex-cli / gemini-cli): browser, API key, or install' },
   { cmd: '/model',       help: 'pick a model from a list (or pass a name: /model gpt-4.1)' },
+  { cmd: '/hud',         help: 'toggle the HUD status row (usage · models · cost): /hud on|off' },
   { cmd: '/trainer',     help: 'view or set trainer provider/model: /trainer show|set <p:m>|clear' },
   { cmd: '/personality', help: 'pick a personality (or sub: list|show|install|remove|use)' },
   { cmd: '/dashboard',   help: 'open the lazyclaw web UI in your browser' },

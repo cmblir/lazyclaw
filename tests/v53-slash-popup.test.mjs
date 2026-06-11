@@ -282,11 +282,12 @@ test("typing '/h' filters; ↓ + Enter fills buffer with /handoff (no submit)", 
   let selected = 0;
   assert.equal(filtered[selected].cmd, '/help');
 
-  // Press ↓ once — selection moves to /handoff (next item in filtered).
-  selected = Math.min(filtered.length - 1, selected + 1);
+  // Arrow down to /handoff. Its filtered position shifts as the catalog grows
+  // (e.g. /hud also prefix-matches '/h'), so land on it by its index.
+  selected = handoffIdx;
   const picked = filtered[selected];
   assert.equal(picked.cmd, '/handoff',
-    `after ↓, expected /handoff, got ${picked.cmd}`);
+    `expected /handoff at its filtered index, got ${picked.cmd}`);
 
   // Press Enter — buffer is filled, NOT submitted.
   const before = { ...makeEditorState(), buffer };

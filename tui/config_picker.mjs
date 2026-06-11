@@ -17,6 +17,7 @@ const CONFIG_ITEMS = [
   { id: 'provider',     label: 'provider',            desc: 'switch the chat provider (family → vendor picker)' },
   { id: 'model',        label: 'model',               desc: 'switch the model (live list when the provider supports it)' },
   { id: 'context',      label: 'context window',      desc: 'history turns / token budget sent per turn' },
+  { id: 'hud',          label: 'HUD status bar',      desc: 'show/hide the usage · models · cost row above the input' },
   { id: 'trainer',      label: 'trainer',             desc: 'learning-loop provider/model (auto = $0 on claude-cli)' },
   { id: 'orchestrator', label: 'orchestrator',        desc: 'multi-agent on/off, planner, workers' },
   { id: 'channel',      label: 'channel credentials', desc: 'Slack/Telegram/Matrix tokens — leaves chat for the prompts, then returns' },

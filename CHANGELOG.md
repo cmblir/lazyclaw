@@ -8,6 +8,12 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **claude-hud-style status bar.** With the HUD enabled (default on), a second
+  status row under the chat input shows real-time usage (`↑in ↓out tok`), session
+  cost (when a rate card or provider-reported cost is available), the trainer
+  model, and the orchestrator shape (`planner +Nw`) — alongside the existing
+  provider · model · ctx row. Toggle it from `/config → HUD status bar` or the
+  `/hud on|off` slash (persists to `cfg.chat.hud`).
 - **Inline connect / login for the keyless CLI providers.** Picking `codex-cli`
   or `gemini-cli` in `/provider` (or the new `/login [provider]`) now detects
   whether the CLI is installed and signed in, and — when it isn't — offers an

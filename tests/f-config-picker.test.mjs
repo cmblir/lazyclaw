@@ -77,7 +77,7 @@ test('/config picker: cancel stays in chat', async () => {
 });
 
 test('every picker item routes somewhere (no dead rows)', () => {
-  const inChat = new Set(['provider', 'model', 'context', 'trainer', 'orchestrator']);
+  const inChat = new Set(['provider', 'model', 'context', 'hud', 'trainer', 'orchestrator']);
   const exits = new Set(['channel', 'webhook', 'wizard']);
   for (const item of CONFIG_ITEMS) {
     assert.ok(inChat.has(item.id) || exits.has(item.id), `unrouted config item: ${item.id}`);

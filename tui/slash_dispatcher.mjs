@@ -36,6 +36,7 @@ import { providerFamilies, providerTag } from './provider_families.mjs';
 import { addCustomProvider } from '../providers/custom_provider.mjs';
 import { setAuthKey } from '../providers/auth_store.mjs';
 import { runProviderLogin, loginSlash } from './login_flow.mjs';
+import { hudSlash } from './hud.mjs';
 import { attachGoalCron, detachGoalCron } from '../goals_cron.mjs';
 import { loadDotenvIfAny } from '../dotenv_min.mjs';
 import { SUBCOMMAND_GROUPS } from './subcommands.mjs';
@@ -334,17 +335,15 @@ async function _addCustomFlow(ctx, registry) {
 
 async function _provider(args, ctx) {
   const registry = await _mod(ctx, 'registryMod', () => import('../providers/registry.mjs'));
-  // `/provider add <name> <baseUrl> [apiKey]` — register a custom OpenAI-
-  // compatible endpoint non-interactively.
+  // `/provider add <name> <baseUrl> [apiKey]` — register a custom OpenAI-compat endpoint.
   const addMatch = args && args.match(/^add\s+(.+)$/i);
   if (addMatch) {
     const [name, baseUrl, apiKey] = splitWhitespace(addMatch[1]);
     if (!name || !baseUrl) return 'usage: /provider add <name> <baseUrl> [apiKey]';
     return _registerCustom(ctx, registry, { name, baseUrl, apiKey });
   }
-  // No arg → drill-in modal picker (family -> provider). Falls back to the
-  // pre-v5.4.3 hint string when ctx.openPicker isn't available (e.g. non-Ink
-  // callers or before the picker ref settles).
+  // No arg → drill-in modal picker (family -> provider); falls back to a hint
+  // string when ctx.openPicker isn't available (non-Ink / picker not settled).
   if (!args) {
     if (typeof ctx.openPicker === 'function') {
       const picked = await _pickProviderDrillIn(ctx, registry);
@@ -1793,6 +1792,7 @@ export const SLASH_HANDLERS = new Map([
   ['/clear', _newReset],
   ['/provider', _provider],
   ['/login', (a, ctx) => loginSlash(a, ctx, { promptText: _promptText })],
+  ['/hud', hudSlash],
   ['/model', _model],
   ['/skill', _skill],
   ['/skills', _skillsList],

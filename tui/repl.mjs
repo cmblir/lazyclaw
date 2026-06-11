@@ -40,6 +40,8 @@ import { SlashPopup, filterSlashCommands } from './slash_popup.mjs';
 import { SLASH_COMMANDS } from './slash_commands.mjs';
 import { ModalPicker, filterModalItems, resolveModalPick } from './modal_picker.mjs';
 import { theme } from './theme.mjs';
+import { StatusBar } from './status_bar.mjs';
+export { StatusBar };
 
 // ─── Alt-buffer mount (DEC 1049) ─────────────────────────────────────────
 //
@@ -579,6 +581,7 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
         streaming: state.streaming,
         ctxUsed: _status.ctxUsed,
         ctxTotal: _status.ctxTotal,
+        hud: _status.hud,
       }),
       // 5) Editor — sticky bottom, content-sized. Wrapped in a flexShrink:0
       //    Box so Yoga doesn't squeeze the input row when scrollback fills.
@@ -640,20 +643,8 @@ export const ScrollbackItem = React.memo(function ScrollbackItem({ item }) {
   return React.createElement(Text, { color: theme.fg }, item.text);
 });
 
-// StatusBar — single row, provider · model · ctx · streaming indicator.
-// Kept intentionally minimal in v5.3; token gauges land separately once
-// usage metrics flow into state.
-export function StatusBar({ provider, model, streaming, ctxUsed, ctxTotal }) {
-  const ctx = (ctxUsed != null && ctxTotal != null) ? `${ctxUsed}/${ctxTotal}` : '--';
-  const indicator = streaming ? theme.accent('● streaming') : theme.dim('○ idle');
-  const prov = provider || '?';
-  const mdl = model || '?';
-  return React.createElement(
-    Box,
-    { flexShrink: 0, paddingX: 1 },
-    React.createElement(Text, null, `${indicator}  ${prov} · ${mdl}  ctx ${ctx}`)
-  );
-}
+// StatusBar moved to ./status_bar.mjs (re-exported above) so the HUD row can
+// grow without pushing repl.mjs over the file-size ratchet.
 
 // Exported for tests that want to verify the splash snapshot without a TTY.
 export function _renderSplashToString(splashProps) {

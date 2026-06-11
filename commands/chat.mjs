@@ -18,6 +18,7 @@ import {
 import { firstRunMode as _firstRunMode, hasConfiguredProvider } from '../first_run.mjs';
 import { applyChatWindow as _applyChatWindow, estimateMessagesTokens, CHAT_WINDOW_TURNS, CHAT_WINDOW_TOKEN_BUDGET } from '../chat_window.mjs';
 import { makeRunTurn as _chatRunTurnFactory } from '../tui/run_turn.mjs';
+import { hudStatus as _hudStatus } from '../tui/hud.mjs';
 import { dispatchSlash as _dispatchSlash, parseSlashLine as _parseSlashLine } from '../tui/slash_dispatcher.mjs';
 import { SLASH_COMMANDS } from '../tui/slash_commands.mjs';
 
@@ -198,8 +199,7 @@ export async function cmdChat(flags = {}) {
           }).catch(() => {});
         } catch { /* swallow */ }
       };
-      // v5.4: chars-sent counter for the Ink chat path. Mirrors the legacy
-      // path's `charsSent` so /usage in Ink reports the same number.
+      // v5.4: chars-sent counter for the Ink path (mirrors legacy `charsSent`).
       let _inkCharsSent = 0;
       const _inkCtx = {
         cfg,
@@ -277,14 +277,14 @@ export async function cmdChat(flags = {}) {
       const ink = render(/* @__PURE__ */ React.createElement(ReplApp, {
         splashProps,
         statusInfo: { provider: activeProvName, model: activeModel },
-        // P3 — live status: provider/model + a context gauge tracking the
-        // history lazyclaw holds (estimateMessagesTokens), not a provider's
-        // self-reported usage (CLI providers carry huge per-call system prompts).
+        // P3 — live status: provider/model + history-based ctx gauge (not the
+        // provider's self-reported per-call usage) + the HUD field bundle.
         getStatus: () => ({
           provider: activeProvName,
           model: activeModel,
           ctxUsed: estimateMessagesTokens(_inkMessages),
           ctxTotal: Number((cfg.chat || {}).windowTokens) || CHAT_WINDOW_TOKEN_BUDGET,
+          hud: _hudStatus(cfg, _inkRunningUsage),
         }),
         runTurnFactory: _inkRunTurnFactory,
         onSlashCommand: _inkSlashHandler,
