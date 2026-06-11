@@ -16,6 +16,16 @@
 export const CHAT_WINDOW_TURNS = Number(process.env.LAZYCLAW_CHAT_WINDOW_TURNS) || 20;
 export const CHAT_WINDOW_TOKEN_BUDGET = Number(process.env.LAZYCLAW_CHAT_WINDOW_TOKENS) || 8000;
 
+// Approximate token count of a messages[] array (4 chars/token, same heuristic
+// the window cap uses). Drives the status-bar context gauge so it reflects the
+// conversation history lazyclaw actually holds — NOT a provider's self-reported
+// usage, which for CLI providers (codex/claude/gemini) includes their own
+// system prompt + tool defs per call and has nothing to do with this budget.
+export function estimateMessagesTokens(messages) {
+  const arr = Array.isArray(messages) ? messages : [];
+  return Math.ceil(arr.reduce((n, m) => n + String(m?.content || '').length, 0) / 4);
+}
+
 // Trim a hydrated messages[] array to fit the sliding window. Returns
 // { messages, dropped } so the caller can log a one-shot "dropped N
 // older turns" line at session start. The first message is preserved
@@ -31,8 +41,7 @@ export function applyChatWindow(messages, { turns = CHAT_WINDOW_TURNS, tokens = 
   while (out.length > turns) out.shift();
   // Token budget cap: estimate 4 chars / token, then trim from the
   // front (oldest) until estimated tokens ≤ budget.
-  const estTokens = (arr) => Math.ceil(arr.reduce((n, m) => n + String(m.content || '').length, 0) / 4);
-  while (out.length > 1 && estTokens(out) > tokens) out.shift();
+  while (out.length > 1 && estimateMessagesTokens(out) > tokens) out.shift();
   const dropped = before - out.length;
   if (sys) out.unshift(sys);
   return { messages: out, dropped };

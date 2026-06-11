@@ -21,6 +21,14 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **Status-bar context gauge was misleading on CLI providers** (e.g. `ctx
+  49467/8000` after a single message). It plotted the provider's *self-reported*
+  cumulative usage against lazyclaw's chat-history budget — two unrelated axes.
+  CLI providers (codex/claude/gemini) ship their own system prompt + tool defs
+  on every call, so their reported input is tens of thousands of tokens and has
+  nothing to do with how much conversation lazyclaw holds. The gauge now tracks
+  the estimated size of the chat history lazyclaw actually sends, so a fresh
+  conversation reads near 0 and grows toward the budget.
 - **`codex-cli` / `gemini-cli` would not connect** because the providers forced
   their hardcoded default model via `-m`. A ChatGPT-account `codex` login only
   accepts the models that plan is entitled to (read from `~/.codex/config.toml`),

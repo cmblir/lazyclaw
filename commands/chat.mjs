@@ -16,7 +16,7 @@ import {
   _quickPrompt, _renderBanner, _renderV5Banner,
 } from '../tui/pickers.mjs';
 import { firstRunMode as _firstRunMode, hasConfiguredProvider } from '../first_run.mjs';
-import { applyChatWindow as _applyChatWindow, CHAT_WINDOW_TURNS, CHAT_WINDOW_TOKEN_BUDGET } from '../chat_window.mjs';
+import { applyChatWindow as _applyChatWindow, estimateMessagesTokens, CHAT_WINDOW_TURNS, CHAT_WINDOW_TOKEN_BUDGET } from '../chat_window.mjs';
 import { makeRunTurn as _chatRunTurnFactory } from '../tui/run_turn.mjs';
 import { dispatchSlash as _dispatchSlash, parseSlashLine as _parseSlashLine } from '../tui/slash_dispatcher.mjs';
 import { SLASH_COMMANDS } from '../tui/slash_commands.mjs';
@@ -277,13 +277,13 @@ export async function cmdChat(flags = {}) {
       const ink = render(/* @__PURE__ */ React.createElement(ReplApp, {
         splashProps,
         statusInfo: { provider: activeProvName, model: activeModel },
-        // P3 — live status: read the current provider/model + token gauge so
-        // the StatusBar refreshes after a /provider or /model switch and each
-        // turn, instead of showing the values captured at mount.
+        // P3 — live status: provider/model + a context gauge tracking the
+        // history lazyclaw holds (estimateMessagesTokens), not a provider's
+        // self-reported usage (CLI providers carry huge per-call system prompts).
         getStatus: () => ({
           provider: activeProvName,
           model: activeModel,
-          ctxUsed: _inkRunningUsage ? _inkRunningUsage.totalTokens : undefined,
+          ctxUsed: estimateMessagesTokens(_inkMessages),
           ctxTotal: Number((cfg.chat || {}).windowTokens) || CHAT_WINDOW_TOKEN_BUDGET,
         }),
         runTurnFactory: _inkRunTurnFactory,
