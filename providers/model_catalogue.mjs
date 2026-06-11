@@ -175,6 +175,33 @@ export function _codexStoredApiKey({ home, readFileSync } = {}) {
   return null;
 }
 
+// A ChatGPT-plan `codex` login has no platform API key, so /v1/models can't be
+// listed. The one model such a login can actually use is the one configured in
+// ~/.codex/config.toml (`model = "gpt-5.5"`). Return it so the picker shows the
+// account's real model instead of a "fetch failed" error. Returns [] when the
+// file is missing or has no model line.
+export function _codexConfigModels({ home, readFileSync } = {}) {
+  const h = home || os.homedir();
+  const read = readFileSync || fs.readFileSync;
+  try {
+    const txt = read(path.join(h, '.codex/config.toml'), 'utf8');
+    const m = /^\s*model\s*=\s*"([^"]+)"/m.exec(String(txt));
+    return m && m[1] ? [m[1]] : [];
+  } catch { return []; }
+}
+
+// Same idea for a `gemini` Google-account login: no listable platform catalogue,
+// but ~/.gemini/settings.json may pin a model. Returns [] when absent.
+export function _geminiConfigModels({ home, readFileSync } = {}) {
+  const h = home || os.homedir();
+  const read = readFileSync || fs.readFileSync;
+  try {
+    const obj = JSON.parse(read(path.join(h, '.gemini/settings.json'), 'utf8'));
+    const m = obj && (obj.model || obj.defaultModel || (obj.model && obj.model.name));
+    return typeof m === 'string' && m ? [m] : [];
+  } catch { return []; }
+}
+
 export async function fetchModelsForProvider(deps) {
   const providerId = deps && deps.providerId;
   const key = (id) => (typeof deps?.resolveAuthKey === 'function' ? deps.resolveAuthKey(id) : '') || '';
@@ -199,7 +226,9 @@ export async function fetchModelsForProvider(deps) {
   if (providerId === 'gemini-cli') {
     const apiKey = key('gemini-cli') || key('gemini') || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '';
     if (apiKey) return fetchGeminiModels({ apiKey, fetchImpl: deps?.fetchImpl });
-    throw new Error('gemini-cli model listing needs a credential: set GEMINI_API_KEY or GOOGLE_API_KEY (the `gemini` CLI login token cannot list models)');
+    // Google-account login can't list a platform catalogue — surface the model
+    // pinned in ~/.gemini/settings.json (if any) instead of throwing.
+    return deps?._geminiConfigModels ? deps._geminiConfigModels() : _geminiConfigModels();
   }
   if (providerId === 'codex-cli') {
     const apiKey = key('codex-cli') || key('openai') || process.env.OPENAI_API_KEY
@@ -208,7 +237,9 @@ export async function fetchModelsForProvider(deps) {
       const { fetchOpenAICompatModels } = await import('./openai_compat.mjs');
       return fetchOpenAICompatModels({ baseUrl: 'https://api.openai.com/v1', apiKey, fetch: deps?.fetchImpl });
     }
-    throw new Error('codex-cli model listing needs a credential: set OPENAI_API_KEY (a ChatGPT-plan `codex` login has no platform API key)');
+    // ChatGPT-plan login has no platform API key — list the model the local
+    // codex config is set to use instead of erroring with "fetch failed".
+    return deps?._codexConfigModels ? deps._codexConfigModels() : _codexConfigModels();
   }
   const c = modelCatalogueFor(deps);
   if (!c) {

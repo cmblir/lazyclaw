@@ -21,6 +21,12 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **`/model` "fetch live" failed for a logged-in `codex-cli` / `gemini-cli`**
+  ("fetch failed: codex-cli model listing needs a credential: set OPENAI_API_KEY").
+  A ChatGPT-plan / Google-account login has no platform API key to list
+  `/v1/models`, so the fetch now falls back to the model the local CLI config is
+  set to use (`~/.codex/config.toml`, `~/.gemini/settings.json`) instead of
+  erroring — the picker shows the account's real model.
 - **Status-bar context gauge was misleading on CLI providers** (e.g. `ctx
   49467/8000` after a single message). It plotted the provider's *self-reported*
   cumulative usage against lazyclaw's chat-history budget — two unrelated axes.
