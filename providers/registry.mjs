@@ -207,18 +207,26 @@ export const PROVIDER_INFO = {
   'gemini-cli': {
     name: 'gemini-cli',
     requiresApiKey: false,
-    docs: 'Google Gemini via the local `gemini` CLI (free Google-account login). No API key — auth flows through whatever account `gemini` is logged in with. Requires @google/gemini-cli installed.',
+    docs: 'Google Gemini via the local `gemini` CLI (free Google-account login). No API key — auth flows through whatever account `gemini` is logged in with. Requires @google/gemini-cli installed. defaultModel is null on purpose: the set of models a given Google login may use is decided server-side, so by default lazyclaw passes no `-m` and lets the CLI pick the account-appropriate model. The suggestedModels below are optional power-user overrides.',
     endpoint: 'subprocess: gemini -p',
-    defaultModel: 'gemini-2.5-pro',
+    defaultModel: null,
     suggestedModels: ['gemini-2.5-pro', 'gemini-2.5-flash', 'pro', 'flash'],
   },
   'codex-cli': {
     name: 'codex-cli',
     requiresApiKey: false,
-    docs: 'OpenAI via the local `codex` CLI (ChatGPT Plus/Pro subscription). No API key — auth flows through `codex` login. Requires the codex CLI installed.',
+    // defaultModel is null by design. A ChatGPT-account codex login only
+    // accepts the models that plan is entitled to (read from ~/.codex/
+    // config.toml, e.g. "gpt-5.5"); forcing a marketing id like the old
+    // default "gpt-5-codex" makes the API reject the turn with HTTP 400
+    // "The '<model>' model is not supported when using Codex with a ChatGPT
+    // account." So by default we pass NO `-m` and let codex use its own
+    // account default. suggestedModels is a single best-effort hint; the
+    // reliable path is the picker's "use the provider's own default" entry.
+    docs: 'OpenAI via the local `codex` CLI (ChatGPT Plus/Pro subscription). No API key — auth flows through `codex` login. Requires the codex CLI installed. By default no model is forced: codex uses the account default from ~/.codex/config.toml (a ChatGPT-plan login rejects models it is not entitled to). Override only with a model your plan allows.',
     endpoint: 'subprocess: codex exec',
-    defaultModel: 'gpt-5-codex',
-    suggestedModels: ['gpt-5-codex', 'gpt-5', 'o3'],
+    defaultModel: null,
+    suggestedModels: ['gpt-5.5'],
   },
   anthropic: {
     name: 'anthropic',

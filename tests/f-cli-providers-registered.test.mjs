@@ -20,8 +20,13 @@ test('gemini-cli and codex-cli are registered providers with metadata', async ()
     assert.equal(info.requiresApiKey, false, `${id} is keyless`);
     assert.ok(Array.isArray(info.suggestedModels) && info.suggestedModels.length > 0);
   }
-  assert.equal(r.PROVIDER_INFO['gemini-cli'].defaultModel, 'gemini-2.5-pro');
-  assert.equal(r.PROVIDER_INFO['codex-cli'].defaultModel, 'gpt-5-codex');
+  // defaultModel is null by design for the keyless CLI providers: the model
+  // set a login may use is decided by the account (codex ChatGPT plan /
+  // gemini Google login), so lazyclaw forces no `-m` and lets the CLI pick.
+  // Forcing the old "gpt-5-codex" default made a ChatGPT-account codex reject
+  // every turn with HTTP 400 "model is not supported … with a ChatGPT account".
+  assert.equal(r.PROVIDER_INFO['gemini-cli'].defaultModel, null);
+  assert.equal(r.PROVIDER_INFO['codex-cli'].defaultModel, null);
 });
 
 test('picker buckets: CLI family now offers all four keyless providers', async () => {

@@ -177,7 +177,16 @@ export const geminiCliProvider = {
       } catch (err) {
         throw new Error(`gemini CLI returned non-JSON stdout: ${err.message} :: ${payload.slice(0, 200)}`);
       }
+      // The JSON payload carries an optional `error` object on failure
+      // (gemini-cli --output-format json: "response, stats, and errors").
+      // A failed turn can still exit 0 with an empty response + an error,
+      // so surface it instead of silently yielding nothing.
       const text = typeof parsed.response === 'string' ? parsed.response : '';
+      if (!text && parsed.error) {
+        const em = parsed.error?.message
+          || (typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error));
+        throw new CliExitError(exitInfo.code, exitInfo.signal, em);
+      }
       if (text) yield text;
       const usage = extractUsage(parsed.stats);
       if (usage && typeof opts.onUsage === 'function') {

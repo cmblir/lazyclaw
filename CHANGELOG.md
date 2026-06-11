@@ -6,6 +6,28 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`codex-cli` / `gemini-cli` would not connect** because the providers forced
+  their hardcoded default model via `-m`. A ChatGPT-account `codex` login only
+  accepts the models that plan is entitled to (read from `~/.codex/config.toml`),
+  so `-m gpt-5-codex` was rejected with HTTP 400 "The 'gpt-5-codex' model is not
+  supported when using Codex with a ChatGPT account." and the turn exited 1. The
+  keyless CLI providers now pass **no `-m` by default** (`defaultModel: null`) and
+  let the CLI's own login pick an account-appropriate model; pass a model only
+  when your plan allows it.
+- **The real failure reason was swallowed.** `codex` reports API/turn errors on
+  STDOUT as `{"type":"error"}` / `{"type":"turn.failed"}` events (stderr only said
+  "Reading additional input from stdin…"), and `gemini --output-format json`
+  carries an `error` object even on a clean exit. Both providers now surface that
+  message instead of an empty reply.
+
+### Changed
+
+- The interactive model picker now offers **"▷ Use the provider's own default
+  model"** (no `-m` override), pre-selected for providers without a forced
+  default — the reliable onboarding path for `codex-cli` / `gemini-cli`.
+
 ## [6.3.1] - 2026-06-10
 
 ### Fixed

@@ -58,12 +58,13 @@ class CliExitError extends Error {
   }
 }
 
-// Map a few friendly aliases. Codex CLI accepts the literal model id
-// (e.g. gpt-5-codex) directly, so unknown inputs pass through.
-const _ALIASES = {
-  codex: 'gpt-5-codex',
-  'gpt-codex': 'gpt-5-codex',
-};
+// No alias map. The previous aliases mapped "codex"/"gpt-codex" to
+// "gpt-5-codex", but that model is rejected by a ChatGPT-account codex
+// login ("not supported when using Codex with a ChatGPT account"), so the
+// alias actively produced a broken `-m`. An empty/unknown model now means
+// "no -m" → codex falls back to the account default in ~/.codex/config.toml,
+// which is the only model set guaranteed to be allowed for that login.
+const _ALIASES = {};
 
 // Drop cross-vendor model ids (claude-*, gemini-*) silently so the
 // CLI falls back to its own default. The orchestrator workflow forwards
@@ -105,6 +106,28 @@ function extractEventText(obj) {
   const item = obj.item || {};
   if (item.type === 'agent_message' && typeof item.text === 'string') return item.text;
   return '';
+}
+
+// Pull a human-readable error out of a codex failure event. Codex reports
+// API/turn failures on STDOUT (not stderr) as either:
+//   {"type":"error","message":"<json-string>"}
+//   {"type":"turn.failed","error":{"message":"<json-string>"}}
+// where the message is usually itself a JSON document
+//   {"type":"error","status":400,"error":{"message":"<the real reason>"}}.
+// We unwrap one level of nesting so callers surface "The 'x' model is not
+// supported …" instead of the misleading "Reading additional input from
+// stdin…" the CLI happens to print on stderr. Returns '' for non-error events.
+function extractEventError(obj) {
+  if (!obj || typeof obj !== 'object') return '';
+  if (obj.type !== 'error' && obj.type !== 'turn.failed') return '';
+  let raw = obj.type === 'turn.failed' ? (obj.error?.message ?? obj.message) : obj.message;
+  if (typeof raw === 'string') {
+    try {
+      const inner = JSON.parse(raw);
+      raw = inner?.error?.message || inner?.message || raw;
+    } catch (_) { /* not nested JSON — use the string as-is */ }
+  }
+  return typeof raw === 'string' ? raw : JSON.stringify(raw ?? obj);
 }
 
 function extractUsage(obj) {
@@ -160,6 +183,7 @@ export const codexCliProvider = {
 
     proc.stdout.setEncoding('utf8');
     let buffer = '';
+    let apiError = null;
     let exitInfo = null;
     const exitPromise = new Promise((resolve) => {
       proc.on('close', (code, signal) => {
@@ -181,6 +205,8 @@ export const codexCliProvider = {
           try { obj = JSON.parse(line); } catch { continue; }
           const text = extractEventText(obj);
           if (text) yield text;
+          const errMsg = extractEventError(obj);
+          if (errMsg) apiError = errMsg;
           const usage = extractUsage(obj);
           if (usage && typeof opts.onUsage === 'function') {
             try { opts.onUsage(usage); } catch (_) { /* never break stream on usage */ }
@@ -201,6 +227,13 @@ export const codexCliProvider = {
       if (spawnError) {
         throw spawnError.code === 'ENOENT' ? new CliMissingError() : spawnError;
       }
+      // Prefer the real API/turn error (carried on stdout) over the CLI's
+      // unhelpful stderr ("Reading additional input from stdin…"). codex
+      // exits non-zero on turn.failed, so this runs before the generic
+      // exit-code branch and gives the actionable message.
+      if (apiError && !opts.signal?.aborted) {
+        throw new CliExitError(exitInfo?.code ?? 1, exitInfo?.signal ?? null, apiError);
+      }
       if (exitInfo && exitInfo.code !== 0 && !opts.signal?.aborted) {
         throw new CliExitError(exitInfo.code, exitInfo.signal, stderr);
       }
@@ -213,4 +246,4 @@ export const codexCliProvider = {
   },
 };
 
-export { CliMissingError, CliExitError, AbortError, resolveModel, buildPrompt, extractEventText, extractUsage };
+export { CliMissingError, CliExitError, AbortError, resolveModel, buildPrompt, extractEventText, extractEventError, extractUsage };

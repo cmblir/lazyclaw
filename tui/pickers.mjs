@@ -107,36 +107,15 @@ export function _attachGhostAutocomplete(rl) {
   };
 }
 
-// LazyClaw banner — printed once at the top of every interactive chat
-// session so users see the active provider/model before they start
-// typing. Plain ANSI; auto-skipped when stdout isn't a TTY (so piped
-// invocations stay clean for tests/scripts).
-// Single source of truth for the LazyClaw banner — used by the chat
-// REPL header, the no-arg launcher, and the first-run welcome panel.
-// Returns an array of pre-formatted lines (with ANSI colour) so the
-// caller can splice in additional rows without re-implementing the
-// alignment.
+// LazyClaw banner — single source of truth (chat REPL header, no-arg
+// launcher, first-run welcome). Printed once so users see the active
+// provider/model; plain ANSI, auto-skipped when stdout isn't a TTY.
+// Returns an array of pre-formatted lines the caller can splice rows into.
 //
-// Width-management rule: every inner line is forced through
-// `.padEnd(W)` so a stray width miscount can't punch the right
-// border off the box (which is exactly the bug v3.99.5 shipped:
-// v4.2.2 — boxed figlet "lazy" wordmark, single-colour orange. The
-// previous mixed-colour banner (helmet-red letter art + ink-beige
-// caption) read as "two banners glued together" because the colour
-// changed mid-box. We use one warm orange (#F08246) for everything —
-// border, letter art, caption — so the eye reads it as one badge.
-//
-// Letter art is figlet "standard" (6 rows) rather than the v3.99.11
-// "small" (4 rows), because small renders as a pixel mush in most
-// terminal fonts. Standard's strokes are wide enough that the
-// letters read as `l a z y` even at small terminal sizes.
-//
-// Layout invariant: every inner row is exactly INNER_W visible cells
-// (no double-width glyphs, all chars are 1 cell in any monospace
-// font), so the right edge `│` always lands in the same column.
-//
-// _renderMascot / _renderMascotTiny are kept as stubs so any leftover
-// caller doesn't crash; no state-coloured art is produced any more.
+// Layout invariants: every inner row is forced through `.padEnd(INNER_W)`
+// and is exactly INNER_W single-cell glyphs, so the right border `│` always
+// lands in the same column. _renderMascot / _renderMascotTiny are stubs kept
+// so any leftover caller doesn't crash.
 
 const _ORANGE_RGB = '241;130;70';  // #F18246
 export function _orange(s) { return `\x1b[38;2;${_ORANGE_RGB}m${s}\x1b[0m`; }
@@ -735,15 +714,26 @@ export async function _pickModelInteractive(providerId, opts = {}) {
   let dynamicModels = [];
   while (true) {
     const allModels = Array.from(new Set([...baseModels, ...dynamicModels]));
-    const modelItems = allModels.map((m) => ({ id: m, label: m, desc: '' }));
+    // "Use the provider's own default" — send no `-m`, the reliable path for
+    // keyless CLI providers (codex-cli / gemini-cli) whose allowed model set
+    // is fixed by the logged-in account: forcing a model the plan isn't
+    // entitled to makes the CLI reject the turn. Pre-selected when the
+    // provider declares no defaultModel.
+    const modelItems = [{
+      id: '__provider_default__',
+      label: "▷ Use the provider's own default model",
+      desc: 'no model override — the CLI/login picks (recommended for codex-cli / gemini-cli)',
+      tag: '\x1b[38;5;208m[default]\x1b[0m',
+    }];
     if (supportsLiveFetch) {
-      modelItems.unshift({
+      modelItems.push({
         id: '__fetch_models__',
         label: '↻ Fetch live model list from /v1/models',
         desc: isCustom || isBuiltinCompat ? `GET ${meta.baseUrl}/models` : 'pulls the up-to-date catalogue from the provider',
         tag: '\x1b[38;5;245m[live]\x1b[0m',
       });
     }
+    for (const m of allModels) modelItems.push({ id: m, label: m, desc: '' });
     modelItems.push({
       id: '__custom_model__',
       label: '… type a custom model id',
@@ -751,9 +741,13 @@ export async function _pickModelInteractive(providerId, opts = {}) {
       tag: '\x1b[38;5;245m[free]\x1b[0m',
     });
 
-    const defaultIdx = supportsLiveFetch
-      ? Math.max(0, 1 + allModels.indexOf(meta.defaultModel || allModels[0]))
-      : Math.max(0, allModels.indexOf(meta.defaultModel || allModels[0]));
+    // Land the cursor on the configured default model when there is one;
+    // otherwise pre-select "use the provider's own default" (index 0).
+    let defaultIdx = 0;
+    if (meta.defaultModel) {
+      const i = modelItems.findIndex((it) => it.id === meta.defaultModel);
+      if (i >= 0) defaultIdx = i;
+    }
     const titlePrefix = opts.titlePrefix ? `${opts.titlePrefix}  ` : '';
     const picked = await _arrowMenu({
       title: `${titlePrefix}pick a model for ${providerId}`,
@@ -764,6 +758,8 @@ export async function _pickModelInteractive(providerId, opts = {}) {
     });
     if (picked === 'CANCEL') return 'CANCEL';
     if (picked === 'BACK')   return 'BACK';
+    // Empty string = "no explicit model" (use the provider/CLI default).
+    if (picked.id === '__provider_default__') return '';
     if (picked.id === '__custom_model__') {
       const typed = (await _quickPrompt(`  model id for ${providerId}: `)).trim();
       if (!typed) continue;
