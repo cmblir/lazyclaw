@@ -37,6 +37,7 @@ import { addCustomProvider } from '../providers/custom_provider.mjs';
 import { setAuthKey } from '../providers/auth_store.mjs';
 import { runProviderLogin, loginSlash } from './login_flow.mjs';
 import { hudSlash } from './hud.mjs';
+import { orchestratorSlash, pickAndSetModel } from './orchestrator_flow.mjs';
 import { attachGoalCron, detachGoalCron } from '../goals_cron.mjs';
 import { loadDotenvIfAny } from '../dotenv_min.mjs';
 import { SUBCOMMAND_GROUPS } from './subcommands.mjs';
@@ -344,12 +345,14 @@ async function _provider(args, ctx) {
   }
   // No arg → drill-in modal picker (family -> provider); falls back to a hint
   // string when ctx.openPicker isn't available (non-Ink / picker not settled).
+  let _fromPicker = false;
   if (!args) {
     if (typeof ctx.openPicker === 'function') {
       const picked = await _pickProviderDrillIn(ctx, registry);
       if (!picked) return 'cancelled';
       if (picked === '__add_custom__') return _addCustomFlow(ctx, registry);
       args = picked;
+      _fromPicker = true;
       // Built-in api-key provider with no key configured → offer to set one.
       await _maybePromptForKey(ctx, registry, args);
     } else {
@@ -365,7 +368,14 @@ async function _provider(args, ctx) {
   if (ctx.setProv) ctx.setProv(next);
   // Keyless CLI not signed in → inline connect menu ('EXIT' = foreground login).
   const r = await runProviderLogin(ctx, args, { promptText: _promptText });
-  return r !== null ? r : `provider → ${args}`;
+  if (r !== null) return r;
+  // Picked from the modal → chain straight into a model pick so provider+model
+  // are set together (no separate /model step). Composites have no model list.
+  if (_fromPicker && args !== 'orchestrator' && typeof ctx.openPicker === 'function') {
+    const mm = await pickAndSetModel(ctx, registry, args);
+    if (mm) return `provider → ${args} · ${mm}`;
+  }
+  return `provider → ${args}`;
 }
 
 function _infoFor(registry, provName) {
@@ -1706,60 +1716,8 @@ async function _channels(args, ctx = {}) {
   return lines.join('\n');
 }
 
-// /orchestrator — view/edit multi-agent config. `status` (default), `on`/`off`,
-// `planner <spec>`, `worker add|remove <spec>`, `maxsubtasks <N>`. ctx-or-
-// lib/config fallback so it works on both REPL paths.
-async function _orchestrator(args, ctx = {}) {
-  const cf = await import('../config_features.mjs');
-  const cfgMod = await import('../lib/config.mjs');
-  const read = typeof ctx.readConfig === 'function' ? ctx.readConfig : cfgMod.readConfig;
-  const write = typeof ctx.writeConfig === 'function' ? ctx.writeConfig : cfgMod.writeConfig;
-  const persist = (cfg) => { write(cfg); if (ctx.cfg) ctx.cfg = cfg; };
-  const parts = (args || '').trim().split(/\s+/).filter(Boolean);
-  const fmt = () => {
-    const s = cf.orchestratorGet(read());
-    return `orchestrator: ${s.active ? 'ON' : 'off'}  ·  planner: ${s.planner || '(default)'}  ·  workers: ${s.workers.length ? s.workers.join(', ') : '(none)'}  ·  maxSubtasks: ${s.maxSubtasks}`;
-  };
-  // Bare `/orchestrator` → arrow-key picker (Ink). Pick ON/OFF/Status instead
-  // of typing the subcommand. Legacy path (no openPicker) shows status text.
-  if (parts.length === 0 && typeof ctx.openPicker === 'function') {
-    const s = cf.orchestratorGet(read());
-    const picked = await ctx.openPicker({
-      title: 'Orchestration',
-      subtitle: `now ${s.active ? 'ON' : 'off'} · planner ${s.planner || '(default)'} · ${s.workers.length} worker(s)`,
-      items: [
-        { id: 'on', label: 'Turn ON', desc: 'route chats through planner + workers' },
-        { id: 'off', label: 'Turn OFF', desc: 'back to a single provider' },
-        { id: 'status', label: 'Status', desc: 'show current config' },
-      ],
-    });
-    if (!picked || typeof picked !== 'string') return fmt();
-    return _orchestrator(picked, ctx);
-  }
-  const sub = (parts[0] || 'status').toLowerCase();
-  if (sub === 'status') return fmt();
-  const cfg = read();
-  if (sub === 'on' || sub === 'enable') {
-    if (!cf.orchestratorGet(cfg).planner) {
-      const base = cfg.provider && cfg.provider !== 'orchestrator' ? cfg.provider : 'claude-cli';
-      cf.orchestratorSet(cfg, { planner: base });
-    }
-    cf.orchestratorEnable(cfg, true); persist(cfg);
-    const after = cf.orchestratorGet(read());
-    return after.workers.length ? 'orchestration ON.\n' + fmt() : 'orchestration ON — but no workers yet. Add one: /orchestrator worker add <provider[:model]>';
-  }
-  if (sub === 'off' || sub === 'disable') { cf.orchestratorEnable(cfg, false); persist(cfg); return 'orchestration off. provider → ' + read().provider; }
-  if (sub === 'planner') { if (!parts[1]) return 'usage: /orchestrator planner <provider[:model]>'; cf.orchestratorSet(cfg, { planner: parts[1] }); persist(cfg); return 'planner → ' + parts[1]; }
-  if (sub === 'maxsubtasks') { const n = parseInt(parts[1], 10); if (!Number.isFinite(n)) return 'usage: /orchestrator maxsubtasks <N>'; cf.orchestratorSet(cfg, { maxSubtasks: Math.max(1, Math.min(10, n)) }); persist(cfg); return fmt(); }
-  if (sub === 'worker') {
-    const action = (parts[1] || '').toLowerCase(); const spec = parts[2];
-    const workers = [...cf.orchestratorGet(cfg).workers];
-    if (action === 'add' && spec) { if (!workers.includes(spec)) workers.push(spec); cf.orchestratorSet(cfg, { workers }); persist(cfg); return 'workers: ' + workers.join(', '); }
-    if ((action === 'remove' || action === 'rm') && spec) { const next = workers.filter((w) => w !== spec); cf.orchestratorSet(cfg, { workers: next }); persist(cfg); return 'workers: ' + (next.join(', ') || '(none)'); }
-    return 'usage: /orchestrator worker add|remove <provider[:model]>';
-  }
-  return 'usage: /orchestrator [status|on|off|planner <spec>|worker add|remove <spec>|maxsubtasks <N>]';
-}
+// /orchestrator — moved to ./orchestrator_flow.mjs (orchestratorSlash) so the
+// interactive fetch+pick planner/worker editor can grow off the ratchet.
 
 // /context — view/set the chat history window (turns + token budget). This is
 // the sliding history budget sent each turn, NOT the model's hard context
@@ -1811,7 +1769,7 @@ export const SLASH_HANDLERS = new Map([
   ['/dashboard', _dashboard],
   ['/menu', _menu],
   ['/channels', _channels],
-  ['/orchestrator', _orchestrator],
+  ['/orchestrator', orchestratorSlash],
   ['/context', _context],
   // /setup — full wizard (every step); /config — pick ONE setting to change
   // (in-chat where possible; credential steps unmount, run, re-enter chat).

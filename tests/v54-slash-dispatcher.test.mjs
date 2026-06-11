@@ -254,6 +254,7 @@ test('/provider with no arg + no picker falls back to hint', async () => {
 test('/provider with no arg + openPicker opens the modal and applies the pick', async () => {
   const ctx = makeMockCtx();
   ctx.openPicker = async (opts) => {
+    if (opts.kind === 'model') return null; // skip the chained provider→model pick
     assert.equal(opts.kind, 'provider');
     return 'other';
   };

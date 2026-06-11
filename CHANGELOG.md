@@ -8,6 +8,14 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **Orchestrator planner/workers are now fetch+pick, not typed specs.**
+  `/orchestrator` (no arg) gains *Set planner…*, *Add worker…*, *Remove worker…*,
+  and *Max subtasks…* — each opens the arrow-key picker: choose a provider, then
+  its model (with live "fetch model list" + "provider default"), and the
+  `provider:model` spec is assembled for you. Typed subcommands still work.
+- **`/provider` now chains straight into a model pick.** After choosing a
+  provider from the picker it immediately offers that provider's model list, so
+  provider + model are set in one flow instead of `/provider` then `/model`.
 - **claude-hud-style status bar.** With the HUD enabled (default on), a second
   status row under the chat input shows real-time usage (`↑in ↓out tok`), session
   cost (when a rate card or provider-reported cost is available), the trainer

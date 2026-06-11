@@ -76,6 +76,7 @@ test('/provider no-arg drills family -> member and never lists orchestrator', as
   const ctx = makeProviderCtx({
     openPicker: async (opts) => {
       kinds.push(opts.kind);
+      if (opts.kind === 'model') return null; // skip the chained provider→model pick
       const ids = opts.items.map((i) => i.id);
       assert.ok(!ids.includes('orchestrator'), 'orchestrator hidden in every step');
       if (opts.kind === 'provider-family') {
@@ -88,7 +89,7 @@ test('/provider no-arg drills family -> member and never lists orchestrator', as
     },
   });
   const out = await dispatchSlash('/provider', '', ctx);
-  assert.deepEqual(kinds, ['provider-family', 'provider']);
+  assert.deepEqual(kinds, ['provider-family', 'provider', 'model']);
   assert.equal(ctx.getActiveProvName(), 'openai');
   assert.match(out, /provider → openai/);
 });
@@ -98,6 +99,7 @@ test('/provider member rows carry tags', async () => {
   const ctx = makeProviderCtx({
     openPicker: async (opts) => {
       if (opts.kind === 'provider-family') return 'cli';
+      if (opts.kind === 'model') return null; // skip the chained provider→model pick
       memberItems = opts.items;
       return 'claude-cli';
     },
