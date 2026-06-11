@@ -123,7 +123,14 @@ export const geminiCliProvider = {
       proc = spawnSandboxed(opts.sandbox || null, bin, args, {
         cwd: opts.cwd || process.cwd(),
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, GEMINI_CLI_TRUST_WORKSPACE: 'true' },
+        // Forward a lazyclaw-stored key as GEMINI_API_KEY so the "paste an API
+        // key" connect path authenticates the subprocess (the gemini CLI reads
+        // this env var). Omitted when blank so a Google-OAuth login is unaffected.
+        env: {
+          ...process.env,
+          GEMINI_CLI_TRUST_WORKSPACE: 'true',
+          ...(opts.apiKey ? { GEMINI_API_KEY: String(opts.apiKey) } : {}),
+        },
       });
     } catch (err) {
       if (err && err.code === 'ENOENT') throw new CliMissingError();

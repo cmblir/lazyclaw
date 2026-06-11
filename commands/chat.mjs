@@ -107,8 +107,7 @@ export async function cmdChat(flags = {}) {
       // narrow-terminal fallback: <60 cols falls back to v4
       if ((process.stdout.columns || 80) < 60) throw new Error('narrow-terminal');
 
-      // Tool + skill groups for the splash panel — shared with the setup
-      // wizard via tui/splash_props.mjs so both surfaces render the same panel.
+      // Tool + skill groups for the splash panel — shared with the setup wizard.
       const { gatherToolAndSkillGroups } = await import('../tui/splash_props.mjs');
       const { tools: toolGroups, skills: skillGroups } =
         await gatherToolAndSkillGroups(path.dirname(configPath()));
@@ -123,13 +122,9 @@ export async function cmdChat(flags = {}) {
       };
       void renderSplashToString; // surfaced for tests; runtime uses <Splash/>
 
-      // C7 — minimal chat-session state for the ink path so runTurn can
-      // talk to the provider (the legacy readline path below sets up the
-      // same shape — kept duplicated here intentionally so the ink branch
-      // remains self-contained and the legacy path stays byte-identical).
-      // Slash commands aren't wired into the ink REPL yet (v5.1 follow-up);
-      // until then, system-prompt composition / --session resume happen
-      // identically to the legacy path.
+      // C7 — minimal chat-session state for the ink path so runTurn can talk to
+      // the provider. The legacy readline path below sets up the same shape
+      // (kept duplicated so each branch stays self-contained).
       let _inkSandboxSpec = null;
       if (flags.sandbox) {
         const sb = await import('../sandbox.mjs');
@@ -301,6 +296,10 @@ export async function cmdChat(flags = {}) {
       if (_inkCtx.requestSetup) await (await import('./setup.mjs')).cmdSetup(undefined, [], {});
       else if (_inkCtx.requestConfigStep) {
         await (await import('./config_step.mjs')).runConfigStep(_inkCtx.requestConfigStep);
+        return cmdChat(flags);
+      } else if (_inkCtx.requestLogin) {
+        // Connect a keyless CLI provider in the foreground (Ink freed stdin), re-enter.
+        await (await import('../providers/cli_login.mjs')).runCliLoginInteractive(_inkCtx.requestLogin);
         return cmdChat(flags);
       }
       return;
@@ -1210,7 +1209,8 @@ export async function cmdChat(flags = {}) {
     try { process.stdin.pause(); } catch (_) {}
     try { process.stdin.unref(); } catch (_) {}
   }
-  // /config in the legacy path: re-run the wizard after the readline loop closes.
+  // /config legacy path: re-run the wizard after the readline loop closes.
+  // (Inline login is Ink-only — legacy ctx has no openPicker — so no requestLogin.)
   if (_legacyCtx.requestSetup) await (await import('./setup.mjs')).cmdSetup(undefined, [], {});
 }
 

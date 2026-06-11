@@ -26,16 +26,16 @@
 //     skillsMod,       // optional — falls back to dynamic import
 //   }
 //
-// Interactive sub-menus (provider/model pickers, /personality picker) are
-// readline-coupled in cli.mjs. In Ink we surface a hint instead of crashing;
-// operators can pass an arg form (e.g. `/provider openai`) or fall back to
-// LAZYCLAW_NO_INK=1. Re-implementing these as Ink overlays is a v5.5 item.
+// Interactive sub-menus that are readline-coupled in cli.mjs surface a hint in
+// Ink instead of crashing; pass an arg form (`/provider openai`) or set
+// LAZYCLAW_NO_INK=1.
 
 import { SLASH_COMMANDS } from './slash_commands.mjs';
 import { supportsLiveFetch, fetchModelsForProvider } from '../providers/model_catalogue.mjs';
 import { providerFamilies, providerTag } from './provider_families.mjs';
 import { addCustomProvider } from '../providers/custom_provider.mjs';
 import { setAuthKey } from '../providers/auth_store.mjs';
+import { runProviderLogin, loginSlash } from './login_flow.mjs';
 import { attachGoalCron, detachGoalCron } from '../goals_cron.mjs';
 import { loadDotenvIfAny } from '../dotenv_min.mjs';
 import { SUBCOMMAND_GROUPS } from './subcommands.mjs';
@@ -364,7 +364,9 @@ async function _provider(args, ctx) {
   }
   if (ctx.setActiveProvName) ctx.setActiveProvName(args);
   if (ctx.setProv) ctx.setProv(next);
-  return `provider → ${args}`;
+  // Keyless CLI not signed in → inline connect menu ('EXIT' = foreground login).
+  const r = await runProviderLogin(ctx, args, { promptText: _promptText });
+  return r !== null ? r : `provider → ${args}`;
 }
 
 function _infoFor(registry, provName) {
@@ -380,17 +382,15 @@ function _isCompositeProvider(info, provName) {
   return !!(s && s.length === 1 && s[0] === provName);
 }
 
-// Whether the active provider exposes any selectable model (a suggested
-// model that isn't just the provider name, or a live-fetchable catalogue).
+// Whether the active provider exposes any selectable model (suggested ≠ provider name, or live-fetchable).
 function _hasRealModels(info, provName) {
   if (supportsLiveFetch(info, provName)) return true;
   const s = info && Array.isArray(info.suggestedModels) ? info.suggestedModels : [];
   return s.some((m) => m && m !== provName);
 }
 
-// Build the model-picker rows: suggested + any live-fetched models, deduped,
-// with the provider default tagged, plus pinned sentinel rows for live-fetch
-// (when supported) and free-text custom entry.
+// Build the model-picker rows: suggested + live-fetched models (deduped, default
+// tagged) plus pinned sentinel rows for live-fetch and free-text custom entry.
 function _buildModelItems(info, provName, dynamicModels) {
   const base = Array.isArray(info.suggestedModels) ? info.suggestedModels : [];
   const all = Array.from(new Set([...(dynamicModels || []), ...base])).filter((m) => m && m !== provName);
@@ -1792,6 +1792,7 @@ export const SLASH_HANDLERS = new Map([
   ['/reset', _newReset],
   ['/clear', _newReset],
   ['/provider', _provider],
+  ['/login', (a, ctx) => loginSlash(a, ctx, { promptText: _promptText })],
   ['/model', _model],
   ['/skill', _skill],
   ['/skills', _skillsList],

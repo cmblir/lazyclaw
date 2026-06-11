@@ -6,6 +6,19 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Inline connect / login for the keyless CLI providers.** Picking `codex-cli`
+  or `gemini-cli` in `/provider` (or the new `/login [provider]`) now detects
+  whether the CLI is installed and signed in, and — when it isn't — offers an
+  in-chat menu instead of dead-ending on the CLI's own "please log in" message:
+  **▶ log in via browser** (`codex login`, or Google sign-in by launching
+  `gemini`), **paste an API key** (`codex login --with-api-key`; `GEMINI_API_KEY`
+  for gemini, now forwarded to the subprocess), or **install the CLI**
+  (`npm i -g @openai/codex` / `@google/gemini-cli`). The browser / install
+  actions suspend the TUI, run in the real terminal, then drop back into chat on
+  the chosen provider. Already-signed-in providers are switched to silently.
+
 ### Fixed
 
 - **`codex-cli` / `gemini-cli` would not connect** because the providers forced
