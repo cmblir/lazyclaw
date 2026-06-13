@@ -31,6 +31,7 @@
 // LAZYCLAW_NO_INK=1.
 
 import { SLASH_COMMANDS } from './slash_commands.mjs';
+import { nearest } from '../lib/args.mjs';
 import { supportsLiveFetch, fetchModelsForProvider } from '../providers/model_catalogue.mjs';
 import { providerFamilies, providerTag } from './provider_families.mjs';
 import { addCustomProvider } from '../providers/custom_provider.mjs';
@@ -265,7 +266,7 @@ async function _promptConfirm(ctx, { title, subtitle } = {}) {
 // Default in-chat approval hook: prompts the operator to confirm each
 // sensitive tool call. Used to drive the fail-closed tool runner from the
 // Ink REPL, where stdin is owned by Ink so a raw readline prompt can't run.
-function _makeInkApprove(ctx) {
+export function _makeInkApprove(ctx) {
   return async function approve({ tool, args, agent }) {
     const raw = typeof args === 'object' ? JSON.stringify(args) : String(args ?? '');
     const summary = redactSecrets(raw).slice(0, 300);
@@ -1715,7 +1716,7 @@ async function _channels(args, ctx = {}) {
     return `channel ${key} → ${en ? 'enabled' : 'disabled'}`;
   }
   const rows = cf.channelStatusList(read());
-  if (!rows.length) return 'no channels configured. add creds with /config (re-runs setup) or `lazyclaw setup`.';
+  if (!rows.length) return 'no channels configured. add creds with /config (pick a setting) or `lazyclaw setup` (full wizard).';
   const lines = ['configured channels:'];
   for (const c of rows) lines.push(`  ${c.name}  ${c.enabled ? 'enabled' : 'disabled'}${c.boundAgent ? ' · agent: ' + c.boundAgent : ''}`);
   lines.push('toggle: /channels <name> on|off   ·   add creds: /config');
@@ -1803,6 +1804,9 @@ export const SLASH_HANDLERS = new Map([
  */
 export async function dispatchSlash(cmd, args, ctx, write) {
   const handler = SLASH_HANDLERS.get(cmd);
-  if (!handler) return `unknown slash command: ${cmd} (try /help)`;
+  if (!handler) {
+    const hint = nearest(cmd, [...SLASH_HANDLERS.keys()]);
+    return `unknown slash command: ${cmd}${hint ? ` — did you mean ${hint}?` : ''} (try /help)`;
+  }
   return handler(args || '', ctx || {}, write);
 }

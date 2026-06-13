@@ -19,7 +19,7 @@ import { firstRunMode as _firstRunMode, hasConfiguredProvider } from '../first_r
 import { applyChatWindow as _applyChatWindow, estimateMessagesTokens, CHAT_WINDOW_TURNS, CHAT_WINDOW_TOKEN_BUDGET } from '../chat_window.mjs';
 import { makeRunTurn as _chatRunTurnFactory } from '../tui/run_turn.mjs';
 import { hudStatus as _hudStatus } from '../tui/hud.mjs';
-import { dispatchSlash as _dispatchSlash, parseSlashLine as _parseSlashLine } from '../tui/slash_dispatcher.mjs';
+import { dispatchSlash as _dispatchSlash, parseSlashLine as _parseSlashLine, _makeInkApprove } from '../tui/slash_dispatcher.mjs';
 import { SLASH_COMMANDS } from '../tui/slash_commands.mjs';
 import { wrapInteractiveProv, makeLegacyApprove } from './chat_hardening.mjs';
 
@@ -231,8 +231,7 @@ export async function cmdChat(flags = {}) {
         resolveAuthKey: (providerName) => _resolveAuthKey(cfg, providerName),
         resolveBaseUrl: (providerName) => _resolveBaseUrl(providerName),
         onCharsSent: (n) => { _inkCharsSent += Number(n) || 0; },
-        // P2 — let /provider add register a custom OpenAI-compatible endpoint
-        // by read-merge-writing config.json from inside the Ink session.
+        // P2 — /provider add read-merge-writes config.json from the Ink session.
         readConfig: () => readConfig(),
         writeConfig: (next) => writeConfig(next),
       };
@@ -249,6 +248,7 @@ export async function cmdChat(flags = {}) {
           ? api.openPicker(opts)
           : Promise.resolve(null);
       };
+      _inkCtx.approve = _makeInkApprove(_inkCtx); // agentic sensitive tools → Ink approval modal
       // Route streamed chunks through ReplApp's injected writeFn: chunks
       // land in React state (liveAssistant) → live region → committed to
       // the <Static/> scrollback on turn-complete, so Ink owns all output.

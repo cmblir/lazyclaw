@@ -490,6 +490,12 @@ test('unknown slash command returns friendly error', async () => {
   assert.match(out, /unknown slash command: \/xyz/);
 });
 
+test('a near-miss slash command suggests the closest match', async () => {
+  const ctx = makeMockCtx();
+  const out = await dispatchSlash('/agentik', '', ctx);   // typo of /agentic
+  assert.match(out, /did you mean \/agentic\?/);
+});
+
 // ─── full coverage: every command in SLASH_COMMANDS resolves without throwing ──
 
 test('every command in SLASH_COMMANDS executes without throwing', async () => {
