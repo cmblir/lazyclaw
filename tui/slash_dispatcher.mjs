@@ -225,11 +225,14 @@ async function _pickProviderDrillIn(ctx, registry) {
 // Single free-text prompt reusing the modal's filter buffer (no dedicated
 // input widget). Returns the typed value, '' (only when allowEmpty), or null
 // on cancel / required-but-empty.
-async function _promptText(ctx, { title, subtitle, allowEmpty } = {}) {
+async function _promptText(ctx, { title, subtitle, allowEmpty, secret } = {}) {
   if (typeof ctx.openPicker !== 'function') return null;
   const picked = await ctx.openPicker({
     kind: 'text',
     title,
+    // `secret` masks the typed query on screen (api-key / token entry) while
+    // the real value still reaches the caller — the modal picker honors it.
+    secret: !!secret,
     subtitle: subtitle || 'type into the filter, then pick the row · Esc cancels',
     items: [{ id: '__text__', label: '✓ use what I typed above', desc: '', pinned: true, freeText: true }],
   });
@@ -313,6 +316,7 @@ async function _maybePromptForKey(ctx, registry, provName) {
   const key = await _promptText(ctx, {
     title: `${provName} needs an api key`,
     subtitle: 'paste it now, or Esc to skip (set later via: lazyclaw auth)',
+    secret: true,
   });
   if (!key) return;
   const next = setAuthKey({ readConfig: ctx.readConfig, writeConfig: ctx.writeConfig, provider: provName, key });
@@ -330,7 +334,7 @@ async function _addCustomFlow(ctx, registry) {
   if (!name) return 'cancelled';
   const baseUrl = await _promptText(ctx, { title: `baseUrl for ${name}`, subtitle: 'must start with http(s) and end in /v1' });
   if (!baseUrl) return 'cancelled';
-  const apiKey = await _promptText(ctx, { title: `api-key for ${name}`, subtitle: 'leave blank for an auth-less endpoint (e.g. local vLLM)', allowEmpty: true });
+  const apiKey = await _promptText(ctx, { title: `api-key for ${name}`, subtitle: 'leave blank for an auth-less endpoint (e.g. local vLLM)', allowEmpty: true, secret: true });
   if (apiKey === null) return 'cancelled';
   return _registerCustom(ctx, registry, { name, baseUrl, apiKey });
 }

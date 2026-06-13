@@ -25,7 +25,15 @@
 // turn-completion logic (ReplApp onTurnComplete, legacy `rl.prompt`)
 // runs unconditionally.
 
+import { Chalk } from 'chalk';
 import { chatAgenticGet, chatPlanModeGet, effectiveChatTools } from '../config_features.mjs';
+
+// Force ANSI on these turn-status markers regardless of stdout TTY detection:
+// the Ink path routes them through React state (Ink preserves embedded SGR
+// and decides display), and the legacy stdout path always targets a terminal
+// for chat. Without forcing, chalk's auto-level strips color under the
+// non-TTY test/pipe sink and the red error / dim abort marker vanish.
+const _statusChalk = new Chalk({ level: 1 });
 
 // Plan-mode addendum — instructs the model to propose, not mutate. Appended
 // to the synthetic chat agent's system prompt only while plan mode is ON.
@@ -219,9 +227,17 @@ export function makeRunTurn({ ctx, writeFn }) {
       _flush();
       // ABORT errors are user-initiated; drop the partial reply (don't
       // push an incomplete assistant message — next turn would treat
-      // it as a complete reply and confuse the model).
-      if (err?.code !== 'ABORT' && !signal?.aborted) {
-        try { writeFn(`error: ${err?.message || String(err)}\n`); }
+      // it as a complete reply and confuse the model). Emit a visible dim
+      // [aborted] marker so the output doesn't just silently stop (the
+      // host onTurnComplete sees reason:'done' because we swallow ABORT).
+      if (err?.code === 'ABORT' || signal?.aborted) {
+        try { writeFn(`${_statusChalk.dim('[aborted]')}\n`); }
+        catch { /* sink failure must not kill the turn */ }
+      } else {
+        // Provider errors render in the red error style (not normal amber
+        // assistant text — the audit gap). The red SGR is embedded so the
+        // Ink scrollback <Text> preserves it and the legacy stdout path shows it.
+        try { writeFn(`${_statusChalk.red(`error: ${err?.message || String(err)}`)}\n`); }
         catch { /* sink failure must not mask err */ }
       }
     }

@@ -7,10 +7,12 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { theme } from './theme.mjs';
-import { formatHudRow } from './hud.mjs';
+import { formatHudRow, formatGauge } from './hud.mjs';
 
 export function StatusBar({ provider, model, streaming, ctxUsed, ctxTotal, hud }) {
-  const ctx = (ctxUsed != null && ctxTotal != null) ? `${ctxUsed}/${ctxTotal}` : '--';
+  // Numbers are computed upstream (chat-history budget, not provider self-report);
+  // formatGauge only changes the RENDERING — adds percent + bar + warn marker.
+  const ctx = (ctxUsed != null && ctxTotal != null) ? formatGauge(ctxUsed, ctxTotal) : '--';
   const indicator = streaming ? theme.accent('● streaming') : theme.dim('○ idle');
   const prov = provider || '?';
   const mdl = model || '?';

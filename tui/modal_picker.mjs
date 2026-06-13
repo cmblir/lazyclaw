@@ -33,6 +33,10 @@ const DEFAULT_MAX_ROWS = 12;
 //   selectedIndex:number — host-owned selection cursor (in filtered list)
 //   query:string         — host-owned filter buffer
 //   searchable?:boolean  — show the filter row (default true)
+//   secret?:boolean      — mask the typed query (api-key / token entry) so it
+//                          isn't echoed to scrollback / screen-share. The host
+//                          still owns + submits the real buffer; this only
+//                          changes how it is drawn.
 //   maxRows?:number      — viewport height (default 12)
 //   toast?:string        — transient one-line message below the list
 //   columns?:number      — terminal width override (tests)
@@ -43,6 +47,7 @@ export function ModalPicker({
   selectedIndex,
   query,
   searchable = true,
+  secret = false,
   maxRows = DEFAULT_MAX_ROWS,
   toast,
   columns,
@@ -74,7 +79,11 @@ export function ModalPicker({
   }
   // Filter row.
   if (searchable) {
-    const q = String(query || '');
+    const raw = String(query || '');
+    // For a secret field, never echo the characters — render one bullet per
+    // *visible* glyph (so CJK width stays correct) while the host keeps the
+    // real buffer for submission.
+    const q = secret ? '•'.repeat(stringWidth(raw)) : raw;
     const tail = total > 0 ? `${total} match${total === 1 ? '' : 'es'}` : 'no matches';
     rows.push(React.createElement(
       Text, { key: 'filter' },

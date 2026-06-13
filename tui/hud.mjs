@@ -8,6 +8,7 @@
 
 import { costFromUsage } from '../providers/rates.mjs';
 import { resolveTrainer } from '../providers/registry.mjs';
+import chalk from 'chalk';
 
 // HUD on unless explicitly disabled — new users see the richer bar by default.
 export function hudEnabled(cfg) {
@@ -44,6 +45,29 @@ export function hudStatus(cfg, usage) {
 }
 
 const fmtTok = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n | 0));
+
+// Context gauge: compact counts + percent + a tiny inline bar, with a warn/
+// danger marker once the window fills up. Pure (used, budget) → string so the
+// status bar and tests can share it. chalk is level-gated (0 under NO_COLOR /
+// non-TTY), so colors degrade to plain text automatically; the warn/danger
+// markers are also plain glyphs so they survive even with color off.
+const GAUGE_CELLS = 8;
+const GAUGE_FILLED = '▰';
+const GAUGE_EMPTY = '▱';
+export function formatGauge(used, budget) {
+  const u = Number(used);
+  const b = Number(budget);
+  if (!Number.isFinite(u) || !Number.isFinite(b) || b <= 0) return '--';
+  const pct = (u / b) * 100;
+  const filled = Math.min(GAUGE_CELLS, Math.max(0, Math.round((pct / 100) * GAUGE_CELLS)));
+  const bar = GAUGE_FILLED.repeat(filled) + GAUGE_EMPTY.repeat(GAUGE_CELLS - filled);
+  const body = `${fmtTok(u)}/${fmtTok(b)} ${Math.round(pct)}% ${bar}`;
+  // >=95% danger, >=80% warn — prefix a plain marker so it's legible without
+  // color, then tint the whole gauge so it stands out at a glance.
+  if (pct >= 95) return chalk.red(`! ${body}`);
+  if (pct >= 80) return chalk.yellow(`⚠ ${body}`);
+  return body;
+}
 
 // Render the HUD line (the extra row below the compact status line). Returns
 // '' when there's nothing worth showing.

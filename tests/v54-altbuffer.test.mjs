@@ -193,8 +193,10 @@ test('commands/chat.mjs passes splashProps to ReplApp and uses exitOnCtrlC (v5.4
   const chat = fs.readFileSync(path.join(here, '..', 'commands', 'chat.mjs'), 'utf8');
   assert.ok(/ReplApp[\s\S]{0,400}splashProps,/.test(chat),
     'commands/chat.mjs must pass splashProps to ReplApp');
-  assert.ok(chat.includes('exitOnCtrlC: true'),
-    'render() must be called with exitOnCtrlC: true');
+  // v6.4: exitOnCtrlC is now FALSE so the editor's 2-stage Ctrl+C handler runs
+  // (first press cancels/clears, second exits) instead of Ink killing instantly.
+  assert.ok(chat.includes('exitOnCtrlC: false'),
+    'render() must be called with exitOnCtrlC: false (editor 2-stage Ctrl+C)');
   assert.ok(!chat.includes('_altWillMount'),
     'commands/chat.mjs must NOT reintroduce the v5.4.0 pre-print gate');
 });

@@ -349,6 +349,11 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
     setState((s) => onEscape(s));
   }, []);
 
+  // v6.4 — 2-stage Ctrl+C exit handler. First Ctrl+C reuses onEscapeKey
+  // (cancel in-flight turn + clear, same reducer as Esc); a second press
+  // within the Editor's window calls onExit. Active when exitOnCtrlC:false.
+  const onExitKey = useCallback(() => { exit(); }, [exit]);
+
   // ─── Slash popup state (v5.4) ──────────────────────────────────────
   // The editor reports its current buffer via onBufferChange; we derive
   // the filtered command list from that and own the selection index.
@@ -593,6 +598,9 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
           onSubmit: handleSubmit,
           onEscape: onEscapeKey,
           onBufferChange: handleBufferChange,
+          // v6.4 — 2-stage Ctrl+C wiring (active when exitOnCtrlC:false).
+          onInterrupt: onEscapeKey,
+          onExit: onExitKey,
           slashSuggestions: showSlashPopup ? filtered : null,
           slashSelectedIndex: selectedSuggestion,
           onSlashMove: handleSlashMove,
