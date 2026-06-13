@@ -24,6 +24,17 @@ const DEFAULT_ATTEMPTS = 3;
 const DEFAULT_MAX_BACKOFF_MS = 60_000;
 const ABSOLUTE_MAX_BACKOFF_MS = 5 * 60_000;  // hard ceiling, ignores caller
 
+// Errors safe to retry before the first chunk: rate limits AND transient
+// server-overload / 5xx. Anthropic surfaces overload as HTTP 529
+// (overloaded_error); generic upstreams use 5xx. 4xx other than 429 are
+// caller-fault and never retried.
+function isRetriableError(err) {
+  const code = err?.code;
+  if (code === 'RATE_LIMIT' || code === 'OVERLOADED' || code === 'SERVER_ERROR') return true;
+  const status = err?.status;
+  return Number.isFinite(status) && status >= 500 && status < 600;
+}
+
 function clampBackoff(retryAfterMs, max) {
   const ceiling = Math.min(max, ABSOLUTE_MAX_BACKOFF_MS);
   if (!Number.isFinite(retryAfterMs) || retryAfterMs < 0) return ceiling;
@@ -85,8 +96,9 @@ export function withRateLimitRetry(provider, retryOpts = {}) {
           lastErr = err;
           // Mid-stream errors cannot be retried: we'd produce duplicate text.
           if (yieldedAny) throw err;
-          // Only retry RATE_LIMIT and only if we still have attempts left.
-          if (err?.code !== 'RATE_LIMIT' || attempt >= attempts) throw err;
+          // Retry rate-limit AND transient server-overload/5xx, only while
+          // attempts remain. 4xx other than 429 bubble unchanged.
+          if (!isRetriableError(err) || attempt >= attempts) throw err;
           const wait = clampBackoff(err.retryAfterMs, maxBackoffMs);
           if (typeof onRetry === 'function') {
             try { onRetry({ attempt: attempt + 1, retryAfterMs: wait, err }); } catch { /* swallow */ }

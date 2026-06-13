@@ -10,7 +10,8 @@ import {
 // Phase D2 — provider-registry bootstrap (lazy load + per-call re-register).
 import { ensureRegistry, requireRegistry, getRegistry } from './lib/registry_boot.mjs';
 // Phase D2 — argument parsing + subcommand inventory + agent-registry classifier.
-import { SUBCOMMANDS, parseArgs, AGENT_REG_SUBS } from './lib/args.mjs';
+// nearest/usageHint power the unknown-subcommand "did you mean" + `help <name>`.
+import { SUBCOMMANDS, parseArgs, AGENT_REG_SUBS, nearest, usageHint } from './lib/args.mjs';
 // Phase D4 — interactive TUI pickers/banner helpers. Still imported here for the
 // onboard / setup / launcher / chat paths that remain inline in this entrypoint.
 import {
@@ -31,6 +32,11 @@ import { dispatchSlash as _dispatchSlash, parseSlashLine as _parseSlashLine } fr
 // D6: single canonical slash catalog. The /help dump in the legacy readline
 // loop reads this same list the Ink path (_help) and the popup use.
 import { SLASH_COMMANDS } from './tui/slash_commands.mjs';
+
+// Sentinel thrown when cmdHelp would process.exit(2) for a known subcommand
+// that lacks a rich HELP_DETAILS entry — caught in the `help` branch so we can
+// fall back to a one-line usage hint instead of exiting non-zero.
+class _HelpFallback extends Error {}
 
 async function main() {
   const argv = process.argv.slice(2);
@@ -420,7 +426,38 @@ async function main() {
     case 'help':
     case '--help':
     case '-h': {
-      await (await import('./commands/setup.mjs')).cmdHelp(rest.positional[0]);
+      const name = rest.positional[0];
+      const cmdHelp = (await import('./commands/setup.mjs')).cmdHelp;
+      // Bare `help` / unknown-name handling stays here so we can offer a
+      // did-you-mean and a bounded usage-hint fallback without editing the
+      // rich HELP_DETAILS map in commands/setup.mjs.
+      if (!name) { cmdHelp(undefined); break; }
+      const hint = usageHint(name);
+      if (!hint) {
+        // Unknown subcommand name passed to help — suggest the nearest match.
+        process.stderr.write(`unknown command "${name}"`);
+        const guess = nearest(name, SUBCOMMANDS);
+        process.stderr.write(guess ? ` — did you mean "${guess}"?\n` : `\n`);
+        process.stderr.write('run `lazyclaw help` to see the list\n');
+        process.exit(2);
+      }
+      // Known subcommand: prefer the rich HELP_DETAILS entry. cmdHelp exits 2
+      // for subcommands that lack a detailed entry (writing its own "unknown
+      // subcommand" lines to stderr first), so guard that fatal exit AND buffer
+      // its stderr — on fallback we drop that noise and print the one-line
+      // usage hint instead. `help <name>` must never error on a real command.
+      const realExit = process.exit;
+      const realErr = process.stderr.write.bind(process.stderr);
+      const buffered = [];
+      let detailMissing = false;
+      process.exit = (code) => { if (code === 2) { detailMissing = true; throw new _HelpFallback(); } realExit(code); };
+      process.stderr.write = (chunk, ...a) => { buffered.push([chunk, a]); return true; };
+      try { cmdHelp(name); }
+      catch (e) { if (!(e instanceof _HelpFallback)) { process.exit = realExit; process.stderr.write = realErr; throw e; } }
+      finally { process.exit = realExit; process.stderr.write = realErr; }
+      // Non-fallback path: replay whatever cmdHelp wrote to stderr verbatim.
+      if (detailMissing) process.stdout.write(hint + '\n');
+      else for (const [chunk, a] of buffered) process.stderr.write(chunk, ...a);
       break;
     }
     case 'menu': {
@@ -428,10 +465,16 @@ async function main() {
       await (await import('./commands/setup.mjs')).cmdLauncher();
       break;
     }
-    default:
+    default: {
+      // Unknown top-level subcommand: lead with a closest-match suggestion so
+      // a typo (`sesions` -> `sessions`) is fixable without scanning the dump.
+      const guess = nearest(cmd, SUBCOMMANDS);
+      if (guess) console.error(`unknown command "${cmd}" — did you mean "${guess}"?`);
+      else console.error(`unknown command "${cmd}"`);
       console.error('Usage: lazyclaw <' + SUBCOMMANDS.join('|') + '> ...');
       console.error('Run `lazyclaw help` for a one-line summary of each subcommand.');
       process.exit(2);
+    }
   }
 }
 

@@ -21,6 +21,7 @@ import { makeRunTurn as _chatRunTurnFactory } from '../tui/run_turn.mjs';
 import { hudStatus as _hudStatus } from '../tui/hud.mjs';
 import { dispatchSlash as _dispatchSlash, parseSlashLine as _parseSlashLine } from '../tui/slash_dispatcher.mjs';
 import { SLASH_COMMANDS } from '../tui/slash_commands.mjs';
+import { wrapInteractiveProv, makeLegacyApprove } from './chat_hardening.mjs';
 
 // Legacy (non-Ink) slash routing for dispatcher-style, ctx-only commands.
 // The Ink REPL routes every slash through _dispatchSlash/SLASH_HANDLERS, but
@@ -90,7 +91,7 @@ export async function cmdChat(flags = {}) {
     }
     activeProvName = 'claude-cli';
   }
-  let prov = lookupProv(activeProvName);
+  let prov = wrapInteractiveProv(lookupProv(activeProvName));  // transient-retry the chat hot path
   if (!prov) { console.error(`unknown provider: ${activeProvName}`); process.exit(2); }
 
   // Top-of-session banner so the user can see at a glance what they're
@@ -214,7 +215,7 @@ export async function cmdChat(flags = {}) {
         getMessages: () => _inkMessages,
         setMessages: (next) => { _inkMessages = Array.isArray(next) ? next : []; },
         getProv: () => prov,
-        setProv: (next) => { prov = next; },
+        setProv: (next) => { prov = wrapInteractiveProv(next); },
         getActiveProvName: () => activeProvName,
         setActiveProvName: (name) => { activeProvName = name; },
         getActiveModel: () => activeModel,
@@ -289,7 +290,7 @@ export async function cmdChat(flags = {}) {
         runTurnFactory: _inkRunTurnFactory,
         onSlashCommand: _inkSlashHandler,
         pickerRef: _inkPickerRef,
-      }), { exitOnCtrlC: true, patchConsole: true });
+      }), { exitOnCtrlC: false, patchConsole: true }); // false → editor 2-stage Ctrl+C
       await ink.waitUntilExit();
       // /setup → full wizard (then shell). /config single step → run JUST
       // that step now that Ink released stdin, then re-enter chat.
@@ -481,8 +482,7 @@ export async function cmdChat(flags = {}) {
     getSessionId: () => sessionId,
     persistTurn,
     accumulateUsage,
-    resolveAuthKey: (providerName) => _resolveAuthKey(cfg, providerName),
-    onCharsSent: (n) => { charsSent += n; },
+    resolveAuthKey: (providerName) => _resolveAuthKey(cfg, providerName), onCharsSent: (n) => { charsSent += n; }, approve: makeLegacyApprove(),
   };
   const runTurn = _chatRunTurnFactory({
     ctx: _legacyCtx,
@@ -528,7 +528,7 @@ export async function cmdChat(flags = {}) {
                 return;
               }
               activeProvName = picked.provider;
-              prov = next;
+              prov = wrapInteractiveProv(next);
               if (picked.model) activeModel = picked.model;
               process.stdout.write(`provider → ${activeProvName}${picked.model ? ` · model → ${picked.model}` : ''}\n`);
             }
@@ -541,7 +541,7 @@ export async function cmdChat(flags = {}) {
           return true;
         }
         activeProvName = arg;
-        prov = next;
+        prov = wrapInteractiveProv(next);
         process.stdout.write(`provider → ${arg}\n`);
         return true;
       }
@@ -574,7 +574,7 @@ export async function cmdChat(flags = {}) {
             return true;
           }
           activeProvName = parsed.provider;
-          prov = next;
+          prov = wrapInteractiveProv(next);
         }
         activeModel = parsed.model || arg;
         process.stdout.write(`model → ${activeModel}${parsed.provider ? ` (provider → ${parsed.provider})` : ''}\n`);
