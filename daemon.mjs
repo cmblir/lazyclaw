@@ -18,6 +18,12 @@ import { createGateway } from './gateway/http_gateway.mjs';
 import { TokenBucketLimiter } from './ratelimit.mjs';
 import { createLogger } from './logger.mjs';
 import * as nudge from './mas/nudge.mjs';
+// MCP: cfg.mcp.servers[] are spawned once per daemon process at boot and
+// stopped on graceful shutdown. Booted here (the single per-process seam,
+// after config is available) — the unattended-safety guard runs earlier in
+// commands/daemon.mjs before startDaemon, so this only spawns once exposure
+// has been cleared. Best-effort: a failing server is logged, never fatal.
+import * as mcpSpawn from './mcp/server_spawn.mjs';
 
 // Route bodies moved to daemon/routes/*; makeHandler now only needs the
 // response/auth helpers used by the pre-switch middleware + dispatch.
@@ -160,8 +166,26 @@ export function makeHandler(ctx) {
     },
     logger,
   });
-  process.on('SIGTERM', () => { _nudgeLoop.stop(); });
-  process.on('SIGINT', () => { _nudgeLoop.stop(); });
+  // Boot any configured MCP servers (cfg.mcp.servers[]). Each registers its
+  // tools as mcp:<server>:<tool> (sensitive=true → approval gate). Fire-and-
+  // forget: startConfigured catches per-server, and we swallow the outer
+  // promise so a slow/failing spawn never blocks or crashes the daemon.
+  (async () => {
+    try {
+      const cfg = typeof ctx.readConfig === 'function' ? ctx.readConfig() : {};
+      const results = await mcpSpawn.startConfigured(cfg);
+      for (const r of results) {
+        if (r?.ok) logger?.info?.('mcp.server_started', { name: r.name, tools: r.tools?.length ?? 0 });
+        else logger?.warn?.('mcp.server_failed', { name: r?.name, err: r?.error });
+      }
+    } catch (err) {
+      logger?.warn?.('mcp.boot_failed', { err: err?.message });
+    }
+  })();
+  // Stop MCP servers on graceful shutdown (unregisters their tools too).
+  const _stopMcp = () => { mcpSpawn.stopAll().catch(() => { /* best-effort */ }); };
+  process.on('SIGTERM', () => { _nudgeLoop.stop(); _stopMcp(); });
+  process.on('SIGINT', () => { _nudgeLoop.stop(); _stopMcp(); });
   return async function handler(req, res) {
     // Capture method+path before any handler logic runs; req.url survives
     // the response but capturing now keeps the log line stable even if a

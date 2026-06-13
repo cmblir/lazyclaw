@@ -1,9 +1,70 @@
 // Daemon + dashboard lifecycle commands (cmdDashboard, cmdDaemon) plus the
 // _killPortOccupant helper, extracted from cli.mjs in Phase D3.
 import path from 'node:path';
+import fs from 'node:fs';
 import { ensureRegistry } from '../lib/registry_boot.mjs';
 import { configPath, readConfig, writeConfig, readVersionFromRepo } from '../lib/config.mjs';
 import { assertUnattendedSafe, installCrashHandlers } from '../lib/gateway_guard.mjs';
+import { isProcessAlive } from '../loops.mjs';
+
+// The bare `lazyclaw daemon` runs in the foreground, so a started daemon
+// records its pid + the actually-bound port here. status/stop read it back;
+// the start path writes it after bind and removes it on graceful shutdown.
+export function _daemonPidfilePath(configDir) {
+  return path.join(configDir, 'daemon.pid');
+}
+
+// Parse the pidfile into { pid, port } or null if missing/garbage. Never
+// throws — a corrupt pidfile is treated the same as "no daemon".
+export function readDaemonPidfile(pidfilePath) {
+  try {
+    const raw = fs.readFileSync(pidfilePath, 'utf8');
+    const obj = JSON.parse(raw);
+    const pid = parseInt(obj?.pid, 10);
+    if (!Number.isFinite(pid)) return null;
+    const port = Number.isFinite(parseInt(obj?.port, 10)) ? parseInt(obj.port, 10) : null;
+    return { pid, port };
+  } catch { return null; }
+}
+
+// Inspect the daemon pidfile and report liveness. A pidfile pointing at a
+// dead pid is stale (the daemon crashed without removing it), so we clean it
+// up here to keep `status` self-healing.
+export function daemonStatus({ configDir }, deps = {}) {
+  const isAlive = deps.isAlive || isProcessAlive;
+  const pf = _daemonPidfilePath(configDir);
+  const rec = readDaemonPidfile(pf);
+  if (!rec) return { running: false, pid: null, port: null };
+  if (isAlive(rec.pid)) return { running: true, pid: rec.pid, port: rec.port };
+  // Stale pidfile — remove it so the next start/status starts clean.
+  try { fs.rmSync(pf); } catch { /* already gone */ }
+  return { running: false, pid: null, port: null };
+}
+
+// SIGTERM the recorded daemon, falling back to SIGKILL only if it ignores the
+// graceful signal. Returns { running, pid, port, killed, exitCode }; a missing
+// or dead pidfile is "not running" (exit 0), never an error.
+export function daemonStop({ configDir }, deps = {}) {
+  const isAlive = deps.isAlive || isProcessAlive;
+  const kill = deps.kill || ((pid, sig) => process.kill(pid, sig));
+  const pf = _daemonPidfilePath(configDir);
+  const rec = readDaemonPidfile(pf);
+  if (!rec || !isAlive(rec.pid)) {
+    try { fs.rmSync(pf); } catch { /* nothing to clean */ }
+    return { running: false, pid: rec ? rec.pid : null, port: rec ? rec.port : null, killed: false, exitCode: 0 };
+  }
+  try { kill(rec.pid, 'SIGTERM'); } catch { /* raced with exit */ }
+  // Short grace window, then SIGKILL the holdout. This is best-effort and
+  // synchronous so the CLI exits deterministically; the daemon's own
+  // graceful-shutdown hook usually wins well inside the window.
+  if (isAlive(rec.pid)) {
+    const until = Date.now() + 1500;
+    while (isAlive(rec.pid) && Date.now() < until) { /* spin briefly */ }
+    if (isAlive(rec.pid)) { try { kill(rec.pid, 'SIGKILL'); } catch { /* gone */ } }
+  }
+  try { fs.rmSync(pf); } catch { /* removed by the daemon already */ }
+  return { running: true, pid: rec.pid, port: rec.port, killed: true, exitCode: 0 };
+}
 
 // Fail closed before binding the HTTP surface: the daemon/dashboard serve
 // POST /inbound + /agent, so the global unattended-sensitive override must
@@ -134,6 +195,35 @@ export async function cmdDashboard(flags = {}) {
 }
 
 export async function cmdDaemon(flags) {
+  // cli.mjs dispatches `daemon` with only the parsed flags, so the lifecycle
+  // subcommand (status|stop|logs) is recovered from argv here. The first
+  // non-flag positional after `daemon` is the subcommand; absent it, we start
+  // the server as before.
+  const { parseArgs } = await import('../lib/args.mjs');
+  const sub = parseArgs(process.argv.slice(3)).positional[0];
+  const cfgDirEarly = path.dirname(configPath());
+  if (sub === 'status') {
+    const st = daemonStatus({ configDir: cfgDirEarly });
+    process.stdout.write(JSON.stringify(st) + '\n');
+    process.exit(0);
+  }
+  if (sub === 'stop') {
+    const r = daemonStop({ configDir: cfgDirEarly });
+    if (!r.running) process.stdout.write('lazyclaw daemon: not running\n');
+    else process.stdout.write(`lazyclaw daemon: stopped pid ${r.pid}${r.killed ? '' : ''}\n`);
+    process.exit(r.exitCode);
+  }
+  if (sub === 'logs') {
+    // The foreground daemon writes its boot line + access logs to stdout; a
+    // logfile only exists when it was installed as an OS service (see
+    // lib/service_install.mjs servicePaths). Point the user at whichever is
+    // applicable. No tail-follower — keep it simple.
+    const { servicePaths } = await import('../lib/service_install.mjs');
+    const logfile = servicePaths('daemon', { configDir: cfgDirEarly }).logfile;
+    if (fs.existsSync(logfile)) process.stdout.write(logfile + '\n');
+    else process.stdout.write(`No service logfile at ${logfile}.\nThe foreground daemon logs to stdout (run \`lazyclaw daemon --log info\`).\n`);
+    process.exit(0);
+  }
   await ensureRegistry();
   _bootGuard('daemon');
   const sessionsMod = await import('../sessions.mjs');
@@ -245,6 +335,13 @@ export async function cmdDaemon(flags) {
     costCap: costCapOrNull,
   }) + '\n');
   if (!once) {
+    // Record pid + the ACTUAL bound port (d.port, not the requested port,
+    // which may be 0) so `daemon status`/`daemon stop` can find us without
+    // an lsof on the port. Removed on graceful shutdown below.
+    const pidfile = _daemonPidfilePath(cfgDir);
+    try { fs.writeFileSync(pidfile, JSON.stringify({ pid: process.pid, port: d.port })); }
+    catch { /* non-fatal: the daemon still runs, just isn't stoppable by pidfile */ }
+    const removePidfile = () => { try { fs.rmSync(pidfile); } catch { /* already gone */ } };
     // Forward SIGINT/SIGTERM to a graceful shutdown with a hard timeout
     // (default 10 s, override with --shutdown-timeout-ms). Second signal
     // bypasses the wait and exits immediately — the orchestrator's "I
@@ -253,7 +350,7 @@ export async function cmdDaemon(flags) {
     const timeoutMs = flags['shutdown-timeout-ms'] ? parseInt(flags['shutdown-timeout-ms'], 10) : 10_000;
     // Always-on: make an unhandled crash observable + drain sockets, then
     // exit non-zero so a service manager restarts us (vs. silent death).
-    installCrashHandlers({ label: 'daemon', logger, stop: () => gracefulShutdown(d.server, timeoutMs) });
+    installCrashHandlers({ label: 'daemon', logger, stop: () => { removePidfile(); return gracefulShutdown(d.server, timeoutMs); } });
     let shuttingDown = false;
     const shutdown = async () => {
       if (shuttingDown) {
@@ -263,6 +360,7 @@ export async function cmdDaemon(flags) {
       shuttingDown = true;
       if (logger) logger.info('shutdown.begin', { timeoutMs });
       const result = await gracefulShutdown(d.server, timeoutMs);
+      removePidfile();
       if (logger) logger.info('shutdown.end', result);
       process.exit(result.forced ? 1 : 0);
     };

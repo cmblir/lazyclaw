@@ -12,7 +12,11 @@ export async function startConfigured(cfg) {
   const servers = cfg?.mcp?.servers || [];
   const results = [];
   for (const s of servers) {
-    try { results.push(await startServer(s)); }
+    // §8: MCP tools invoke external server code, so they MUST stay behind the
+    // fail-closed approval gate. Force sensitive:true at boot — config can
+    // narrow exposure (allowGlob) but can never downgrade an MCP tool to
+    // ungated. A config-supplied sensitive:false is ignored, not honored.
+    try { results.push(await startServer({ ...s, sensitive: true })); }
     catch (e) { results.push({ ok: false, name: s.name, error: e.message }); }
   }
   return results;

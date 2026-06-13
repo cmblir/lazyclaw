@@ -189,6 +189,57 @@ async function main() {
       }
       break;
     }
+    case 'index': {
+      // FTS index recovery surface documented by mas/index_db.mjs and the
+      // doctor failure-log. reindexAll (NOT the destructive rebuild) drops the
+      // db and repopulates from the on-disk corpus, so recall is never left empty.
+      if (rest.positional[0] !== 'rebuild') {
+        console.error('Usage: lazyclaw index rebuild');
+        process.exit(2);
+      }
+      const cfgDir = path.dirname(configPath());
+      try {
+        const indexDb = await import('./mas/index_db.mjs');
+        indexDb.reindexAll(cfgDir);
+        // reindexAll returns void; derive what landed by counting the FTS rows.
+        const db = indexDb.openIndex(cfgDir);
+        const counts = {};
+        for (const [scope, table] of [
+          ['sessions', 'fts_sessions'], ['skills', 'fts_skills'],
+          ['trajectories', 'fts_trajectories'], ['memories', 'fts_memories'],
+        ]) {
+          counts[scope] = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
+        }
+        console.log(JSON.stringify({ ok: true, counts }));
+        process.exit(0);
+      } catch (e) {
+        console.error(`index rebuild failed: ${e.message}`);
+        process.exit(1);
+      }
+      break;
+    }
+    case 'mcp': {
+      // Read-only MCP surface (v1). `mcp list` prints the configured servers
+      // (cfg.mcp.servers) and any servers currently connected in this process.
+      // start/stop are daemon-boot driven (cfg.mcp.servers) — no CLI mutation
+      // in v1 (follow-up).
+      if (rest.positional[0] !== 'list') {
+        console.error('Usage: lazyclaw mcp list');
+        process.exit(2);
+      }
+      const cfg = readConfig();
+      const configured = (cfg?.mcp?.servers || []).map(s => ({
+        name: s.name, command: s.command, args: s.args || [], allowGlob: s.allowGlob || '*',
+      }));
+      // listServers() reports servers connected in *this* process. The CLI is
+      // a short-lived process that never boots them, so this is normally empty
+      // — surfaced anyway so the same command works when run inside the daemon.
+      let connected = [];
+      try { connected = (await import('./mcp/client.mjs')).listServers(); }
+      catch { /* mcp client unavailable — report configured only */ }
+      console.log(JSON.stringify({ ok: true, configured, connected }, null, 2));
+      break;
+    }
     case 'chat': {
       await (await import('./commands/chat.mjs')).cmdChat(rest.flags);
       break;
