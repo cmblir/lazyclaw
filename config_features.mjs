@@ -303,6 +303,51 @@ export function chatWindowSet(cfg, { turns, tokens } = {}) {
   return cfg;
 }
 
+// ── Chat agentic REPL + plan mode (cfg.chat.{agentic,tools,planMode}) ────
+// Group 1 — when agentic mode is ON the chat turn routes through the MAS
+// tool loop (runAgentTurn) instead of plain streaming. Opt-in, OFF by
+// default, so existing users keep the exact streaming behavior. Plan mode
+// rides on the same loop but intersects the tool whitelist down to a
+// read-only set ("propose, don't mutate"). Accessors are the registration
+// surface for these keys, mirroring chatWindowGet/Set above.
+//
+// Default whitelist is read-only + safe: a chat turn that can silently
+// propose bash is higher-risk than /task, so bash/write are opt-in per tool
+// via cfg.chat.tools. Sensitive tools still pass the fail-closed approval
+// gate in mas/tool_runner.mjs regardless.
+export const DEFAULT_CHAT_TOOLS = ['read', 'grep', 'skill_view'];
+// Read-only safe set used to intersect the whitelist in plan mode (drops
+// bash/write/delegate and any other sensitive verb). Kept narrow on purpose.
+export const READONLY_CHAT_TOOLS = ['read', 'grep', 'skill_view'];
+
+export function chatAgenticGet(cfg) {
+  return !!(cfg && cfg.chat && cfg.chat.agentic === true);
+}
+export function chatPlanModeGet(cfg) {
+  return !!(cfg && cfg.chat && cfg.chat.planMode === true);
+}
+export function chatToolsGet(cfg) {
+  const c = (cfg && cfg.chat && typeof cfg.chat === 'object') ? cfg.chat : {};
+  return Array.isArray(c.tools) ? c.tools.slice() : DEFAULT_CHAT_TOOLS.slice();
+}
+
+// Persist a chat.* boolean/array key, mutating cfg in place. Returns cfg.
+export function chatSet(cfg, key, value) {
+  cfg.chat = (cfg.chat && typeof cfg.chat === 'object') ? cfg.chat : {};
+  cfg.chat[key] = value;
+  return cfg;
+}
+
+// Resolve the effective tool whitelist for an agentic chat turn. In plan
+// mode the configured whitelist is intersected with the read-only set so
+// no mutating tool can be proposed; otherwise the configured list is used
+// as-is (default read-only safe set when unset).
+export function effectiveChatTools(cfg, { planMode = false } = {}) {
+  const tools = chatToolsGet(cfg);
+  if (!planMode) return tools;
+  return tools.filter((t) => READONLY_CHAT_TOOLS.includes(t));
+}
+
 // ── Orchestrator — multi-agent config (cfg.orchestrator) ────────────────
 // Shared by the setup wizard, the /orchestrator slash, and the CLI so the
 // "planner + workers" config has one shape. Orchestration is ACTIVE only when

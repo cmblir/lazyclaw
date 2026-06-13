@@ -37,6 +37,7 @@ import { addCustomProvider } from '../providers/custom_provider.mjs';
 import { setAuthKey } from '../providers/auth_store.mjs';
 import { runProviderLogin, loginSlash } from './login_flow.mjs';
 import { hudSlash } from './hud.mjs';
+import { agenticSlash, planSlash, CHAT_MODE_SLASH_COMMANDS } from './chat_mode_slash.mjs';
 import { orchestratorSlash, pickAndSetModel } from './orchestrator_flow.mjs';
 import { attachGoalCron, detachGoalCron } from '../goals_cron.mjs';
 import { loadDotenvIfAny } from '../dotenv_min.mjs';
@@ -628,7 +629,8 @@ async function _skillsList(args, ctx) {
   if (!names.length) {
     return [
       'no skills installed.',
-      'install one:  lazyclaw skills install <owner>/<repo>',
+      'starter pack:  lazyclaw skills starter',
+      'install more:  lazyclaw skills install <owner>/<repo>',
       'then /skills to pick, or /skill <name>[,<name>] to activate.',
     ].join('\n');
   }
@@ -1738,6 +1740,15 @@ async function _context(args, ctx = {}) {
   return 'usage: /context [status | turns <N> | tokens <N>]';
 }
 
+// /agentic + /plan live in ./chat_mode_slash.mjs (Group 1) — kept out of this
+// file (at its size ratchet) so the toggles can grow there. Register their
+// catalog rows in the shared SLASH_COMMANDS so /help, the popup,
+// ghost-autocomplete, and the d6 drift-guard see them (idempotent — ESM runs
+// module init once; appended per the catalog's ordering note).
+for (const entry of CHAT_MODE_SLASH_COMMANDS) {
+  if (!SLASH_COMMANDS.some((c) => c.cmd === entry.cmd)) SLASH_COMMANDS.push(entry);
+}
+
 // ─── dispatch table ──────────────────────────────────────────────────────
 
 export const SLASH_HANDLERS = new Map([
@@ -1751,6 +1762,8 @@ export const SLASH_HANDLERS = new Map([
   ['/provider', _provider],
   ['/login', (a, ctx) => loginSlash(a, ctx, { promptText: _promptText })],
   ['/hud', hudSlash],
+  ['/agentic', agenticSlash],
+  ['/plan', planSlash],
   ['/model', _model],
   ['/skill', _skill],
   ['/skills', _skillsList],

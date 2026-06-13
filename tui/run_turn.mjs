@@ -25,6 +25,89 @@
 // turn-completion logic (ReplApp onTurnComplete, legacy `rl.prompt`)
 // runs unconditionally.
 
+import { chatAgenticGet, chatPlanModeGet, effectiveChatTools } from '../config_features.mjs';
+
+// Plan-mode addendum — instructs the model to propose, not mutate. Appended
+// to the synthetic chat agent's system prompt only while plan mode is ON.
+const PLAN_MODE_ADDENDUM = 'You are in PLAN mode. Propose a plan; do not mutate '
+  + 'anything. List the steps you would take and the tools you would use, then stop.';
+
+// Fire the post-task learning loop on every successful chat turn (v5 Group A
+// C1). Fire-and-forget via queueMicrotask so the next prompt is never blocked
+// on trajectory write / synth. Shared by the streaming and agentic paths.
+function _fireLearningHook(ctx, messages, activeProvName, activeModel, transcript) {
+  try {
+    queueMicrotask(() => {
+      import('../mas/learning.mjs').then((mod) => mod.runLearning('post-task', {
+        agent: { name: 'chat', provider: activeProvName, model: activeModel, role: '' },
+        task: {
+          id: ctx.getSessionId() || ctx.syntheticChatSessionId,
+          title: '(chat turn)',
+          turns: messages.slice(-2).map((m) => ({
+            agent: m.role === 'user' ? 'user' : 'chat',
+            text: m.content,
+            ts: new Date().toISOString(),
+          })),
+        },
+        configDir: ctx.cfgDir,
+        cfg: ctx.cfg,
+        transcript: String(transcript || '').slice(0, 8000),
+      })).catch(() => { /* learning loop is best-effort */ });
+    });
+  } catch { /* never let learning hook break the chat */ }
+}
+
+// Drive one agentic chat turn through the MAS tool loop. Builds the synthetic
+// chat agent record, renders compact tool-activity status lines + the final
+// answer into writeChunk, and returns the final assistant text. The approval
+// hook is taken from ctx.approve when present (Ink: _makeInkApprove, legacy:
+// makeReadlineApprove) — when absent the fail-closed gate in tool_runner.mjs
+// simply denies any sensitive tool (no silent ungated execution).
+async function _runAgenticTurn({ ctx, messages, sysMsg, activeProvName, activeModel, planMode, writeChunk, signal }) {
+  const runAgentTurn = ctx.runAgentTurnImpl
+    || (await import('../mas/agent_turn.mjs')).runAgentTurn;
+  const tools = effectiveChatTools(ctx.cfg, { planMode });
+  let role = (sysMsg && sysMsg.content) || '';
+  if (planMode) role = role ? `${role}\n\n${PLAN_MODE_ADDENDUM}` : PLAN_MODE_ADDENDUM;
+  const agent = { name: 'chat', provider: activeProvName, model: activeModel, role, tools };
+  // History excludes the just-pushed user message and the system slot (the
+  // latter is threaded via agent.role); runAgentTurn appends userMessage.
+  const history = messages
+    .slice(0, -1)
+    .filter((m) => m.role !== 'system')
+    .map((m) => ({ role: m.role, content: m.content }));
+  const userMessage = messages[messages.length - 1]?.content || '';
+  let result;
+  try {
+    result = await runAgentTurn({
+      agent, userMessage, history,
+      configDir: ctx.cfgDir,
+      apiKey: ctx.resolveAuthKey(activeProvName),
+      approve: ctx.approve,
+      security: ctx.cfg?.security,
+      cache: true,
+      usePromptStack: false,
+      signal,
+    });
+  } catch (err) {
+    // No silent catch — surface as a status line; return empty so the caller
+    // still completes the turn (persist + learning) without a half reply.
+    try { writeChunk(`· agentic turn failed: ${err?.message || String(err)}\n`); } catch { /* sink */ }
+    return '';
+  }
+  // Compact tool-activity status lines (dim, not the red provider-error style).
+  for (const c of (result.toolCalls || [])) {
+    const ok = c.ok ? '✓' : '⚠';
+    try { writeChunk(`· ${ok} ${c.name}\n`); } catch { /* sink */ }
+  }
+  if (result.stoppedBy === 'budget') {
+    try { writeChunk(`· stopped after ${result.iterations} tool step(s)\n`); } catch { /* sink */ }
+  }
+  const text = result.text || '';
+  if (text) { try { writeChunk(text); } catch { /* sink */ } }
+  return text;
+}
+
 /**
  * @typedef {Object} RunTurnCtx
  * @property {Object} cfg                                  Active config.
@@ -79,6 +162,34 @@ export function makeRunTurn({ ctx, writeFn }) {
       const prov = ctx.getProv();
       const activeProvName = ctx.getActiveProvName();
       const activeModel = ctx.getActiveModel();
+      // Group 1 — agentic REPL. When cfg.chat.agentic (or plan mode) is ON,
+      // route the turn through the MAS tool loop (runAgentTurn) instead of
+      // the streaming sendMessage path. Plan mode forces agentic-on for the
+      // turn (read-only). Everything else (persistTurn, the post-task
+      // learning hook below) is shared. When OFF — the default — the
+      // streaming path below runs UNCHANGED.
+      const planMode = chatPlanModeGet(ctx.cfg);
+      if (chatAgenticGet(ctx.cfg) || planMode) {
+        const acc2 = await _runAgenticTurn({
+          ctx, messages, sysMsg, activeProvName, activeModel, planMode,
+          writeChunk: _writeChunk, signal,
+        });
+        if (_writeTimer) clearTimeout(_writeTimer);
+        _flush();
+        try { writeFn('\n'); } catch { /* sink failure must not kill the turn */ }
+        messages.push({ role: 'assistant', content: acc2 });
+        ctx.persistTurn('assistant', acc2);
+        _fireLearningHook(ctx, messages, activeProvName, activeModel, acc2);
+        return;
+      }
+      // Configurable max-output-tokens (config.json `maxTokens`). Only
+      // thread it through when it's a positive finite number; otherwise
+      // leave opts.maxTokens unset so each provider's DEFAULT_MAX_TOKENS
+      // applies.
+      const cfgMaxTokens = ctx.cfg?.maxTokens;
+      const maxTokens = (typeof cfgMaxTokens === 'number' && Number.isFinite(cfgMaxTokens) && cfgMaxTokens > 0)
+        ? cfgMaxTokens
+        : undefined;
       // C8 — prompt-cache the static system prefix. The Anthropic
       // provider prefers `systemStatic` when present; non-Anthropic
       // providers ignore the field and fall back to the legacy
@@ -90,6 +201,7 @@ export function makeRunTurn({ ctx, writeFn }) {
         signal,
         onUsage: ctx.accumulateUsage,
         cache: true,
+        ...(maxTokens !== undefined ? { maxTokens } : {}),
         ...(sysMsg ? { systemStatic: sysMsg.content } : {}),
       })) {
         _writeChunk(chunk);
@@ -101,28 +213,7 @@ export function makeRunTurn({ ctx, writeFn }) {
       catch { /* sink failure must not kill the turn */ }
       messages.push({ role: 'assistant', content: acc });
       ctx.persistTurn('assistant', acc);
-      // v5 Group A (C1): close the post-task learning loop on every
-      // successful chat turn. Fire-and-forget via queueMicrotask so the
-      // next prompt is never blocked on trajectory write / synth.
-      try {
-        queueMicrotask(() => {
-          import('../mas/learning.mjs').then((mod) => mod.runLearning('post-task', {
-            agent: { name: 'chat', provider: activeProvName, model: activeModel, role: '' },
-            task: {
-              id: ctx.getSessionId() || ctx.syntheticChatSessionId,
-              title: '(chat turn)',
-              turns: messages.slice(-2).map((m) => ({
-                agent: m.role === 'user' ? 'user' : 'chat',
-                text: m.content,
-                ts: new Date().toISOString(),
-              })),
-            },
-            configDir: ctx.cfgDir,
-            cfg: ctx.cfg,
-            transcript: acc.slice(0, 8000),
-          })).catch(() => { /* learning loop is best-effort */ });
-        });
-      } catch { /* never let learning hook break the chat */ }
+      _fireLearningHook(ctx, messages, activeProvName, activeModel, acc);
     } catch (err) {
       if (_writeTimer) clearTimeout(_writeTimer);
       _flush();
