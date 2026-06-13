@@ -7,6 +7,65 @@ import { ensureRegistry, getRegistry } from '../lib/registry_boot.mjs';
 
 const BUNDLE_VERSION = 1;
 
+// Key names that carry secrets. A bundle on a teammate's laptop must never
+// leak per-provider keys (cfg.authProfiles[<provider>][i].key, written by
+// providers/auth_store.mjs) or any other secret-bearing config value, not
+// just the legacy top-level cfg['api-key']. Match on the KEY name so we can
+// redact custom/nested entries without knowing the config schema ahead of
+// time, while leaving non-secret keys (baseUrl, model, label, …) untouched.
+const SECRET_KEY_RE = /(?:api[-_]?key|secret|token|password|authorization|access[-_]?key)/i;
+
+// Deep-clone cfg with every secret-bearing string value redacted. Pure — never
+// mutates the input. Preserves structure/labels so the bundle stays
+// inspectable (e.g. authProfiles keeps {label} but drops {key}).
+function redactSecrets(value, keyName = '') {
+  if (Array.isArray(value)) return value.map((v) => redactSecrets(v));
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = redactSecrets(v, k);
+    return out;
+  }
+  if (typeof value === 'string' && SECRET_KEY_RE.test(keyName)) return '***REDACTED***';
+  return value;
+}
+
+// Reciprocal of the export redaction: deep-clone cfg with every
+// '***REDACTED***' placeholder dropped, so importing a redacted bundle never
+// persists the literal placeholder string into config.json. Skipping the key
+// (rather than writing it) means an existing real value survives the default
+// "bundle wins" merge, and an authProfiles entry keeps its {label} slot minus
+// the secret. Symmetric with redactSecrets / redactAuthProfileKeys above.
+const REDACTED_PLACEHOLDER = '***REDACTED***';
+function stripRedacted(value) {
+  if (Array.isArray(value)) return value.map(stripRedacted);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (v === REDACTED_PLACEHOLDER) continue;   // drop the redacted key entirely
+      out[k] = stripRedacted(v);
+    }
+    return out;
+  }
+  return value;
+}
+
+// Redact the per-provider api keys in authProfiles. The field is literally
+// named `key` (not `apiKey`), so the generic key-name match above doesn't
+// catch it; handle it structurally instead. Keep `label` so the auth profile
+// shape stays inspectable. Operates on the already-cloned safeCfg.
+function redactAuthProfileKeys(safeCfg) {
+  const profiles = safeCfg.authProfiles;
+  if (!profiles || typeof profiles !== 'object') return safeCfg;
+  for (const provider of Object.keys(profiles)) {
+    const arr = profiles[provider];
+    if (!Array.isArray(arr)) continue;
+    profiles[provider] = arr.map((p) =>
+      p && typeof p === 'object' && 'key' in p ? { ...p, key: '***REDACTED***' } : p,
+    );
+  }
+  return safeCfg;
+}
+
 export async function cmdExport(flags) {
   // Portable bundle: config + every installed skill + (optionally) every
   // persisted session. Writes JSON to stdout so the caller pipes it
@@ -19,10 +78,9 @@ export async function cmdExport(flags) {
   const sessionsMod = await import('../sessions.mjs');
   const cfgDir = path.dirname(configPath());
   const cfg = readConfig();
-  const safeCfg = { ...cfg };
-  if (!flags['include-secrets']) {
-    if (safeCfg['api-key']) safeCfg['api-key'] = '***REDACTED***';
-  }
+  // redactSecrets deep-clones, so --include-secrets keeps the original cfg
+  // verbatim while the default path emits a fully redacted copy.
+  const safeCfg = flags['include-secrets'] ? cfg : redactAuthProfileKeys(redactSecrets(cfg));
   const skills = skillsMod.listSkills(cfgDir).map(s => ({
     name: s.name,
     content: skillsMod.loadSkill(s.name, cfgDir),
@@ -79,11 +137,13 @@ export async function cmdImport(flags) {
   // Config
   if (bundle.config && typeof bundle.config === 'object') {
     const existing = readConfig();
+    // Strip every redacted placeholder from the incoming config BEFORE the
+    // merge so the literal '***REDACTED***' is never persisted — at the
+    // top-level api-key, inside authProfiles[].key, or any nested secret.
+    const incoming = stripRedacted(bundle.config);
     const next = flags['no-overwrite-config']
-      ? { ...bundle.config, ...existing }    // existing wins
-      : { ...existing, ...bundle.config };   // bundle wins (default)
-    // Drop redacted secrets so we never write the placeholder string.
-    if (next['api-key'] === '***REDACTED***') delete next['api-key'];
+      ? { ...incoming, ...existing }    // existing wins
+      : { ...existing, ...incoming };   // bundle wins (default)
     writeConfig(next);
     stats.configKeys = Object.keys(bundle.config).length;
   }
