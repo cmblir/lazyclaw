@@ -18,8 +18,33 @@ export function constantTimeEqual(a, b) {
   return diff === 0;
 }
 
+/**
+ * Static dashboard shell allowlist. The HTML/CSS/JS that make up the
+ * dashboard contain no secrets — they're an empty shell that fetches every
+ * piece of data over the (still token-gated) JSON API. Serving the shell
+ * without a token lets the browser load the page and obtain the token from
+ * the user; the bearer check then guards every data/mutation route. The
+ * list is the EXACT set of static GET routes (see daemon/route_table.mjs);
+ * no prefixes, so a route like `/dashboard.html` or `/config` never matches.
+ */
+const STATIC_DASHBOARD_PATHS = new Set([
+  '/', '/dashboard', '/dashboard/', '/dashboard.css', '/dashboard.js',
+]);
+export function isStaticDashboardPath(pathname) {
+  return STATIC_DASHBOARD_PATHS.has(pathname);
+}
+
 export function isAuthorized(req, expectedToken) {
   if (!expectedToken) return true;  // auth disabled
+  // Static dashboard shell bypasses the token gate (GET-only, no secrets).
+  // Normalize the URL first so a dot-segment path like `/dashboard/../config`
+  // can't ride the bypass into a gated data route — it normalizes to
+  // `/config`, which isn't on the allowlist.
+  if ((req.method || 'GET').toUpperCase() === 'GET') {
+    let pathname = '';
+    try { pathname = new URL(req.url || '/', 'http://localhost').pathname; } catch { pathname = ''; }
+    if (isStaticDashboardPath(pathname)) return true;
+  }
   const header = req.headers['authorization'] || '';
   const m = /^Bearer\s+(.+)$/i.exec(header);
   if (!m) return false;

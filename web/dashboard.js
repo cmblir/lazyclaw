@@ -10,9 +10,54 @@
 
     document.getElementById('footer-url').textContent = location.href;
 
+    // ── Auth token ────────────────────────────────────────────────
+    // The static dashboard shell is served without a token, but the JSON
+    // API stays gated when the daemon runs with --auth-token. We keep the
+    // token in localStorage and attach it as `Authorization: Bearer` on
+    // every API call. A loopback daemon with no auth never sends a token —
+    // the header is simply absent and calls work unchanged.
+    const TOKEN_KEY = 'lazyclaw_token';
+    function getToken() {
+      try { return localStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; }
+    }
+    function setToken(t) {
+      try { localStorage.setItem(TOKEN_KEY, t); } catch {}
+    }
+    // Merge an Authorization header into the caller's opts when a token is
+    // known, without clobbering any other headers they passed.
+    function withAuth(opts = {}) {
+      const token = getToken();
+      if (!token) return opts;
+      return { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + token } };
+    }
+    // On 401 from a gated route, prompt the user once for the token, store
+    // it, and signal the caller to retry. window.prompt is fine for v1.
+    function promptForToken() {
+      const entered = window.prompt(
+        'This daemon requires an auth token (started with --auth-token).\n' +
+        'Paste the token to continue:',
+        getToken(),
+      );
+      if (entered == null) return false; // user cancelled
+      setToken(entered.trim());
+      return true;
+    }
+
+    // Single auth-aware fetch primitive: adds the bearer token via withAuth,
+    // prompts for a token + retries once on 401, returns the raw Response.
+    // ALL dashboard requests route through this (api/apiSoft + the direct
+    // export/delete/test/POST call sites) so none bypass the auth gate. Uses
+    // globalThis.fetch so this is the only place that touches fetch directly.
+    async function apiRaw(path, opts = {}) {
+      let r = await globalThis.fetch(path, withAuth(opts));
+      if (r.status === 401 && promptForToken()) {
+        r = await globalThis.fetch(path, withAuth(opts)); // retry once with the new token
+      }
+      return r;
+    }
     // Tiny fetch helper that surfaces errors as toasts on the page.
     async function api(path, opts = {}) {
-      const r = await fetch(path, opts);
+      const r = await apiRaw(path, opts);
       if (!r.ok && r.status !== 200) {
         let body = '';
         try { body = JSON.stringify(await r.json()); } catch {}
@@ -24,7 +69,7 @@
     // /doctor (503 on issues), /rates/validate (422), /config/validate (422)
     // endpoints where a non-200 carries a meaningful payload, not an error.
     async function apiSoft(path, opts = {}) {
-      const r = await fetch(path, opts);
+      const r = await apiRaw(path, opts);
       let body = null;
       try { body = await r.json(); } catch {}
       return { status: r.status, ok: r.ok, body };
@@ -155,27 +200,18 @@
           const tagAgent = s.agentName
             ? `<span class="pill" style="background:rgba(217,179,90,0.18);color:var(--accent);">@${escHtml(s.agentName)}</span>`
             : '';
-          const trajBtn = s.trajectoryId
-            ? `<button class="btn btn-secondary btn-sm" data-action="trajectory" data-traj="${escHtml(s.trajectoryId)}">Trajectory</button>`
-            : '';
           div.innerHTML = `<div class="name">${escHtml(id)}</div>
             <div class="dim">${turns ? turns + ' turns' : ''}</div>
             ${tagTrained}${tagAgent}
             <div class="dim row-actions">${escHtml(updated)}</div>
             <button class="btn btn-secondary btn-sm" data-action="view">View</button>
             <button class="btn btn-secondary btn-sm" data-action="export">Export</button>
-            ${trajBtn}
             <button class="btn btn-danger btn-sm" data-action="delete">Delete</button>`;
           div.addEventListener('click', (e) => {
             const btn = e.target.closest('button');
             const action = btn?.dataset.action;
             if (action === 'export') return openSessionExport(id);
             if (action === 'delete') return deleteSession(id);
-            if (action === 'trajectory') {
-              const traj = btn.dataset.traj;
-              window.open('/trajectories/' + encodeURIComponent(traj), '_blank');
-              return;
-            }
             return openSessionDetail(id);
           });
           root.appendChild(div);
@@ -211,7 +247,7 @@
     async function openSessionExport(id) {
       openModal({ title: `Export — ${id}`, bodyHtml: '<div class="empty">Loading…</div>' });
       try {
-        const r = await fetch('/sessions/' + encodeURIComponent(id) + '/export?format=md');
+        const r = await apiRaw('/sessions/' + encodeURIComponent(id) + '/export?format=md');
         const text = await r.text();
         document.getElementById('modal-body').innerHTML = `<pre>${escHtml(text)}</pre>`;
         document.getElementById('modal-foot').innerHTML = `
@@ -225,7 +261,7 @@
     async function deleteSession(id) {
       if (!confirm(`Delete session "${id}"?\nTurn log will be permanently removed.`)) return;
       try {
-        await fetch('/sessions/' + encodeURIComponent(id), { method: 'DELETE' });
+        await apiRaw('/sessions/' + encodeURIComponent(id), { method: 'DELETE' });
         LOADERS.sessions();
       } catch (e) {
         alert('Delete failed: ' + e.message);
@@ -330,7 +366,7 @@
       out.style.color = 'var(--dim)';
       out.textContent = '⏳ synthesizing…';
       try {
-        const r = await fetch('/skills/synth', {
+        const r = await apiRaw('/skills/synth', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ sessionId: sid }),
@@ -354,7 +390,7 @@
       openModal({ title: `Skill — ${name}`, bodyHtml: '<div class="empty">Loading…</div>' });
       try {
         // GET /skills/<name> returns the markdown body as text/markdown.
-        const r = await fetch('/skills/' + encodeURIComponent(name));
+        const r = await apiRaw('/skills/' + encodeURIComponent(name));
         if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
         const text = await r.text();
         document.getElementById('modal-body').innerHTML = `<pre class="markdown">${escHtml(text)}</pre>`;
@@ -369,7 +405,7 @@
     async function deleteSkill(name) {
       if (!confirm(`Remove skill "${name}"?`)) return;
       try {
-        await fetch('/skills/' + encodeURIComponent(name), { method: 'DELETE' });
+        await apiRaw('/skills/' + encodeURIComponent(name), { method: 'DELETE' });
         LOADERS.skills();
       } catch (e) {
         alert('Delete failed: ' + e.message);
@@ -424,7 +460,7 @@
       out.textContent = '⏳ probing…';
       out.style.color = 'var(--dim)';
       try {
-        const r = await fetch('/providers/' + encodeURIComponent(name) + '/test');
+        const r = await apiRaw('/providers/' + encodeURIComponent(name) + '/test');
         const body = await r.json();
         if (body.ok) {
           out.style.color = 'var(--ok)';
@@ -443,7 +479,7 @@
     async function removeProvider(name) {
       if (!confirm(`Remove custom provider "${name}"?`)) return;
       try {
-        const r = await fetch('/providers/' + encodeURIComponent(name), { method: 'DELETE' });
+        const r = await apiRaw('/providers/' + encodeURIComponent(name), { method: 'DELETE' });
         const body = await r.json();
         if (!r.ok) throw new Error(body.error || `${r.status}`);
         LOADERS.providers();
@@ -496,7 +532,7 @@
       status.style.color = 'var(--dim)';
       status.textContent = 'Saving…';
       try {
-        const r = await fetch('/providers', {
+        const r = await apiRaw('/providers', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ name, baseUrl, apiKey: apiKey || undefined, defaultModel: defaultModel || undefined }),
@@ -590,7 +626,7 @@
           return `<tr class="clickable" data-wf-id="${escHtml(s.sessionId)}">
             <td><code>${escHtml(s.sessionId)}</code></td>
             <td>${tags.join(' ') || '<span class="dim">—</span>'}</td>
-            <td class="num">${sm.done ?? 0} / ${total}</td>
+            <td class="num">${sm.success ?? 0} / ${total}</td>
             <td class="num">${sm.failed ?? 0}</td>
             <td class="dim">${escHtml(s.updatedAt || s.startedAt || '')}</td>
             <td><button class="btn btn-danger btn-sm" data-action="wf-delete">Delete</button></td>
@@ -618,10 +654,11 @@
       try {
         const r = await api('/workflows/' + encodeURIComponent(id));
         const sm = r.summary || {};
-        const nodes = r.state?.nodeResults || r.nodeResults || {};
+        // GET /workflows/<id> returns the per-node map under `nodes`.
+        const nodes = r.nodes || r.state?.nodes || {};
         const nodeRows = Object.entries(nodes).map(([nid, n]) => {
           const status = (n.status || '').toLowerCase();
-          const pillClass = status === 'failed' ? 'err' : (status === 'done' ? 'ok' : (status === 'running' ? 'warn' : ''));
+          const pillClass = status === 'failed' ? 'err' : (status === 'success' ? 'ok' : (status === 'running' ? 'warn' : ''));
           const dur = n.durationMs != null ? fmtDuration(n.durationMs) : '—';
           const out = String(n.output ?? n.error ?? '');
           const truncated = out.length > 240 ? out.slice(0, 240) + '…' : out;
@@ -634,7 +671,7 @@
         }).join('');
         const summaryHtml = `<div class="grid" style="margin-bottom:14px;">
             <div class="stat"><div class="label">Total</div><div class="value">${sm.total ?? '—'}</div></div>
-            <div class="stat"><div class="label">Done</div><div class="value">${sm.done ?? 0}</div></div>
+            <div class="stat"><div class="label">Done</div><div class="value">${sm.success ?? 0}</div></div>
             <div class="stat"><div class="label">Failed</div><div class="value" style="color:${sm.failed ? 'var(--err)' : 'inherit'}">${sm.failed ?? 0}</div></div>
             <div class="stat"><div class="label">Running</div><div class="value">${sm.running ?? 0}</div></div>
           </div>`;
@@ -653,7 +690,7 @@
     async function deleteWorkflow(id) {
       if (!confirm(`Delete workflow session "${id}"?\nState file will be permanently removed.`)) return;
       try {
-        await fetch('/workflows/' + encodeURIComponent(id), { method: 'DELETE' });
+        await apiRaw('/workflows/' + encodeURIComponent(id), { method: 'DELETE' });
         LOADERS.workflows();
       } catch (e) {
         alert('Delete failed: ' + e.message);
@@ -771,7 +808,7 @@
       status.style.color = 'var(--dim)';
       status.textContent = 'Saving…';
       try {
-        const r = await fetch('/rates/' + encodeURIComponent(key), {
+        const r = await apiRaw('/rates/' + encodeURIComponent(key), {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(card),
@@ -795,7 +832,7 @@
     async function deleteRateCard(key) {
       if (!confirm(`Delete rate card "${key}"?`)) return;
       try {
-        const r = await fetch('/rates/' + encodeURIComponent(key), { method: 'DELETE' });
+        const r = await apiRaw('/rates/' + encodeURIComponent(key), { method: 'DELETE' });
         if (!r.ok) {
           const body = await r.json().catch(() => ({}));
           throw new Error(body.error || `${r.status}`);
@@ -890,9 +927,9 @@
     };
 
     async function rebuildIndex() {
-      if (!confirm('Rebuild the FTS5 index? Existing index.db will be deleted and recreated empty.')) return;
+      if (!confirm('Rebuild the FTS5 index? Recall is repopulated from the existing corpus — no stored data is lost.')) return;
       try {
-        const r = await fetch('/index/rebuild', { method: 'POST' });
+        const r = await apiRaw('/index/rebuild', { method: 'POST' });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) { alert('Rebuild failed: ' + (body.error || r.statusText)); return; }
         alert('Index rebuilt. Re-run Doctor to confirm.');
@@ -1010,7 +1047,7 @@
       status.style.color = 'var(--dim)';
       status.textContent = 'Saving…';
       try {
-        const r = await fetch('/config/' + encodeURIComponent(key), {
+        const r = await apiRaw('/config/' + encodeURIComponent(key), {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ value }),
@@ -1034,7 +1071,7 @@
     async function deleteConfigKey(key) {
       if (!confirm(`Delete config key "${key}"?`)) return;
       try {
-        const r = await fetch('/config/' + encodeURIComponent(key), { method: 'DELETE' });
+        const r = await apiRaw('/config/' + encodeURIComponent(key), { method: 'DELETE' });
         if (!r.ok) {
           const body = await r.json().catch(() => ({}));
           throw new Error(body.error || `${r.status}`);
@@ -1275,7 +1312,7 @@
       out.textContent = '⏳ testing…';
       out.style.color = 'var(--dim)';
       try {
-        const r = await fetch('/sandbox/' + encodeURIComponent(name) + '/test', { method: 'POST' });
+        const r = await apiRaw('/sandbox/' + encodeURIComponent(name) + '/test', { method: 'POST' });
         const body = await r.json().catch(() => ({}));
         if (body.ok) {
           out.style.color = 'var(--ok)';
@@ -1291,7 +1328,7 @@
     }
     async function sandboxUse(name) {
       try {
-        const r = await fetch('/sandbox/use', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) });
+        const r = await apiRaw('/sandbox/use', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) });
         if (!r.ok) { const e = await r.json().catch(() => ({})); alert('Failed: ' + (e.error || r.statusText)); return; }
         LOADERS.sandbox();
       } catch (e) { alert('Failed: ' + e.message); }

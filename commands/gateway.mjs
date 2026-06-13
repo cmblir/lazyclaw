@@ -22,6 +22,13 @@ import { makeInboundHandler } from '../lib/inbound_client.mjs';
 
 export const GATEWAY_CHANNELS = ['slack', 'telegram', 'matrix'];
 
+// In-tree plugin channels (channels-<name>/index.mjs). These are NOT builtins:
+// each ships as a @lazyclaw/channel-* package that exports
+// register({ addChannel }) and wires a factory returning a channels/base.mjs
+// Channel (start/send/stop). The gateway loads the ENABLED ones at runtime so
+// `channels enable discord` is actually reachable instead of a no-op.
+export const PLUGIN_CHANNELS = ['discord', 'email', 'signal', 'voice', 'whatsapp'];
+
 // Default per-channel constructors. Each receives { handler, logger,
 // allowlist }, must return a started channel exposing send()/stop().
 // Injectable so tests can run the full gateway with stub transports.
@@ -47,15 +54,60 @@ const DEFAULT_FACTORIES = {
   },
 };
 
+// Resolve an enabled plugin channel into the same gateway transport factory
+// shape the builtins use: ({ handler, logger, allowlist }) -> a STARTED
+// channel exposing send()/stop(). Dynamically imports channels-<name>/index.mjs
+// and runs its register({ addChannel }) hook to capture the channel factory.
+//
+// A plugin that does not conform — import fails, no register export, never
+// registers the requested name — is SKIPPED (returns null) so the gateway can
+// log a warning and keep the other channels running. A factory that hands back
+// the wrong shape is caught lazily, when the returned transport factory is
+// invoked, so runGateway's per-channel try/catch turns it into a skip+warn.
+// `importer` is injectable for tests.
+export async function _loadPluginChannel(name, { importer } = {}) {
+  const load = importer || ((n) => import(`../channels-${n}/index.mjs`));
+  let mod;
+  try {
+    mod = await load(name);
+  } catch {
+    return null; // missing optional dep / module: skip, do not crash the gateway.
+  }
+  if (!mod || typeof mod.register !== 'function') return null;
+  let channelFactory = null;
+  try {
+    mod.register({ addChannel: (n, factory) => { if (n === name) channelFactory = factory; } });
+  } catch {
+    return null;
+  }
+  if (typeof channelFactory !== 'function') return null;
+  return async ({ handler, logger, allowlist }) => {
+    const ch = channelFactory({ allowlist });
+    if (!ch || typeof ch.start !== 'function' || typeof ch.send !== 'function' || typeof ch.stop !== 'function') {
+      throw new Error(`plugin channel "${name}" does not conform to the channel interface (start/send/stop)`);
+    }
+    await ch.start(handler, { poll: true, logger });
+    return ch;
+  };
+}
+
 // Which channels should the gateway run? --channels a,b wins; otherwise the
-// enabled cfg.channels sections that we have a built-in transport for.
+// enabled cfg.channels sections we can actually run — a built-in transport OR
+// an in-tree plugin channel.
 export function _selectChannels(cfg, flags = {}) {
+  const runnable = (n) => GATEWAY_CHANNELS.includes(n) || PLUGIN_CHANNELS.includes(n);
   if (flags.channels) {
     return String(flags.channels).split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)
-      .filter((n) => GATEWAY_CHANNELS.includes(n));
+      .filter(runnable);
   }
   const configured = (cfg.channels && typeof cfg.channels === 'object') ? cfg.channels : {};
-  return GATEWAY_CHANNELS.filter((n) => configured[n] && configured[n].enabled !== false);
+  const isEnabled = (n) => configured[n] && configured[n].enabled !== false;
+  // Builtins first (in their canonical order, preserving existing behavior),
+  // then enabled plugin channels.
+  return [
+    ...GATEWAY_CHANNELS.filter(isEnabled),
+    ...PLUGIN_CHANNELS.filter(isEnabled),
+  ];
 }
 
 // The whole gateway, with injectable deps so tests can drive it end-to-end
@@ -129,7 +181,19 @@ export async function runGateway(flags = {}, deps = {}) {
       provider: flags.provider, model: flags.model,
     });
     try {
-      const ch = await factories[name]({
+      // Builtin transport, else resolve an enabled in-tree plugin channel and
+      // adapt it to the same factory shape. A plugin that won't load is skipped
+      // (factory === null) rather than crashing the gateway.
+      let factory = factories[name];
+      if (!factory) {
+        factory = await _loadPluginChannel(name, { importer: deps.pluginImporter });
+        if (!factory) {
+          skipped.push({ name, error: 'plugin channel did not conform (no usable register/factory)' });
+          log(`[gateway] ${name}: skipped (plugin channel did not load or does not conform)\n`);
+          continue;
+        }
+      }
+      const ch = await factory({
         handler,
         logger: (line) => log(line),
         allowlist: allowlistArr.length ? allowlistArr : null,
