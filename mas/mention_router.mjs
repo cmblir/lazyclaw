@@ -26,6 +26,7 @@ import * as agentMemory from './agent_memory.mjs';
 import * as skillSynth from './skill_synth.mjs';
 import * as skills from '../skills.mjs';
 import { composePromptStack } from './prompt_stack.mjs';
+import { finalizeTerminalStop } from './router_termination.mjs';
 
 export class MentionRouterError extends Error {
   constructor(message, code) {
@@ -530,11 +531,10 @@ export async function runTaskTurn({
       queue.push(team.lead);
     }
   }
-
   if (iterations >= maxAgentTurns) stoppedBy = 'budget';
-  // Close the Slack client once for the whole run — but only if WE opened
-  // it. A caller-provided sender is left running for the caller to reuse.
-  // All exit paths (done/budget/abort/idle) fall through to this return.
+  // C3 — strand-proof a non-DONE exit: terminal status + stop note (no-op for 'done'); task activates post-failure learning.
+  current = await finalizeTerminalStop({ stoppedBy, iterations, current, configDir, tasksMod, postToThread, slackSender, logger, task: current });
+  // Close the Slack client for the whole run, but only if WE opened it.
   if (ownSlackSender && slackSender) await slackSender.stop().catch(() => {});
   return { task: current, iterations, stoppedBy };
 }

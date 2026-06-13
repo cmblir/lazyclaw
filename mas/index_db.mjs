@@ -183,6 +183,22 @@ export function indexSkill(row, configDir = defaultConfigDir()) {
   }
 }
 
+// Remove a skill's FTS row so an archived/removed skill stops surfacing in
+// recall. Until now deleteSkill only ran as an upsert prelude inside
+// indexSkill; skills.removeSkill unlinks the .md but left the stale FTS row
+// recallable. Best-effort like the index writers — a delete hiccup must
+// never fail the caller's archive/remove path.
+export function deleteSkill(skillName, configDir = defaultConfigDir()) {
+  try {
+    const s = _stmts(configDir);
+    s.deleteSkill.run(String(skillName || ''));
+  } catch (e) {
+    _logIndexFailure(configDir, 'skills', e);
+    // eslint-disable-next-line no-console
+    console.warn('[index_db] deleteSkill failed:', e.message);
+  }
+}
+
 export function indexTrajectory(row, configDir = defaultConfigDir()) {
   try {
     const s = _stmts(configDir);
@@ -269,6 +285,12 @@ export function recall(query, opts = {}) {
       const rows = stmt.all(safeQuery, fetchK);
       for (const r of rows) {
         const { scope: sc2, bm25, snippet, ...metadata } = r;
+        // snippet() wraps the matched term in <mark>..</mark>; recall hits
+        // are fed verbatim into agent prompts, where the markup is noise.
+        // Return plain text — strip the tags FTS5 injected.
+        const plainSnippet = typeof snippet === 'string'
+          ? snippet.replace(/<\/?mark>/g, '')
+          : snippet;
         // Apply where-filter at row level — keeps the bm25 ordering
         // intact and avoids re-fetching after sort.
         if (whereKeys.length) {
@@ -278,7 +300,7 @@ export function recall(query, opts = {}) {
           }
           if (skip) continue;
         }
-        hits.push({ scope: sc2, rank: hits.length, bm25, snippet, metadata });
+        hits.push({ scope: sc2, rank: hits.length, bm25, snippet: plainSnippet, metadata });
       }
     } catch (e) {
       // FTS5 MATCH syntax errors are caller mistakes; skip silently.

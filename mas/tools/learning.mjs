@@ -13,6 +13,38 @@ function resolveConfigDir(ctx) {
 function memoryDir(ctx) { return path.join(resolveConfigDir(ctx), 'memory'); }
 function userMdPath(ctx) { return path.join(memoryDir(ctx), 'USER.md'); }
 
+// Best-effort FTS5 mirrors (spec §4.4) — same shape skill_synth /
+// user_modeler use: dynamic import, openIndex, then index*. An index
+// failure NEVER fails the tool; index_db's own write hooks already log
+// to index-failures.jsonl, so we swallow here.
+async function _indexSkillSafe(row, configDir) {
+  try {
+    const idx = await import('../index_db.mjs');
+    idx.openIndex(configDir);
+    idx.indexSkill(row, configDir);
+  } catch { /* non-fatal */ }
+}
+
+async function _indexMemorySafe(row, ctx) {
+  try {
+    const configDir = resolveConfigDir(ctx);
+    const idx = await import('../index_db.mjs');
+    idx.openIndex(configDir);
+    idx.indexMemory(row, configDir);
+  } catch { /* non-fatal */ }
+}
+
+// Minimal frontmatter key reader — skill_edit only needs trained_by/group
+// off the existing frontmatter block to keep the FTS metadata stable.
+function _parseFm(fm) {
+  const meta = {};
+  for (const line of String(fm || '').split('\n')) {
+    const i = line.indexOf(':');
+    if (i > 0) meta[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+  }
+  return meta;
+}
+
 const skill_view = {
   name: 'skill_view', category: 'learning', sensitive: false,
   description: 'Return the body of an installed skill (by name).',
@@ -64,6 +96,15 @@ const skill_create = {
       '',
     ].join('\n');
     const file = skills.installSkill(args.name, fm + args.body + (args.body.endsWith('\n') ? '' : '\n'), configDir);
+    // FTS5 write-through (spec §4.4): mirror the new skill so recall finds
+    // it without waiting for a reindexAll. Best-effort — an index error must
+    // never fail the create. trained_by is always 'user' for this tool.
+    await _indexSkillSafe({
+      skill_name: args.name,
+      trained_by: 'user',
+      group_name: args.group || (args.name.includes('-') ? args.name.split('-')[0] : 'legacy'),
+      content: args.body,
+    }, configDir);
     return { ok: true, name: args.name, file };
   },
 };
@@ -86,6 +127,16 @@ const skill_edit = {
     let fm = m[1];
     fm = fm.replace(/version:\s*(\d+)/, (_, v) => `version: ${Number(v) + 1}`);
     skills.installSkill(args.name, `---\n${fm}\n---\n${args.body}${args.body.endsWith('\n') ? '' : '\n'}`, configDir);
+    // FTS5 write-through (spec §4.4): re-index the edited body so recall
+    // surfaces the new content. Preserve the skill's existing frontmatter
+    // trained_by / group; best-effort, never fails the edit.
+    const meta = _parseFm(fm);
+    await _indexSkillSafe({
+      skill_name: args.name,
+      trained_by: meta.trained_by || 'user',
+      group_name: meta.group || (args.name.includes('-') ? args.name.split('-')[0] : 'legacy'),
+      content: args.body,
+    }, configDir);
     return { ok: true, name: args.name };
   },
 };
@@ -107,12 +158,16 @@ const memory_write = {
     fs.mkdirSync(dir, { recursive: true });
     if (args.kind === 'recent') {
       fs.appendFileSync(path.join(dir, 'recent.jsonl'), JSON.stringify({ ts: Date.now(), content: args.content }) + '\n');
+      // recent.jsonl is not an FTS scope (no fts_recent table); skip indexing.
     } else if (args.kind === 'core') {
       fs.writeFileSync(path.join(dir, 'core.md'), args.content);
+      // FTS5 write-through (spec §4.4): mirror core memory so recall finds it.
+      await _indexMemorySafe({ topic: 'core', kind: 'core', content: args.content }, ctx);
     } else if (args.kind === 'episodic') {
       if (!args.topic) return { ok: false, error: 'memory_write: topic required for episodic' };
       fs.mkdirSync(path.join(dir, 'episodic'), { recursive: true });
       fs.writeFileSync(path.join(dir, 'episodic', `${args.topic}.md`), args.content);
+      await _indexMemorySafe({ topic: args.topic, kind: 'episodic', content: args.content }, ctx);
     } else {
       return { ok: false, error: `memory_write: unknown kind ${args.kind}` };
     }

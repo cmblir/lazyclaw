@@ -393,3 +393,54 @@ export function makeOrchestratorProvider(opts = {}) {
     },
   };
 }
+
+// Minimal one-shot worker dispatch for the `delegate` agent tool.
+//
+// `delegate` hands a single subtask to ONE provider — no plan/synthesis.
+// It reuses the same spec-resolution + key-resolution infra the
+// orchestrator's EXECUTE phase uses (a "<provider>[:<model>]" spec routed
+// through PROVIDERS/PROVIDER_INFO, key via lib/config::_resolveAuthKey),
+// but as a standalone call so the `delegate` tool actually runs.
+//
+// Imports are lazy so this module keeps its leaf static-dep graph (it must
+// NOT statically import ./registry.mjs — that re-forms the registry↔orch
+// cycle; see the header note above).
+//
+// job = { worker: '<provider>[:<model>]', prompt, model? }
+// returns { ok:true, text } | { ok:false, error }
+export async function dispatchWorker(job = {}) {
+  const workerSpec = String(job?.worker || '');
+  const prompt = String(job?.prompt || '');
+  if (!workerSpec || !prompt) return { ok: false, error: 'delegate: worker + prompt required' };
+
+  let registry, config;
+  try {
+    registry = await import('./registry.mjs');
+    config = await import('../lib/config.mjs');
+  } catch (e) {
+    return { ok: false, error: `delegate: failed to load provider infra: ${e?.message || String(e)}` };
+  }
+
+  const lookup = (p) => ({ prov: registry.PROVIDERS[p], info: registry.PROVIDER_INFO[p] });
+  const worker = _lookupProvider(workerSpec, lookup);
+  if (!worker) return { ok: false, error: `delegate: unknown worker provider "${_parseSpec(workerSpec).provider}"` };
+  if (worker.name === 'orchestrator') return { ok: false, error: 'delegate: worker cannot be "orchestrator"' };
+  // Explicit job.model overrides the model parsed from the spec.
+  const model = String(job?.model || '') || worker.model || '';
+
+  const cfg = config.readConfig() || {};
+  const apiKey = config._resolveAuthKey(cfg, worker.name);
+
+  let text = '';
+  try {
+    for await (const chunk of worker.prov.sendMessage([{ role: 'user', content: prompt }], {
+      apiKey,
+      model: model || undefined,
+    })) {
+      text += String(chunk);
+    }
+  } catch (e) {
+    return { ok: false, error: `delegate: ${worker.name} error: ${e?.message || String(e)}` };
+  }
+  return { ok: true, text };
+}

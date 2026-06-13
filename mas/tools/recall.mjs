@@ -120,7 +120,13 @@ export async function exec(args, { configDir } = {}) {
       const meta = h.metadata || {};
       for (const key of filterKeys) {
         if (key === 'since') {
-          if (Number(meta.ts || 0) < Number(filter.since)) return false;
+          // Only fts_sessions carries a ts column; skills/trajectories/
+          // memories have no ts. A "since" bound must NOT silently drop
+          // those ts-less hits — only drop a hit that HAS a ts older than
+          // the bound. (meta.ts === undefined / '' means "no timestamp".)
+          if (meta.ts !== undefined && meta.ts !== null && meta.ts !== '') {
+            if (Number(meta.ts) < Number(filter.since)) return false;
+          }
         } else if (String(meta[key] ?? '') !== String(filter[key])) {
           return false;
         }

@@ -14,6 +14,7 @@
 
 import { spawn } from 'node:child_process';
 import { scrubEnv } from '../scrub_env.mjs';
+import { spawnSandboxed } from '../../sandbox.mjs';
 
 export const NAME = 'bash';
 export const DESCRIPTION = 'Run a shell command in the agent\'s workspace. Returns {stdout, stderr, exitCode}. Timeout 30s by default.';
@@ -30,7 +31,7 @@ const MAX_TIMEOUT_MS = 5 * 60_000;
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_OUTPUT_BYTES = 200_000;  // 200 KB per stream — bigger gets truncated
 
-export async function exec(args, { cwd = process.cwd() } = {}) {
+export async function exec(args, { cwd = process.cwd(), sandbox = null, _spawnSandboxed = spawnSandboxed } = {}) {
   if (!args || typeof args.command !== 'string' || args.command.trim() === '') {
     return { ok: false, error: 'bash: command is required (non-empty string)' };
   }
@@ -39,7 +40,13 @@ export async function exec(args, { cwd = process.cwd() } = {}) {
     MAX_TIMEOUT_MS
   );
   return new Promise((resolve) => {
-    const child = spawn('sh', ['-c', args.command], { cwd, env: scrubEnv(process.env) });
+    // When a sandbox spec is present, run the SAME scrubbed `sh -c <cmd>`
+    // inside it (containment ADDED, never replacing the approval gate); a
+    // null/absent spec keeps the byte-stable bare-host path (unchanged).
+    // _spawnSandboxed is a test injection seam — defaults to the real impl.
+    const child = sandbox
+      ? _spawnSandboxed(sandbox, 'sh', ['-c', args.command], { cwd, env: scrubEnv(process.env) })
+      : spawn('sh', ['-c', args.command], { cwd, env: scrubEnv(process.env) });
     let stdout = '', stderr = '';
     let outBytes = 0, errBytes = 0;
     let truncated = false;

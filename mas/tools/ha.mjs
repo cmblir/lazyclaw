@@ -8,6 +8,7 @@ function deferred(name) {
 
 const ha_call_service = {
   name: 'ha_call_service', category: 'iot', sensitive: true,
+  unavailable: true, // not implemented (deferred to v5.1) — hidden from tool schemas until wired
   description: 'STUB — Home Assistant service call deferred to v5.1.',
   parameters: {
     type: 'object',
@@ -22,6 +23,7 @@ const ha_call_service = {
 
 const ha_get_state = {
   name: 'ha_get_state', category: 'iot', sensitive: true,
+  unavailable: true, // not implemented (deferred to v5.1) — hidden from tool schemas until wired
   description: 'STUB — Home Assistant state read deferred to v5.1.',
   parameters: {
     type: 'object',

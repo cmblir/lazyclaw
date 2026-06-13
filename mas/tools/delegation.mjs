@@ -5,6 +5,14 @@
 let _dispatcher = null;
 export function __setDispatcher(fn) { _dispatcher = fn; }
 
+// Test seam for dispatchSpawn's turn runner, mirroring __setDispatcher.
+// When set, dispatchSpawn calls it with the SAME args it would hand
+// runAgentTurn ({ agent: <record>, userMessage, configDir }) so tests can
+// assert a resolved agent RECORD (with .provider) reaches the runner —
+// without spinning up a real provider.
+let _turnRunner = null;
+export function __setTurnRunner(fn) { _turnRunner = fn; }
+
 async function dispatchDelegate(job) {
   if (_dispatcher) return _dispatcher(job);
   const orch = await import('../../providers/orchestrator.mjs').catch(() => null);
@@ -14,12 +22,27 @@ async function dispatchDelegate(job) {
   return orch.dispatchWorker(job);
 }
 
+// job = { agent: '<name>', prompt, configDir }
+// runAgentTurn expects an agent RECORD (reads .provider/.tools), not a name
+// string. Resolve the name → record via getAgent first, then invoke the
+// runner with the shape it actually consumes and surface the final text.
 async function dispatchSpawn(job) {
+  const agentName = String(job?.agent || '');
   const at = await import('../agent_turn.mjs').catch(() => null);
-  if (!at || typeof at.runAgentTurn !== 'function') {
+  const runner = _turnRunner || (at && typeof at.runAgentTurn === 'function' ? at.runAgentTurn : null);
+  if (!runner) {
     return { ok: false, error: 'task_spawn: agent_turn.runAgentTurn unavailable' };
   }
-  return at.runAgentTurn(job);
+  const agents = await import('../../agents.mjs').catch(() => null);
+  if (!agents || typeof agents.getAgent !== 'function') {
+    return { ok: false, error: 'task_spawn: agents.getAgent unavailable' };
+  }
+  const record = agents.getAgent(agentName, job?.configDir);
+  if (!record) {
+    return { ok: false, error: `task_spawn: unknown agent ${agentName}` };
+  }
+  const result = await runner({ agent: record, userMessage: job?.prompt, configDir: job?.configDir });
+  return { ok: true, text: result?.text || '', stoppedBy: result?.stoppedBy, iterations: result?.iterations };
 }
 
 const task_spawn = {
@@ -30,9 +53,9 @@ const task_spawn = {
     properties: { agent: { type: 'string' }, prompt: { type: 'string' } },
     required: ['agent', 'prompt'],
   },
-  async exec(args) {
+  async exec(args, ctx = {}) {
     if (!args?.agent || !args?.prompt) return { ok: false, error: 'task_spawn: agent + prompt required' };
-    return dispatchSpawn({ agent: args.agent, prompt: args.prompt });
+    return dispatchSpawn({ agent: args.agent, prompt: args.prompt, configDir: ctx.configDir });
   },
 };
 

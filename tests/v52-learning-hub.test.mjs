@@ -203,9 +203,20 @@ test('runLearning("active-recall-miss") archives a skill that falls below the th
   assert.equal(skills.skillExists('about-to-die', cfgDir), false);
 });
 
-test('runLearning("periodic-curation") is a Phase 2 stub but returns a stable envelope', async () => {
-  const res = await runLearning('periodic-curation', { cfg: {} });
+test('runLearning("periodic-curation") runs the real curator (no longer a stub)', async () => {
+  // periodic-curation used to be a {stub:true} no-op; it now replays the real
+  // skills_curator against configDir. curateImpl/now are injection seams so
+  // the pass is deterministic in the test.
+  let called = null;
+  const res = await runLearning('periodic-curation', {
+    cfg: {},
+    configDir: '/tmp/lc-curate-test',
+    now: 1_700_000_000_000,
+    curateImpl: (dir, now) => { called = { dir, now }; return { archived: [], scanned: 0 }; },
+  });
   assert.equal(res.trigger, 'periodic-curation');
-  assert.equal(res.results.stub, true);
+  assert.equal(res.results.stub, undefined);            // no longer a stub
+  assert.deepEqual(res.results, { archived: [], scanned: 0 });
   assert.deepEqual(res.errors, []);
+  assert.deepEqual(called, { dir: '/tmp/lc-curate-test', now: 1_700_000_000_000 });
 });

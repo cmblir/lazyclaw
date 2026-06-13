@@ -39,6 +39,9 @@ const image_describe = {
 
 const image_generate = {
   name: 'image_generate', category: 'media', sensitive: true,
+  // Working tool: the OPENAI_API_KEY path makes a real images/generations call
+  // (gpt-image-1); only the FAL_KEY path is unimplemented. NOT a stub — stays
+  // advertised so the 'media' toolset works on OpenAI-key deployments.
   description: 'Generate an image. Requires OPENAI_API_KEY (DALL-E) or FAL_KEY.',
   parameters: {
     type: 'object',
@@ -67,6 +70,7 @@ const image_generate = {
 
 const tts_speak = {
   name: 'tts_speak', category: 'media', sensitive: true,
+  unavailable: true, // not implemented (deferred to v5.1) — hidden from tool schemas until wired
   description: 'STUB — TTS reply deferred to v5.1 per spec §0.2.',
   parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
   async exec() {

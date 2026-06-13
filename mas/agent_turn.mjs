@@ -3,13 +3,13 @@
 // the model emits a final text reply (or the iteration budget runs
 // out).
 //
-// Provider routing:
-//   anthropic → providers/tool_use/anthropic.mjs   (Phase 12b)
-//   openai    → providers/tool_use/openai.mjs      (Phase 12c — todo)
-//   gemini    → providers/tool_use/gemini.mjs      (Phase 12d — todo)
-//   claude-cli → not supported (subprocess provider — Phase 12 scope
-//                excludes it; runAgentTurn throws so callers can flag
-//                the agent in the dashboard).
+// Provider routing (all wired — see adapterFor below):
+//   anthropic  → providers/tool_use/anthropic.mjs
+//   openai     → providers/tool_use/openai.mjs
+//   gemini     → providers/tool_use/gemini.mjs
+//   claude-cli → providers/claude_cli.mjs; the tool-use loop runs INSIDE
+//                the binary, so the adapter normalises every reply to
+//                kind:'final' (no tool_calls envelope is ever observed).
 //
 // The loop:
 //   1. Build messages = [...history, {role:user, content:input}]
@@ -95,6 +95,11 @@ export async function runAgentTurn({
   signal,
   approve,
   security,
+  // Optional parsed sandbox spec (or null). Threaded into runTool so the
+  // bash tool runs inside the sandbox when one is configured. Default null
+  // keeps existing callers/tests byte-stable; see scope_notes for which
+  // callers should pass this to fully activate sandboxing.
+  sandbox = null,
   // v5 (Group A — C3): trajectoryRef is OPT-OUT, not opt-in. A caller
   // that doesn't pass one but DOES pass a configDir gets a
   // default-stamped record so every production agent turn lands in
@@ -219,7 +224,7 @@ export async function runAgentTurn({
       try {
         result = await runTool({
           agent, tool: call.name, args: call.input,
-          taskId, configDir, cwd, approve, security,
+          taskId, configDir, cwd, approve, security, sandbox,
         });
         if (result && result.ok === false) ok = false;
       } catch (err) {

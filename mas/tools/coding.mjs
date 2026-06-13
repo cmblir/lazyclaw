@@ -53,6 +53,7 @@ const node_exec = {
 
 const sql_query = {
   name: 'sql_query', category: 'coding', sensitive: true,
+  unavailable: true, // not implemented (ctx.db is never bound) — hidden from tool schemas until wired
   description: 'Run a read-only SQL query against the agent\'s bound database. Returns rows.',
   parameters: {
     type: 'object',

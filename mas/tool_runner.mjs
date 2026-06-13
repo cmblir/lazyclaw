@@ -27,6 +27,7 @@ export function listToolSchemas(names) {
   for (const name of wanted) {
     const t = registry.lookup(name);
     if (!t) continue;
+    if (t.unavailable) continue; // not-implemented stubs stay registered but hidden from the model's tool schemas
     out.push({ name: t.name, description: t.description, parameters: t.parameters });
   }
   return out;
@@ -35,7 +36,7 @@ export function listToolSchemas(names) {
 export function isImplemented(name) { return registry.lookup(name) !== null; }
 export function knownTool(name)     { return registry.lookup(name) !== null; }
 
-export async function runTool({ agent, tool, args, taskId, configDir, cwd, approve, security } = {}) {
+export async function runTool({ agent, tool, args, taskId, configDir, cwd, approve, security, sandbox = null } = {}) {
   if (!agent || !Array.isArray(agent.tools)) {
     throw new ToolError('agent record with .tools[] is required', 'TOOL_BAD_AGENT');
   }
@@ -72,7 +73,7 @@ export async function runTool({ agent, tool, args, taskId, configDir, cwd, appro
   }
   let result;
   try {
-    result = await impl.exec(args || {}, { cwd: cwd || process.cwd(), configDir, taskId, agent });
+    result = await impl.exec(args || {}, { cwd: cwd || process.cwd(), configDir, taskId, agent, sandbox });
   } catch (err) {
     result = { ok: false, error: `${tool} threw: ${err?.message || err}` };
   }

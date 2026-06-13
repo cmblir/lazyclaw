@@ -19,10 +19,10 @@
 //   active-recall-miss   — a skill was recalled but failed to apply.
 //                          Decrement its confidence; archive when it
 //                          falls below the activation threshold.
-//   periodic-curation    — cron-driven skills_curator replay. Phase 2
-//                          full implementation; v5.0.10 emits a warning
-//                          and returns a no-op result so a cron entry
-//                          configured today does not crash.
+//   periodic-curation    — cron-driven skills_curator replay. Runs the
+//                          real curator (archives agent-authored skills
+//                          idle >90d) against ctx.configDir; the clock is
+//                          injectable (ctx.now) for deterministic tests.
 //
 // Hard contract: a single broken handler MUST NOT poison the others.
 // Each sub-routine is wrapped in its own try/catch so e.g. a missing
@@ -33,6 +33,7 @@ import * as skillSynth from './skill_synth.mjs';
 import * as userModeler from './user_modeler.mjs';
 import * as confidence from './confidence.mjs';
 import * as skills from '../skills.mjs';
+import * as skillsCurator from '../skills_curator.mjs';
 import { resolveTrainer } from '../providers/registry.mjs';
 import { hasClaudeCliSession } from '../providers/claude_cli_detect.mjs';
 
@@ -321,12 +322,27 @@ export async function _runActiveRecallMiss(ctx, logger) {
 
 // ── periodic-curation ────────────────────────────────────────────────
 //
-// Phase 2 full implementation. v5.0.10 emits a structured warning so a
-// cron entry created today returns a stable shape and operators can see
-// the hook fired without blowing up.
-export async function _runPeriodicCuration(_ctx, logger) {
-  logger('[learning] periodic-curation is a Phase 2 hook — no-op for now.\n');
-  return { trigger: 'periodic-curation', results: { stub: true }, errors: [] };
+// Run the real skills_curator sweep: archive agent-authored skills idle
+// for 90+ days so the recall index stops bloating the system prompt. The
+// clock is injectable (ctx.now) so the 90d boundary is reproducible in
+// tests; it defaults to the wall-clock for the cron caller. curate()
+// never throws for a single bad skill, but we still wrap the whole pass
+// so an unreadable store can't poison the funnel.
+//
+// ctx: { configDir, now?, curateImpl? }
+export async function _runPeriodicCuration(ctx, logger) {
+  // curateImpl is an injection seam for tests; production uses the real
+  // curator. Default the clock here, not in curate(), which demands a
+  // finite number.
+  const curate = typeof ctx.curateImpl === 'function' ? ctx.curateImpl : skillsCurator.curate;
+  const now = Number.isFinite(ctx.now) ? ctx.now : Date.now();
+  try {
+    const results = curate(ctx.configDir, now);
+    return { trigger: 'periodic-curation', results, errors: [] };
+  } catch (e) {
+    logger(`[learning] periodic-curation failed: ${e?.message || e}\n`);
+    return { trigger: 'periodic-curation', results: {}, errors: [{ step: 'curate', error: String(e?.message || e) }] };
+  }
 }
 
 // ── helpers ──────────────────────────────────────────────────────────
