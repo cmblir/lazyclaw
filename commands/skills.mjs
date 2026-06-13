@@ -2,6 +2,7 @@
 // extracted from cli.mjs in Phase D3. Self-contained over skills*.mjs modules.
 import path from 'node:path';
 import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { configPath } from '../lib/config.mjs';
 
 export async function cmdSkills(sub, positional, flags = {}) {
@@ -118,6 +119,23 @@ export async function cmdSkills(sub, positional, flags = {}) {
       console.log(JSON.stringify({ ok: true, name, path: written, bytes: content.length }));
       return;
     }
+    case 'starter': {
+      // Bundled starter pack — the .md skills shipped under the package's
+      // skills/ directory. pickSkillFiles() already prefers a skills/ dir
+      // at a repo root, so the same heuristic that resolves a GitHub
+      // bundle resolves the local package. Existing names are skipped
+      // unless --force, so user edits survive re-runs.
+      const inst = await import('../skills_install.mjs');
+      const pkgRoot = fileURLToPath(new URL('..', import.meta.url));
+      const picked = inst.pickSkillFiles(pkgRoot);
+      if (!picked.length) {
+        console.error('no bundled starter skills found (package incomplete?)');
+        process.exit(1);
+      }
+      const r = inst.installPickedSkills(picked, cfgDir, { force: !!flags.force });
+      console.log(JSON.stringify({ ok: true, installed: r.installed, skipped: r.skipped }, null, 2));
+      return;
+    }
     case 'remove': {
       const name = positional[0];
       if (!name) { console.error('Usage: lazyclaw skills remove <name>'); process.exit(2); }
@@ -212,7 +230,7 @@ export async function cmdSkills(sub, positional, flags = {}) {
       return;
     }
     default:
-      console.error('Usage: lazyclaw skills <list|show <name>|install <name> [--from path]|remove <name>|search <query> [--regex]|curate|classify <name>>');
+      console.error('Usage: lazyclaw skills <list|show <name>|install <name> [--from path]|starter [--force]|remove <name>|search <query> [--regex]|curate|classify <name>>');
       process.exit(2);
   }
 }

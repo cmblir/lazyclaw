@@ -68,6 +68,7 @@
     "sandbox/",
     "skills_install.mjs",
     "skills_curator.mjs",
+    "skills/",
     "cron.mjs",
     "loop-engine.mjs",
     "loops.mjs",
