@@ -17,6 +17,14 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **Ink REPL input UX.** Up/Down recalls this session's prompts; mid-line
+  editing (Left/Right, Home/End or Ctrl+A/E, Ctrl+K kill-to-end, Ctrl+W
+  delete-word, cursor-position backspace); bracketed paste; two-stage Ctrl+C
+  (first cancels/clears, second exits); an aborted (Esc) turn prints a dim
+  `[aborted]` marker; provider errors render in the red error style. API keys
+  typed in the picker are masked on screen (the real value still submits).
+- **Context gauge shows a percentage + bar** with a warning threshold, not
+  just raw token counts.
 - **Agentic chat REPL + plan mode.** With `/agentic on` (or `cfg.chat.agentic`)
   the interactive chat turn runs the tool loop — reads, greps, and (with
   approval) edits/runs — instead of being text-only; tool activity and the
@@ -83,6 +91,18 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **Interactive chat now retries transient provider errors.** The retry
+  wrapper covers 5xx / overloaded (Anthropic 529) before the first chunk (was
+  RATE_LIMIT-only), and the chat hot path wraps its provider with it (and
+  re-wraps after a `/provider` or `/model` switch) — a transient 429/529 no
+  longer just prints `error: …`. Mid-stream errors are still never retried.
+- **A corrupt `config.json` fails loudly instead of silently resetting.**
+  `readConfig` distinguished missing (fresh, returns `{}`) from present-but-
+  unparseable; the latter now prints an actionable error and throws a
+  `ConfigError` (caught at the CLI boot boundary) instead of returning `{}` —
+  so a typo no longer drops every setting or lets a later write clobber the file.
+- **Unknown subcommands suggest the nearest match** (`did you mean "sessions"?`)
+  and `lazyclaw help <name>` prints that command's usage instead of erroring.
 - **Learning loop: two dead triggers wired.** `periodic-curation` was a
   `{stub:true}` no-op — it now runs the real `skills_curator` (archives
   agent-authored skills idle >90d). `post-failure` had zero callers — a
