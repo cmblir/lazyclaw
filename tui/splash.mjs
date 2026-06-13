@@ -49,6 +49,19 @@ function shortCwd(cwd) {
   return cwd;
 }
 
+// Provider-aware splash tip. The $0 "learning loop" pitch only applies when
+// the trainer runs on claude-cli (Claude Pro/Max subscription is keyless and
+// free); for any other provider the loop costs API tokens, so showing the
+// Claude pitch is misleading. The trainer provider wins because the pitch is
+// about the learning loop, not the chat provider (see splash info line).
+export function pickSplashTip({ provider, trainer = {} } = {}) {
+  const trainerProvider = trainer.provider || provider;
+  if (trainerProvider === 'claude-cli') {
+    return 'Tip: trainer learns from your Claude Pro subscription at $0.';
+  }
+  return 'Tip: /help lists every command, tool, and skill.';
+}
+
 function toolRow({ category, sensitive, verbs }) {
   const label = sensitive ? `${category}*` : category;
   const tail = verbs.slice(0, 6).join(' · ');
@@ -153,7 +166,7 @@ function renderWide(props, cols) {
   if (sessionId) lines.push(`${LMARGIN}Session: ${sessionId}`);
   lines.push('');
   lines.push(`${LMARGIN}Welcome to lazyclaw. Type your message or /help for commands.`);
-  lines.push(`${LMARGIN}+ Tip: trainer learns from your Claude Pro subscription at $0.`);
+  lines.push(`${LMARGIN}+ ${pickSplashTip({ provider, trainer })}`);
   // v5.4.3 — the baked-in status row that used to live here duplicated
   // ReplApp's real <StatusBar/> (tui/repl.mjs:476). Removing it cuts 4
   // rows from the splash AND eliminates the visible overlap the user
@@ -237,7 +250,7 @@ function renderMedium(props, cols) {
   if (sessionId) lines.push(`${LMARGIN}Session: ${sessionId}`);
   lines.push('');
   lines.push(`${LMARGIN}Welcome to lazyclaw. Type your message or /help for commands.`);
-  lines.push(`${LMARGIN}+ Tip: trainer learns from your Claude Pro subscription at $0.`);
+  lines.push(`${LMARGIN}+ ${pickSplashTip({ provider, trainer })}`);
   // v5.4.3 — baked-in status row removed; ReplApp renders the real one.
 
   return lines;

@@ -17,6 +17,15 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **`NO_COLOR` / dumb-terminal respect.** A central color gate (`NO_COLOR`
+  env per no-color.org, `TERM=dumb`, or non-TTY) disables color, and the
+  legacy pickers/setup-wizard route their ANSI through it instead of emitting
+  raw escapes. The setup wizard's `Ctrl+C` now cancels the step instead of
+  hard-killing the process.
+- **Provider-adaptive splash tip** — the "$0 on your Claude subscription" tip
+  shows only for `claude-cli`; other providers get a neutral `/help` tip.
+- **`/new` clears the screen** — the scrollback is wiped, not just the
+  in-memory history, so a fresh conversation actually looks fresh.
 - **Ink REPL input UX.** Up/Down recalls this session's prompts; mid-line
   editing (Left/Right, Home/End or Ctrl+A/E, Ctrl+K kill-to-end, Ctrl+W
   delete-word, cursor-position backspace); bracketed paste; two-stage Ctrl+C

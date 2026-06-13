@@ -11,6 +11,7 @@ import {
   fetchModelsForProvider as _fetchModelsResolve,
   supportsLiveFetch as _supportsLiveFetch,
 } from '../providers/model_catalogue.mjs';
+import { paint } from './theme.mjs';
 
 export function _attachGhostAutocomplete(rl) {
   // Returns `{ dispose, suspend, resume }`. Dispose detaches the keypress +
@@ -265,9 +266,10 @@ export async function _arrowMenu({ title, subtitle, footer, items, defaultIdx = 
   // before drawing so the picker always receives the first keypress.
   process.stdin.resume();
   if (process.stdin.ref) process.stdin.ref();
-  const accent = (s) => `\x1b[38;5;208m${s}\x1b[0m`;
-  const dim    = (s) => `\x1b[2m${s}\x1b[0m`;
-  const bold   = (s) => `\x1b[1m${s}\x1b[0m`;
+  // Menu chrome via the theme gate: plain text under NO_COLOR / dumb / non-TTY.
+  const accent = (s) => paint('38;5;208', s);
+  const dim    = (s) => paint('2', s);
+  const bold   = (s) => paint('1', s);
 
   // Typeahead state. `query` accumulates printable chars when searchable
   // is on; the visible item slice is recomputed on every keystroke. We
@@ -360,7 +362,10 @@ export async function _arrowMenu({ title, subtitle, footer, items, defaultIdx = 
         cleanup();
         resolve(view[idx]);
       }
-      else if (key.ctrl && key.name === 'c') { cleanup(); process.exit(130); }
+      // Ctrl+C mid-wizard cancels this step (resolve the CANCEL sentinel the
+      // callers already handle) instead of hard-killing the whole process —
+      // a wizard step must be abortable without taking the app down.
+      else if (key.ctrl && key.name === 'c') { cleanup(); resolve('CANCEL'); }
       else if (key.ctrl && key.name === 'u') { if (searchable) { query = ''; recompute(); } }
       else if (key.name === 'escape') {
         if (searchable && query) { query = ''; recompute(); return; }
@@ -399,10 +404,10 @@ export function _providerFamilies() {
   // tui/provider_families.mjs; the ANSI tags below are readline-specific.
   const b = _bucketProviders(getRegistry());
   return {
-    api: { label: 'API key', desc: 'paste an sk-... key during setup',  tag: '\x1b[38;5;245m[needs key]\x1b[0m', members: b.api },
-    cli: { label: 'CLI / Local', desc: 'keyless — uses an existing CLI login or a local daemon', tag: '\x1b[38;5;208m[no key]\x1b[0m', members: b.cli },
-    meta: { label: 'Multi-agent', desc: 'orchestrator — fan a task out to a planner + workers (advanced)', tag: '\x1b[38;5;245m[meta]\x1b[0m', members: b.meta },
-    mock: { label: 'Mock', desc: 'offline echo, only useful for testing', tag: '\x1b[38;5;245m[test]\x1b[0m', members: b.mock },
+    api: { label: 'API key', desc: 'paste an sk-... key during setup',  tag: paint('38;5;245', '[needs key]'), members: b.api },
+    cli: { label: 'CLI / Local', desc: 'keyless — uses an existing CLI login or a local daemon', tag: paint('38;5;208', '[no key]'), members: b.cli },
+    meta: { label: 'Multi-agent', desc: 'orchestrator — fan a task out to a planner + workers (advanced)', tag: paint('38;5;245', '[meta]'), members: b.meta },
+    mock: { label: 'Mock', desc: 'offline echo, only useful for testing', tag: paint('38;5;245', '[test]'), members: b.mock },
   };
 }
 
@@ -489,8 +494,8 @@ export async function _pickProviderInteractive() {
         label: name,
         desc,
         tag: isCustom
-          ? '\x1b[38;5;213m[custom]\x1b[0m'
-          : (meta.requiresApiKey ? '\x1b[38;5;245m[api key]\x1b[0m' : '\x1b[38;5;208m[no key]\x1b[0m'),
+          ? paint('38;5;213', '[custom]')
+          : (meta.requiresApiKey ? paint('38;5;245', '[api key]') : paint('38;5;208', '[no key]')),
       };
     });
     // Surface a "+ Add a new custom endpoint…" entry inside the API-key
@@ -502,7 +507,7 @@ export async function _pickProviderInteractive() {
         id: '__add_custom__',
         label: '+ Add a custom OpenAI-compatible endpoint…',
         desc: 'NVIDIA NIM · OpenRouter · Together · Groq · vLLM · LM Studio · …',
-        tag: '\x1b[38;5;213m[new]\x1b[0m',
+        tag: paint('38;5;213', '[new]'),
       });
     }
     if (memberNames.length === 1 && family.id !== 'api') {
@@ -556,10 +561,10 @@ export async function _pickProviderInteractive() {
 // workers: multi-select with a running list + add/remove/done loop.
 // maxSubtasks: typed integer, default 5.
 export async function _setupOrchestratorInteractive() {
-  const accent = (s) => `\x1b[38;5;208m${s}\x1b[0m`;
-  const dim    = (s) => `\x1b[2m${s}\x1b[0m`;
-  const bold   = (s) => `\x1b[1m${s}\x1b[0m`;
-  const ok     = (s) => `\x1b[32m${s}\x1b[0m`;
+  const accent = (s) => paint('38;5;208', s);
+  const dim    = (s) => paint('2', s);
+  const bold   = (s) => paint('1', s);
+  const ok     = (s) => paint('32', s);
   const info = getRegistry().PROVIDER_INFO || {};
   const eligibleNames = Object.keys(getRegistry().PROVIDERS).filter((n) => n !== 'orchestrator' && n !== 'mock');
   if (eligibleNames.length === 0) {
@@ -723,14 +728,14 @@ export async function _pickModelInteractive(providerId, opts = {}) {
       id: '__provider_default__',
       label: "▷ Use the provider's own default model",
       desc: 'no model override — the CLI/login picks (recommended for codex-cli / gemini-cli)',
-      tag: '\x1b[38;5;208m[default]\x1b[0m',
+      tag: paint('38;5;208', '[default]'),
     }];
     if (supportsLiveFetch) {
       modelItems.push({
         id: '__fetch_models__',
         label: '↻ Fetch live model list from /v1/models',
         desc: isCustom || isBuiltinCompat ? `GET ${meta.baseUrl}/models` : 'pulls the up-to-date catalogue from the provider',
-        tag: '\x1b[38;5;245m[live]\x1b[0m',
+        tag: paint('38;5;245', '[live]'),
       });
     }
     for (const m of allModels) modelItems.push({ id: m, label: m, desc: '' });
@@ -738,7 +743,7 @@ export async function _pickModelInteractive(providerId, opts = {}) {
       id: '__custom_model__',
       label: '… type a custom model id',
       desc: 'use any model id supported by this provider, even if not listed above',
-      tag: '\x1b[38;5;245m[free]\x1b[0m',
+      tag: paint('38;5;245', '[free]'),
     });
 
     // Land the cursor on the configured default model when there is one;
@@ -770,7 +775,7 @@ export async function _pickModelInteractive(providerId, opts = {}) {
         process.stdout.write(`\n  fetching ${providerId} model list…\n`);
         const fetched = await _fetchModelsForProvider(providerId);
         if (!fetched.length) {
-          process.stdout.write(`  ${'\x1b[33m'}no models returned${'\x1b[0m'} — falling back to the suggested list.\n`);
+          process.stdout.write(`  ${paint(33, 'no models returned')} — falling back to the suggested list.\n`);
           await _quickPrompt('  press Enter to continue ');
         } else {
           dynamicModels = fetched;
@@ -778,7 +783,7 @@ export async function _pickModelInteractive(providerId, opts = {}) {
           await _quickPrompt('  press Enter to pick one ');
         }
       } catch (e) {
-        process.stdout.write(`\n  ${'\x1b[33m'}fetch failed:${'\x1b[0m'} ${e?.message || e}\n`);
+        process.stdout.write(`\n  ${paint(33, 'fetch failed:')} ${e?.message || e}\n`);
         await _quickPrompt('  press Enter to continue ');
       }
       continue;
@@ -815,10 +820,10 @@ export async function _fetchModelsForProvider(providerId) {
 // Persists into cfg.customProviders[] and returns { name } on success,
 // or null when the user backs out.
 export async function _addCustomProviderInteractive() {
-  const accent = (s) => `\x1b[38;5;208m${s}\x1b[0m`;
-  const dim    = (s) => `\x1b[2m${s}\x1b[0m`;
-  const bold   = (s) => `\x1b[1m${s}\x1b[0m`;
-  const ok     = (s) => `\x1b[32m${s}\x1b[0m`;
+  const accent = (s) => paint('38;5;208', s);
+  const dim    = (s) => paint('2', s);
+  const bold   = (s) => paint('1', s);
+  const ok     = (s) => paint('32', s);
 
   process.stdout.write('\x1b[2J\x1b[H');
   process.stdout.write(accent('Add a custom OpenAI-compatible endpoint') + '\n');
@@ -840,7 +845,7 @@ export async function _addCustomProviderInteractive() {
     }
     try { name = validateCustomProviderName(raw); }
     catch (e) {
-      process.stdout.write(`  \x1b[33m${e.message}\x1b[0m — try again.\n`);
+      process.stdout.write(`  ${paint(33, e.message)} — try again.\n`);
       continue;
     }
     // OpenAI-compat builtins (nim / openrouter / groq / …) can be overridden
@@ -850,9 +855,9 @@ export async function _addCustomProviderInteractive() {
     // the override so it isn't a silent surprise.
     if (typeof isBuiltinOpenAICompatName === 'function' && isBuiltinOpenAICompatName(name)) {
       process.stdout.write(
-        `  \x1b[2mNote: "${name}" is a built-in OpenAI-compatible provider; ` +
+        paint(2, `Note: "${name}" is a built-in OpenAI-compatible provider; ` +
         `your custom entry will override the built-in baseUrl/api-key for this install. ` +
-        `Remove with: lazyclaw providers remove ${name}\x1b[0m\n`
+        `Remove with: lazyclaw providers remove ${name}`) + '\n'
       );
     }
     break;
@@ -860,7 +865,7 @@ export async function _addCustomProviderInteractive() {
   const baseUrlRaw = (await _quickPrompt(`  ${bold('baseUrl')} ${dim('(must end in /v1, no trailing slash needed):')} `)).trim();
   if (!baseUrlRaw) { process.stdout.write(dim('  cancelled — baseUrl is required.\n')); return null; }
   if (!/^https?:\/\//i.test(baseUrlRaw)) {
-    process.stdout.write('  \x1b[33mbaseUrl must start with http:// or https://\x1b[0m — cancelled.\n');
+    process.stdout.write(`  ${paint(33, 'baseUrl must start with http:// or https://')} — cancelled.\n`);
     return null;
   }
   const apiKey = (await _quickPrompt(`  ${bold('api-key')} ${dim('(blank if the endpoint is auth-less, e.g. local vLLM):')} `)).trim();
@@ -884,7 +889,7 @@ export async function _addCustomProviderInteractive() {
   } else if (result.probe.ok) {
     probeMsg = `  ${ok('✓')} registered — /v1/models returned no entries (will rely on free-text model id).\n`;
   } else {
-    probeMsg = `  \x1b[33m!\x1b[0m registered, but /v1/models probe failed: ${result.probe.error}\n`;
+    probeMsg = `  ${paint(33, '!')} registered, but /v1/models probe failed: ${result.probe.error}\n`;
   }
   process.stdout.write('\n');
   process.stdout.write(`  ${ok(bold('✓ custom provider saved:'))} ${entry.name}  ${dim('→')} ${entry.baseUrl}\n`);

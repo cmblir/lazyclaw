@@ -41,7 +41,7 @@ import { SLASH_COMMANDS } from './slash_commands.mjs';
 import { ModalPicker, filterModalItems, resolveModalPick } from './modal_picker.mjs';
 import { theme } from './theme.mjs';
 import { StatusBar } from './status_bar.mjs';
-export { StatusBar };
+import { onConversationReset, clearTerminalScreen } from './repl_reset.mjs'; export { StatusBar };
 
 // ─── Alt-buffer mount (DEC 1049) ─────────────────────────────────────────
 //
@@ -257,7 +257,7 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
   // sticky-bottom Editor actually pins. Non-alt mode keeps the legacy
   // content-sized layout so existing tests + non-TTY fallbacks behave
   // identically. Listen for SIGWINCH-driven resize events.
-  const { stdout } = useStdout();
+  const { stdout, write: writeStdout } = useStdout();
   const [rows, setRows] = useState(() => (stdout && stdout.rows) || 24);
   useEffect(() => {
     if (!stdout) return undefined;
@@ -307,6 +307,7 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
         // when the user hits Esc (onEscape aborts state.controller).
         const result = await onSlashCommand(trimmed, controller.signal);
         if (result === 'EXIT') { exit(); return; }
+        if (result === 'NEW') { clearTerminalScreen(writeStdout); setState((s) => onConversationReset(s)); refreshStatus(); return; } // /new: wipe screen + scrollback so it visually starts over
         if (typeof result === 'string' && result.length > 0) {
           setState((s) => onStreamChunk(s, { chunk: result }));
         }
@@ -332,7 +333,7 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
         reason: err && err.name === 'AbortError' ? 'aborted' : 'error',
       }));
     }
-  }, [exit, onSlashCommand, refreshStatus]);
+  }, [exit, onSlashCommand, refreshStatus, writeStdout]);
 
   // Auto-submit queued mid-stream-interrupt message (spec §5.8). Read
   // state.nextTurnFirstMessage so the effect re-fires when promoted.
