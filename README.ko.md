@@ -88,9 +88,12 @@ chat에서 `/orchestrator` (빈 입력 = on/off picker) 또는 `/orchestrator on
 | `/channels [<name> on\|off]` | 채널 보기 / 토글 |
 | `/orchestrator [on\|off\|…]` | 멀티에이전트 보기 / 토글 (빈 입력=picker) |
 | `/context [turns N\|tokens N]` | 히스토리 윈도우 조절 |
+| `/agentic [on\|off]` · `/plan [on\|off]` | chat에서 tool 실행(approval 게이트); plan은 읽기전용 "먼저 제안" |
 | `/skill` · `/personality` · `/memory` · `/loop` · `/goal` | 스킬·페르소나·메모리·루프·목표 |
 
 `/help`로 전체 목록. 고스트 자동완성, 한글 IME는 박스 안에서 조합.
+
+스킬은 markdown 지침 번들로 시스템 프롬프트에 합성된다. `lazyclaw skills starter`로 번들 스타터 팩 8종(`concise` · `korean` · `commit-message` · `code-review` · `channel-style` · `summarize` · `explain` · `debug-coach`) 설치, `lazyclaw skills install <user>/<repo>`로 GitHub에서 추가 설치, chat에서는 `/skills`로 선택.
 
 ## 대시보드
 

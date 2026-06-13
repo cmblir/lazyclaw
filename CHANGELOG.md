@@ -6,8 +6,56 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **`lazyclaw export` no longer leaks per-provider secrets.** Redaction
+  previously masked only the top-level `api-key`; it now deep-redacts any
+  secret-named config value and the `authProfiles[<provider>][].key` entries
+  (keeping `label` so the bundle stays inspectable). `lazyclaw import`
+  reciprocally strips the `***REDACTED***` placeholder so it is never
+  persisted into `config.json`. `--include-secrets` still exports verbatim.
+
 ### Added
 
+- **Agentic chat REPL + plan mode.** With `/agentic on` (or `cfg.chat.agentic`)
+  the interactive chat turn runs the tool loop — reads, greps, and (with
+  approval) edits/runs — instead of being text-only; tool activity and the
+  final answer render inline. Sensitive tools still pass the existing
+  fail-closed approval gate; agentic mode is OFF by default. `/plan on` adds a
+  read-only mode (read-only tools + "propose, don't act"). Chat tool whitelist
+  is `cfg.chat.tools` (default `read`/`grep`/`skill_view`; `bash`/`write`
+  opt-in).
+- **MCP server boot.** `cfg.mcp.servers` are now started at daemon boot
+  (best-effort, stopped on shutdown) and their tools register as
+  `mcp:<server>:<tool>`. MCP tools are forced `sensitive` (approval-gated)
+  regardless of config. `lazyclaw mcp list` shows configured servers.
+- **Configured sandbox now contains agent shell commands.** The `bash` tool
+  runs inside the configured sandbox (`spawnSandboxed`) when a sandbox spec is
+  threaded through; the no-sandbox path is unchanged.
+- **Plugin channels are reachable.** The gateway now loads enabled non-builtin
+  channels (discord/email/signal/voice/whatsapp) via the plugin contract,
+  skipping non-conforming plugins with a warning instead of ignoring them.
+- **`lazyclaw daemon status | stop | logs` + a pidfile.** The bare daemon now
+  records `~/.lazyclaw/daemon.pid` (pid + bound port) on start and removes it
+  on shutdown; `status` reports `{running,pid,port}` and self-heals stale
+  pidfiles, `stop` SIGTERMs (SIGKILL fallback), `logs` points at the logfile.
+  `service status` on launchd now reports `running`+pid like systemd/fallback.
+- **`lazyclaw index rebuild`.** The FTS5-recovery command the code and doctor
+  already pointed operators at now exists — repopulates the index from the
+  corpus (`reindexAll`), not the destructive wipe.
+- **Configurable max output tokens** via top-level `maxTokens` in
+  `config.json` (was hard-capped at 4096 with no surface).
+- **Provider idle timeout.** Every HTTP provider now aborts a stalled stream
+  after an inter-chunk idle window (default 120s, `LAZYCLAW_REQUEST_TIMEOUT_MS`)
+  instead of freezing the turn forever; healthy long streams are unaffected.
+- **Bundled starter skill pack + `lazyclaw skills starter`.** Eight curated
+  skills now ship with the package under `skills/` (`concise`, `korean`,
+  `commit-message`, `code-review`, `channel-style`, `summarize`, `explain`,
+  `debug-coach`). `lazyclaw skills starter` copies them into
+  `~/.lazyclaw/skills/` — existing names are skipped so user edits survive
+  re-runs; `--force` overwrites. The `/skills` empty state now points at the
+  starter pack, and `lazyclaw skills install <user>/lazyclaw` resolves the
+  same bundle from GitHub via the existing `skills/`-dir heuristic.
 - **Orchestrator planner/workers are now fetch+pick, not typed specs.**
   `/orchestrator` (no arg) gains *Set planner…*, *Add worker…*, *Remove worker…*,
   and *Max subtasks…* — each opens the arrow-key picker: choose a provider, then
@@ -35,6 +83,47 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **Learning loop: two dead triggers wired.** `periodic-curation` was a
+  `{stub:true}` no-op — it now runs the real `skills_curator` (archives
+  agent-authored skills idle >90d). `post-failure` had zero callers — a
+  non-DONE team-task stop (budget/idle/failed) now fires it (writes a failure
+  trajectory). *(Confidence accumulation and the active-recall-miss detector
+  remain deferred — they need a skill-success signal design.)*
+- **Agent-authored skills/memories were invisible to recall.** `skill_create`,
+  `skill_edit`, and `memory_write` now write through to the FTS5 index (were
+  only findable after a full `reindexAll`); `index_db.deleteSkill` is a real
+  op; the recall `since` filter no longer drops hits that lack a timestamp;
+  recall snippets no longer carry `<mark>` HTML into the model prompt.
+- **`claude-cli` silently ignored its own top-suggested models.** The picker
+  leads with `claude-fable-5` / `claude-opus-4-8`, but the alias table stopped
+  at `4-7`, so `resolveModelAlias` returned `''` for those ids and the CLI fell
+  back to its default model. Added the current canonical ids (and a `fable`
+  tier alias) so the picked model is honored.
+- **OpenAI reasoning models (`o1`/`o3`/`o4…`) returned HTTP 400.** The provider
+  always sent `max_tokens`; o-series ids now send `max_completion_tokens`
+  instead (native `openai` + tool-use path; OpenAI-compat vendors unchanged).
+- **`task_spawn` / `delegate` agent tools always failed.** `task_spawn` now
+  resolves the agent name to a record before calling `runAgentTurn` (was
+  passing a string → `PROVIDER_UNSUPPORTED`); `delegate` now has a real
+  `orchestrator.dispatchWorker` (one-shot worker provider call) instead of an
+  "unavailable" stub.
+- **Multi-agent tasks that stopped on budget/abort/idle were stranded as
+  "running" forever.** A non-DONE terminal exit now patches the task to a
+  terminal status and posts a stop note to the thread (was silent).
+- **Workflow detail in the dashboard never showed node results** (read the
+  wrong field `nodeResults` instead of `nodes`); the node status pill and the
+  "Done" count read non-existent fields (`'done'` status / boolean `sm.done`)
+  and now use the canonical `'success'` / `sm.success`. Removed the dead
+  per-session "Trajectory" link (404, route deferred) and the false "index
+  will be deleted and recreated empty" reindex warning (it repopulates).
+- **Not-implemented stub tools** (`tts_speak`, `sql_query`, `ha_call_service`,
+  `ha_get_state`) are hidden from the tool schemas shown to the model (flagged
+  `unavailable`, still registered) so agents stop wasting calls on them.
+- **The dashboard works against an `--auth-token` daemon.** The static shell
+  (HTML/CSS/JS, no secrets) loads without a token; every API call now routes
+  through a single auth-aware fetch that attaches `Authorization: Bearer` from
+  localStorage and prompts once on 401. Data/mutation routes stay gated; a
+  path-traversal guard keeps the static bypass from reaching them.
 - **Web dashboard rendered unstyled with every tab stuck on "Loading…".** The
   HTML referenced its CSS/JS by relative path (`href="dashboard.css"`), but the
   daemon serves the page at `/dashboard` **and** `/dashboard/`; under the

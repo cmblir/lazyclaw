@@ -134,6 +134,7 @@ The REPL has slash commands for everything you'd otherwise edit config for — p
 | `/channels [<name> on\|off]` | view / toggle channels |
 | `/orchestrator [on\|off\|…]` | view / toggle multi-agent (picker on bare call) |
 | `/context [turns N\|tokens N]` | resize the chat history window |
+| `/agentic [on\|off]` · `/plan [on\|off]` | let chat run tools (approval-gated); plan mode is read-only "propose first" |
 | `/skill` · `/personality` · `/memory` · `/loop` · `/goal` | skills, personas, memory, loops, goals |
 
 `/help` lists them all. Ghost-text autocomplete completes commands as you type; CJK/Hangul input composes inside the box.
@@ -162,10 +163,13 @@ A framework-free SPA over the daemon's JSON API: Chat, Sessions, Workflows, Skil
 ## What else it ships
 
 - **Tool registry** — 12 categories (`agents`, `browser`, `coding`, `exec`, `fs`, `git`, `iot`, `learning`, `media`, `net`, `os`, `scheduling`) plus stdio MCP. Sensitive tools (shell, write, network) are **fail-closed** behind an approval hook by default.
+- **Skills** — markdown instruction bundles composed into the system prompt. `lazyclaw skills starter` installs the bundled pack (`concise` · `korean` · `commit-message` · `code-review` · `channel-style` · `summarize` · `explain` · `debug-coach`); `lazyclaw skills install <user>/<repo>` pulls more from GitHub; `/skills` picks one in chat.
 - **Durable recall** — one SQLite + FTS5 index over sessions, skills, trajectories, and memory; rebuildable from the corpus.
 - **Loops & goals** — durable foreground/`--detach` loops and cron-scheduled goals that survive restart.
 - **Personas** — layered SOUL / workspace / personality / role / user-model / skills compose into the system prompt.
-- **Sandboxes** — `local` / `docker` / `ssh` / `singularity` / `modal` / `daytona` behind one API.
+- **Sandboxes** — `local` / `docker` / `ssh` / `singularity` / `modal` / `daytona` behind one API; the `bash` tool runs inside the configured sandbox when one is set.
+- **MCP** — stdio MCP servers in `cfg.mcp.servers` boot with the daemon; their tools register as `mcp:<server>:<tool>` (always approval-gated). `lazyclaw mcp list`.
+- **Daemon lifecycle** — `lazyclaw daemon status | stop | logs` over a pidfile; `maxTokens` in config raises the output cap; `LAZYCLAW_REQUEST_TIMEOUT_MS` sets the per-provider idle timeout (default 120s).
 
 ## Configuration & security
 
