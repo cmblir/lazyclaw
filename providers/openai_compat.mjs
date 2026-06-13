@@ -48,6 +48,61 @@ class RateLimitError extends Error {
   }
 }
 
+class TimeoutError extends Error {
+  constructor(idleMs) {
+    super(`openai-compat: idle timeout — no stream activity for ${idleMs}ms`);
+    this.name = 'TimeoutError';
+    this.code = 'TIMEOUT';
+    this.idleMs = idleMs;
+  }
+}
+
+const DEFAULT_IDLE_TIMEOUT_MS = 120000;
+
+// Resolve the IDLE (inter-chunk) timeout once per request: opts override
+// wins, then env LAZYCLAW_REQUEST_TIMEOUT_MS (positive int), else 120s.
+function resolveIdleTimeoutMs(opts) {
+  if (Number.isFinite(opts?.idleTimeoutMs) && opts.idleTimeoutMs > 0) return opts.idleTimeoutMs;
+  const raw = parseInt(process.env.LAZYCLAW_REQUEST_TIMEOUT_MS ?? '', 10);
+  if (Number.isFinite(raw) && raw > 0) return raw;
+  return DEFAULT_IDLE_TIMEOUT_MS;
+}
+
+// Wrap a chunk iterator with an IDLE timeout: abort only when NO chunk has
+// arrived for idleMs (the timer resets on every received chunk, and also
+// guards the connect/first-byte phase). This is NOT a total-duration cap,
+// so a long but healthy generation that streams steadily is never aborted.
+// `controller` is aborted on idle expiry so the real connection tears down.
+async function* iterateWithIdleTimeout(body, idleMs, controller) {
+  const iterator = iterateBody(body)[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      let timer;
+      const idle = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new TimeoutError(idleMs));
+        }, idleMs);
+      });
+      let step;
+      try {
+        step = await Promise.race([iterator.next(), idle]);
+      } finally {
+        clearTimeout(timer);
+      }
+      if (step.done) return;
+      yield step.value;
+    }
+  } finally {
+    // Best-effort, NON-awaited cleanup: on idle abort the underlying reader
+    // may be suspended on a read that never settles, so awaiting return()
+    // would re-hang us. The controller abort already tears down the socket.
+    if (typeof iterator.return === 'function') {
+      try { Promise.resolve(iterator.return()).catch(() => {}); } catch { /* ignore */ }
+    }
+  }
+}
+
 class ApiError extends Error {
   constructor(status, body) {
     super(`openai-compat ${status}: ${String(body).slice(0, 200)}`);
@@ -175,12 +230,26 @@ export function makeOpenAICompatProvider(cfg) {
       if (apiKey) headers['authorization'] = `Bearer ${apiKey}`;
 
       if (opts.signal?.aborted) throw new AbortError('aborted before request');
+      // Compose the caller's signal with an internal controller that the idle
+      // timeout aborts. The composed signal goes to fetch so a stalled
+      // connection (or a user cancel) tears down the real socket.
+      const idleMs = resolveIdleTimeoutMs(opts);
+      const idleController = new AbortController();
+      const fetchSignal = opts.signal
+        ? (typeof AbortSignal.any === 'function'
+            ? AbortSignal.any([opts.signal, idleController.signal])
+            : idleController.signal)
+        : idleController.signal;
+      const forwardCallerAbort = () => idleController.abort();
+      if (opts.signal && typeof AbortSignal.any !== 'function') {
+        opts.signal.addEventListener('abort', forwardCallerAbort, { once: true });
+      }
       const url = `${baseUrl}/chat/completions`;
       const res = await fetchFn(url, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
-        signal: opts.signal,
+        signal: fetchSignal,
       });
 
       if (!res.ok) {
@@ -211,7 +280,10 @@ export function makeOpenAICompatProvider(cfg) {
           });
         } catch { /* never let a callback abort the stream */ }
       };
-      for await (const chunk of iterateBody(res.body)) {
+      try {
+      for await (const chunk of iterateWithIdleTimeout(res.body, idleMs, idleController)) {
+        // A user cancel surfaces as an idle-controller abort too; map it back
+        // to ABORT so it stays distinguishable from a TIMEOUT.
         if (opts.signal?.aborted) throw new AbortError('aborted mid-stream');
         buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
         let consumed = 0;
@@ -255,6 +327,11 @@ export function makeOpenAICompatProvider(cfg) {
           }
         }
         if (consumed > 0) buffer = buffer.slice(consumed);
+      }
+      } finally {
+        if (opts.signal && typeof AbortSignal.any !== 'function') {
+          opts.signal.removeEventListener('abort', forwardCallerAbort);
+        }
       }
       const tail = decoder.decode();
       if (tail) buffer += tail;

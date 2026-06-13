@@ -47,6 +47,63 @@ class RateLimitError extends Error {
   }
 }
 
+class TimeoutError extends Error {
+  constructor(idleMs) {
+    super(`anthropic: idle timeout — no stream activity for ${idleMs}ms`);
+    this.name = 'TimeoutError';
+    this.code = 'TIMEOUT';
+    this.idleMs = idleMs;
+  }
+}
+
+const DEFAULT_IDLE_TIMEOUT_MS = 120000;
+
+// Resolve the IDLE (inter-chunk) timeout once per request: opts override
+// wins, then env LAZYCLAW_REQUEST_TIMEOUT_MS (positive int), else 120s.
+function resolveIdleTimeoutMs(opts) {
+  if (Number.isFinite(opts?.idleTimeoutMs) && opts.idleTimeoutMs > 0) return opts.idleTimeoutMs;
+  const raw = parseInt(process.env.LAZYCLAW_REQUEST_TIMEOUT_MS ?? '', 10);
+  if (Number.isFinite(raw) && raw > 0) return raw;
+  return DEFAULT_IDLE_TIMEOUT_MS;
+}
+
+// Wrap a chunk iterator with an IDLE timeout: abort only when NO chunk has
+// arrived for idleMs (the timer resets on every received chunk, and also
+// guards the connect/first-byte phase). This is NOT a total-duration cap,
+// so a long but healthy generation that streams steadily is never aborted.
+// `controller` is aborted on idle expiry so the real connection tears down;
+// the caller's signal is forwarded into the same controller upstream.
+async function* iterateWithIdleTimeout(body, idleMs, controller) {
+  const iterator = iterateBody(body)[Symbol.asyncIterator]();
+  try {
+    while (true) {
+      let timer;
+      const idle = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new TimeoutError(idleMs));
+        }, idleMs);
+      });
+      let step;
+      try {
+        step = await Promise.race([iterator.next(), idle]);
+      } finally {
+        clearTimeout(timer);
+      }
+      if (step.done) return;
+      yield step.value;
+    }
+  } finally {
+    // Best-effort, NON-awaited cleanup: on idle abort the underlying reader
+    // may be suspended on a read that never settles, so awaiting return()
+    // would re-hang us. We aborted the controller (tearing down the real
+    // connection) already; just nudge the iterator and move on.
+    if (typeof iterator.return === 'function') {
+      try { Promise.resolve(iterator.return()).catch(() => {}); } catch { /* ignore */ }
+    }
+  }
+}
+
 class ApiError extends Error {
   constructor(status, body) {
     super(`anthropic api ${status}: ${body.slice(0, 200)}`);
@@ -198,6 +255,21 @@ export const anthropicProvider = {
     // surfaces immediately rather than waiting for the next chunk.
     if (opts.signal?.aborted) throw new AbortError('aborted before request');
 
+    // Compose the caller's signal with an internal controller that the idle
+    // timeout aborts. The composed signal goes to fetch so a stalled
+    // connection (or a user cancel) tears down the real socket.
+    const idleMs = resolveIdleTimeoutMs(opts);
+    const idleController = new AbortController();
+    const fetchSignal = opts.signal
+      ? (typeof AbortSignal.any === 'function'
+          ? AbortSignal.any([opts.signal, idleController.signal])
+          : idleController.signal)
+      : idleController.signal;
+    const forwardCallerAbort = () => idleController.abort();
+    if (opts.signal && typeof AbortSignal.any !== 'function') {
+      opts.signal.addEventListener('abort', forwardCallerAbort, { once: true });
+    }
+
     const res = await fetchFn('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -206,7 +278,7 @@ export const anthropicProvider = {
         'anthropic-version': ANTHROPIC_VERSION,
       },
       body: JSON.stringify(body),
-      signal: opts.signal,
+      signal: fetchSignal,
     });
 
     if (!res.ok) {
@@ -232,7 +304,10 @@ export const anthropicProvider = {
     // We collect both and emit a single opts.onUsage call right before
     // we return on message_stop.
     let usage = null;
-    for await (const chunk of iterateBody(res.body)) {
+    try {
+    for await (const chunk of iterateWithIdleTimeout(res.body, idleMs, idleController)) {
+      // A user cancel surfaces as an idle-controller abort too; map it back
+      // to ABORT so it stays distinguishable from a TIMEOUT.
       if (opts.signal?.aborted) throw new AbortError('aborted mid-stream');
       buffer += typeof chunk === 'string' ? chunk : decoder.decode(chunk, { stream: true });
       let consumed = 0;
@@ -319,6 +394,11 @@ export const anthropicProvider = {
         }
       }
       if (consumed > 0) buffer = buffer.slice(consumed);
+    }
+    } finally {
+      if (opts.signal && typeof AbortSignal.any !== 'function') {
+        opts.signal.removeEventListener('abort', forwardCallerAbort);
+      }
     }
     // Flush any pending bytes the streaming decoder was still holding.
     const tail = decoder.decode();

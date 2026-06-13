@@ -18,6 +18,12 @@
 const DEFAULT_BASE = 'https://api.openai.com/v1';
 const DEFAULT_MAX_TOKENS = 4096;
 
+// OpenAI o-series reasoning models (o1/o3/o4...) reject `max_tokens` with
+// HTTP 400 'Unsupported parameter: max_tokens, use max_completion_tokens'.
+function isReasoningModel(model) {
+  return /^o\d/i.test(String(model || ''));
+}
+
 export class OpenAIToolUseError extends Error {
   constructor(message, code, body) {
     super(message);
@@ -71,8 +77,11 @@ export async function callOnce({
   const body = {
     model: model || 'gpt-4.1',
     messages: fullMessages,
-    max_tokens: maxTokens,
   };
+  // Reasoning models take max_completion_tokens; everything else takes
+  // max_tokens. Never emit both — the o-series rejects max_tokens.
+  if (isReasoningModel(body.model)) body.max_completion_tokens = maxTokens;
+  else body.max_tokens = maxTokens;
   if (tools && tools.length) body.tools = tools;
 
   const res = await fetchFn(url, {

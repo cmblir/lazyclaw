@@ -51,12 +51,15 @@ class CliExitError extends Error {
 // form `claude --model` actually accepts. The Python dashboard ran into
 // the same issue (FF1) — passing the full id silently hangs the CLI.
 const _CLI_MODEL_ALIASES = {
+  'claude-fable-5':       'fable',
+  'claude-opus-4-8':      'opus',
   'claude-opus-4-7':      'opus',
   'claude-opus-4-6':      'opus',
   'claude-sonnet-4-6':    'sonnet',
   'claude-sonnet-4-5':    'sonnet',
   'claude-haiku-4-5':     'haiku',
   'claude-haiku-4-5-20251001': 'haiku',
+  fable: 'fable',
   opus: 'opus',
   sonnet: 'sonnet',
   haiku: 'haiku',
