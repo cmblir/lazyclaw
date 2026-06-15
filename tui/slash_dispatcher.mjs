@@ -1076,12 +1076,28 @@ async function _personality(args, ctx) {
     return fs.readFileSync(p, 'utf8');
   }
   if (sub === 'install') {
-    if (!a || !b) return 'usage: /personality install <name> <file.md>';
-    const dst = path.join(dir, `${a}.md`);
-    if (fs.existsSync(dst)) return `personality already installed: ${a}`;
-    if (!fs.existsSync(b)) return `source file not found: ${b}`;
-    fs.writeFileSync(dst, fs.readFileSync(b, 'utf8'));
-    return `installed ${a}`;
+    let nm = a, src = b;
+    // Guided fill: missing name/file + a modal → prompt for them, and retry on
+    // a bad path instead of erroring out (up to a few attempts).
+    if ((!nm || !src) && typeof ctx.openPicker === 'function') {
+      if (!nm) {
+        nm = await _promptText(ctx, { title: 'Install personality — name', subtitle: 'short id to install it as (Esc cancels)' });
+        if (!nm) return 'personality install: cancelled';
+      }
+      if (fs.existsSync(path.join(dir, `${nm}.md`))) return `personality already installed: ${nm}`;
+      for (let attempt = 0; attempt < 3 && !src; attempt++) {
+        const p = await _promptText(ctx, { title: `Source file for ${nm}`, subtitle: attempt ? 'not found — try again (Esc cancels)' : 'path to a .md file (Esc cancels)' });
+        if (!p) return 'personality install: cancelled';
+        if (fs.existsSync(p)) { src = p; break; }
+      }
+      if (!src) return 'personality install: source file not found after 3 tries';
+    }
+    if (!nm || !src) return 'usage: /personality install <name> <file.md>';
+    const dst = path.join(dir, `${nm}.md`);
+    if (fs.existsSync(dst)) return `personality already installed: ${nm}`;
+    if (!fs.existsSync(src)) return `source file not found: ${src}`;
+    fs.writeFileSync(dst, fs.readFileSync(src, 'utf8'));
+    return `installed ${nm}`;
   }
   if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
     if (!a) return 'usage: /personality remove <name>';
@@ -1375,12 +1391,14 @@ async function _trainer(args, ctx) {
 
   if (sub === 'set') {
     let spec = tokens[1];
+    let _setFromPicker = false;
     // No spec + a modal available → drill the shared picker (with an "auto"
     // row and a "provider default" row) instead of requiring a typed spec.
     if (!spec && typeof ctx.openPicker === 'function') {
       const r = await pickProviderModel(ctx, registry, { includeAuto: true, includeDefault: true });
       if (!r || r.model == null) return 'trainer set: cancelled';
       spec = r.provider === 'auto' ? 'auto' : (r.model ? `${r.provider}:${r.model}` : r.provider);
+      _setFromPicker = true;
     }
     if (!spec) return 'usage: /trainer set <provider>[:<model>]  (or `auto` for orchestrator-managed)';
     const parsed = typeof registry.parseProviderModel === 'function'
@@ -1402,6 +1420,17 @@ async function _trainer(args, ctx) {
       if (!fp.provider) return `/trainer set: could not parse fallback "${fallbackSpec}"`;
       if (fp.provider !== 'auto' && !_providerLookup(registry, fp.provider)) {
         return `/trainer set: unknown provider "${fp.provider}"`;
+      }
+    }
+    // Picker-driven set with no --fallback flag → offer an optional fallback
+    // pick (the flag form stays the escape hatch for typed callers).
+    if (_setFromPicker && !fallbackSpec && typeof ctx.openPicker === 'function') {
+      const addFb = await _promptConfirm(ctx, { title: 'Add a fallback trainer?', subtitle: 'used when the primary is unavailable · Esc / deny to skip' });
+      if (addFb) {
+        const fr = await pickProviderModel(ctx, registry, { includeAuto: true, includeDefault: true });
+        if (fr && fr.model != null) {
+          fallbackSpec = fr.provider === 'auto' ? 'auto' : (fr.model ? `${fr.provider}:${fr.model}` : fr.provider);
+        }
       }
     }
     // Read-merge-write so unrelated cfg keys survive.

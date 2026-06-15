@@ -136,11 +136,26 @@ export async function orchestratorSlash(args, ctx = {}) {
     return after.workers.length ? 'orchestration ON.\n' + fmt() : 'orchestration ON — but no workers yet. Add one: /orchestrator worker add <provider[:model]>';
   }
   if (sub === 'off' || sub === 'disable') { orchestratorEnable(cfg, false); persist(cfg); return 'orchestration off. provider → ' + read().provider; }
-  if (sub === 'planner') { if (!parts[1]) return 'usage: /orchestrator planner <provider[:model]>'; orchestratorSet(cfg, { planner: parts[1] }); persist(cfg); return 'planner → ' + parts[1]; }
+  if (sub === 'planner') {
+    // No spec + a modal → drill the picker instead of erroring.
+    if (!parts[1] && typeof ctx.openPicker === 'function') {
+      const registry = await import('../providers/registry.mjs');
+      const r = await orchestratorAction(ctx, registry, 'planner');
+      return `${r}\n${fmt()}`;
+    }
+    if (!parts[1]) return 'usage: /orchestrator planner <provider[:model]>'; orchestratorSet(cfg, { planner: parts[1] }); persist(cfg); return 'planner → ' + parts[1];
+  }
   if (sub === 'maxsubtasks') { const n = parseInt(parts[1], 10); if (!Number.isFinite(n)) return 'usage: /orchestrator maxsubtasks <N>'; orchestratorSet(cfg, { maxSubtasks: Math.max(1, Math.min(10, n)) }); persist(cfg); return fmt(); }
   if (sub === 'worker') {
     const action = (parts[1] || '').toLowerCase(); const spec = parts[2];
     const workers = [...orchestratorGet(cfg).workers];
+    // worker add / remove with no spec + a modal → route through the picker
+    // (add → provider/model pick; remove → pick from current workers).
+    if ((action === 'add' || action === 'remove' || action === 'rm' || action === 'delete') && !spec && typeof ctx.openPicker === 'function') {
+      const registry = await import('../providers/registry.mjs');
+      const r = await orchestratorAction(ctx, registry, action === 'add' ? 'worker-add' : 'worker-remove');
+      return `${r}\n${fmt()}`;
+    }
     if (action === 'add' && spec) { if (!workers.includes(spec)) workers.push(spec); orchestratorSet(cfg, { workers }); persist(cfg); return 'workers: ' + workers.join(', '); }
     if ((action === 'remove' || action === 'rm' || action === 'delete') && spec) { const next = workers.filter((w) => w !== spec); orchestratorSet(cfg, { workers: next }); persist(cfg); return 'workers: ' + (next.join(', ') || '(none)'); }
     return 'usage: /orchestrator worker add|remove <provider[:model]>';

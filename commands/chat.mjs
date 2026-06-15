@@ -96,6 +96,17 @@ export async function cmdChat(flags = {}) {
   let prov = wrapInteractiveProv(lookupProv(activeProvName));  // transient-retry the chat hot path
   if (!prov) { console.error(`unknown provider: ${activeProvName}`); process.exit(2); }
 
+  // First-turn key preflight: warn up front when the active provider needs an
+  // API key but none resolves, instead of letting the first turn fail opaquely.
+  // Cheap (no network); TTY-only so pipelines aren't spammed.
+  if (process.stdout.isTTY) {
+    const _meta = (getRegistry().PROVIDER_INFO || {})[activeProvName] || {};
+    if (_meta.requiresApiKey && !_resolveAuthKey(cfg, activeProvName)) {
+      process.stdout.write(`  ⚠ no API key found for ${activeProvName} — the first message will fail until you set one.\n`);
+      process.stdout.write(`    fix: /provider (pick + paste a key) · or  lazyclaw auth add ${activeProvName}\n`);
+    }
+  }
+
   // Top-of-session banner so the user can see at a glance what they're
   // talking to. Cheap (no provider call) and TTY-only.
   // v5 ink splash + REPL when stdin is a real TTY and the user has not
