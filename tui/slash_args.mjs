@@ -20,10 +20,8 @@ import { CLI_LOGIN_PROVIDERS } from '../providers/cli_login.mjs';
 import { KNOWN_CHANNELS } from '../config_features.mjs';
 import { listAgents } from '../agents.mjs';
 import { listSkills } from '../skills.mjs';
+import { listGoals } from '../goals.mjs';
 
-// Config-setting ids — mirrors tui/config_picker.mjs CONFIG_ITEMS, duplicated
-// here so this pure module doesn't import the ink-bound picker.
-const CONFIG_SETTINGS = ['provider', 'model', 'context', 'hud', 'trainer', 'orchestrator', 'channel', 'webhook', 'wizard'];
 const ONOFF = ['on', 'off'];
 
 const sp = (kind, completer, name) => ({ kind, completer, name });
@@ -35,11 +33,14 @@ const ARG_RULES = {
   '/login':        (t) => (t.length === 1 ? sp('inline', 'loginProvider', 'provider') : null),
   '/hud':          (t) => (t.length === 1 ? sp('inline', 'onoff', 'on|off') : null),
   '/memory':       (t) => (t.length === 1 ? sp('inline', 'memoryScope', 'scope') : null),
-  '/config':       (t) => (t.length === 1 ? sp('inline', 'configSetting', 'setting') : null),
   '/context':      (t) => (t.length === 1 ? sp('inline', 'contextSub', 'sub') : null),
   '/task':         (t) => (t.length === 1 ? sp('inline', 'taskSub', 'sub') : null),
   '/team':         (t) => (t.length === 1 ? sp('inline', 'teamSub', 'sub') : null),
-  '/goal':         (t) => (t.length === 1 ? sp('inline', 'goalSub', 'sub') : null),
+  '/handoff':      (t) => (t.length === 1 ? sp('inline', 'channelName', 'channel') : null),
+  '/dashboard':    (t) => (t.length === 1 ? sp('inline', 'dashboardSub', 'sub') : null),
+  '/goal':         (t) => (t.length === 1 ? sp('inline', 'goalFirst', 'goal/sub')
+                          : (t[0] === 'show' || t[0] === 'close') && t.length === 2 ? sp('inline', 'goalName', 'goal')
+                          : t[0] === 'close' && t.length === 3 ? sp('inline', 'goalOutcome', 'outcome') : null),
   '/skill':        (t) => (t.length === 1 ? sp('inline', 'skillName', 'skill') : null),
   '/skills':       (t) => (t.length === 1 ? sp('inline', 'skillName', 'skill') : null),
   '/provider':     (t) => (t.length === 1 ? sp('inline', 'provider', 'provider') : null),
@@ -89,11 +90,14 @@ const INLINE_SOURCES = {
   loginProvider:  () => Object.keys(CLI_LOGIN_PROVIDERS).map((v) => ({ value: v, desc: 'connect via CLI login' })),
   onoff:          () => ONOFF.map((v) => ({ value: v, desc: '' })),
   memoryScope:    () => ['core', 'recent', 'episodic'].map((v) => ({ value: v, desc: '' })),
-  configSetting:  () => CONFIG_SETTINGS.map((v) => ({ value: v, desc: '' })),
   contextSub:     () => ['status', 'turns', 'tokens'].map((v) => ({ value: v, desc: '' })),
   taskSub:        () => ['start', 'tick', 'list', 'show', 'transcript', 'abandon', 'done', 'remove'].map((v) => ({ value: v, desc: '' })),
   teamSub:        () => ['list', 'show', 'add', 'remove'].map((v) => ({ value: v, desc: '' })),
-  goalSub:        () => ['add', 'list', 'show', 'close'].map((v) => ({ value: v, desc: '' })),
+  dashboardSub:   () => ['stop', 'kill'].map((v) => ({ value: v, desc: '' })),
+  goalOutcome:    () => ['done', 'abandoned'].map((v) => ({ value: v, desc: '' })),
+  goalName:       (ctx) => safe(() => listGoals(ctx.cfgDir).map((g) => ({ value: g.name, desc: g.status || '' })).filter((i) => i.value)),
+  goalFirst:      (ctx) => ['add', 'list', 'show', 'close'].map((v) => ({ value: v, desc: '' }))
+                      .concat(safe(() => listGoals(ctx.cfgDir).map((g) => ({ value: g.name, desc: g.status || 'goal' })).filter((i) => i.value))),
   personalitySub: () => ['list', 'show', 'install', 'remove', 'use'].map((v) => ({ value: v, desc: '' })),
   agentSub:       () => ['list', 'show', 'add', 'edit', 'remove'].map((v) => ({ value: v, desc: '' })),
   trainerSub:     () => ['show', 'set', 'fallback', 'clear'].map((v) => ({ value: v, desc: '' })),

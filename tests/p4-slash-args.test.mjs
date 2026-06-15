@@ -66,6 +66,23 @@ test('listArgCandidates returns [] for a modal spec', () => {
   assert.deepEqual(listArgCandidates(argSpecFor('/model gpt', CAT), {}), []);
 });
 
+test('argSpecFor: handoff/dashboard/goal/channels rules; /config has none', () => {
+  assert.equal(argSpecFor('/handoff ', CAT).completer, 'channelName');
+  assert.equal(argSpecFor('/dashboard ', CAT).completer, 'dashboardSub');
+  assert.equal(argSpecFor('/goal ', CAT).completer, 'goalFirst');
+  assert.equal(argSpecFor('/goal close g1 ', CAT).completer, 'goalOutcome');
+  assert.equal(argSpecFor('/channels ', CAT).completer, 'channelName');
+  assert.equal(argSpecFor('/channels slack ', CAT).completer, 'onoff');
+  assert.equal(argSpecFor('/config ', CAT), null); // /config opens its own picker; no inline arg
+});
+
+test('listArgCandidates: /channels and /handoff both list channels', () => {
+  const ch = listArgCandidates(argSpecFor('/channels ', CAT), {}).map((i) => i.value);
+  assert.ok(ch.includes('slack') && ch.includes('telegram'));
+  assert.deepEqual(listArgCandidates(argSpecFor('/handoff ', CAT), {}).map((i) => i.value), ch);
+  assert.deepEqual(listArgCandidates(argSpecFor('/dashboard ', CAT), {}).map((i) => i.value), ['stop', 'kill']);
+});
+
 test('runArgCompleter drives the modal model completer', async () => {
   const ctx = {
     getActiveProvName: () => 'anthropic', getActiveModel: () => '',

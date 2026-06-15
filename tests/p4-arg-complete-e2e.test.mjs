@@ -70,6 +70,29 @@ test('inline arg popup: /login shows candidates; down + Enter fills the token, E
   } finally { try { inst.unmount(); } catch {} try { inst.cleanup(); } catch {} }
 });
 
+test('inline arg popup: /channels candidates fill + submit', async () => {
+  const { stdin, stdout, stderr } = mkStdio();
+  let submitted = null;
+  const inst = render(React.createElement(ReplApp, {
+    splashProps: { provider: 'mock', model: 'm', version: '6.x', cwd: '/tmp', tools: [], skills: [] },
+    slashCommands: SLASH_COMMANDS,
+    onSlashCommand: async (line) => { submitted = line; return 'ok'; },
+    onArgList: (buf) => (buf.startsWith('/channels')
+      ? [{ value: 'slack', desc: '' }, { value: 'telegram', desc: '' }]
+      : []),
+    runTurnFactory: () => async () => {},
+  }), { stdout, stdin, stderr, exitOnCtrlC: false, patchConsole: false });
+  try {
+    stdin.write('/channels ');
+    await sleep(300);
+    stdin.write('\r');  // fill first candidate (slack)
+    await sleep(200);
+    stdin.write('\r');  // submit
+    for (let i = 0; i < 60 && submitted === null; i++) await sleep(40);
+    assert.equal(submitted, '/channels slack');
+  } finally { try { inst.unmount(); } catch {} try { inst.cleanup(); } catch {} }
+});
+
 test('args still submit normally when there is no completer (regression)', async () => {
   const { stdin, stdout, stderr } = mkStdio();
   let submitted = null;
