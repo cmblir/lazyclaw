@@ -112,6 +112,11 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **`/model` and `/provider` picks now persist across restarts.** The active
+  model/provider were held in memory only, so a model chosen via `/model`
+  reverted to the on-disk `cfg.model` on the next launch (only the
+  `/provider`→model chain saved before). Both setters now read-merge-write
+  `config.json`; orchestrator routing is left to `/orchestrator on|off`.
 - **Stale default models bumped.** `claude-cli` and `anthropic` `defaultModel`
   were `claude-opus-4-7` (previous gen) and the streaming/tool_use fallbacks
   disagreed with the registry; all now resolve to `claude-opus-4-8` /
