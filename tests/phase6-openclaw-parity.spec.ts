@@ -6250,7 +6250,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     const out = JSON.parse(r.stdout);
     expect(out.name).toBe('anthropic');
     expect(out.endpoint).toContain('anthropic.com');
-    expect(out.defaultModel).toBe('claude-opus-4-7');
+    expect(out.defaultModel).toBe('claude-opus-4-8');
   });
 
   test('providers info on unknown provider exits 2 with a registered-list hint', () => {
