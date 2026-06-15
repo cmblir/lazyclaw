@@ -138,7 +138,7 @@ The REPL has slash commands for everything you'd otherwise edit config for — p
 | `/agentic [on\|off]` · `/plan [on\|off]` | let chat run tools (approval-gated); plan mode is read-only "propose first" |
 | `/skill` · `/personality` · `/memory` · `/loop` · `/goal` | skills, personas, memory, loops, goals |
 
-`/help` lists them all. Ghost-text autocomplete completes commands as you type; for commands that take a value (`/model`, `/provider`, `/trainer set`, `/orchestrator planner`, `/agent edit`), press **Tab** after the command to pick the value from the same searchable list. CJK/Hangul input composes inside the box.
+`/help` lists them all. Autocomplete works as you type: command names (`/...`) and, after a command, its **arguments** — `/login` → `codex-cli`/`gemini-cli`, `/hud` → `on`/`off`, `/channels` → channel names, subcommands for `/task` `/team` `/agent` `/personality` `/trainer` `/orchestrator`, and more — appear in a popup (↑/↓ select, Enter fill). The 2-step provider→model picks (`/model`, `/trainer set`, `/orchestrator planner`) show a `↹ pick` hint; press **Tab** to open the drill-in modal. CJK/Hangul input composes inside the box.
 
 ## The dashboard
 

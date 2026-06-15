@@ -25,11 +25,15 @@ Versioning: [SemVer](https://semver.org/).
   a hand-typed `provider:model` spec. `/orchestrator` planner/worker and the
   `/provider`→model chain share that one picker too; the parallel
   `pickModelForProvider` implementation was removed.
-- **Slash-argument autocomplete.** After a command that takes a value
-  (`/model`, `/provider`, `/trainer set`, `/orchestrator planner`,
-  `/agent edit`), an `↹ pick <arg>` hint shows; pressing **Tab** opens the
-  searchable modal picker and fills the chosen value into the buffer (↑/↓ to
-  navigate, type to filter, Enter to confirm). Typed forms still work.
+- **Inline slash-argument autocomplete for every arg-taking command.** Typing
+  a value after a command now shows candidates in the popup (like the
+  `/command` popup): `/login` → `codex-cli`/`gemini-cli`, `/hud` → `on`/`off`,
+  `/memory`, `/config`, `/channels` (names + `on`/`off`), `/skill`, `/provider`,
+  and subcommand menus for `/task` `/team` `/goal` `/context` `/agent`
+  `/personality` `/trainer` `/orchestrator` (plus dynamic agent/skill/personality
+  name lists). ↑/↓ select, Enter fills. The 2-step provider→model picks
+  (`/model`, `/trainer set`, `/orchestrator planner`) show a `↹ pick` hint and
+  open the drill-in modal on **Tab**. Typed forms still work.
 - **`NO_COLOR` / dumb-terminal respect.** A central color gate (`NO_COLOR`
   env per no-color.org, `TERM=dumb`, or non-TTY) disables color, and the
   legacy pickers/setup-wizard route their ANSI through it instead of emitting

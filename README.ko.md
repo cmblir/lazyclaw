@@ -92,7 +92,7 @@ chat에서 `/orchestrator` (빈 입력 = on/off picker) 또는 `/orchestrator on
 | `/agentic [on\|off]` · `/plan [on\|off]` | chat에서 tool 실행(approval 게이트); plan은 읽기전용 "먼저 제안" |
 | `/skill` · `/personality` · `/memory` · `/loop` · `/goal` | 스킬·페르소나·메모리·루프·목표 |
 
-`/help`로 전체 목록. 고스트 자동완성으로 명령어 완성, 값을 받는 명령(`/model`·`/provider`·`/trainer set`·`/orchestrator planner`·`/agent edit`)은 명령어 뒤에서 **Tab**으로 값을 같은 picker에서 선택. 한글 IME는 박스 안에서 조합.
+`/help`로 전체 목록. 타이핑하면 자동완성: 명령어(`/...`)와 그 **인자**까지 — `/login`→`codex-cli`/`gemini-cli`, `/hud`→`on`/`off`, `/channels`→채널명, `/task`·`/team`·`/agent`·`/personality`·`/trainer`·`/orchestrator` 서브커맨드 등 — 팝업에 떠서 ↑/↓ 선택, Enter로 채움. provider→model 2단계 선택(`/model`·`/trainer set`·`/orchestrator planner`)은 `↹ pick` 힌트가 뜨고 **Tab**으로 드릴인 모달 열림. 한글 IME는 박스 안에서 조합.
 
 스킬은 markdown 지침 번들로 시스템 프롬프트에 합성된다. `lazyclaw skills starter`로 번들 스타터 팩 8종(`concise` · `korean` · `commit-message` · `code-review` · `channel-style` · `summarize` · `explain` · `debug-coach`) 설치, `lazyclaw skills install <user>/<repo>`로 GitHub에서 추가 설치, chat에서는 `/skills`로 선택.
 
