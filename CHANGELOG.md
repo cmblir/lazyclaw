@@ -116,7 +116,10 @@ Versioning: [SemVer](https://semver.org/).
   were `claude-opus-4-7` (previous gen) and the streaming/tool_use fallbacks
   disagreed with the registry; all now resolve to `claude-opus-4-8` /
   `gemini-2.5-pro`, so empty-model agents and `providers test` hit a current
-  model. (Fallbacks only fire when no model is passed.)
+  model. (Fallbacks only fire when no model is passed.) `claude-fable-5` was
+  also removed from the suggested lists (API-priced, not on the claude-cli
+  subscription tier) — `claude-opus-4-8` is now the first suggestion; it can
+  still be entered as a custom id.
 - **`config validate` recognizes first-class keys.** `trainer`, `orchestrator`,
   `persona`, `customProviders` and `chat` are no longer reported as
   "unknown top-level key".
