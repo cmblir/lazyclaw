@@ -182,6 +182,24 @@ export function fillSlashCommand(state, cmd) {
   };
 }
 
+// Replace the whitespace-delimited token that ENDS the buffer with `value`.
+// Used by slash-argument completion: the user types `/model gpt`, picks
+// `gpt-4.1` from the modal, and the partial token is swapped in place. Does NOT
+// submit. Leaves the cursor at the end of the inserted value. When the buffer
+// ends in a space (empty arg token), `value` is appended.
+export function fillArgToken(state, value) {
+  const buffer = state.buffer || '';
+  const start = buffer.lastIndexOf(' ') + 1; // char after the last space (0 if none)
+  const filled = buffer.slice(0, start) + value;
+  return {
+    ...state,
+    buffer: filled,
+    cursor: filled.length,
+    lastSubmit: null,
+    lastWasPaste: false,
+  };
+}
+
 // Step one codepoint LEFT of `idx` in `buffer` (UTF-16 aware). Returns the
 // new index (>= 0). If the char before idx is a low surrogate, skip both
 // units so we land before the full astral codepoint.
