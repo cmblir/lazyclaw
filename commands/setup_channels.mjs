@@ -103,7 +103,8 @@ export async function runChannelStep({ cfgDir, prompt, colors, write = (s) => pr
 
   const answers = {};
   for (const f of spec.fields) {
-    const v = (await prompt(`  ${spec.label} — ${f.prompt}${f.optional ? ' (optional)' : ''}: `)).trim();
+    // Mask secret fields so tokens aren't echoed in plaintext to the terminal.
+    const v = (await prompt(`  ${spec.label} — ${f.prompt}${f.optional ? ' (optional)' : ''}: `, { secret: !!f.secret })).trim();
     if (v) answers[f.key] = v;
   }
   try {

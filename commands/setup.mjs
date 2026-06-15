@@ -15,7 +15,7 @@ import { SUBCOMMANDS, parseArgs, AGENT_REG_SUBS } from '../lib/args.mjs';
 import {
   _attachGhostAutocomplete, _fetchModelsForProvider, _pauseChatForSubMenu,
   _pickModelInteractive, _pickProviderInteractive, _printChatBanner,
-  _quickPrompt, _renderBanner, _renderV5Banner,
+  _quickPrompt, _quickPromptSecret, _renderBanner, _renderV5Banner,
 } from '../tui/pickers.mjs';
 import { firstRunMode as _firstRunMode } from '../first_run.mjs';
 import { applyChatWindow as _applyChatWindow, CHAT_WINDOW_TURNS, CHAT_WINDOW_TOKEN_BUDGET } from '../chat_window.mjs';
@@ -78,9 +78,13 @@ export async function cmdOnboard(flags) {
     const meta = (getRegistry().PROVIDER_INFO || {})[flags.provider] || {};
     if (meta.requiresApiKey && !flags['api-key']) {
       const prefix = meta.keyPrefix ? ` (starts with "${meta.keyPrefix}")` : '';
-      flags['api-key'] = (await ask(`api-key${prefix}: `)).trim();
+      // Close the line-mode reader before the masked raw-mode read so they
+      // don't both consume stdin. The key is masked (•) — never echoed.
+      rl.close();
+      flags['api-key'] = await _quickPromptSecret(`api-key${prefix}: `);
+    } else {
+      rl.close();
     }
-    rl.close();
   }
   const next = applyOnboardConfig(readConfig(), flags);
   if (!next.provider) { console.error('onboard: provider is required'); process.exit(2); }

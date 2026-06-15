@@ -898,7 +898,15 @@ export async function _addCustomProviderInteractive() {
   await _quickPrompt('  press Enter to continue ');
   return { name };
 }
-export async function _quickPrompt(label) {
+// Single-line readline prompt. Pass { secret: true } to mask the typed value
+// (api keys, channel tokens) — the bytes are read in raw mode and echoed as
+// bullets so the secret never appears on screen / scrollback / a screen-share.
+// Non-TTY input can't be masked (no raw mode); it falls back to the plain read,
+// which is fine for piped automation where there is no screen to leak to.
+export async function _quickPrompt(label, opts = {}) {
+  if (opts.secret && process.stdin.isTTY && process.stdin.setRawMode) {
+    return _quickPromptSecret(label);
+  }
   const readline = await import('node:readline');
   process.stdout.write('\n');
   // Make sure stdin is in cooked / line-buffered mode for the
@@ -914,4 +922,46 @@ export async function _quickPrompt(label) {
   const ans = await new Promise((resolve) => rl.question(label, resolve));
   rl.close();
   return ans.trim();
+}
+
+// Masked raw-mode reader: echoes one bullet per typed character, handles
+// Backspace, Enter/Ctrl-D (submit), and Ctrl-C (abort → empty string). The real
+// characters accumulate off-screen and are returned trimmed.
+export async function _quickPromptSecret(label) {
+  const stdin = process.stdin;
+  process.stdout.write('\n' + label);
+  const wasRaw = !!stdin.isRaw;
+  try { stdin.setRawMode(true); } catch (_) {}
+  stdin.resume();
+  if (stdin.ref) stdin.ref();
+  const prevEnc = stdin.readableEncoding;
+  stdin.setEncoding('utf8');
+  let buf = '';
+  const value = await new Promise((resolve) => {
+    const onData = (chunk) => {
+      for (const ch of String(chunk)) {
+        if (ch === '\r' || ch === '\n' || ch === '\x04') { // Enter / Ctrl-D
+          cleanup(); resolve(buf); return;
+        }
+        if (ch === '\x03') { // Ctrl-C abort
+          cleanup(); resolve(''); return;
+        }
+        if (ch === '\x7f' || ch === '\x08') { // Backspace / Delete
+          if (buf.length) { buf = buf.slice(0, -1); process.stdout.write('\b \b'); }
+          continue;
+        }
+        if (ch < ' ') continue; // ignore other control chars (arrows, etc.)
+        buf += ch;
+        process.stdout.write('•');
+      }
+    };
+    const cleanup = () => {
+      stdin.removeListener('data', onData);
+      try { stdin.setRawMode(wasRaw); } catch (_) {}
+      if (prevEnc) { try { stdin.setEncoding(prevEnc); } catch (_) {} }
+      process.stdout.write('\n');
+    };
+    stdin.on('data', onData);
+  });
+  return value.trim();
 }
