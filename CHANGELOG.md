@@ -17,8 +17,9 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
-- **One model picker everywhere.** `/trainer set|fallback` and the new
-  `/agent edit <name>` now open the same provider→model picker as `/model`
+- **One model picker everywhere.** Bare `/trainer` opens an action menu
+  (Set / Fallback / Clear / Show, like bare `/orchestrator`); `/trainer set|fallback`
+  and the new `/agent edit <name>` open the same provider→model picker as `/model`
   (family drill-in, live-fetch, a `… type a custom model id` row, and — for
   the trainer — an `auto` and a `provider default` row), instead of requiring
   a hand-typed `provider:model` spec. `/orchestrator` planner/worker and the
