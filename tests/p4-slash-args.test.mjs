@@ -80,7 +80,7 @@ test('listArgCandidates: /channels first token includes setup + channels; /hando
   const first = listArgCandidates(argSpecFor('/channels ', CAT), {}).map((i) => i.value);
   assert.ok(first.includes('setup') && first.includes('slack') && first.includes('telegram'));
   const action = listArgCandidates(argSpecFor('/channels slack ', CAT), {}).map((i) => i.value);
-  assert.deepEqual(action, ['on', 'off', 'setup']);
+  assert.deepEqual(action, ['on', 'off', 'setup', 'test']);
   const handoff = listArgCandidates(argSpecFor('/handoff ', CAT), {}).map((i) => i.value);
   assert.ok(handoff.includes('slack') && handoff.includes('telegram'));
   assert.deepEqual(listArgCandidates(argSpecFor('/dashboard ', CAT), {}).map((i) => i.value), ['stop', 'kill']);

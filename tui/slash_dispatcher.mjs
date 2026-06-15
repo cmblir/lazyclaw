@@ -597,10 +597,20 @@ async function _agent(args, ctx) {
         : renderRecord(a, { fields: ['name', 'displayName', 'provider', 'model', 'role', 'tools', 'tags', 'iconEmoji', 'memoryWrite', 'skillWrite', 'createdAt', 'updatedAt'] });
     }
     if (sub === 'add') {
-      if (!aname) return 'usage: /agent add <name> [role text…]';
-      const roleText = rest.slice(1).join(' ').trim();
-      const a = agentsMod.registerAgent({ name: aname, role: roleText }, ctx.cfgDir);
-      return `✓ added agent ${a.name} (tools=${(a.tools || []).join(',')})`;
+      let name = aname;
+      let roleText = rest.slice(1).join(' ').trim();
+      // Guided fill: no name typed + a modal available → prompt for it.
+      if (!name && typeof ctx.openPicker === 'function') {
+        name = await _promptText(ctx, { title: 'New agent — name', subtitle: 'short id, e.g. scout (Esc cancels)' });
+        if (!name) return 'agent add: cancelled';
+        if (!roleText) {
+          const r = await _promptText(ctx, { title: `Role for ${name}`, subtitle: 'one line describing what this agent does (Esc to skip)', allowEmpty: true });
+          roleText = r || '';
+        }
+      }
+      if (!name) return 'usage: /agent add <name> [role text…]';
+      const a = agentsMod.registerAgent({ name, role: roleText }, ctx.cfgDir);
+      return `✓ added agent ${a.name} (tools=${(a.tools || []).join(',')}) — set its model with /agent edit ${a.name}`;
     }
     if (sub === 'edit') {
       if (!aname) return 'usage: /agent edit <name>';
@@ -631,10 +641,11 @@ async function _agent(args, ctx) {
 }
 
 async function _team(args, ctx) {
-  let teamsMod, loopMod;
+  let teamsMod, loopMod, agentsMod;
   try {
     teamsMod = await import('../teams.mjs');
     loopMod = await import('../loop-engine.mjs');
+    agentsMod = await import('../agents.mjs');
   } catch (e) { return `/team unavailable: ${e?.message || e}`; }
   let tokens;
   try { tokens = loopMod.splitArgs(args); }
@@ -673,8 +684,8 @@ async function _team(args, ctx) {
         : renderRecord(t, { fields: ['name', 'displayName', 'lead', 'agents', 'slackChannel', 'createdAt', 'updatedAt'] });
     }
     if (sub === 'add') {
-      if (!tname) return 'usage: /team add <name> --agents a,b,c [--lead a] [--channel #x]';
       let agentsCsv = null, lead = null, channel = '';
+      let teamName = tname;
       for (let i = 1; i < rest.length; i++) {
         const t = rest[i];
         if (t === '--agents') agentsCsv = rest[++i] || '';
@@ -682,14 +693,43 @@ async function _team(args, ctx) {
         else if (t === '--channel') channel = rest[++i] || '';
         else return `/team error: unknown token "${t}"`;
       }
-      if (!agentsCsv) return '/team add: --agents is required';
-      const agentsList = teamsMod.parseListFlag(agentsCsv);
+      // Guided fill: no --agents + a modal available → name prompt, then a
+      // multi-pick over registered agents, then a lead pick. Typed form
+      // (--agents …) and the no-modal path are unchanged.
+      let agentsList;
+      if (!agentsCsv && typeof ctx.openPicker === 'function') {
+        if (!teamName) {
+          teamName = await _promptText(ctx, { title: 'New team — name', subtitle: 'short id (Esc cancels)' });
+          if (!teamName) return 'team add: cancelled';
+        }
+        const all = agentsMod ? agentsMod.listAgents(ctx.cfgDir).map((a) => a.name) : [];
+        if (!all.length) return 'team add: no agents registered yet — add one with /agent add first';
+        const chosen = [];
+        for (let guard = 0; guard < 50; guard++) {
+          const items = all.filter((n) => !chosen.includes(n)).map((n) => ({ id: n, label: n }));
+          if (chosen.length) items.unshift({ id: '__done__', label: `✓ done (${chosen.length} selected)`, pinned: true });
+          if (!items.length) break;
+          const p = await ctx.openPicker({ kind: 'menu', title: `Team agents — ${chosen.length} picked`, subtitle: 'pick agents one at a time · ✓ done to finish · Esc cancels', items });
+          const id = p && typeof p === 'object' ? p.id : p;
+          if (!id) { if (chosen.length) break; return 'team add: cancelled'; }
+          if (id === '__done__') break;
+          chosen.push(id);
+        }
+        if (!chosen.length) return 'team add: cancelled (no agents picked)';
+        const lp = await ctx.openPicker({ kind: 'menu', title: 'Team lead', subtitle: 'who leads this team?', items: chosen.map((n) => ({ id: n, label: n })) });
+        lead = (lp && typeof lp === 'object' ? lp.id : lp) || chosen[0];
+        agentsList = chosen;
+      } else {
+        if (!teamName) return 'usage: /team add <name> --agents a,b,c [--lead a] [--channel #x]';
+        if (!agentsCsv) return '/team add: --agents is required';
+        agentsList = teamsMod.parseListFlag(agentsCsv);
+      }
       const ch = channel ? await teamsMod.resolveSlackChannel(channel, {
         botToken: process.env.SLACK_BOT_TOKEN || null,
         apiBase: process.env.SLACK_API_BASE || 'https://slack.com/api',
         logger: () => {},
       }) : '';
-      const team = teamsMod.registerTeam({ name: tname, agents: agentsList, lead, slackChannel: ch }, ctx.cfgDir);
+      const team = teamsMod.registerTeam({ name: teamName, agents: agentsList, lead, slackChannel: ch }, ctx.cfgDir);
       return `✓ added team ${team.name} (lead=${team.lead}, agents=${team.agents.join(',')})`;
     }
     if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
@@ -860,6 +900,30 @@ async function _goal(args, ctx) {
       else if (t.startsWith('--')) return `goal error: unknown flag ${t}`;
       else if (!name) name = t;
       else return `goal error: unexpected arg "${t}"`;
+    }
+    // Guided fill: no name + a modal available → prompt name + desc, and offer
+    // a cron preset picker instead of a hand-typed spec. Typed form unchanged.
+    if (!name && typeof ctx.openPicker === 'function') {
+      name = await _promptText(ctx, { title: 'New goal — name', subtitle: 'short id (Esc cancels)' });
+      if (!name) return 'goal add: cancelled';
+      if (!desc) {
+        const d = await _promptText(ctx, { title: `Goal "${name}" — description`, subtitle: 'what is this goal? (Esc to skip)', allowEmpty: true });
+        desc = d || '';
+      }
+      if (!cron) {
+        const cp = await ctx.openPicker({
+          kind: 'menu', title: 'Schedule (optional)', subtitle: 'run this goal on a cron?',
+          items: [
+            { id: '', label: 'none', desc: 'no schedule' },
+            { id: '0 9 * * *', label: 'daily 09:00', desc: '0 9 * * *' },
+            { id: '0 * * * *', label: 'hourly', desc: '0 * * * *' },
+            { id: '0 9 * * 1', label: 'weekly (Mon 09:00)', desc: '0 9 * * 1' },
+            { id: '__custom__', label: 'custom…', desc: 'type a cron spec', freeText: true },
+          ],
+        });
+        if (cp && typeof cp === 'object' && cp.id === '__custom__') cron = String(cp.query || '').trim() || null;
+        else { const cid = cp && typeof cp === 'object' ? cp.id : cp; cron = cid && typeof cid === 'string' ? cid : null; }
+      }
     }
     if (!name) return 'usage: /goal add <name> [--desc "..."] [--cron "<spec>"]';
     try {
@@ -1156,6 +1220,25 @@ async function _task(args, ctx, write) {
         else if (t === '--description' || t === '--desc') description = rest[++i] || '';
         else if (t === '--lead') lead = rest[++i] || null;
         else if (!teamName && !t.startsWith('--')) teamName = t;
+      }
+      // Guided fill: missing team/title + a modal available → pick the team
+      // from the registry and prompt for a title. Typed form unchanged.
+      if ((!teamName || !title) && typeof ctx.openPicker === 'function') {
+        if (!teamName) {
+          const teams = teamsMod.listTeams(ctx.cfgDir);
+          if (!teams.length) return 'task start: no teams yet — create one with /team add first';
+          const tp = await ctx.openPicker({ kind: 'menu', title: 'Start task — pick a team', items: teams.map((t) => ({ id: t.name, label: t.name, desc: `lead=${t.lead || '?'} · agents=${(t.agents || []).join(',')}` })) });
+          teamName = tp && typeof tp === 'object' ? tp.id : tp;
+          if (!teamName || typeof teamName !== 'string') return 'task start: cancelled';
+        }
+        if (!title) {
+          title = await _promptText(ctx, { title: `Task title (team: ${teamName})`, subtitle: 'one line describing the task (Esc cancels)' });
+          if (!title) return 'task start: cancelled';
+        }
+        if (!description) {
+          const d = await _promptText(ctx, { title: 'Task description', subtitle: 'optional detail (Esc to skip)', allowEmpty: true });
+          description = d || '';
+        }
       }
       if (!teamName || !title) return 'usage: /task start <team> --title "..." [--description "..."] [--lead <name>]';
       const team = teamsMod.getTeam(teamName, ctx.cfgDir);
@@ -1604,7 +1687,7 @@ async function _dashboard(args) {
 // behind `lazyclaw menu`. This restores discoverability: browse subcommands
 // and get the exact command to run. (Most subcommands own stdout / spawn, so
 // they can't safely run inline in the Ink scrollback — we echo the command.)
-async function _menu(args, ctx) {
+async function _menu(args, ctx, write) {
   if (typeof ctx.openPicker === 'function') {
     const items = [];
     const seen = new Set();
@@ -1612,17 +1695,23 @@ async function _menu(args, ctx) {
       for (const c of cmds) {
         if (seen.has(c)) continue;
         seen.add(c);
-        items.push({ id: c, label: c, desc: group });
+        // Mark which subcommands can run in-chat (a /slash equivalent exists).
+        const inChat = SLASH_HANDLERS.has(`/${c}`);
+        items.push({ id: c, label: c, desc: inChat ? `${group} · runs in chat` : group });
       }
     }
     const picked = await ctx.openPicker({
       kind: 'menu',
       title: 'lazyclaw subcommands',
-      subtitle: 'Enter shows how to run it · Esc cancels',
+      subtitle: 'Enter runs it in chat (or shows the shell command) · Esc cancels',
       items,
     });
     if (!picked) return 'cancelled';
     const cmd = typeof picked === 'string' ? picked : picked.id;
+    // If there's an in-chat slash equivalent, dispatch it directly instead of
+    // telling the user to leave chat.
+    const handler = SLASH_HANDLERS.get(`/${cmd}`);
+    if (handler) return handler('', ctx, write);
     return `run from a shell:  lazyclaw ${cmd}`;
   }
   return [
@@ -1704,6 +1793,16 @@ async function _channels(args, ctx = {}) {
     return `✓ ${spec.label} credentials saved (${setKeys.join(', ') || 'none'}) → channel enabled${plugin}`;
   }
 
+  // `/channels <name> test` — verify the stored credentials with a live call.
+  if (name && /^test$/i.test(action || '')) {
+    const channelMod = await import('../commands/setup_channels.mjs');
+    try { loadDotenvIfAny(ctx.cfgDir); } catch { /* best-effort */ }
+    const r = await channelMod.verifyChannel(name.toLowerCase());
+    if (r.ok === true) return `✓ ${name} verified — ${r.detail}`;
+    if (r.ok === null) return `· ${name}: ${r.detail}`;
+    return `✗ ${name}: ${r.detail}${r.hint ? `\n  fix: ${r.hint}` : ''}`;
+  }
+
   if (name && /^(on|off|enable|disable)$/i.test(action || '')) {
     const en = /^(on|enable)$/i.test(action);
     const cfg = read();
@@ -1750,8 +1849,24 @@ async function _channels(args, ctx = {}) {
   }
   const rows = cf.channelStatusList(read());
   if (!rows.length) return 'no channels configured. set credentials with /channels setup (or `lazyclaw setup` for the full wizard).';
+  // Cross-reference each channel's required env creds against the loaded env so
+  // the list flags a channel that's "enabled" but missing its token.
+  let channelMod = null;
+  try {
+    loadDotenvIfAny(ctx.cfgDir);
+    channelMod = await import('../commands/setup_channels.mjs');
+  } catch { /* hint is best-effort */ }
+  const missingFor = (name) => {
+    const spec = channelMod && channelMod.channelByName(name);
+    if (!spec) return [];
+    return spec.fields.filter((f) => !f.optional && !process.env[f.env]).map((f) => f.env);
+  };
   const lines = ['configured channels:'];
-  for (const c of rows) lines.push(`  ${c.name}  ${c.enabled ? 'enabled' : 'disabled'}${c.boundAgent ? ' · agent: ' + c.boundAgent : ''}`);
+  for (const c of rows) {
+    const miss = missingFor(c.name);
+    const credNote = miss.length ? ` · creds: missing ${miss.join(', ')}` : '';
+    lines.push(`  ${c.name}  ${c.enabled ? 'enabled' : 'disabled'}${c.boundAgent ? ' · agent: ' + c.boundAgent : ''}${credNote}`);
+  }
   lines.push('toggle: /channels <name> on|off   ·   set creds: /channels <name> setup');
   return lines.join('\n');
 }

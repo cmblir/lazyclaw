@@ -116,7 +116,7 @@ export function buildModelItems(info, provName, dynamicModels, opts = {}) {
     items.push({
       id: '__fetch_models__',
       label: '↻ fetch live model list',
-      desc: 'pull the current catalogue from the provider',
+      desc: 'pull the current catalogue (may take a few seconds)',
       pinned: true,
     });
   }

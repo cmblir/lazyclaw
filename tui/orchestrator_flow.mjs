@@ -142,7 +142,7 @@ export async function orchestratorSlash(args, ctx = {}) {
     const action = (parts[1] || '').toLowerCase(); const spec = parts[2];
     const workers = [...orchestratorGet(cfg).workers];
     if (action === 'add' && spec) { if (!workers.includes(spec)) workers.push(spec); orchestratorSet(cfg, { workers }); persist(cfg); return 'workers: ' + workers.join(', '); }
-    if ((action === 'remove' || action === 'rm') && spec) { const next = workers.filter((w) => w !== spec); orchestratorSet(cfg, { workers: next }); persist(cfg); return 'workers: ' + (next.join(', ') || '(none)'); }
+    if ((action === 'remove' || action === 'rm' || action === 'delete') && spec) { const next = workers.filter((w) => w !== spec); orchestratorSet(cfg, { workers: next }); persist(cfg); return 'workers: ' + (next.join(', ') || '(none)'); }
     return 'usage: /orchestrator worker add|remove <provider[:model]>';
   }
   return 'usage: /orchestrator [status|on|off|planner <spec>|worker add|remove <spec>|maxsubtasks <N>]';
