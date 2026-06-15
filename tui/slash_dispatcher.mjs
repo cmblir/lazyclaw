@@ -32,8 +32,17 @@
 
 import { SLASH_COMMANDS } from './slash_commands.mjs';
 import { nearest } from '../lib/args.mjs';
-import { supportsLiveFetch, fetchModelsForProvider } from '../providers/model_catalogue.mjs';
-import { providerFamilies, providerTag } from './provider_families.mjs';
+import {
+  pickProviderModel,
+  pickProviderDrillIn as _pickProviderDrillIn,
+  pickProviderForModel as _pickProviderForModel,
+  pickModelLoop as _pickModelLoop,
+  buildModelItems as _buildModelItems,
+  infoFor as _infoFor,
+  providerLookup as _providerLookup,
+  isCompositeProvider as _isCompositeProvider,
+  hasRealModels as _hasRealModels,
+} from './model_pick.mjs';
 import { addCustomProvider } from '../providers/custom_provider.mjs';
 import { setAuthKey } from '../providers/auth_store.mjs';
 import { runProviderLogin, loginSlash } from './login_flow.mjs';
@@ -160,68 +169,6 @@ async function _newReset(_args, ctx) {
   return 'cleared — new conversation';
 }
 
-function _providerLookup(registry, name) {
-  if (typeof registry.lookupProv === 'function') return registry.lookupProv(name);
-  return registry.PROVIDERS ? registry.PROVIDERS[name] : null;
-}
-
-// Pick a provider via the family drill-in (API key / CLI-Local / Mock),
-// mirroring the legacy readline wizard. Single-option steps auto-advance.
-// orchestrator is never listed. Returns a provider id or null on cancel.
-async function _pickProviderDrillIn(ctx, registry) {
-  const info = registry.PROVIDER_INFO || {};
-  const families = providerFamilies(registry);
-  const nonEmpty = Object.values(families).filter((f) => f.members.length > 0);
-  if (!nonEmpty.length) return null;
-
-  // ── Step 1 — auth family (skipped when only one is populated) ──
-  let family = nonEmpty[0];
-  if (nonEmpty.length > 1) {
-    const picked = await ctx.openPicker({
-      kind: 'provider-family',
-      title: 'select provider — how do you want to auth?',
-      subtitle: 'API: bring your own key · CLI/Local: use this machine · Mock: offline',
-      items: nonEmpty.map((f) => ({
-        id: f.id,
-        label: f.label,
-        desc: `${f.desc} · ${f.members.slice(0, 3).join(' / ')}${f.members.length > 3 ? ` (+${f.members.length - 3})` : ''}`,
-        tag: f.tag,
-      })),
-    });
-    if (!picked || typeof picked !== 'string') return null;
-    family = families[picked];
-    if (!family || !family.members.length) return null;
-  }
-
-  // ── Step 2 — provider in that family (auto-advances on a single member) ──
-  // The API-key family also offers "+ add a custom endpoint" so NIM /
-  // OpenRouter / vLLM / etc. can be registered without leaving chat. The
-  // add-custom row is never auto-advanced past, so don't single-skip it in.
-  const items = family.members.map((id) => {
-    const meta = info[id] || {};
-    let desc = '';
-    if (meta.custom) desc = `custom · ${meta.baseUrl || ''}`;
-    else if (meta.builtinOpenAICompat) desc = meta.label || meta.baseUrl || '';
-    else if (meta.label && meta.label !== id) desc = meta.label;
-    return { id, label: id, desc, tag: providerTag(meta) };
-  });
-  if (family.id === 'api') {
-    items.push({
-      id: '__add_custom__',
-      label: '+ add a custom OpenAI-compatible endpoint…',
-      desc: 'NIM · OpenRouter · Together · Groq · vLLM · LM Studio',
-      tag: 'new',
-    });
-  }
-  if (items.length === 1) return items[0].id;
-  const picked = await ctx.openPicker({
-    kind: 'provider',
-    title: `select provider — ${family.label}`,
-    subtitle: `current: ${ctx.getActiveProvName()}`,
-    items,
-  });
-  return typeof picked === 'string' ? picked : null;
-}
 
 // Single free-text prompt reusing the modal's filter buffer (no dedicated
 // input widget). Returns the typed value, '' (only when allowEmpty), or null
@@ -384,133 +331,6 @@ async function _provider(args, ctx) {
   return `provider → ${args}`;
 }
 
-function _infoFor(registry, provName) {
-  return (registry.PROVIDER_INFO && registry.PROVIDER_INFO[provName]) || {};
-}
-
-// A composite provider (orchestrator) has no real model list — its only
-// "model" is the provider name itself, so the model picker would dead-end
-// on a single bogus row. Detect it so we can redirect to a provider pick.
-function _isCompositeProvider(info, provName) {
-  if (info && info.composite) return true;
-  const s = info && Array.isArray(info.suggestedModels) ? info.suggestedModels : null;
-  return !!(s && s.length === 1 && s[0] === provName);
-}
-
-// Whether the active provider exposes any selectable model (suggested ≠ provider name, or live-fetchable).
-function _hasRealModels(info, provName) {
-  if (supportsLiveFetch(info, provName)) return true;
-  const s = info && Array.isArray(info.suggestedModels) ? info.suggestedModels : [];
-  return s.some((m) => m && m !== provName);
-}
-
-// Build the model-picker rows: suggested + live-fetched models (deduped, default
-// tagged) plus pinned sentinel rows for live-fetch and free-text custom entry.
-function _buildModelItems(info, provName, dynamicModels) {
-  const base = Array.isArray(info.suggestedModels) ? info.suggestedModels : [];
-  const all = Array.from(new Set([...(dynamicModels || []), ...base])).filter((m) => m && m !== provName);
-  const items = [];
-  if (supportsLiveFetch(info, provName)) {
-    items.push({
-      id: '__fetch_models__',
-      label: '↻ fetch live model list',
-      desc: 'pull the current catalogue from the provider',
-      pinned: true,
-    });
-  }
-  for (const m of all) {
-    items.push({ id: m, label: m, desc: info.defaultModel === m ? '(default)' : '' });
-  }
-  items.push({
-    id: '__custom_model__',
-    label: '… type a custom model id',
-    desc: 'type the id into the filter above, then pick this row',
-    pinned: true,
-    freeText: true,
-  });
-  // Reach another provider's models (e.g. claude-cli's opus) without leaving
-  // /model — the active provider isn't the only place to pick a model.
-  items.push({
-    id: '__switch_provider__',
-    label: '⇄ pick a different provider…',
-    desc: 'switch provider (e.g. claude-cli for opus/sonnet), then its model',
-    pinned: true,
-  });
-  return items;
-}
-
-// Run the model picker for `provName`, looping on the live-fetch row and
-// resolving the free-text row from the typed filter. Returns a concrete
-// model id, or null on cancel.
-async function _pickModelLoop(ctx, registry, provName) {
-  const info = _infoFor(registry, provName);
-  let dynamic = [];
-  let note = '';
-  for (let guard = 0; guard < 50; guard++) {
-    const items = _buildModelItems(info, provName, dynamic);
-    const picked = await ctx.openPicker({
-      kind: 'model',
-      title: `select model for ${provName}`,
-      subtitle: note || `current: ${ctx.getActiveModel() || '(default)'}`,
-      items,
-    });
-    if (picked == null) return null;
-    if (typeof picked === 'object') {
-      // free-text custom row → { id, query }
-      const typed = String(picked.query || '').trim();
-      if (!typed) { note = 'type a model id into the filter first'; continue; }
-      return typed;
-    }
-    if (picked === '__fetch_models__') {
-      try {
-        const fetcher = typeof ctx.fetchModels === 'function'
-          ? ctx.fetchModels
-          : (provId) => fetchModelsForProvider({
-              cfg: ctx.cfg,
-              registryMod: registry,
-              resolveAuthKey: (id) => (ctx.resolveAuthKey ? ctx.resolveAuthKey(id) : ''),
-              providerId: provId,
-            });
-        const fetched = await fetcher(provName);
-        if (Array.isArray(fetched) && fetched.length) {
-          dynamic = fetched;
-          note = `fetched ${fetched.length} model(s) — pick one or type a custom id`;
-        } else {
-          note = 'no models returned — using the suggested list';
-        }
-      } catch (e) {
-        note = `fetch failed: ${e && e.message ? e.message : e}`;
-      }
-      continue;
-    }
-    // Switch to a different provider's models (e.g. claude-cli's opus).
-    if (picked === '__switch_provider__') return '__switch_provider__';
-    return picked;
-  }
-  return null;
-}
-
-// Flat provider picker used to escape a composite/model-less active provider
-// or to switch providers from inside /model. Hides composites + mock,
-// mirroring the legacy wizard's filter (cli.mjs:1979).
-async function _pickProviderForModel(ctx, registry, subtitle) {
-  const info = registry.PROVIDER_INFO || {};
-  const known = Object.keys(registry.PROVIDERS || {})
-    .filter((id) => id !== 'mock' && !((info[id] || {}).composite))
-    .sort();
-  const items = known.map((id) => ({
-    id,
-    label: id,
-    desc: info[id] && info[id].docs ? String(info[id].docs).split('\n')[0].slice(0, 60) : '',
-  }));
-  const picked = await ctx.openPicker({
-    kind: 'provider',
-    title: 'select provider (then a model)',
-    subtitle: subtitle || `${ctx.getActiveProvName()} has no selectable models — pick a provider`,
-    items,
-  });
-  return typeof picked === 'string' ? picked : null;
-}
 
 async function _model(args, ctx) {
   const registry = await _mod(ctx, 'registryMod', () => import('../providers/registry.mjs'));
