@@ -6,7 +6,7 @@
 // `GET /config/validate` (daemon) so both produce bit-for-bit
 // identical output.
 
-const KNOWN_KEYS = new Set(['provider', 'model', 'api-key', 'rates']);
+const KNOWN_KEYS = new Set(['provider', 'model', 'api-key', 'rates', 'trainer', 'orchestrator', 'persona', 'customProviders', 'chat']);
 
 /**
  * @param {Record<string, unknown>} cfg
