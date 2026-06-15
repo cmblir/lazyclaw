@@ -3132,13 +3132,19 @@ test.describe('Phase 6 — OpenClaw parity', () => {
       version: () => '0.0.0',
       authToken: 'secret-abc',
     });
+    // makeHandler legitimately reads config once at construction (MCP-server
+    // boot). Let that settle, then snapshot — we assert the REQUEST path adds
+    // no further reads, i.e. a wrong token is rejected before the route runs.
+    await new Promise((r) => setImmediate(r));
+    const configReadAtBoot = configRead;
     const fakeReq: any = { method: 'GET', url: '/status', headers: { authorization: 'Bearer wrong' } };
     let status = 0;
     const fakeRes: any = { writeHead(s: number) { status = s; }, end() {} };
     await handler(fakeReq, fakeRes);
     expect(status).toBe(401);
-    // Auth check happens before route resolution — readConfig must NOT be called.
-    expect(configRead).toBe(0);
+    // Auth check happens before route resolution — the wrong-token request must
+    // not reach a route that reads config (no read beyond the boot-time one).
+    expect(configRead).toBe(configReadAtBoot);
   });
 
   test('daemon constantTimeEqual: same-length mismatch and different-length both reject', async () => {
@@ -6886,7 +6892,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     const dir = tmpConfigDir();
     const r = runCli(['help', 'nonsense-command'], dir);
     expect(r.status).toBe(2);
-    expect(r.stderr).toMatch(/unknown subcommand: nonsense-command/);
+    expect(r.stderr).toMatch(/unknown command "nonsense-command"/);
     expect(r.stderr).toMatch(/run `lazyclaw help`/);
   });
 
