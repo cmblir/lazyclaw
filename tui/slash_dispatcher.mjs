@@ -35,13 +35,8 @@ import { nearest } from '../lib/args.mjs';
 import {
   pickProviderModel,
   pickProviderDrillIn as _pickProviderDrillIn,
-  pickProviderForModel as _pickProviderForModel,
-  pickModelLoop as _pickModelLoop,
-  buildModelItems as _buildModelItems,
   infoFor as _infoFor,
   providerLookup as _providerLookup,
-  isCompositeProvider as _isCompositeProvider,
-  hasRealModels as _hasRealModels,
 } from './model_pick.mjs';
 import { addCustomProvider } from '../providers/custom_provider.mjs';
 import { setAuthKey } from '../providers/auth_store.mjs';
