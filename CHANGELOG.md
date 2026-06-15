@@ -17,6 +17,18 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **One model picker everywhere.** `/trainer set|fallback` and the new
+  `/agent edit <name>` now open the same provider→model picker as `/model`
+  (family drill-in, live-fetch, a `… type a custom model id` row, and — for
+  the trainer — an `auto` and a `provider default` row), instead of requiring
+  a hand-typed `provider:model` spec. `/orchestrator` planner/worker and the
+  `/provider`→model chain share that one picker too; the parallel
+  `pickModelForProvider` implementation was removed.
+- **Slash-argument autocomplete.** After a command that takes a value
+  (`/model`, `/provider`, `/trainer set`, `/orchestrator planner`,
+  `/agent edit`), an `↹ pick <arg>` hint shows; pressing **Tab** opens the
+  searchable modal picker and fills the chosen value into the buffer (↑/↓ to
+  navigate, type to filter, Enter to confirm). Typed forms still work.
 - **`NO_COLOR` / dumb-terminal respect.** A central color gate (`NO_COLOR`
   env per no-color.org, `TERM=dumb`, or non-TTY) disables color, and the
   legacy pickers/setup-wizard route their ANSI through it instead of emitting
@@ -100,6 +112,14 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **Stale default models bumped.** `claude-cli` and `anthropic` `defaultModel`
+  were `claude-opus-4-7` (previous gen) and the streaming/tool_use fallbacks
+  disagreed with the registry; all now resolve to `claude-opus-4-8` /
+  `gemini-2.5-pro`, so empty-model agents and `providers test` hit a current
+  model. (Fallbacks only fire when no model is passed.)
+- **`config validate` recognizes first-class keys.** `trainer`, `orchestrator`,
+  `persona`, `customProviders` and `chat` are no longer reported as
+  "unknown top-level key".
 - **Interactive chat now retries transient provider errors.** The retry
   wrapper covers 5xx / overloaded (Anthropic 529) before the first chunk (was
   RATE_LIMIT-only), and the chat hot path wraps its provider with it (and

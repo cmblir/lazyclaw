@@ -85,13 +85,14 @@ chat에서 `/orchestrator` (빈 입력 = on/off picker) 또는 `/orchestrator on
 |---|---|
 | `/config` | chat 나가고 setup 위저드 재실행 |
 | `/provider` · `/model` | 검색 picker로 provider/model 선택 |
+| `/trainer [set\|fallback]` · `/agent edit <name>` | trainer / agent의 provider+model을 같은 picker로 선택 (`auto`·custom-id 행 포함) |
 | `/channels [<name> on\|off]` | 채널 보기 / 토글 |
 | `/orchestrator [on\|off\|…]` | 멀티에이전트 보기 / 토글 (빈 입력=picker) |
 | `/context [turns N\|tokens N]` | 히스토리 윈도우 조절 |
 | `/agentic [on\|off]` · `/plan [on\|off]` | chat에서 tool 실행(approval 게이트); plan은 읽기전용 "먼저 제안" |
 | `/skill` · `/personality` · `/memory` · `/loop` · `/goal` | 스킬·페르소나·메모리·루프·목표 |
 
-`/help`로 전체 목록. 고스트 자동완성, 한글 IME는 박스 안에서 조합.
+`/help`로 전체 목록. 고스트 자동완성으로 명령어 완성, 값을 받는 명령(`/model`·`/provider`·`/trainer set`·`/orchestrator planner`·`/agent edit`)은 명령어 뒤에서 **Tab**으로 값을 같은 picker에서 선택. 한글 IME는 박스 안에서 조합.
 
 스킬은 markdown 지침 번들로 시스템 프롬프트에 합성된다. `lazyclaw skills starter`로 번들 스타터 팩 8종(`concise` · `korean` · `commit-message` · `code-review` · `channel-style` · `summarize` · `explain` · `debug-coach`) 설치, `lazyclaw skills install <user>/<repo>`로 GitHub에서 추가 설치, chat에서는 `/skills`로 선택.
 

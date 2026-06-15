@@ -131,13 +131,14 @@ The REPL has slash commands for everything you'd otherwise edit config for — p
 |---|---|
 | `/config` | leave chat and re-run the setup wizard |
 | `/provider` · `/model` | pick provider / model from a searchable list |
+| `/trainer [set\|fallback]` · `/agent edit <name>` | pick the trainer / an agent's provider+model from the same list (with an `auto` and a custom-id row) |
 | `/channels [<name> on\|off]` | view / toggle channels |
 | `/orchestrator [on\|off\|…]` | view / toggle multi-agent (picker on bare call) |
 | `/context [turns N\|tokens N]` | resize the chat history window |
 | `/agentic [on\|off]` · `/plan [on\|off]` | let chat run tools (approval-gated); plan mode is read-only "propose first" |
 | `/skill` · `/personality` · `/memory` · `/loop` · `/goal` | skills, personas, memory, loops, goals |
 
-`/help` lists them all. Ghost-text autocomplete completes commands as you type; CJK/Hangul input composes inside the box.
+`/help` lists them all. Ghost-text autocomplete completes commands as you type; for commands that take a value (`/model`, `/provider`, `/trainer set`, `/orchestrator planner`, `/agent edit`), press **Tab** after the command to pick the value from the same searchable list. CJK/Hangul input composes inside the box.
 
 ## The dashboard
 
