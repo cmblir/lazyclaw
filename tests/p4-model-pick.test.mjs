@@ -46,8 +46,13 @@ test('pickProviderModel resolves a custom id from the freeText row', async () =>
   assert.equal(r.model, 'my-tuned-model');
 });
 
-test('pickProviderModel returns null on cancel', async () => {
+test('pickProviderModel reports the provider with a null model when the model pick is cancelled', async () => {
   const ctx = mkCtx([null]);
+  assert.deepEqual(await pickProviderModel(ctx, registry, {}), { provider: 'anthropic', model: null });
+});
+
+test('pickProviderModel returns null when cancelled at the provider step', async () => {
+  const ctx = mkCtx([null], { prov: 'orchestrator' }); // composite → provider step first
   assert.equal(await pickProviderModel(ctx, registry, {}), null);
 });
 

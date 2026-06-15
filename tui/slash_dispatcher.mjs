@@ -336,53 +336,26 @@ async function _model(args, ctx) {
   const registry = await _mod(ctx, 'registryMod', () => import('../providers/registry.mjs'));
   if (!args) {
     if (typeof ctx.openPicker === 'function') {
-      let provName = ctx.getActiveProvName();
-      let info = _infoFor(registry, provName);
-      let switched = false;
-      // Composite (orchestrator) or model-less active provider → pick a
-      // provider first so the user is never dead-ended on a single row.
-      if (_isCompositeProvider(info, provName) || !_hasRealModels(info, provName)) {
-        const pickedProv = await _pickProviderForModel(ctx, registry);
-        if (!pickedProv) return 'cancelled';
-        if (pickedProv !== provName) {
-          const next = _providerLookup(registry, pickedProv);
-          if (!next) return `unknown provider: ${pickedProv}`;
-          if (ctx.setActiveProvName) ctx.setActiveProvName(pickedProv);
-          if (ctx.setProv) ctx.setProv(next);
-          switched = true;
-        }
-        provName = pickedProv;
-        info = _infoFor(registry, provName);
+      // Shared canonical picker: provider drill-in (only when the active
+      // provider has no models) → model loop with the "⇄ switch provider"
+      // and custom-id rows. Session-only — /model does not persist to disk.
+      const r = await pickProviderModel(ctx, registry, { includeSwitch: true });
+      if (!r) return 'cancelled';
+      const switched = r.provider !== ctx.getActiveProvName();
+      if (switched) {
+        const next = _providerLookup(registry, r.provider);
+        if (!next) return `unknown provider: ${r.provider}`;
+        if (ctx.setActiveProvName) ctx.setActiveProvName(r.provider);
+        if (ctx.setProv) ctx.setProv(next);
       }
-      // Model pick loop — the "⇄ pick a different provider" row re-enters the
-      // provider picker so models from any provider (e.g. claude-cli's opus)
-      // are reachable without leaving /model.
-      let model = null;
-      for (let guard = 0; guard < 25; guard++) {
-        model = await _pickModelLoop(ctx, registry, provName);
-        if (model === '__switch_provider__') {
-          const np = await _pickProviderForModel(ctx, registry, `current: ${provName} — pick a provider`);
-          if (!np) continue; // cancelled the switch → back to the model list
-          if (np !== provName) {
-            const next = _providerLookup(registry, np);
-            if (!next) { continue; }
-            if (ctx.setActiveProvName) ctx.setActiveProvName(np);
-            if (ctx.setProv) ctx.setProv(next);
-            switched = true;
-            provName = np;
-            info = _infoFor(registry, provName);
-          }
-          continue;
-        }
-        break;
+      // Model pick cancelled (null) → keep any provider switch, leave model.
+      if (r.model == null) {
+        return switched ? `provider → ${r.provider} (model unchanged)` : 'cancelled';
       }
-      if (model == null || model === '__switch_provider__') {
-        return switched ? `provider → ${provName} (model unchanged)` : 'cancelled';
-      }
-      if (ctx.setActiveModel) ctx.setActiveModel(model);
+      if (ctx.setActiveModel) ctx.setActiveModel(r.model);
       return switched
-        ? `provider → ${provName} · model → ${model}`
-        : `model → ${model}`;
+        ? `provider → ${r.provider} · model → ${r.model}`
+        : `model → ${r.model}`;
     }
     return `model: ${ctx.getActiveModel() || '(default)'}\n(pass an arg: /model <name>)`;
   }

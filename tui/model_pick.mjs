@@ -270,7 +270,10 @@ export async function pickProviderModel(ctx, registry, opts = {}) {
       if (np !== provName) { provName = np; switched = true; info = infoFor(registry, provName); }
       continue;
     }
-    if (model == null) return null;
+    // Cancelled the model step. Report the (possibly switched) provider with a
+    // null model so /model can keep a provider switch while leaving the model
+    // unchanged; spec/record callers treat a null model as a full cancel.
+    if (model == null) return { provider: provName, model: null };
     return { provider: provName, model };
   }
   return null;
