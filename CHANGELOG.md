@@ -25,6 +25,17 @@ Versioning: [SemVer](https://semver.org/).
   a hand-typed `provider:model` spec. `/orchestrator` planner/worker and the
   `/provider`→model chain share that one picker too; the parallel
   `pickModelForProvider` implementation was removed.
+- **Guided creation.** `/agent add`, `/goal add`, `/task start`, `/team add`
+  now walk you through it when you don't pass the args — prompt for the name,
+  pick the team/agents from the registry, choose a cron preset — instead of
+  printing a usage string. Typed forms still work.
+- **Verify channel credentials.** `lazyclaw channels test <name>` and
+  `/channels <name> test` do a live check (Slack/Telegram/Matrix) and report
+  ✓ verified or ✗ rejected with the fix, so a bad token is caught at setup
+  rather than at first message. `/channels` list also flags a channel whose
+  required credentials are missing.
+- **`/menu` runs commands in chat** when a slash equivalent exists (was always
+  "run it from a shell").
 - **No-arg action menus.** Bare `/agent` `/team` `/task` `/goal` `/channels`
   `/context` `/memory` now open a pick-an-action menu (like bare `/trainer`)
   instead of printing status or a "run it from the shell" dead-end. `/channels`
