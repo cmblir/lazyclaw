@@ -118,6 +118,17 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **Set channel credentials from `/channels`.** `/channels [<name>] setup` now
+  collects the bot token / homeserver / etc. in-chat (masked modal) and saves
+  them — previously toggling was all `/channels` did and setting creds forced a
+  detour out to `/config`.
+- **Secret entry is masked in the setup wizard.** API keys (`lazyclaw onboard`/
+  `setup`) and channel tokens (`runChannelStep`) were read with plain readline
+  and echoed in plaintext to the terminal/scrollback; they now read in raw mode
+  and echo bullets. (Security.)
+- **Slash help text corrected** to match the handlers (`/team`, `/agent`,
+  `/handoff`, `/loop`, and the README `/config` row no longer advertise
+  verbs/args that don't exist).
 - **`/model` and `/provider` picks now persist across restarts.** The active
   model/provider were held in memory only, so a model chosen via `/model`
   reverted to the on-disk `cfg.model` on the next launch (only the
