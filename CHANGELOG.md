@@ -25,6 +25,16 @@ Versioning: [SemVer](https://semver.org/).
   a hand-typed `provider:model` spec. `/orchestrator` planner/worker and the
   `/provider`→model chain share that one picker too; the parallel
   `pickModelForProvider` implementation was removed.
+- **No-arg action menus.** Bare `/agent` `/team` `/task` `/goal` `/channels`
+  `/context` `/memory` now open a pick-an-action menu (like bare `/trainer`)
+  instead of printing status or a "run it from the shell" dead-end. `/channels`
+  toggles a channel in place or jumps to credential setup; `/context` drills a
+  numeric picker. `/skill` with no argument no longer silently wipes active
+  skills — it opens the skill picker; clearing now needs explicit `/skill clear`.
+- **Readable `show` output.** `/agent show`, `/team show`, `/goal show`,
+  `/task show`, and `/trainer`'s configured block print `key: value` lines
+  instead of a raw JSON dump; append `json` (e.g. `/agent show x json`) for the
+  machine form.
 - **Inline slash-argument autocomplete for every arg-taking command.** Typing
   a value after a command now shows candidates in the popup (like the
   `/command` popup): `/login` → `codex-cli`/`gemini-cli`, `/hud` → `on`/`off`,
@@ -129,6 +139,13 @@ Versioning: [SemVer](https://semver.org/).
 - **Slash help text corrected** to match the handlers (`/team`, `/agent`,
   `/handoff`, `/loop`, and the README `/config` row no longer advertise
   verbs/args that don't exist).
+- **Destructive removes ask first.** `/agent remove`, `/team remove`,
+  `/task remove`, and `/personality remove` now confirm in chat before deleting
+  (the non-interactive CLI still deletes directly). `/channels off` and
+  `/goal close` print how to reverse them.
+- **Chat errors suggest a fix.** A failed turn (bad/missing key, unknown model,
+  network) now shows a one-line hint under the error instead of just the raw
+  message.
 - **`/model` and `/provider` picks now persist across restarts.** The active
   model/provider were held in memory only, so a model chosen via `/model`
   reverted to the on-disk `cfg.model` on the next launch (only the
