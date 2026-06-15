@@ -74,30 +74,50 @@ export async function providersTest(c) {
           const cfg = ctx.readConfig();
           const apiKey = cfg['api-key'] || '';
           const sharedPrompt = url.searchParams.get('prompt') || 'ping';
+          // Per-provider timeout so one unreachable provider (a keyless
+          // claude-cli subprocess that never logs in, a dead network endpoint)
+          // can't hang the whole all-providers probe — without it the route
+          // blocks until every sendMessage settles. Override with ?timeoutMs=;
+          // floor 1000, default 8000.
+          const _tm = parseInt(url.searchParams.get('timeoutMs') || '', 10);
+          const perTimeoutMs = Number.isFinite(_tm) && _tm >= 1000 ? _tm : 8000;
           const tAll = Date.now();
           const results = await Promise.all(
             Object.entries(PROVIDERS).map(async ([pid, provider]) => {
               const meta = PROVIDER_INFO[pid] || {};
               const model = url.searchParams.get('model') || cfg.model || meta.defaultModel || 'unknown';
               const t0 = Date.now();
+              const ac = new AbortController();
+              let timer = null;
               try {
-                let reply = '';
-                const stream = provider.sendMessage([{ role: 'user', content: sharedPrompt }], { apiKey, model });
-                for await (const chunk of stream) {
-                  if (typeof chunk === 'string') reply += chunk;
-                }
+                const consume = (async () => {
+                  let reply = '';
+                  const stream = provider.sendMessage([{ role: 'user', content: sharedPrompt }], { apiKey, model, signal: ac.signal });
+                  for await (const chunk of stream) {
+                    if (typeof chunk === 'string') reply += chunk;
+                  }
+                  return reply;
+                })();
+                const timeout = new Promise((_, reject) => {
+                  timer = setTimeout(() => { try { ac.abort(); } catch { /* best-effort */ } reject(new Error(`timed out after ${perTimeoutMs}ms`)); }, perTimeoutMs);
+                });
+                const reply = await Promise.race([consume, timeout]);
                 return {
                   name: pid, ok: reply.length > 0, model,
                   durationMs: Date.now() - t0,
                   replyLength: reply.length,
                 };
               } catch (err) {
+                try { ac.abort(); } catch { /* best-effort */ }
+                const timedOut = /timed out after/.test(err?.message || '');
                 return {
                   name: pid, ok: false, model,
                   durationMs: Date.now() - t0,
                   error: err?.message || String(err),
-                  code: err?.code || null,
+                  code: timedOut ? 'TIMEOUT' : (err?.code || null),
                 };
+              } finally {
+                if (timer) clearTimeout(timer);
               }
             }),
           );
