@@ -129,10 +129,10 @@ The REPL has slash commands for everything you'd otherwise edit config for — p
 
 | Slash | Does |
 |---|---|
-| `/config` | leave chat and re-run the setup wizard |
+| `/config` | change one setting in-chat (provider/model/context/channel creds/webhook/…); `/setup` re-runs the whole wizard |
 | `/provider` · `/model` | pick provider / model from a searchable list |
 | `/trainer [set\|fallback]` · `/agent edit <name>` | pick the trainer / an agent's provider+model from the same list (with an `auto` and a custom-id row) |
-| `/channels [<name> on\|off]` | view / toggle channels |
+| `/channels [<name> on\|off\|setup]` | view / toggle channels; `setup` sets the bot token & credentials in-chat |
 | `/orchestrator [on\|off\|…]` | view / toggle multi-agent (picker on bare call) |
 | `/context [turns N\|tokens N]` | resize the chat history window |
 | `/agentic [on\|off]` · `/plan [on\|off]` | let chat run tools (approval-gated); plan mode is read-only "propose first" |
