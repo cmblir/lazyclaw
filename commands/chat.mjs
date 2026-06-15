@@ -271,6 +271,22 @@ export async function cmdChat(flags = {}) {
           try { process.stdout.write(chunk); } catch { /* swallow */ }
         });
       };
+      // v6.x slash-argument completion. ReplApp calls this with the current
+      // buffer when Tab is pressed on a command's value; we resolve the
+      // completer (model/provider/trainerSpec/orchestratorSpec/agentName),
+      // drive it through the same _inkCtx (its openPicker IS ReplApp's modal),
+      // and return the string ReplApp injects back into the buffer.
+      const { argSpecFor: _argSpecFor, runArgCompleter: _runArgCompleter } = await import('../tui/slash_args.mjs');
+      const { SLASH_COMMANDS: _ARG_CATALOG } = await import('../tui/slash_commands.mjs');
+      const _argRegistry = await import('../providers/registry.mjs');
+      const _argAgents = await import('../agents.mjs');
+      const _inkArgComplete = async (buffer) => {
+        try {
+          const spec = _argSpecFor(buffer, _ARG_CATALOG);
+          if (!spec) return null;
+          return await _runArgCompleter(spec, _inkCtx, _argRegistry, _argAgents);
+        } catch { return null; }
+      };
       // v5.4.1: splash renders INSIDE the alt-buffer (not pre-printed to
       // primary). The v5.4.0 pre-print made the screen go blank during
       // chat because alt-buffer cleared it on enter. Splash lives in the
@@ -289,6 +305,7 @@ export async function cmdChat(flags = {}) {
         }),
         runTurnFactory: _inkRunTurnFactory,
         onSlashCommand: _inkSlashHandler,
+        onArgComplete: _inkArgComplete,
         pickerRef: _inkPickerRef,
       }), { exitOnCtrlC: false, patchConsole: true }); // false → editor 2-stage Ctrl+C
       await ink.waitUntilExit();

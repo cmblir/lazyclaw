@@ -38,6 +38,7 @@ import { Splash, renderSplashToString } from './splash.mjs';
 import { Editor } from './editor.mjs';
 import { SlashPopup, filterSlashCommands } from './slash_popup.mjs';
 import { SLASH_COMMANDS } from './slash_commands.mjs';
+import { argSpecFor } from './slash_args.mjs';
 import { ModalPicker, filterModalItems, resolveModalPick } from './modal_picker.mjs';
 import { theme } from './theme.mjs';
 import { StatusBar } from './status_bar.mjs';
@@ -214,7 +215,7 @@ export function consumeNextTurnFirstMessage(state) {
 //   - runTurnFactory(writeFn) → runTurn(text, signal)   (sticky layout)
 //   - runTurn(text, signal)                              (legacy, stdout)
 // Legacy mode is preserved verbatim for the existing cli.mjs callsite.
-export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, onSlashCommand, statusInfo, getStatus, pickerRef }) {
+export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, onSlashCommand, onArgComplete, statusInfo, getStatus, pickerRef }) {
   // statusInfo seeds the StatusBar's provider/model/ctx. getStatus (optional)
   // returns the live values so the bar refreshes after a /provider or /model
   // switch and after each turn (token/ctx gauge) — without it the bar would
@@ -398,6 +399,29 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
     setSelectedSuggestion(0);
   }, []);
 
+  // ─── Slash-argument completion (v6.x) ──────────────────────────────
+  // When the buffer is `/<cmd> <value>` and <cmd> declares an arg completer,
+  // keep an inline hint past the space-guard; Tab hands the buffer to the host
+  // (onArgComplete), which opens the modal picker and returns the chosen value.
+  // The value is pushed back to the Editor via argInject (applied with a nonce
+  // so the same value can be injected twice and re-renders don't re-apply it).
+  const argSpec = useMemo(
+    () => (typeof onArgComplete === 'function' ? argSpecFor(bufferPeek, catalog) : null),
+    [bufferPeek, catalog, onArgComplete],
+  );
+  const argCompletable = !!argSpec;
+  const [argInject, setArgInject] = useState(null);
+  const argNonceRef = useRef(0);
+  const handleArgComplete = useCallback(async (buf) => {
+    if (typeof onArgComplete !== 'function') return;
+    let value = null;
+    try { value = await onArgComplete(buf); } catch { value = null; }
+    if (typeof value === 'string' && value) {
+      argNonceRef.current += 1;
+      setArgInject({ value, nonce: argNonceRef.current });
+    }
+  }, [onArgComplete]);
+
   // Hide the popup when the buffer already exactly matches the only
   // remaining suggestion (with or without a trailing space). Otherwise
   // the popup intercepts Enter and the fully-typed command (e.g.
@@ -566,6 +590,15 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
             selectedIndex: selectedSuggestion,
           })
         : null,
+      // 3a) Arg-completion hint — shown past the space-guard when the command
+      //     under the cursor has a completable value. Tab opens the picker.
+      (!showSlashPopup && argSpec && !modalOpen)
+        ? React.createElement(
+            Box,
+            { paddingX: 1, key: 'arghint' },
+            React.createElement(Text, { dimColor: true }, `↹ pick ${argSpec.name}`)
+          )
+        : null,
       // 3b) Modal picker (v5.4.3) — flex sibling above StatusBar, only
       //     visible while ReplApp's `modal` state is set. Suppresses the
       //     slash popup so the overlays don't stack.
@@ -606,6 +639,10 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
           slashSelectedIndex: selectedSuggestion,
           onSlashMove: handleSlashMove,
           onSlashDismiss: handleSlashDismiss,
+          // v6.x slash-argument completion.
+          argCompletable,
+          onArgComplete: handleArgComplete,
+          argInject,
           // v5.4.3 — modal picker key contract. When modalOpen the
           // Editor swallows all keys (no buffer mutation, no submit).
           modalOpen,
