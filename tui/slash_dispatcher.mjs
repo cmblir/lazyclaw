@@ -569,12 +569,25 @@ async function _agent(args, ctx) {
       const a = agentsMod.registerAgent({ name: aname, role: roleText }, ctx.cfgDir);
       return `✓ added agent ${a.name} (tools=${(a.tools || []).join(',')})`;
     }
+    if (sub === 'edit') {
+      if (!aname) return 'usage: /agent edit <name>';
+      const existing = agentsMod.getAgent(aname, ctx.cfgDir);
+      if (!existing) return `no agent "${aname}"`;
+      if (typeof ctx.openPicker !== 'function') {
+        return `agent edit: picker unavailable here — use: lazyclaw agent edit ${aname} --provider <p> --model <m>`;
+      }
+      const registry = await _mod(ctx, 'registryMod', () => import('../providers/registry.mjs'));
+      const r = await pickProviderModel(ctx, registry, { pickProvider: true, includeDefault: true, includeSwitch: false });
+      if (!r || r.model == null) return 'agent edit: cancelled';
+      const patched = agentsMod.patchAgent(aname, { provider: r.provider, model: r.model || '' }, ctx.cfgDir);
+      return `✓ ${patched.name} → ${patched.provider}${patched.model ? '/' + patched.model : ''}`;
+    }
     if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
       if (!aname) return 'usage: /agent remove <name>';
       agentsMod.removeAgent(aname, ctx.cfgDir);
       return `✓ removed agent ${aname}`;
     }
-    return `/agent: unknown sub "${sub}" — list|show|add|remove`;
+    return `/agent: unknown sub "${sub}" — list|show|add|edit|remove`;
   } catch (e) {
     return `/agent error: ${e?.message || e}`;
   }
