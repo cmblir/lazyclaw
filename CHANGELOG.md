@@ -25,6 +25,16 @@ Versioning: [SemVer](https://semver.org/).
   a hand-typed `provider:model` spec. `/orchestrator` planner/worker and the
   `/provider`→model chain share that one picker too; the parallel
   `pickModelForProvider` implementation was removed.
+- **Guided `/personality install`** prompts for the name + source file (with
+  retry on a bad path) instead of erroring on missing args.
+- **`/orchestrator planner` / `worker add|remove` with no spec** open the
+  provider→model picker; **`/trainer set`** via the picker now offers an
+  optional fallback pick.
+- **`lazyclaw setup --only <steps>` / `--skip <steps>`** to re-run or bypass
+  individual wizard steps (provider/verify/channel/workspace/skill/webhook/
+  orchestrator).
+- **Chat key preflight** — starting chat with a key-requiring provider but no
+  key warns up front (with the fix) instead of failing the first turn opaquely.
 - **Guided creation.** `/agent add`, `/goal add`, `/task start`, `/team add`
   now walk you through it when you don't pass the args — prompt for the name,
   pick the team/agents from the registry, choose a cron preset — instead of
