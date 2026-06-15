@@ -88,7 +88,7 @@ export async function callOnce({
   if (!apiKey) {
     throw new GeminiToolUseError('apiKey is required', 'NO_API_KEY');
   }
-  const m = model || 'gemini-2.5-flash';
+  const m = model || 'gemini-2.5-pro';
   const url = `${(baseUrl || DEFAULT_BASE).replace(/\/$/, '')}/models/${encodeURIComponent(m)}:generateContent`;
   const fetchFn = fetchImpl || globalThis.fetch;
 

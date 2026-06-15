@@ -185,7 +185,7 @@ export const geminiProvider = {
     const fetchFn = opts.fetch || globalThis.fetch;
     if (!fetchFn) throw new Error('gemini: no fetch implementation available');
     const baseUrl = (opts.baseUrl || DEFAULT_BASE).replace(/\/$/, '');
-    const model = opts.model || 'gemini-1.5-pro';
+    const model = opts.model || 'gemini-2.5-pro';
 
     if (opts.signal?.aborted) throw new AbortError('aborted before request');
 

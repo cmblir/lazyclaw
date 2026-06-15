@@ -68,7 +68,7 @@ export async function callOnce({
   const url = `${(baseUrl || DEFAULT_BASE).replace(/\/$/, '')}/messages`;
   const fetchFn = fetchImpl || globalThis.fetch;
   const body = {
-    model: model || 'claude-opus-4-7',
+    model: model || 'claude-opus-4-8',
     max_tokens: maxTokens,
     messages,
   };

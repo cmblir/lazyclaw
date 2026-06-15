@@ -191,7 +191,7 @@ export const PROVIDER_INFO = {
     requiresApiKey: false,
     docs: 'Anthropic via the local `claude` CLI (Pro / Max subscription). No API key — auth flows through whatever account `claude` is logged in with. Requires Claude Code installed.',
     endpoint: 'subprocess: claude -p',
-    defaultModel: 'claude-opus-4-7',
+    defaultModel: 'claude-opus-4-8',
     suggestedModels: [
       'claude-fable-5',
       'claude-opus-4-8',
@@ -234,7 +234,7 @@ export const PROVIDER_INFO = {
     keyPrefix: 'sk-ant-',
     docs: 'Anthropic Messages API (pay-per-token, requires sk-ant- key). Supports streaming + extended thinking. For subscription billing, use the `claude-cli` provider instead.',
     endpoint: 'https://api.anthropic.com/v1/messages',
-    defaultModel: 'claude-opus-4-7',
+    defaultModel: 'claude-opus-4-8',
     suggestedModels: [
       'claude-fable-5',
       'claude-opus-4-8',

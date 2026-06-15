@@ -191,7 +191,7 @@ export const anthropicProvider = {
     const fetchFn = opts.fetch || globalThis.fetch;
     if (!fetchFn) throw new Error('anthropic: no fetch implementation available');
 
-    const model = opts.model || 'claude-opus-4-7';
+    const model = opts.model || 'claude-opus-4-8';
     const apiMessages = messages
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .map(m => ({ role: m.role, content: String(m.content ?? '') }));
