@@ -34,7 +34,7 @@ test('argSpecFor: value args gate on the subcommand', () => {
   assert.equal(argSpecFor('/orchestrator planner ', CAT).completer, 'orchestratorSpec');
   assert.equal(argSpecFor('/agent edit sc', CAT).completer, 'agentName');
   assert.equal(argSpecFor('/personality use de', CAT).completer, 'personalityName');
-  assert.equal(argSpecFor('/channels slack ', CAT).completer, 'onoff'); // 2nd token
+  assert.equal(argSpecFor('/channels slack ', CAT).completer, 'channelAction'); // 2nd token: on|off|setup
 });
 
 test('argSpecFor: null when no rule / no space', () => {
@@ -71,15 +71,18 @@ test('argSpecFor: handoff/dashboard/goal/channels rules; /config has none', () =
   assert.equal(argSpecFor('/dashboard ', CAT).completer, 'dashboardSub');
   assert.equal(argSpecFor('/goal ', CAT).completer, 'goalFirst');
   assert.equal(argSpecFor('/goal close g1 ', CAT).completer, 'goalOutcome');
-  assert.equal(argSpecFor('/channels ', CAT).completer, 'channelName');
-  assert.equal(argSpecFor('/channels slack ', CAT).completer, 'onoff');
+  assert.equal(argSpecFor('/channels ', CAT).completer, 'channelFirst');
+  assert.equal(argSpecFor('/channels slack ', CAT).completer, 'channelAction');
   assert.equal(argSpecFor('/config ', CAT), null); // /config opens its own picker; no inline arg
 });
 
-test('listArgCandidates: /channels and /handoff both list channels', () => {
-  const ch = listArgCandidates(argSpecFor('/channels ', CAT), {}).map((i) => i.value);
-  assert.ok(ch.includes('slack') && ch.includes('telegram'));
-  assert.deepEqual(listArgCandidates(argSpecFor('/handoff ', CAT), {}).map((i) => i.value), ch);
+test('listArgCandidates: /channels first token includes setup + channels; /handoff lists channels', () => {
+  const first = listArgCandidates(argSpecFor('/channels ', CAT), {}).map((i) => i.value);
+  assert.ok(first.includes('setup') && first.includes('slack') && first.includes('telegram'));
+  const action = listArgCandidates(argSpecFor('/channels slack ', CAT), {}).map((i) => i.value);
+  assert.deepEqual(action, ['on', 'off', 'setup']);
+  const handoff = listArgCandidates(argSpecFor('/handoff ', CAT), {}).map((i) => i.value);
+  assert.ok(handoff.includes('slack') && handoff.includes('telegram'));
   assert.deepEqual(listArgCandidates(argSpecFor('/dashboard ', CAT), {}).map((i) => i.value), ['stop', 'kill']);
 });
 

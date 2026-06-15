@@ -44,8 +44,8 @@ const ARG_RULES = {
   '/skill':        (t) => (t.length === 1 ? sp('inline', 'skillName', 'skill') : null),
   '/skills':       (t) => (t.length === 1 ? sp('inline', 'skillName', 'skill') : null),
   '/provider':     (t) => (t.length === 1 ? sp('inline', 'provider', 'provider') : null),
-  '/channels':     (t) => (t.length === 1 ? sp('inline', 'channelName', 'channel')
-                          : t.length === 2 ? sp('inline', 'onoff', 'on|off') : null),
+  '/channels':     (t) => (t.length === 1 ? sp('inline', 'channelFirst', 'channel/setup')
+                          : t.length === 2 ? sp('inline', 'channelAction', 'on|off|setup') : null),
   '/personality':  (t) => (t.length === 1 ? sp('inline', 'personalitySub', 'sub')
                           : (t[0] === 'use' || t[0] === 'show' || t[0] === 'remove') && t.length === 2
                             ? sp('inline', 'personalityName', 'name') : null),
@@ -104,6 +104,8 @@ const INLINE_SOURCES = {
   orchestratorSub:() => ['status', 'on', 'off', 'planner', 'worker', 'maxsubtasks'].map((v) => ({ value: v, desc: '' })),
   workerAction:   () => ['add', 'remove'].map((v) => ({ value: v, desc: '' })),
   channelName:    () => KNOWN_CHANNELS.map((v) => ({ value: v, desc: '' })),
+  channelFirst:   () => [{ value: 'setup', desc: 'set channel credentials' }].concat(KNOWN_CHANNELS.map((v) => ({ value: v, desc: '' }))),
+  channelAction:  () => [...ONOFF, 'setup'].map((v) => ({ value: v, desc: v === 'setup' ? 'set credentials' : '' })),
   provider:       (_ctx, registry) => Object.keys((registry && registry.PROVIDERS) || {})
                       .filter((n) => n !== 'mock').sort().map((v) => ({ value: v, desc: '' })),
   agentName:      (ctx) => safe(() => listAgents(ctx.cfgDir).map((a) => ({ value: a.name, desc: a.model ? `${a.provider}/${a.model}` : a.provider }))),

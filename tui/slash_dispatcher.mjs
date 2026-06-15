@@ -1534,7 +1534,70 @@ async function _channels(args, ctx = {}) {
   const cfgMod = await import('../lib/config.mjs');
   const read = typeof ctx.readConfig === 'function' ? ctx.readConfig : cfgMod.readConfig;
   const write = typeof ctx.writeConfig === 'function' ? ctx.writeConfig : cfgMod.writeConfig;
-  const [name, action] = (args || '').trim().split(/\s+/).filter(Boolean);
+  const toks = (args || '').trim().split(/\s+/).filter(Boolean);
+  const [name, action] = toks;
+
+  // `/channels [<name>] setup` — set the channel's credentials (bot token,
+  // homeserver, …) from chat instead of redirecting to /config. Reuses the
+  // masked modal prompt (_promptText) so secrets are never echoed. No modal →
+  // fall back to the readline channel step (same as /config's channel item).
+  const wantSetup = toks.some((t) => /^setup$/i.test(t));
+  if (wantSetup) {
+    const channelMod = await import('../commands/setup_channels.mjs');
+    const picked = toks.find((t) => !/^setup$/i.test(t));
+    if (typeof ctx.openPicker !== 'function') {
+      // Readline path: hand off to the existing channel wizard step.
+      ctx.requestConfigStep = 'channel';
+      return 'EXIT';
+    }
+    let chName = picked && picked.toLowerCase();
+    if (!chName) {
+      const sel = await ctx.openPicker({
+        kind: 'menu',
+        title: 'channel — set credentials',
+        subtitle: 'pick a channel to configure',
+        items: channelMod.CHANNEL_CATALOG.map((c) => ({
+          id: c.name,
+          label: c.label,
+          desc: c.builtin ? '' : `plugin: ${c.plugin}`,
+        })),
+      });
+      chName = sel && typeof sel === 'object' ? sel.id : sel;
+      if (!chName || typeof chName !== 'string') return 'channel setup: cancelled';
+    }
+    const spec = channelMod.channelByName(chName);
+    if (!spec) return `unknown channel: ${chName} (known: ${cf.KNOWN_CHANNELS.join(', ')})`;
+    if (!spec.fields.length) {
+      // No creds (e.g. http / whatsapp) — just enable it.
+      const cfgDirX = ctx.cfgDir || (await import('node:path')).dirname(cfgMod.configPath());
+      channelMod.persistChannel(cfgDirX, chName, {});
+      if (ctx.cfg) { ctx.cfg.channels = ctx.cfg.channels || {}; ctx.cfg.channels[chName] = { ...(ctx.cfg.channels[chName] || {}), enabled: true }; }
+      return `channel ${chName} → enabled (no credentials needed)`;
+    }
+    const answers = {};
+    for (const f of spec.fields) {
+      const v = await _promptText(ctx, {
+        title: `${spec.label} — ${f.prompt}`,
+        subtitle: f.optional ? 'optional · Esc to skip' : 'Esc cancels',
+        secret: !!f.secret,
+        allowEmpty: !!f.optional,
+      });
+      if (v === null) {
+        if (f.optional) continue;       // Esc on an optional field → skip it
+        return 'channel setup: cancelled';
+      }
+      if (v) answers[f.key] = v;
+    }
+    const path = await import('node:path');
+    const cfgDirX = ctx.cfgDir || path.dirname(cfgMod.configPath());
+    channelMod.persistChannel(cfgDirX, chName, answers);
+    // Mirror enabled flag onto the in-session cfg so a follow-up list is fresh.
+    if (ctx.cfg) { ctx.cfg.channels = ctx.cfg.channels || {}; ctx.cfg.channels[chName] = { ...(ctx.cfg.channels[chName] || {}), enabled: true }; }
+    const setKeys = Object.keys(answers);
+    const plugin = spec.builtin ? '' : `\n(plugin required — install: lazyclaw channels install ${spec.plugin})`;
+    return `✓ ${spec.label} credentials saved (${setKeys.join(', ') || 'none'}) → channel enabled${plugin}`;
+  }
+
   if (name && /^(on|off|enable|disable)$/i.test(action || '')) {
     const en = /^(on|enable)$/i.test(action);
     const cfg = read();
@@ -1558,10 +1621,10 @@ async function _channels(args, ctx = {}) {
     return `channel ${key} → ${en ? 'enabled' : 'disabled'}`;
   }
   const rows = cf.channelStatusList(read());
-  if (!rows.length) return 'no channels configured. add creds with /config (pick a setting) or `lazyclaw setup` (full wizard).';
+  if (!rows.length) return 'no channels configured. set credentials with /channels setup (or `lazyclaw setup` for the full wizard).';
   const lines = ['configured channels:'];
   for (const c of rows) lines.push(`  ${c.name}  ${c.enabled ? 'enabled' : 'disabled'}${c.boundAgent ? ' · agent: ' + c.boundAgent : ''}`);
-  lines.push('toggle: /channels <name> on|off   ·   add creds: /config');
+  lines.push('toggle: /channels <name> on|off   ·   set creds: /channels <name> setup');
   return lines.join('\n');
 }
 
