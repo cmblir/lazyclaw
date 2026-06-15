@@ -6,6 +6,7 @@
 import path from 'node:path';
 import {
   configPath, readConfig, writeConfig,
+  persistActiveModel, persistActiveProvider,
   _resolveAuthKey, _resolveBaseUrl, readVersionFromRepo,
 } from '../lib/config.mjs';
 import { ensureRegistry, requireRegistry, getRegistry } from '../lib/registry_boot.mjs';
@@ -217,9 +218,13 @@ export async function cmdChat(flags = {}) {
         getProv: () => prov,
         setProv: (next) => { prov = wrapInteractiveProv(next); },
         getActiveProvName: () => activeProvName,
-        setActiveProvName: (name) => { activeProvName = name; },
+        // Persist provider/model picks so they survive a restart (was
+        // in-memory only — a model chosen via /model reverted to cfg.model on
+        // the next launch). persistActiveProvider leaves orchestrator routing
+        // to /orchestrator on|off.
+        setActiveProvName: (name) => { activeProvName = name; persistActiveProvider(cfg, name); },
         getActiveModel: () => activeModel,
-        setActiveModel: (name) => { activeModel = name; },
+        setActiveModel: (name) => { activeModel = name; persistActiveModel(cfg, name); },
         getSessionId: () => _inkSessionId,
         setSessionId: (id) => { _inkSessionId = id; },
         getCharsSent: () => _inkCharsSent,
