@@ -120,6 +120,7 @@ export function Editor({
   // v5.4 slash-popup wiring (all optional — pre-v5.4 callers pass none):
   slashSuggestions,      // Array<{cmd,help}> | null
   slashSelectedIndex,    // number
+  slashFillMode,         // 'command' (default) | 'arg' — arg fills the token via fillArgToken
   onSlashMove,           // (delta: -1 | +1) => void
   onSlashDismiss,        // () => void
   // v5.4.3 modal-picker wiring (all optional — pre-v5.4.3 callers pass none).
@@ -269,20 +270,38 @@ export function Editor({
       if (key.tab || key.return) {
         const safeIdx = Math.max(0, Math.min(slashSuggestions.length - 1, slashSelectedIndex || 0));
         const picked = slashSuggestions[safeIdx];
-        const bufTrim = current.buffer.replace(/\s+$/, '');
-        const alreadyExact = !!picked && (current.buffer === picked.cmd || bufTrim === picked.cmd);
-        if (alreadyExact) {
-          if (key.tab) return; // no completion to make
-          // key.return on exact match → fall through to applyKey/submit.
-        } else {
-          if (picked) {
-            const next = fillSlashCommand(current, picked.cmd);
-            commit(next);
-            if (onBufferChange) {
-              try { onBufferChange(next.buffer); } catch {}
+        if (slashFillMode === 'arg') {
+          // Arg popup: picked.cmd holds the candidate VALUE. Fill it into the
+          // token in place. When the token already equals the candidate, Enter
+          // falls through to submit (Tab no-ops).
+          const start = Math.max(current.buffer.lastIndexOf(' '), current.buffer.lastIndexOf(',')) + 1;
+          const exact = !!picked && current.buffer.slice(start) === picked.cmd;
+          if (exact && key.return) {
+            // token complete → fall through to applyKey/submit
+          } else {
+            if (!exact && picked) {
+              const next = fillArgToken(current, picked.cmd);
+              commit(next);
+              if (onBufferChange) { try { onBufferChange(next.buffer); } catch {} }
             }
+            return;
           }
-          return;
+        } else {
+          const bufTrim = current.buffer.replace(/\s+$/, '');
+          const alreadyExact = !!picked && (current.buffer === picked.cmd || bufTrim === picked.cmd);
+          if (alreadyExact) {
+            if (key.tab) return; // no completion to make
+            // key.return on exact match → fall through to applyKey/submit.
+          } else {
+            if (picked) {
+              const next = fillSlashCommand(current, picked.cmd);
+              commit(next);
+              if (onBufferChange) {
+                try { onBufferChange(next.buffer); } catch {}
+              }
+            }
+            return;
+          }
         }
       }
       // Anything else (printable, backspace) falls through to applyKey.

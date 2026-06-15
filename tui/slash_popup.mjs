@@ -86,6 +86,10 @@ export function SlashPopup({
   selectedIndex = 0,
   maxRows = 8,
   columns,
+  // When true, always render the selectable chooser (used by the arg popup,
+  // whose buffer has a space — which would otherwise collapse a single
+  // candidate into the non-selectable inline hint).
+  forceChooser = false,
 }) {
   if (!commands || commands.length === 0) return null;
   const cols = columns
@@ -97,7 +101,7 @@ export function SlashPopup({
 
   // Inline-hint mode: buffer already has args + a single match. Render
   // the help text on one dimmed line. No border, no chooser.
-  const isInlineHint = buffer.includes(' ') && commands.length === 1;
+  const isInlineHint = !forceChooser && buffer.includes(' ') && commands.length === 1;
   if (isInlineHint) {
     const c = commands[0];
     return React.createElement(

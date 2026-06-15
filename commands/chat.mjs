@@ -276,21 +276,29 @@ export async function cmdChat(flags = {}) {
           try { process.stdout.write(chunk); } catch { /* swallow */ }
         });
       };
-      // v6.x slash-argument completion. ReplApp calls this with the current
-      // buffer when Tab is pressed on a command's value; we resolve the
-      // completer (model/provider/trainerSpec/orchestratorSpec/agentName),
-      // drive it through the same _inkCtx (its openPicker IS ReplApp's modal),
-      // and return the string ReplApp injects back into the buffer.
-      const { argSpecFor: _argSpecFor, runArgCompleter: _runArgCompleter } = await import('../tui/slash_args.mjs');
+      // v6.x slash-argument completion (two surfaces, see tui/slash_args.mjs):
+      //   onArgList     → inline candidates rendered in the popup (login, hud,
+      //                   memory, config, channels, subcommands, names, …).
+      //   onArgComplete → Tab opens the drill-in modal for 2-step provider→model
+      //                   specs (/model, /trainer set, /orchestrator planner).
+      // Both resolve through _inkCtx (its openPicker IS ReplApp's modal; its
+      // cfgDir/registry feed the inline lists).
+      const { argSpecFor: _argSpecFor, runArgCompleter: _runArgCompleter, listArgCandidates: _listArgCandidates } = await import('../tui/slash_args.mjs');
       const { SLASH_COMMANDS: _ARG_CATALOG } = await import('../tui/slash_commands.mjs');
       const _argRegistry = await import('../providers/registry.mjs');
-      const _argAgents = await import('../agents.mjs');
       const _inkArgComplete = async (buffer) => {
         try {
           const spec = _argSpecFor(buffer, _ARG_CATALOG);
-          if (!spec) return null;
-          return await _runArgCompleter(spec, _inkCtx, _argRegistry, _argAgents);
+          if (!spec || spec.kind !== 'modal') return null;
+          return await _runArgCompleter(spec, _inkCtx, _argRegistry);
         } catch { return null; }
+      };
+      const _inkArgList = (buffer) => {
+        try {
+          const spec = _argSpecFor(buffer, _ARG_CATALOG);
+          if (!spec || spec.kind !== 'inline') return [];
+          return _listArgCandidates(spec, _inkCtx, _argRegistry);
+        } catch { return []; }
       };
       // v5.4.1: splash renders INSIDE the alt-buffer (not pre-printed to
       // primary). The v5.4.0 pre-print made the screen go blank during
@@ -311,6 +319,7 @@ export async function cmdChat(flags = {}) {
         runTurnFactory: _inkRunTurnFactory,
         onSlashCommand: _inkSlashHandler,
         onArgComplete: _inkArgComplete,
+        onArgList: _inkArgList,
         pickerRef: _inkPickerRef,
       }), { exitOnCtrlC: false, patchConsole: true }); // false → editor 2-stage Ctrl+C
       await ink.waitUntilExit();

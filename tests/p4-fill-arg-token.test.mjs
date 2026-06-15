@@ -23,3 +23,8 @@ test('fillArgToken replaces only the last token (multi-word args)', () => {
   const next = fillArgToken(buf('/trainer set anth'), 'anthropic:claude-opus-4-8');
   assert.equal(next.buffer, '/trainer set anthropic:claude-opus-4-8');
 });
+
+test('fillArgToken replaces the last comma segment (comma-lists, e.g. /skill)', () => {
+  const next = fillArgToken(buf('/skill review,sty'), 'style');
+  assert.equal(next.buffer, '/skill review,style');
+});

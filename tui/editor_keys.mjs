@@ -189,7 +189,9 @@ export function fillSlashCommand(state, cmd) {
 // ends in a space (empty arg token), `value` is appended.
 export function fillArgToken(state, value) {
   const buffer = state.buffer || '';
-  const start = buffer.lastIndexOf(' ') + 1; // char after the last space (0 if none)
+  // Replace the token after the last separator. Comma is a separator too so
+  // comma-lists (`/skill a,b`) complete the trailing segment in place.
+  const start = Math.max(buffer.lastIndexOf(' '), buffer.lastIndexOf(',')) + 1;
   const filled = buffer.slice(0, start) + value;
   return {
     ...state,

@@ -215,7 +215,7 @@ export function consumeNextTurnFirstMessage(state) {
 //   - runTurnFactory(writeFn) → runTurn(text, signal)   (sticky layout)
 //   - runTurn(text, signal)                              (legacy, stdout)
 // Legacy mode is preserved verbatim for the existing cli.mjs callsite.
-export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, onSlashCommand, onArgComplete, statusInfo, getStatus, pickerRef }) {
+export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, onSlashCommand, onArgComplete, onArgList, statusInfo, getStatus, pickerRef }) {
   // statusInfo seeds the StatusBar's provider/model/ctx. getStatus (optional)
   // returns the live values so the bar refreshes after a /provider or /model
   // switch and after each turn (token/ctx gauge) — without it the bar would
@@ -366,50 +366,52 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
   );
   const [bufferPeek, setBufferPeek] = useState('');
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);
+  const activeLenRef = useRef(0); // length of whatever popup list is active (commands or arg candidates)
   const filtered = useMemo(
     () => filterSlashCommands(bufferPeek, catalog),
     [bufferPeek, catalog]
   );
-  // Reset selection whenever the match list changes length (typing
-  // narrows results, so highlight the first row again).
-  const lastLenRef = useRef(0);
-  useEffect(() => {
-    if (filtered.length !== lastLenRef.current) {
-      setSelectedSuggestion(0);
-      lastLenRef.current = filtered.length;
-    } else if (selectedSuggestion >= filtered.length) {
-      setSelectedSuggestion(Math.max(0, filtered.length - 1));
-    }
-  }, [filtered.length, selectedSuggestion]);
 
   const handleBufferChange = useCallback((buf) => {
     setBufferPeek(buf || '');
   }, []);
   const handleSlashMove = useCallback((delta) => {
     setSelectedSuggestion((i) => {
-      const max = Math.max(0, filtered.length - 1);
+      const max = Math.max(0, activeLenRef.current - 1);
       const n = i + delta;
       if (n < 0) return 0;
       if (n > max) return max;
       return n;
     });
-  }, [filtered.length]);
+  }, []);
   const handleSlashDismiss = useCallback(() => {
     setBufferPeek('');
     setSelectedSuggestion(0);
   }, []);
 
   // ─── Slash-argument completion (v6.x) ──────────────────────────────
-  // When the buffer is `/<cmd> <value>` and <cmd> declares an arg completer,
-  // keep an inline hint past the space-guard; Tab hands the buffer to the host
-  // (onArgComplete), which opens the modal picker and returns the chosen value.
-  // The value is pushed back to the Editor via argInject (applied with a nonce
-  // so the same value can be injected twice and re-renders don't re-apply it).
+  // argSpec resolves what (if anything) is completable after the command.
+  //   kind 'inline' → candidates render in the popup (onArgList → argList);
+  //                   ↑/↓ select, Tab/Enter fill the token (fillArgToken).
+  //   kind 'modal'  → a "↹ pick" hint shows; Tab opens the drill-in picker
+  //                   (handleArgComplete → onArgComplete → argInject).
   const argSpec = useMemo(
-    () => (typeof onArgComplete === 'function' ? argSpecFor(bufferPeek, catalog) : null),
-    [bufferPeek, catalog, onArgComplete],
+    () => argSpecFor(bufferPeek, catalog),
+    [bufferPeek, catalog],
   );
-  const argCompletable = !!argSpec;
+  const [argList, setArgList] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    if (argSpec && argSpec.kind === 'inline' && typeof onArgList === 'function') {
+      Promise.resolve(onArgList(bufferPeek))
+        .then((items) => { if (!cancelled) setArgList(Array.isArray(items) ? items : []); })
+        .catch(() => { if (!cancelled) setArgList([]); });
+    } else {
+      setArgList((prev) => (prev.length ? [] : prev));
+    }
+    return () => { cancelled = true; };
+  }, [bufferPeek, argSpec, onArgList]);
+  const argCompletable = !!argSpec && argSpec.kind === 'modal' && typeof onArgComplete === 'function';
   const [argInject, setArgInject] = useState(null);
   const argNonceRef = useRef(0);
   const handleArgComplete = useCallback(async (buf) => {
@@ -422,11 +424,8 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
     }
   }, [onArgComplete]);
 
-  // Hide the popup when the buffer already exactly matches the only
-  // remaining suggestion (with or without a trailing space). Otherwise
-  // the popup intercepts Enter and the fully-typed command (e.g.
-  // '/exit') never reaches handleSubmit. Belt-and-suspenders with the
-  // editor-side fall-through in tui/editor.mjs.
+  // Hide the command popup when the buffer already exactly matches the only
+  // remaining suggestion (so Enter submits /exit etc. instead of re-filling).
   const _bufTrimmed = bufferPeek.replace(/\s+$/, '');
   const _exactOnly =
     filtered.length === 1 &&
@@ -510,16 +509,34 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
   }, []);
   const modalOpen = !!modal;
 
-  // Slash popup is suppressed whenever a modal picker is active so the
-  // overlays don't stack, AND once the buffer has a space (the user is typing
-  // ARGS, e.g. `/orchestrator off`). Without the space guard the popup stayed
-  // open as a one-row hint and the editor treated Enter as "fill the matched
-  // command", which dropped the args and reverted the buffer to the bare
-  // command. With args, Enter must submit the full line instead.
-  const showSlashPopup =
+  // Command popup (no space) vs inline-arg popup (has space + an inline spec) —
+  // mutually exclusive via the space. Both feed the same Editor/SlashPopup
+  // machinery; slashFillMode tells the Editor which fill to apply (whole
+  // command vs the arg token). Modal-kind args show a hint instead (Tab opens
+  // the drill-in picker). Suppressed entirely while a modal picker is up.
+  const cmdPopup =
     !modalOpen &&
     bufferPeek.startsWith('/') && bufferPeek.indexOf(' ') < 0 &&
     filtered.length > 0 && !_exactOnly;
+  const argPopup = !modalOpen && !cmdPopup && !!argSpec && argSpec.kind === 'inline' && argList.length > 0;
+  const popupRows = cmdPopup
+    ? filtered
+    : argPopup
+      ? argList.map((i) => ({ cmd: i.value, help: i.desc || '' }))
+      : [];
+  const showSlashPopup = popupRows.length > 0;
+  const slashFillMode = argPopup ? 'arg' : 'command';
+  activeLenRef.current = popupRows.length;
+  // Reset / clamp the highlighted row when the active list changes.
+  const lastLenRef = useRef(0);
+  useEffect(() => {
+    if (popupRows.length !== lastLenRef.current) {
+      setSelectedSuggestion(0);
+      lastLenRef.current = popupRows.length;
+    } else if (selectedSuggestion >= popupRows.length) {
+      setSelectedSuggestion(Math.max(0, popupRows.length - 1));
+    }
+  }, [popupRows.length, selectedSuggestion]);
 
   // Outer column height: pinned to rows-1 in alt-buffer mode so the
   // Editor truly sticks to the bottom. Non-alt keeps content-sized layout
@@ -586,13 +603,15 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
       showSlashPopup
         ? React.createElement(SlashPopup, {
             buffer: bufferPeek,
-            commands: filtered,
+            commands: popupRows,
             selectedIndex: selectedSuggestion,
+            forceChooser: slashFillMode === 'arg',
           })
         : null,
-      // 3a) Arg-completion hint — shown past the space-guard when the command
-      //     under the cursor has a completable value. Tab opens the picker.
-      (!showSlashPopup && argSpec && !modalOpen)
+      // 3a) Modal-kind arg hint — for 2-step specs (/model, /trainer set,
+      //     /orchestrator planner) Tab opens the drill-in picker. Inline-kind
+      //     args render their candidates in the popup above instead.
+      (!showSlashPopup && argSpec && argSpec.kind === 'modal' && !modalOpen)
         ? React.createElement(
             Box,
             { paddingX: 1, key: 'arghint' },
@@ -635,11 +654,13 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
           // v6.4 — 2-stage Ctrl+C wiring (active when exitOnCtrlC:false).
           onInterrupt: onEscapeKey,
           onExit: onExitKey,
-          slashSuggestions: showSlashPopup ? filtered : null,
+          slashSuggestions: showSlashPopup ? popupRows : null,
           slashSelectedIndex: selectedSuggestion,
+          slashFillMode,
           onSlashMove: handleSlashMove,
           onSlashDismiss: handleSlashDismiss,
-          // v6.x slash-argument completion.
+          // v6.x slash-argument completion (inline fills the token; modal kind
+          // uses argCompletable+onArgComplete to open the drill-in picker).
           argCompletable,
           onArgComplete: handleArgComplete,
           argInject,
