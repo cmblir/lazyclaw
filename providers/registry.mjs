@@ -193,7 +193,6 @@ export const PROVIDER_INFO = {
     endpoint: 'subprocess: claude -p',
     defaultModel: 'claude-opus-4-8',
     suggestedModels: [
-      'claude-fable-5',
       'claude-opus-4-8',
       'claude-opus-4-7',
       'claude-opus-4-6',
@@ -236,7 +235,6 @@ export const PROVIDER_INFO = {
     endpoint: 'https://api.anthropic.com/v1/messages',
     defaultModel: 'claude-opus-4-8',
     suggestedModels: [
-      'claude-fable-5',
       'claude-opus-4-8',
       'claude-opus-4-7',
       'claude-opus-4-6',

@@ -15,6 +15,12 @@ test('claude-cli + anthropic default to the current Opus', () => {
   assert.ok(info['anthropic'].suggestedModels.includes('claude-opus-4-8'));
 });
 
+test('claude-fable-5 is not suggested (policy: not available on this tier)', () => {
+  const info = registry.PROVIDER_INFO;
+  assert.ok(!info['claude-cli'].suggestedModels.includes('claude-fable-5'));
+  assert.ok(!info['anthropic'].suggestedModels.includes('claude-fable-5'));
+});
+
 test('gemini default is gemini-2.5-pro', () => {
   assert.equal(registry.PROVIDER_INFO['gemini'].defaultModel, 'gemini-2.5-pro');
 });
