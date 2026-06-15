@@ -88,6 +88,53 @@ const mask = (v) => {
   return s.length <= 4 ? '••••' : `${s.slice(0, 3)}…${s.slice(-2)}`;
 };
 
+// Verify a channel's stored credentials with a cheap live call (Slack
+// auth.test, Telegram getMe, Matrix whoami). Reads creds from `env` (defaults
+// to process.env — load the .env first). Returns { ok, detail, hint }:
+// ok=true verified, ok=false rejected/unreachable (hint = how to fix),
+// ok=null when the channel has no verifiable endpoint (http/plugins). Pure
+// w.r.t. config; fetch is injectable for tests.
+export async function verifyChannel(name, { env = process.env, fetchImpl } = {}) {
+  const f = fetchImpl || globalThis.fetch;
+  const spec = channelByName(name);
+  if (!spec) return { ok: false, detail: `unknown channel "${name}"`, hint: '' };
+  const need = (envVar) => env[envVar] || '';
+  try {
+    if (name === 'slack') {
+      const token = need('SLACK_BOT_TOKEN');
+      if (!token) return { ok: false, detail: 'no SLACK_BOT_TOKEN set', hint: 'set it with /channels slack setup' };
+      const base = env.SLACK_API_BASE || 'https://slack.com/api';
+      const res = await f(`${base}/auth.test`, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
+      const j = await res.json().catch(() => ({}));
+      return j && j.ok
+        ? { ok: true, detail: `team=${j.team || '?'} user=${j.user || '?'}`, hint: '' }
+        : { ok: false, detail: `Slack rejected the token (${j && j.error ? j.error : 'auth.test failed'})`, hint: 'check SLACK_BOT_TOKEN via /channels slack setup' };
+    }
+    if (name === 'telegram') {
+      const token = need('TELEGRAM_BOT_TOKEN');
+      if (!token) return { ok: false, detail: 'no TELEGRAM_BOT_TOKEN set', hint: 'set it with /channels telegram setup' };
+      const res = await f(`https://api.telegram.org/bot${token}/getMe`);
+      const j = await res.json().catch(() => ({}));
+      return j && j.ok
+        ? { ok: true, detail: `@${(j.result && j.result.username) || '?'}`, hint: '' }
+        : { ok: false, detail: `Telegram rejected the token (${j && j.description ? j.description : 'getMe failed'})`, hint: 'check TELEGRAM_BOT_TOKEN via /channels telegram setup' };
+    }
+    if (name === 'matrix') {
+      const hs = need('MATRIX_HOMESERVER');
+      const token = need('MATRIX_ACCESS_TOKEN');
+      if (!hs || !token) return { ok: false, detail: 'no MATRIX_HOMESERVER / MATRIX_ACCESS_TOKEN set', hint: 'set them with /channels matrix setup' };
+      const res = await f(`${hs.replace(/\/$/, '')}/_matrix/client/v3/account/whoami`, { headers: { authorization: `Bearer ${token}` } });
+      const j = await res.json().catch(() => ({}));
+      return res.ok && j && j.user_id
+        ? { ok: true, detail: j.user_id, hint: '' }
+        : { ok: false, detail: 'Matrix rejected the token', hint: 'check MATRIX_ACCESS_TOKEN via /channels matrix setup' };
+    }
+    return { ok: null, detail: `no live verification for "${name}"`, hint: '' };
+  } catch (e) {
+    return { ok: false, detail: `could not reach ${name}: ${e && e.message ? e.message : e}`, hint: 'check your network / credentials' };
+  }
+}
+
 // Interactive channel step. `prompt(label)` resolves to a trimmed string;
 // `write(text)` sinks UI output (defaults to process.stdout). Returns
 // { skipped, channel?, needsPlugin? }. Never echoes a secret field value.

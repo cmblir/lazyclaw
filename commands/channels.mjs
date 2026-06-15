@@ -212,6 +212,18 @@ export async function cmdChannels(sub, positional = [], flags = {}) {
     process.stdout.write(`removed ${name}\n`);
     return;
   }
+  if (sub === 'test') {
+    const name = (positional[0] || '').toLowerCase();
+    if (!name) { process.stderr.write('usage: lazyclaw channels test <name>\n'); process.exit(2); }
+    const { verifyChannel } = await import('./setup_channels.mjs');
+    try { (await import('../dotenv_min.mjs')).loadDotenvIfAny(cfgDir); } catch { /* best-effort */ }
+    const r = await verifyChannel(name);
+    if (flags.json) { process.stdout.write(JSON.stringify({ channel: name, ...r }) + '\n'); return; }
+    if (r.ok === true) process.stdout.write(`✓ ${name} verified — ${r.detail}\n`);
+    else if (r.ok === null) process.stdout.write(`· ${name}: ${r.detail}\n`);
+    else { process.stdout.write(`✗ ${name}: ${r.detail}${r.hint ? `\n  fix: ${r.hint}` : ''}\n`); process.exitCode = 1; }
+    return;
+  }
   if (sub === 'enable' || sub === 'disable') {
     const name = (positional[0] || '').toLowerCase();
     if (!name) { process.stderr.write(`usage: lazyclaw channels ${sub} <name>\n`); process.exit(2); }

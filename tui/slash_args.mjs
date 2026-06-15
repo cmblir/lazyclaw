@@ -105,7 +105,7 @@ const INLINE_SOURCES = {
   workerAction:   () => ['add', 'remove'].map((v) => ({ value: v, desc: '' })),
   channelName:    () => KNOWN_CHANNELS.map((v) => ({ value: v, desc: '' })),
   channelFirst:   () => [{ value: 'setup', desc: 'set channel credentials' }].concat(KNOWN_CHANNELS.map((v) => ({ value: v, desc: '' }))),
-  channelAction:  () => [...ONOFF, 'setup'].map((v) => ({ value: v, desc: v === 'setup' ? 'set credentials' : '' })),
+  channelAction:  () => [...ONOFF, 'setup', 'test'].map((v) => ({ value: v, desc: v === 'setup' ? 'set credentials' : v === 'test' ? 'verify credentials' : '' })),
   provider:       (_ctx, registry) => Object.keys((registry && registry.PROVIDERS) || {})
                       .filter((n) => n !== 'mock').sort().map((v) => ({ value: v, desc: '' })),
   agentName:      (ctx) => safe(() => listAgents(ctx.cfgDir).map((a) => ({ value: a.name, desc: a.model ? `${a.provider}/${a.model}` : a.provider }))),
