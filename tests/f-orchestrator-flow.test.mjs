@@ -4,7 +4,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { orchestratorAction, pickModelForProvider, pickAndSetModel, orchestratorSlash } from '../tui/orchestrator_flow.mjs';
+import { orchestratorAction, pickAndSetModel, orchestratorSlash } from '../tui/orchestrator_flow.mjs';
 
 const registry = {
   PROVIDERS: { openai: {}, 'claude-cli': {}, ollama: {}, orchestrator: {}, mock: {} },
@@ -27,15 +27,8 @@ function scriptedCtx(returns) {
   };
 }
 
-test('pickModelForProvider: provider-default sentinel returns empty string', async () => {
-  const ctx = scriptedCtx(['__default__']);
-  assert.equal(await pickModelForProvider(ctx, registry, 'openai'), '');
-});
-
-test('pickModelForProvider: a concrete model id passes through', async () => {
-  const ctx = scriptedCtx(['gpt-4.1']);
-  assert.equal(await pickModelForProvider(ctx, registry, 'openai'), 'gpt-4.1');
-});
+// (the provider→model pick itself is covered by tests/p4-model-pick.test.mjs;
+// here we exercise the orchestrator wrapper that turns it into a spec string)
 
 test('orchestratorAction planner: provider then model → "provider:model" spec', async () => {
   const ctx = scriptedCtx(['openai', 'gpt-4.1']);

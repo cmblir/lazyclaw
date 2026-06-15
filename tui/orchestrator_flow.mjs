@@ -4,60 +4,21 @@
 // modal picker (ctx.openPicker); kept out of slash_dispatcher.mjs (at the
 // file-size ratchet).
 
-import { fetchModelsForProvider, supportsLiveFetch } from '../providers/model_catalogue.mjs';
 import { orchestratorGet, orchestratorSet, orchestratorEnable } from '../config_features.mjs';
 import { readConfig as _readConfig, writeConfig as _writeConfig } from '../lib/config.mjs';
-
-// Pick a model for `prov` via the modal: provider default (no -m) / live fetch /
-// curated list / free-text. Returns the model id, '' for "provider default", or
-// null on cancel.
-export async function pickModelForProvider(ctx, registry, prov) {
-  const meta = (registry.PROVIDER_INFO || {})[prov] || {};
-  let dynamic = [];
-  for (let guard = 0; guard < 30; guard++) {
-    const base = Array.isArray(meta.suggestedModels) ? meta.suggestedModels : [];
-    const all = [...new Set([...dynamic, ...base])].filter((m) => m && m !== prov);
-    const items = [{ id: '__default__', label: "▷ provider's own default model", desc: 'no -m override' }];
-    if (supportsLiveFetch(meta, prov)) items.push({ id: '__fetch__', label: '↻ fetch live model list', desc: 'pull the current catalogue' });
-    for (const m of all) items.push({ id: m, label: m, desc: meta.defaultModel === m ? '(default)' : '' });
-    items.push({ id: '__custom__', label: '… type a custom model id', desc: 'type into the filter, then pick this row', freeText: true });
-
-    const picked = await ctx.openPicker({ kind: 'model', title: `model for ${prov}`, subtitle: 'Enter to pick · Esc cancels', items });
-    if (picked == null) return null;
-    if (typeof picked === 'object') { const t = String(picked.query || '').trim(); if (t) return t; continue; }
-    if (picked === '__default__') return '';
-    if (picked === '__fetch__') {
-      try {
-        const f = await fetchModelsForProvider({
-          cfg: ctx.cfg, registryMod: registry,
-          resolveAuthKey: (id) => (ctx.resolveAuthKey ? ctx.resolveAuthKey(id) : ''),
-          providerId: prov,
-        });
-        if (Array.isArray(f) && f.length) dynamic = f;
-      } catch (_) { /* keep the suggested list */ }
-      continue;
-    }
-    return picked;
-  }
-  return null;
-}
+import { pickProviderModel } from './model_pick.mjs';
 
 // Pick a provider (excluding orchestrator/mock) then its model → a spec string
-// "provider" or "provider:model". Returns null on cancel.
+// "provider" or "provider:model". Returns null on cancel. Wraps the canonical
+// picker (pickProvider forces the provider step; the chat provider is never
+// assumed for a planner/worker). includeSwitch is off — an orchestrator role
+// is one explicit provider:model, not a hop between providers.
 async function pickProviderModelSpec(ctx, registry, title) {
-  const info = registry.PROVIDER_INFO || {};
-  const names = Object.keys(registry.PROVIDERS || {})
-    .filter((n) => n !== 'orchestrator' && n !== 'mock')
-    .sort();
-  const provPick = await ctx.openPicker({
-    kind: 'menu', title, subtitle: 'pick a provider, then its model',
-    items: names.map((n) => ({ id: n, label: n, desc: (info[n] || {}).label && info[n].label !== n ? info[n].label : '' })),
+  const r = await pickProviderModel(ctx, registry, {
+    title, exclude: ['orchestrator', 'mock'], pickProvider: true, includeDefault: true, includeSwitch: false,
   });
-  const prov = provPick && typeof provPick === 'object' ? provPick.id : provPick;
-  if (!prov || !registry.PROVIDERS[prov]) return null;
-  const model = await pickModelForProvider(ctx, registry, prov);
-  if (model === null) return null;
-  return model ? `${prov}:${model}` : prov;
+  if (!r || r.model == null) return null;
+  return r.model ? `${r.provider}:${r.model}` : r.provider;
 }
 
 // Apply an interactive orchestrator edit. `action` ∈ planner | worker-add |
@@ -110,8 +71,9 @@ export async function orchestratorAction(ctx, registry, action) {
 // Pick a model for the active provider and persist it as cfg.model. Returns a
 // status fragment, or null on cancel. Used to chain provider→model in /provider.
 export async function pickAndSetModel(ctx, registry, prov) {
-  const m = await pickModelForProvider(ctx, registry, prov);
-  if (m === null) return null;
+  const r = await pickProviderModel(ctx, registry, { startProvider: prov, includeDefault: true, includeSwitch: false });
+  if (!r || r.model == null) return null;
+  const m = r.model;
   if (ctx.setActiveModel) ctx.setActiveModel(m || null);
   try {
     const c = (ctx.readConfig || _readConfig)();

@@ -152,10 +152,11 @@ export async function pickModelLoop(ctx, registry, provName, opts = {}) {
   let note = '';
   for (let guard = 0; guard < 50; guard++) {
     const items = buildModelItems(info, provName, dynamic, opts);
+    const cur = typeof ctx.getActiveModel === 'function' ? ctx.getActiveModel() : '';
     const picked = await ctx.openPicker({
       kind: 'model',
       title: `select model for ${provName}`,
-      subtitle: note || `current: ${ctx.getActiveModel() || '(default)'}`,
+      subtitle: note || `current: ${cur || '(default)'}`,
       items,
     });
     if (picked == null) return null;
@@ -221,10 +222,11 @@ export async function pickProviderForModel(ctx, registry, subtitle, opts = {}) {
       pinned: true,
     });
   }
+  const active = typeof ctx.getActiveProvName === 'function' ? ctx.getActiveProvName() : '';
   const picked = await ctx.openPicker({
     kind: 'provider',
     title: 'select provider (then a model)',
-    subtitle: subtitle || `${ctx.getActiveProvName()} has no selectable models — pick a provider`,
+    subtitle: subtitle || `${active} has no selectable models — pick a provider`,
     items,
   });
   return typeof picked === 'string' ? picked : null;
@@ -236,6 +238,7 @@ export async function pickProviderForModel(ctx, registry, subtitle, opts = {}) {
 // opts (all optional):
 //   includeSwitch  — show "⇄ pick a different provider" in the model list (default true)
 //   includeAuto    — always open the provider step first with an "auto" row (trainer)
+//   pickProvider   — always open the provider step (orchestrator planner/worker)
 //   includeDefault — add the "▷ provider's own default model" row (orchestrator/agent)
 //   exclude        — provider ids to hide (orchestrator: ['orchestrator','mock'])
 //   startProvider  — begin at this provider (skip the active-provider seed)
@@ -245,15 +248,19 @@ export async function pickProviderModel(ctx, registry, opts = {}) {
   const exclude = opts.exclude || [];
   const loopOpts = { includeSwitch, includeDefault: !!opts.includeDefault };
 
-  let provName = opts.startProvider || ctx.getActiveProvName();
+  let provName = opts.startProvider || (typeof ctx.getActiveProvName === 'function' ? ctx.getActiveProvName() : '');
   let info = infoFor(registry, provName);
   let switched = !!opts.startProvider;
 
   // Open the provider step when the active provider can't offer a model, or
-  // when the caller always wants a provider choice (trainer's includeAuto).
-  const mustPickProvider = !!opts.includeAuto
+  // when the caller always wants a provider choice (orchestrator's pickProvider,
+  // trainer's includeAuto). startProvider skips the step (provider already chosen).
+  const mustPickProvider = !opts.startProvider && (
+    !!opts.pickProvider
+    || !!opts.includeAuto
     || isCompositeProvider(info, provName)
-    || !hasRealModels(info, provName);
+    || !hasRealModels(info, provName)
+  );
   if (mustPickProvider) {
     const picked = await pickProviderForModel(ctx, registry, opts.title, { exclude, includeAuto: opts.includeAuto });
     if (picked == null) return null;
