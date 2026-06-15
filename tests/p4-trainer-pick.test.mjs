@@ -57,3 +57,30 @@ test('/trainer set picker cancel writes nothing', async () => {
   assert.match(out, /cancelled/);
   assert.ok(!fs.existsSync(path.join(cfgDir, 'config.json')));
 });
+
+test('bare /trainer opens the action menu; picking "set" drills the picker', async () => {
+  const cfgDir = tmpCfgDir();
+  const ctx = {
+    cfgDir, cfg: {},
+    getActiveProvName: () => 'anthropic', getActiveModel: () => '',
+    resolveAuthKey: () => '',
+    // menu → 'set', then provider 'anthropic', then model 'claude-opus-4-8'
+    openPicker: scriptedPicker(['set', 'anthropic', 'claude-opus-4-8']),
+  };
+  const out = await dispatchSlash('/trainer', '', ctx, () => {});
+  const disk = JSON.parse(fs.readFileSync(path.join(cfgDir, 'config.json'), 'utf8'));
+  assert.equal(disk.trainer.provider, 'anthropic');
+  assert.equal(disk.trainer.model, 'claude-opus-4-8');
+  assert.match(out, /trainer → anthropic:claude-opus-4-8/);
+});
+
+test('bare /trainer cancelled falls back to show', async () => {
+  const ctx = {
+    cfgDir: tmpCfgDir(), cfg: {},
+    getActiveProvName: () => 'claude-cli', getActiveModel: () => 'claude-opus-4-8',
+    resolveAuthKey: () => '',
+    openPicker: scriptedPicker([null]), // cancel the menu
+  };
+  const out = await dispatchSlash('/trainer', '', ctx, () => {});
+  assert.match(out, /trainer \(effective\)/);
+});

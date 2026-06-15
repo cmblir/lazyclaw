@@ -1132,6 +1132,35 @@ async function _task(args, ctx, write) {
 async function _trainer(args, ctx) {
   const registry = await _mod(ctx, 'registryMod', () => import('../providers/registry.mjs'));
   const tokens = splitWhitespace(args);
+
+  // Bare /trainer with a modal available → an action menu (mirrors the bare
+  // /orchestrator menu). "Set"/"Fallback" re-enter and drill the shared
+  // provider→model picker; "Clear"/"Show" run their subcommands. Typed forms
+  // (/trainer set <p:m>, etc.) still work and skip the menu.
+  if (tokens.length === 0 && typeof ctx.openPicker === 'function') {
+    let cur = '';
+    try {
+      if (typeof registry.resolveTrainer === 'function') {
+        const e = registry.resolveTrainer(ctx.cfg || {});
+        cur = `now: ${e.provider}${e.model ? ':' + e.model : ':(default)'}`;
+      }
+    } catch { /* show menu without the current hint */ }
+    const picked = await ctx.openPicker({
+      kind: 'menu',
+      title: 'Trainer — synthesis / learning model',
+      subtitle: cur || 'pick provider + model for trainer turns',
+      items: [
+        { id: 'set', label: 'Set trainer…', desc: 'pick provider + model (or auto / provider default)' },
+        { id: 'fallback', label: 'Set fallback…', desc: 'pick a fallback provider + model' },
+        { id: 'clear', label: 'Clear', desc: 'unset — mirror the chat provider/model' },
+        { id: 'show', label: 'Show', desc: 'print the effective + configured trainer' },
+      ],
+    });
+    const id = picked && typeof picked === 'object' ? picked.id : picked;
+    if (!id || typeof id !== 'string') return _trainer('show', ctx); // cancelled → show status
+    return _trainer(id, ctx); // re-enter; set/fallback open the picker (no spec)
+  }
+
   const sub = tokens[0] || 'show';
 
   if (sub === 'show') {
