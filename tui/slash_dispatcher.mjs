@@ -1148,7 +1148,14 @@ async function _trainer(args, ctx) {
   }
 
   if (sub === 'set') {
-    const spec = tokens[1];
+    let spec = tokens[1];
+    // No spec + a modal available → drill the shared picker (with an "auto"
+    // row and a "provider default" row) instead of requiring a typed spec.
+    if (!spec && typeof ctx.openPicker === 'function') {
+      const r = await pickProviderModel(ctx, registry, { includeAuto: true, includeDefault: true });
+      if (!r || r.model == null) return 'trainer set: cancelled';
+      spec = r.provider === 'auto' ? 'auto' : (r.model ? `${r.provider}:${r.model}` : r.provider);
+    }
     if (!spec) return 'usage: /trainer set <provider>[:<model>]  (or `auto` for orchestrator-managed)';
     const parsed = typeof registry.parseProviderModel === 'function'
       ? registry.parseProviderModel(spec)
@@ -1188,7 +1195,12 @@ async function _trainer(args, ctx) {
   }
 
   if (sub === 'fallback') {
-    const spec = tokens[1];
+    let spec = tokens[1];
+    if (!spec && typeof ctx.openPicker === 'function') {
+      const r = await pickProviderModel(ctx, registry, { includeAuto: true, includeDefault: true });
+      if (!r || r.model == null) return 'trainer fallback: cancelled';
+      spec = r.provider === 'auto' ? 'auto' : (r.model ? `${r.provider}:${r.model}` : r.provider);
+    }
     if (!spec) return 'usage: /trainer fallback <provider>[:<model>]  |  clear';
     const fs = await import('node:fs');
     const path = await import('node:path');
