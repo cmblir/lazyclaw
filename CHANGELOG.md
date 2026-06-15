@@ -28,10 +28,11 @@ Versioning: [SemVer](https://semver.org/).
 - **Inline slash-argument autocomplete for every arg-taking command.** Typing
   a value after a command now shows candidates in the popup (like the
   `/command` popup): `/login` → `codex-cli`/`gemini-cli`, `/hud` → `on`/`off`,
-  `/memory`, `/config`, `/channels` (names + `on`/`off`), `/skill`, `/provider`,
-  and subcommand menus for `/task` `/team` `/goal` `/context` `/agent`
-  `/personality` `/trainer` `/orchestrator` (plus dynamic agent/skill/personality
-  name lists). ↑/↓ select, Enter fills. The 2-step provider→model picks
+  `/memory`, `/channels` (names + `on`/`off`), `/handoff` (channel), `/dashboard`
+  (`stop`/`kill`), `/skill`, `/provider`, and subcommand menus for `/task`
+  `/team` `/goal` (incl. existing goal names) `/context` `/agent` `/personality`
+  `/trainer` `/orchestrator` (plus dynamic agent/skill/personality name lists).
+  ↑/↓ select, Enter fills. (`/config` opens its own setting picker on Enter.) The 2-step provider→model picks
   (`/model`, `/trainer set`, `/orchestrator planner`) show a `↹ pick` hint and
   open the drill-in modal on **Tab**. Typed forms still work.
 - **`NO_COLOR` / dumb-terminal respect.** A central color gate (`NO_COLOR`
