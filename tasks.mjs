@@ -15,7 +15,12 @@ import crypto from 'node:crypto';
 import { getTeam } from './teams.mjs';
 
 const TASKS_DIRNAME = 'tasks';
-export const VALID_STATUSES = ['pending', 'running', 'done', 'failed', 'abandoned'];
+// 'paused' is a resumable terminal state: a router turn that stopped on the
+// turn budget or went idle (no agent had more to do) lands here — it didn't
+// fail, and `task tick <id>` resumes it (the router flips it back to 'running'
+// for the next turn). Distinct from 'failed' (error), 'abandoned' (explicit
+// abort), and 'done' (completed).
+export const VALID_STATUSES = ['pending', 'running', 'done', 'failed', 'abandoned', 'paused'];
 
 export class TaskError extends Error {
   constructor(message, code) {

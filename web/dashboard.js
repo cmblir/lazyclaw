@@ -1197,7 +1197,7 @@
               <td>${Array.isArray(t.turns) ? t.turns.length : 0}</td>
               <td><span class="dim">${escapeHtml((t.createdAt || '').slice(0, 19))}</span></td>
               <td>
-                ${t.status === 'running' || t.status === 'pending'
+                ${t.status === 'running' || t.status === 'pending' || t.status === 'paused'
                   ? `<button class="btn btn-secondary" onclick="closeTask('${encodeURIComponent(t.id)}','done')">Mark done</button>
                      <button class="btn btn-secondary" onclick="closeTask('${encodeURIComponent(t.id)}','abandon')">Abandon</button>`
                   : ''}

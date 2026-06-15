@@ -295,7 +295,7 @@ test.describe('Phase 13 — mention router', () => {
     await mock.close();
   });
 
-  test('budget exhaustion returns stoppedBy=budget without flipping task.status to done', async () => {
+  test('budget exhaustion returns stoppedBy=budget and pauses the task (not done)', async () => {
     const cfgDir = tmpDir('p13-budget');
     fs.mkdirSync(path.join(cfgDir, 'tasks'), { recursive: true });
     const task = { ...makeTask('shop', 'planner'), id: 't_20260518_rout03' };
@@ -330,7 +330,8 @@ test.describe('Phase 13 — mention router', () => {
     });
     expect(r.stoppedBy).toBe('budget');
     expect(r.iterations).toBe(3);
-    expect(r.task.status).toBe('running');
+    // Budget exhaustion is a pause, not done/failed → 'paused' (resumable).
+    expect(r.task.status).toBe('paused');
     await mock.close();
   });
 

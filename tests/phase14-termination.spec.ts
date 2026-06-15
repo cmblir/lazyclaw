@@ -226,9 +226,11 @@ test.describe('Phase 14 — termination policies', () => {
     const summary = JSON.parse(r.stdout);
     expect(summary.stoppedBy).toBe('budget');
     expect(summary.iterations).toBe(4);
-    // Task remains running so the user can either abandon or tick again.
+    // Hitting the turn budget is a pause, not a failure: the task lands on
+    // 'paused' (resumable — `task tick` flips it back to running, or the user
+    // can abandon it). It is NOT left perpetually 'running'.
     const onDisk = JSON.parse(fs.readFileSync(path.join(cfg, 'tasks', `${open.id}.json`), 'utf8'));
-    expect(onDisk.status).toBe('running');
+    expect(onDisk.status).toBe('paused');
     await mock.close();
   });
 
@@ -253,8 +255,9 @@ test.describe('Phase 14 — termination policies', () => {
     const r = await runCliAsync(['task', 'tick', open.id, 'go'], cfg, { LAZYCLAW_ANTHROPIC_BASE_URL: mock.baseUrl });
     expect(r.status).toBe(0);
     expect(JSON.parse(r.stdout).stoppedBy).toBe('idle');
+    // Idle is a pause, not a failure → 'paused' (resumable via `task tick`).
     const onDisk = JSON.parse(fs.readFileSync(path.join(cfg, 'tasks', `${open.id}.json`), 'utf8'));
-    expect(onDisk.status).toBe('running');
+    expect(onDisk.status).toBe('paused');
     await mock.close();
   });
 });

@@ -130,8 +130,10 @@ test('budget exit flips task.status off running and posts a stop note', async ()
   assert.equal(r.stoppedBy, 'budget', 'precondition: this run must exit via budget');
   // (a) task is no longer stranded in 'running'.
   assert.notEqual(r.task.status, 'running', 'task must not stay running after budget exit');
-  // status must come from the existing vocabulary's terminal set.
-  assert.ok(['done', 'failed', 'abandoned'].includes(r.task.status),
+  // status must come from the vocabulary's terminal set. Budget exit is a
+  // pause (resumable), so 'paused' is the expected landing — but accept any
+  // terminal value so this stays a stranded-running guard, not a vocab lock.
+  assert.ok(['done', 'failed', 'abandoned', 'paused'].includes(r.task.status),
     `expected terminal status, got "${r.task.status}"`);
 
   // re-read from disk to confirm the patch was persisted, not just returned.

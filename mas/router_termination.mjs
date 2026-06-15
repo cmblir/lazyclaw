@@ -2,11 +2,12 @@
 // mention_router.mjs so a non-DONE exit (budget / abort / idle) lands the
 // task on a terminal status AND posts a closing note to the thread, instead
 // of leaving status 'running' forever (a perpetual run on the dashboard) and
-// the thread silent. The DONE path flips status + posts a closing note; this
+// the thread silent. abort → 'abandoned'; budget/idle → 'paused' (resumable
+// via `task tick`). The DONE path flips status + posts a closing note; this
 // mirrors that for the stranded exits. Lives in its own module to keep
 // mention_router.mjs under its size ceiling.
 //
-// A non-DONE stop that wasn't an explicit abort (budget / idle / failed)
+// A non-DONE stop that wasn't an explicit abort (budget / idle → paused)
 // also fires the post-failure learning trigger so a stranded team task
 // teaches an anti-pattern skill. It's fire-and-forget (never awaited, never
 // throws into the router) and degrades to a no-op when the caller hasn't
@@ -16,7 +17,7 @@ import { runLearning as defaultRunLearning } from './learning.mjs';
 
 /**
  * Patch task status + post a stop note for a non-DONE terminal exit, and
- * fire post-failure learning for budget/idle/failed stops (not abort).
+ * fire post-failure learning for budget/idle (paused) stops (not abort).
  * Returns the (possibly updated) task record. A 'done' stop is a no-op so
  * the caller can invoke this unconditionally.
  *
@@ -30,15 +31,19 @@ import { runLearning as defaultRunLearning } from './learning.mjs';
  */
 export async function finalizeTerminalStop({ stoppedBy, iterations, current, configDir, tasksMod, postToThread, slackSender, logger, task, cfg, runLearningImpl }) {
   if (stoppedBy === 'done') return current;
-  // Closest existing terminal vocabulary (tasks.mjs VALID_STATUSES): an
-  // explicit abort maps to 'abandoned'; budget/idle didn't finish the work,
-  // so 'failed'. No new status values are introduced.
-  const terminalStatus = stoppedBy === 'abort' ? 'abandoned' : 'failed';
+  // Map the stop reason to a terminal status (tasks.mjs VALID_STATUSES):
+  //   abort        → 'abandoned'  (explicit human stop)
+  //   budget/idle  → 'paused'     (didn't fail — resumable; `task tick` flips
+  //                                it back to 'running' for the next turn)
+  // This keeps a stopped task off the dashboard's perpetual-'running' list
+  // while being honest that hitting the turn budget or going idle is a pause,
+  // not a failure.
+  const terminalStatus = stoppedBy === 'abort' ? 'abandoned' : 'paused';
   const stopNote = stoppedBy === 'abort'
     ? ':octagonal_sign: task aborted.'
     : stoppedBy === 'budget'
-      ? `:hourglass: stopped after ${iterations} turns (turn budget reached).`
-      : ':warning: stopped — no agent had anything left to do.';
+      ? `:hourglass: paused after ${iterations} turns (turn budget reached) — \`task tick\` to resume.`
+      : ':zzz: paused — no agent had anything left to do; \`task tick\` to resume.';
   const next = tasksMod.patchTask(current.id, { status: terminalStatus }, configDir);
   await postToThread({ task: next, agentRecord: null, text: stopNote, logger, sender: slackSender });
 
