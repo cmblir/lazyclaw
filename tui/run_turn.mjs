@@ -35,6 +35,26 @@ import { chatAgenticGet, chatPlanModeGet, effectiveChatTools } from '../config_f
 // non-TTY test/pipe sink and the red error / dim abort marker vanish.
 const _statusChalk = new Chalk({ level: 1 });
 
+// Classify a provider/turn error into a one-line actionable hint (or '' when
+// none applies). Checked auth → model → network so one hint at most. Advisory
+// only — rendered dim under the red error line.
+function _errorHint(err) {
+  const msg = String(err?.message || err || '');
+  const status = err?.status;
+  const code = err?.code;
+  if (status === 401 || status === 403 || /\b(401|403|unauthorized|forbidden|invalid[ _-]?api[ _-]?key|authentication|no api key|missing api key)\b/i.test(msg)) {
+    return 'hint: set a key with /provider, or `lazyclaw auth add <provider>`';
+  }
+  if (status === 404 || /\b(404|model[ _-]?not[ _-]?found|no such model|unknown model|model .* does not exist|not_found_error)\b/i.test(msg)) {
+    return 'hint: run /model to pick a valid model';
+  }
+  if (code === 'ENOTFOUND' || code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || code === 'ECONNRESET' || code === 'EAI_AGAIN'
+      || /\b(ENOTFOUND|ECONNREFUSED|ETIMEDOUT|ECONNRESET|EAI_AGAIN|network|fetch failed|socket hang up|getaddrinfo)\b/i.test(msg)) {
+    return 'hint: check your connection / base URL (/provider to review the endpoint)';
+  }
+  return '';
+}
+
 // Plan-mode addendum — instructs the model to propose, not mutate. Appended
 // to the synthetic chat agent's system prompt only while plan mode is ON.
 const PLAN_MODE_ADDENDUM = 'You are in PLAN mode. Propose a plan; do not mutate '
@@ -239,6 +259,8 @@ export function makeRunTurn({ ctx, writeFn }) {
         // Ink scrollback <Text> preserves it and the legacy stdout path shows it.
         try { writeFn(`${_statusChalk.red(`error: ${err?.message || String(err)}`)}\n`); }
         catch { /* sink failure must not mask err */ }
+        const _hint = _errorHint(err);
+        if (_hint) { try { writeFn(`${_statusChalk.dim(_hint)}\n`); } catch { /* sink */ } }
       }
     }
   };

@@ -303,14 +303,22 @@ test('/skill <names> inserts system message', async () => {
   assert.match(msgs[0].content, /review\+style/);
 });
 
-test('/skill (no arg) clears system message', async () => {
+test('/skill clear clears system message (bare /skill no longer wipes silently)', async () => {
   const ctx = makeMockCtx();
   ctx.setMessages([{ role: 'system', content: 'old' }, { role: 'user', content: 'hi' }]);
-  const out = await dispatchSlash('/skill', '', ctx);
+  const out = await dispatchSlash('/skill', 'clear', ctx);
   assert.match(out, /cleared system prompt/);
   const msgs = ctx.getMessages();
   assert.equal(msgs.length, 1);
   assert.equal(msgs[0].role, 'user');
+});
+
+test('/skill (no arg, no picker) returns usage instead of clearing', async () => {
+  const ctx = makeMockCtx();
+  ctx.setMessages([{ role: 'system', content: 'old' }, { role: 'user', content: 'hi' }]);
+  const out = await dispatchSlash('/skill', '', ctx);
+  assert.match(out, /usage: \/skill/);
+  assert.equal(ctx.getMessages().length, 2, 'system message must NOT be wiped by a bare /skill');
 });
 
 test('/skills is alias for /skill', async () => {

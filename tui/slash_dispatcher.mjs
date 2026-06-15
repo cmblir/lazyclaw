@@ -38,6 +38,7 @@ import {
   infoFor as _infoFor,
   providerLookup as _providerLookup,
 } from './model_pick.mjs';
+import { renderRecord } from '../lib/render.mjs';
 import { addCustomProvider } from '../providers/custom_provider.mjs';
 import { setAuthKey } from '../providers/auth_store.mjs';
 import { runProviderLogin, loginSlash } from './login_flow.mjs';
@@ -372,13 +373,22 @@ async function _model(args, ctx) {
 async function _skill(args, ctx) {
   // `/skill name1,name2` — replace the active system message with a
   // composition. No-arg → clear system message. Mirrors cli.mjs:3046.
-  const names = args.split(',').map((s) => s.trim()).filter(Boolean);
+  // `clear`/`unset` are not skill names — treat them as the explicit clear verb
+  // so they reach the clear branch instead of being composed as a skill.
+  const isClear = /^(clear|unset)$/i.test((args || '').trim());
+  const names = isClear ? [] : args.split(',').map((s) => s.trim()).filter(Boolean);
   const messages = ctx.getMessages().slice(); // mutable copy
   const sysIdx = messages.findIndex((m) => m.role === 'system');
   const sid = ctx.getSessionId && ctx.getSessionId();
   const sessionsMod = await _mod(ctx, 'sessionsMod', () => import('../sessions.mjs'));
 
   if (names.length === 0) {
+    // Footgun guard: bare `/skill` used to silently wipe the active skills.
+    // Now no-arg opens the skill picker; clearing requires explicit /skill clear.
+    if (!isClear) {
+      if (typeof ctx.openPicker === 'function') return _skillsList('', ctx);
+      return 'usage: /skill <name>[,<name>]  ·  /skill clear to unset  ·  /skills to pick';
+    }
     if (sysIdx >= 0) messages.splice(sysIdx, 1);
     if (ctx.setMessages) ctx.setMessages(messages);
     if (sid) {
@@ -481,6 +491,18 @@ async function _memory(args, ctx) {
   try { mem = await import('../memory.mjs'); }
   catch (e) { return `memory unavailable: ${e?.message || e}`; }
   const tokens = splitWhitespace(args);
+  if (!tokens.length && typeof ctx.openPicker === 'function') {
+    const picked = await ctx.openPicker({
+      kind: 'menu', title: 'Memory', subtitle: 'view a memory store',
+      items: [
+        { id: 'core', label: 'Core', desc: 'persistent core memory' },
+        { id: 'recent', label: 'Recent', desc: 'last ~20 messages' },
+        { id: 'episodic', label: 'Episodic', desc: 'consolidated topic files' },
+      ],
+    });
+    const pid = picked && typeof picked === 'object' ? picked.id : picked;
+    return _memory(typeof pid === 'string' && pid ? pid : 'core', ctx);
+  }
   const which = tokens[0] || 'core';
   if (which === 'core') {
     const body = mem.loadCore(ctx.cfgDir);
@@ -544,6 +566,20 @@ async function _agent(args, ctx) {
   const rest = tokens.slice(1);
   const aname = rest[0];
   try {
+    if (!sub && typeof ctx.openPicker === 'function') {
+      const picked = await ctx.openPicker({
+        kind: 'menu', title: 'Agents', subtitle: `${agentsMod.listAgents(ctx.cfgDir).length} registered`,
+        items: [
+          { id: 'list', label: 'List agents', desc: 'show all' },
+          { id: 'add', label: 'Add agent…', desc: '/agent add <name> [role]' },
+          { id: 'edit', label: 'Edit agent…', desc: 'pick provider + model' },
+          { id: 'show', label: 'Show agent…', desc: 'print one record' },
+          { id: 'remove', label: 'Remove agent…', desc: 'delete a record' },
+        ],
+      });
+      const pid = picked && typeof picked === 'object' ? picked.id : picked;
+      return _agent(typeof pid === 'string' && pid ? pid : 'list', ctx);
+    }
     if (!sub || sub === 'list') {
       const agents = agentsMod.listAgents(ctx.cfgDir);
       if (agents.length === 0) return 'no agents registered. /agent add <name> [...] to create.';
@@ -553,10 +589,12 @@ async function _agent(args, ctx) {
       }).join('\n');
     }
     if (sub === 'show') {
-      if (!aname) return 'usage: /agent show <name>';
+      if (!aname) return 'usage: /agent show <name> [json]';
       const a = agentsMod.getAgent(aname, ctx.cfgDir);
       if (!a) return `no agent "${aname}"`;
-      return JSON.stringify(a, null, 2);
+      return rest[1] === 'json'
+        ? JSON.stringify(a, null, 2)
+        : renderRecord(a, { fields: ['name', 'displayName', 'provider', 'model', 'role', 'tools', 'tags', 'iconEmoji', 'memoryWrite', 'skillWrite', 'createdAt', 'updatedAt'] });
     }
     if (sub === 'add') {
       if (!aname) return 'usage: /agent add <name> [role text…]';
@@ -579,6 +617,10 @@ async function _agent(args, ctx) {
     }
     if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
       if (!aname) return 'usage: /agent remove <name>';
+      if (typeof ctx.openPicker === 'function') {
+        const ok = await _promptConfirm(ctx, { title: `Remove agent "${aname}"?`, subtitle: 'This cannot be undone. Enter selects · Esc cancels' });
+        if (!ok) return `agent remove: cancelled — "${aname}" not removed`;
+      }
       agentsMod.removeAgent(aname, ctx.cfgDir);
       return `✓ removed agent ${aname}`;
     }
@@ -601,6 +643,19 @@ async function _team(args, ctx) {
   const rest = tokens.slice(1);
   const tname = rest[0];
   try {
+    if (!sub && typeof ctx.openPicker === 'function') {
+      const picked = await ctx.openPicker({
+        kind: 'menu', title: 'Teams', subtitle: `${teamsMod.listTeams(ctx.cfgDir).length} registered`,
+        items: [
+          { id: 'list', label: 'List teams', desc: 'show all' },
+          { id: 'add', label: 'Add team…', desc: '/team add <name> --agents a,b --lead a' },
+          { id: 'show', label: 'Show team…', desc: 'print one record' },
+          { id: 'remove', label: 'Remove team…', desc: 'delete a team' },
+        ],
+      });
+      const pid = picked && typeof picked === 'object' ? picked.id : picked;
+      return _team(typeof pid === 'string' && pid ? pid : 'list', ctx);
+    }
     if (!sub || sub === 'list') {
       const teams = teamsMod.listTeams(ctx.cfgDir);
       if (teams.length === 0) return 'no teams registered. /team add <name> --agents a,b --lead a [--channel #x]';
@@ -610,10 +665,12 @@ async function _team(args, ctx) {
       }).join('\n');
     }
     if (sub === 'show') {
-      if (!tname) return 'usage: /team show <name>';
+      if (!tname) return 'usage: /team show <name> [json]';
       const t = teamsMod.getTeam(tname, ctx.cfgDir);
       if (!t) return `no team "${tname}"`;
-      return JSON.stringify(t, null, 2);
+      return rest[1] === 'json'
+        ? JSON.stringify(t, null, 2)
+        : renderRecord(t, { fields: ['name', 'displayName', 'lead', 'agents', 'slackChannel', 'createdAt', 'updatedAt'] });
     }
     if (sub === 'add') {
       if (!tname) return 'usage: /team add <name> --agents a,b,c [--lead a] [--channel #x]';
@@ -637,6 +694,10 @@ async function _team(args, ctx) {
     }
     if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
       if (!tname) return 'usage: /team remove <name>';
+      if (typeof ctx.openPicker === 'function') {
+        const ok = await _promptConfirm(ctx, { title: `Remove team "${tname}"?`, subtitle: 'This cannot be undone. Enter selects · Esc cancels' });
+        if (!ok) return `team remove: cancelled — "${tname}" not removed`;
+      }
       teamsMod.removeTeam(tname, ctx.cfgDir);
       return `✓ removed team ${tname}`;
     }
@@ -762,6 +823,22 @@ async function _goal(args, ctx) {
     sessionsMod = await _mod(ctx, 'sessionsMod', () => import('../sessions.mjs'));
   } catch (e) { return `/goal unavailable: ${e?.message || e}`; }
   if (!args) {
+    if (typeof ctx.openPicker === 'function') {
+      const active = goalsMod.listGoals(ctx.cfgDir).filter((g) => g.status === 'active');
+      const picked = await ctx.openPicker({
+        kind: 'menu', title: 'Goals', subtitle: `${active.length} active`,
+        items: [
+          { id: 'list', label: 'List goals', desc: 'show all' },
+          { id: 'add', label: 'Add goal…', desc: '/goal add <name> [--desc] [--cron]' },
+          { id: 'show', label: 'Show goal…', desc: 'print one record' },
+          { id: 'close', label: 'Close goal…', desc: 'mark done/abandoned' },
+          ...active.map((g) => ({ id: g.name, label: `↪ switch: ${g.name}`, desc: g.description || '' })),
+        ],
+      });
+      const pid = picked && typeof picked === 'object' ? picked.id : picked;
+      if (pid && typeof pid === 'string') return _goal(pid, ctx);
+      // cancelled → fall through to the text list below
+    }
     const items = goalsMod.listGoals(ctx.cfgDir).filter((g) => g.status === 'active');
     if (!items.length) return 'no active goals';
     return items.map((g) =>
@@ -810,10 +887,12 @@ async function _goal(args, ctx) {
   if (sub === 'list') return JSON.stringify(goalsMod.listGoals(ctx.cfgDir), null, 2);
   if (sub === 'show') {
     const name = rest[0];
-    if (!name) return 'usage: /goal show <name>';
+    if (!name) return 'usage: /goal show <name> [json]';
     const g = goalsMod.getGoal(name, ctx.cfgDir);
     if (!g) return `no goal "${name}"`;
-    return JSON.stringify(g, null, 2);
+    return rest[1] === 'json'
+      ? JSON.stringify(g, null, 2)
+      : renderRecord(g, { fields: ['name', 'status', 'description', 'schedule', 'channels', 'createdAt', 'memoryPath'] });
   }
   if (sub === 'close') {
     const name = rest[0];
@@ -831,7 +910,7 @@ async function _goal(args, ctx) {
           if (removed) detachNote = ' (cron detached)';
         } catch { /* best-effort */ }
       }
-      return `✓ goal ${g.name} closed (status: ${g.status})${detachNote}`;
+      return `✓ goal ${g.name} closed (status: ${g.status})${detachNote} — start a fresh goal with /goal add ${g.name} --desc "..."`;
     } catch (e) { return `goal error: ${e?.message || e}`; }
   }
   // single-arg branch: switch
@@ -944,6 +1023,10 @@ async function _personality(args, ctx) {
     if (!a) return 'usage: /personality remove <name>';
     const p = path.join(dir, `${a}.md`);
     if (!fs.existsSync(p)) return `personality not installed: ${a}`;
+    if (typeof ctx.openPicker === 'function') {
+      const ok = await _promptConfirm(ctx, { title: `Remove personality "${a}"?`, subtitle: 'This cannot be undone. Enter selects · Esc cancels' });
+      if (!ok) return `personality remove: cancelled — "${a}" not removed`;
+    }
     fs.unlinkSync(p);
     return `removed ${a}`;
   }
@@ -985,18 +1068,37 @@ async function _task(args, ctx, write) {
   const id = tokens[1];
 
   try {
+    if (!sub && typeof ctx.openPicker === 'function') {
+      const picked = await ctx.openPicker({
+        kind: 'menu', title: 'Tasks', subtitle: `${tasksMod.listTasks(ctx.cfgDir).length} task(s)`,
+        items: [
+          { id: 'list', label: 'List tasks', desc: 'show all' },
+          { id: 'start', label: 'Start task…', desc: 'open a new multi-agent task' },
+          { id: 'tick', label: 'Tick task…', desc: 'one router turn' },
+          { id: 'show', label: 'Show task…', desc: 'print a record' },
+          { id: 'transcript', label: 'Transcript…', desc: 'dump turns' },
+          { id: 'done', label: 'Mark done…', desc: 'close a task' },
+          { id: 'abandon', label: 'Abandon…', desc: 'abandon a task' },
+          { id: 'remove', label: 'Remove…', desc: 'delete a task' },
+        ],
+      });
+      const pid = picked && typeof picked === 'object' ? picked.id : picked;
+      return _task(typeof pid === 'string' && pid ? pid : 'list', ctx, write);
+    }
     if (!sub || sub === 'list') {
       const items = tasksMod.listTasks(ctx.cfgDir);
-      if (!items.length) return 'no tasks. `lazyclaw task start --team ... --title ...` from the shell to create one.';
+      if (!items.length) return 'no tasks yet. /task start <team> --title "..." to create one.';
       return items.map((t) =>
         `• ${t.id} [${t.status || 'unknown'}] ${t.title || '(no title)'}${t.team ? ` — team=${t.team}` : ''}${t.lead ? ` — lead=${t.lead}` : ''}`
       ).join('\n');
     }
     if (sub === 'show') {
-      if (!id) return 'usage: /task show <id>';
+      if (!id) return 'usage: /task show <id> [json]';
       const t = tasksMod.getTask(id, ctx.cfgDir);
       if (!t) return `no task "${id}"`;
-      return JSON.stringify(t, null, 2);
+      return tokens[2] === 'json'
+        ? JSON.stringify(t, null, 2)
+        : renderRecord(t, { fields: ['id', 'status', 'title', 'description', 'team', 'lead', 'slackChannel', 'createdAt', 'updatedAt'] });
     }
     if (sub === 'transcript') {
       if (!id) return 'usage: /task transcript <id> [text|md|json]';
@@ -1035,6 +1137,10 @@ async function _task(args, ctx, write) {
     }
     if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
       if (!id) return 'usage: /task remove <id>';
+      if (typeof ctx.openPicker === 'function') {
+        const ok = await _promptConfirm(ctx, { title: `Remove task ${id}?`, subtitle: 'This cannot be undone. Enter selects · Esc cancels' });
+        if (!ok) return `task remove: cancelled — ${id} not removed`;
+      }
       tasksMod.removeTask(id, ctx.cfgDir);
       return `✓ removed task ${id}`;
     }
@@ -1173,7 +1279,7 @@ async function _trainer(args, ctx) {
     } catch { /* fall through */ }
     const configured = (ctx.cfg && ctx.cfg.trainer) || null;
     const cfgRender = configured
-      ? JSON.stringify(configured, null, 2)
+      ? renderRecord(configured, { fields: ['provider', 'model', 'fallback'] }).split('\n').map((l) => '  ' + l).join('\n')
       : '(unset — trainer mirrors the chat provider/model)';
     return [
       'trainer (effective):',
@@ -1618,7 +1724,29 @@ async function _channels(args, ctx = {}) {
     if (ctx.cfg && ctx.cfg !== cfg && typeof ctx.cfg === 'object') {
       cf.channelSetEnabled(ctx.cfg, key, en);
     }
-    return `channel ${key} → ${en ? 'enabled' : 'disabled'}`;
+    return en
+      ? `channel ${key} → enabled`
+      : `channel ${key} → disabled (re-enable with /channels ${key} on)`;
+  }
+  // No-arg + modal → an action menu: each row toggles in place, plus a
+  // "set credentials" row. Falls through to the text list when no modal.
+  if (!toks.length && typeof ctx.openPicker === 'function') {
+    const statusRows = cf.channelStatusList(read());
+    const items = statusRows.map((c) => ({
+      id: `toggle:${c.name}`,
+      label: `${c.name} — ${c.enabled ? 'enabled' : 'disabled'}`,
+      desc: c.enabled ? 'Enter to disable' : 'Enter to enable',
+    }));
+    items.push({ id: 'setup', label: '+ Set credentials…', desc: 'pick a channel and enter bot token / homeserver / …' });
+    const picked = await ctx.openPicker({ kind: 'menu', title: 'Channels', subtitle: `${statusRows.length} configured`, items });
+    const pid = picked && typeof picked === 'object' ? picked.id : picked;
+    if (!pid || typeof pid !== 'string') return 'cancelled';
+    if (pid === 'setup') return _channels('setup', ctx);
+    if (pid.startsWith('toggle:')) {
+      const nm = pid.slice(7);
+      const cur = statusRows.find((r) => r.name === nm);
+      return _channels(`${nm} ${cur && cur.enabled ? 'off' : 'on'}`, ctx);
+    }
   }
   const rows = cf.channelStatusList(read());
   if (!rows.length) return 'no channels configured. set credentials with /channels setup (or `lazyclaw setup` for the full wizard).';
@@ -1643,6 +1771,32 @@ async function _context(args, ctx = {}) {
   const parts = (args || '').trim().split(/\s+/).filter(Boolean);
   const sub = (parts[0] || 'status').toLowerCase();
   const fmt = () => { const w = cf.chatWindowGet(read()); return `context window: ${w.turns} turns · ${w.tokens} tokens  (history budget — not the model's hard limit)`; };
+  // No-arg + modal → action menu → numeric picker (mirrors orchestrator maxsubtasks).
+  if (!parts.length && typeof ctx.openPicker === 'function') {
+    const w = cf.chatWindowGet(read());
+    const action = await ctx.openPicker({
+      kind: 'menu', title: 'Context window (history budget)', subtitle: `now ${w.turns} turns · ${w.tokens} tokens`,
+      items: [
+        { id: 'turns', label: 'Set turns…', desc: 'past turns to send' },
+        { id: 'tokens', label: 'Set tokens…', desc: 'token budget (min 256)' },
+        { id: 'status', label: 'Status', desc: 'show current' },
+      ],
+    });
+    const aid = action && typeof action === 'object' ? action.id : action;
+    if (!aid || typeof aid !== 'string' || aid === 'status') return fmt();
+    if (aid === 'turns') {
+      const np = await ctx.openPicker({ kind: 'menu', title: 'Turns to keep', subtitle: `currently ${w.turns}`, items: [5, 10, 15, 20, 30, 40, 50].map((x) => ({ id: String(x), label: String(x) })) });
+      const v = parseInt(np && typeof np === 'object' ? np.id : np, 10);
+      if (!Number.isFinite(v)) return 'context turns: cancelled';
+      const cfg = read(); cf.chatWindowSet(cfg, { turns: v }); persist(cfg); return fmt();
+    }
+    if (aid === 'tokens') {
+      const np = await ctx.openPicker({ kind: 'menu', title: 'Token budget', subtitle: `currently ${w.tokens}`, items: [2000, 4000, 8000, 12000, 16000, 32000].map((x) => ({ id: String(x), label: String(x) })) });
+      const v = parseInt(np && typeof np === 'object' ? np.id : np, 10);
+      if (!Number.isFinite(v) || v < 256) return 'context tokens: cancelled';
+      const cfg = read(); cf.chatWindowSet(cfg, { tokens: v }); persist(cfg); return fmt();
+    }
+  }
   if (sub === 'status') return fmt();
   const n = parseInt(parts[1], 10);
   if (sub === 'turns') { if (!Number.isFinite(n) || n < 1) return 'usage: /context turns <N>'; const cfg = read(); cf.chatWindowSet(cfg, { turns: n }); persist(cfg); return fmt(); }

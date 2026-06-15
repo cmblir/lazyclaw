@@ -9,6 +9,7 @@ import {
   persistActiveModel, persistActiveProvider,
   _resolveAuthKey, _resolveBaseUrl, readVersionFromRepo,
 } from '../lib/config.mjs';
+import { renderRecord } from '../lib/render.mjs';
 import { ensureRegistry, requireRegistry, getRegistry } from '../lib/registry_boot.mjs';
 import { SUBCOMMANDS, parseArgs, AGENT_REG_SUBS } from '../lib/args.mjs';
 import {
@@ -989,10 +990,11 @@ export async function cmdChat(flags = {}) {
               process.stdout.write(`• ${a.name} — ${a.displayName} — ${provLine} — tools=[${(a.tools || []).join(',')}]\n`);
             }
           } else if (sub === 'show') {
-            if (!aname) { process.stdout.write('usage: /agent show <name>\n'); return true; }
+            if (!aname) { process.stdout.write('usage: /agent show <name> [json]\n'); return true; }
             const a = agentsMod.getAgent(aname, cfgDir);
             if (!a) process.stdout.write(`no agent "${aname}"\n`);
-            else process.stdout.write(JSON.stringify(a, null, 2) + '\n');
+            else if (rest[1] === 'json') process.stdout.write(JSON.stringify(a, null, 2) + '\n');
+            else process.stdout.write(renderRecord(a, { fields: ['name', 'displayName', 'provider', 'model', 'role', 'tools', 'tags', 'iconEmoji', 'memoryWrite', 'skillWrite', 'createdAt', 'updatedAt'] }) + '\n');
           } else if (sub === 'add') {
             if (!aname) { process.stdout.write('usage: /agent add <name> [role text…]\n'); return true; }
             const roleText = rest.slice(1).join(' ').trim();

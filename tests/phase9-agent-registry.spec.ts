@@ -157,7 +157,7 @@ test.describe('Phase 9 — agent registry', () => {
     expect(await waitFor(child, sink, '• planner')).toBe(true);
 
     child.stdin.write('/agent show planner\n');
-    expect(await waitFor(child, sink, '"name": "planner"')).toBe(true);
+    expect(await waitFor(child, sink, 'name: planner')).toBe(true);
 
     child.stdin.write('/agent remove planner\n');
     expect(await waitFor(child, sink, '✓ removed agent planner')).toBe(true);
