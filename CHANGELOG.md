@@ -17,6 +17,11 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **Setup wizard channel step is now a picker.** The first-run wizard's
+  "where will you run it?" step no longer makes you type the channel name —
+  pick it from an arrow-key list (type to filter), set its credentials inline
+  (secrets masked), and loop to add several channels in one pass (exit via the
+  "Done" row or Esc).
 - **One model picker everywhere.** Bare `/trainer` opens an action menu
   (Set / Fallback / Clear / Show, like bare `/orchestrator`); `/trainer set|fallback`
   and the new `/agent edit <name>` open the same provider→model picker as `/model`
