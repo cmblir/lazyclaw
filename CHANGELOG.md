@@ -22,6 +22,19 @@ Versioning: [SemVer](https://semver.org/).
   pick it from an arrow-key list (type to filter), set its credentials inline
   (secrets masked), and loop to add several channels in one pass (exit via the
   "Done" row or Esc).
+- **The rest of the wizard is pickable too.** "Test the provider now?",
+  "Initialise a workspace?", "Install a skill bundle?", "Add a webhook?" and
+  "Enable orchestration?" are now arrow-key Yes/Skip picks, and the context
+  window is a preset pick (keep / small / default / large / custom) — no more
+  typing `y`/`n` or raw numbers.
+
+### Fixed
+
+- **Wizard no longer pushes the screen down each step.** The arrow-key picker
+  cleared the main screen buffer on every redraw, which interleaved with prior
+  steps' output and pushed a screenful into scrollback per step (a growing
+  gap). It now renders on the alternate screen buffer (like vim/less/fzf) and
+  restores the main buffer on exit, pushing nothing.
 - **One model picker everywhere.** Bare `/trainer` opens an action menu
   (Set / Fallback / Clear / Show, like bare `/orchestrator`); `/trainer set|fallback`
   and the new `/agent edit <name>` open the same provider→model picker as `/model`
