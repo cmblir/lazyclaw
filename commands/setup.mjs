@@ -16,6 +16,7 @@ import {
   _attachGhostAutocomplete, _fetchModelsForProvider, _pauseChatForSubMenu,
   _pickModelInteractive, _pickProviderInteractive, _printChatBanner,
   _quickPrompt, _quickPromptSecret, _renderBanner, _renderV5Banner,
+  _pickYesNo,
 } from '../tui/pickers.mjs';
 import { firstRunMode as _firstRunMode } from '../first_run.mjs';
 import { applyChatWindow as _applyChatWindow, CHAT_WINDOW_TURNS, CHAT_WINDOW_TOKEN_BUDGET } from '../chat_window.mjs';
@@ -256,7 +257,7 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
   if (want('verify') && cfgAfterOnboard.provider) {
   process.stdout.write(`  ${accent('Step 2/7 ·')} ${bold('Verify the provider responds')}\n`);
   process.stdout.write(`  ${dim('Sends a 1-token "ping" via `lazyclaw providers test`. Confirm a clean reply before layering on channels/skills.')}\n\n`);
-  const wantPing = !flags['skip-test'] && (await _quickPrompt('  test now? [Y/n] ')).trim().toLowerCase() !== 'n';
+  const wantPing = !flags['skip-test'] && await _pickYesNo('Test the provider now?', { subtitle: 'sends a 1-token ping to confirm a clean reply', yesLabel: 'Test now', noLabel: 'Skip', defaultYes: true });
   if (wantPing) {
     try {
       // No-exit probe (providers/probe.mjs) — the CLI `providers test` calls
@@ -285,7 +286,8 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
   if (want('workspace')) {
   process.stdout.write(`  ${accent('Step 4/7 ·')} ${bold('Initialise a workspace?')} ${dim('(optional)')}\n`);
   process.stdout.write(`  ${dim('A workspace is a folder of AGENTS.md / SOUL.md / TOOLS.md prompt files that auto-inject into chat / agent. Skip if you don\'t need project-specific personas yet.')}\n\n`);
-  const wsName = (await _quickPrompt('  workspace name (Enter to skip): ')).trim();
+  const wantWs = await _pickYesNo('Initialise a workspace?', { yesLabel: 'Create one', noLabel: 'Skip', defaultYes: false });
+  const wsName = wantWs ? (await _quickPrompt('  workspace name: ')).trim() : '';
   if (wsName && /^[A-Za-z0-9_.-]+$/.test(wsName)) {
     try {
       const ws = await import('../workspace.mjs');
@@ -306,7 +308,8 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
   if (want('skill')) {
   process.stdout.write(`  ${accent('Step 5/7 ·')} ${bold('Install a skill bundle from GitHub?')} ${dim('(optional)')}\n`);
   process.stdout.write(`  ${dim('Format: <user>/<repo>[@<ref>]. Skills are .md prompt fragments that compose into the system prompt via --skill.')}\n\n`);
-  const skillSpec = (await _quickPrompt('  github spec (Enter to skip): ')).trim();
+  const wantSkill = await _pickYesNo('Install a skill bundle from GitHub?', { yesLabel: 'Install one', noLabel: 'Skip', defaultYes: false });
+  const skillSpec = wantSkill ? (await _quickPrompt('  github spec (<user>/<repo>[@<ref>]): ')).trim() : '';
   if (skillSpec) {
     try {
       const inst = await import('../skills_install.mjs');

@@ -210,8 +210,10 @@ export async function runChannelStep({ cfgDir, prompt, colors, write = (s) => pr
 // Outbound webhook step (moved verbatim-in-spirit from setup.mjs).
 export async function runWebhookStep({ prompt, colors, write = (s) => process.stdout.write(s) }) {
   const { dim, ok, warn } = colors;
+  const { _pickYesNo } = await import('../tui/pickers.mjs');
   write(`  ${dim('Outbound webhook for `lazyclaw message send <name> <text>`. Slack / Discord Incoming Webhook URLs work as-is.')}\n\n`);
-  const hookName = (await prompt('  webhook name (Enter to skip): ')).trim();
+  const wantHook = await _pickYesNo('Add an outbound webhook?', { yesLabel: 'Add one', noLabel: 'Skip', defaultYes: false });
+  const hookName = wantHook ? (await prompt('  webhook name: ')).trim() : '';
   if (!hookName) { write(`  ${dim('— skipped —')}\n\n`); return { skipped: true }; }
   const hookUrl = (await prompt('  webhook URL: ')).trim();
   if (!hookUrl) { write(`  ${warn('skipped:')} URL required\n\n`); return { skipped: true }; }
@@ -233,13 +235,29 @@ export async function runWebhookStep({ prompt, colors, write = (s) => process.st
 export async function runContextStep({ prompt, colors, write = (s) => process.stdout.write(s) }) {
   const { dim, ok } = colors;
   const cf = await import('../config_features.mjs');
+  const { _pickChoice } = await import('../tui/pickers.mjs');
   const cur = cf.chatWindowGet(readConfig());
   write(`  ${dim(`Context window — how much past conversation to send each turn (sliding budget, not the model's hard limit). Now: ${cur.turns} turns · ${cur.tokens} tokens.`)}\n\n`);
-  const turnsRaw = (await prompt(`  turns to keep (Enter = ${cur.turns}): `)).trim();
-  const tokensRaw = (await prompt(`  token budget (Enter = ${cur.tokens}): `)).trim();
-  if (!turnsRaw && !tokensRaw) { write(`  ${dim('— kept defaults —')}\n\n`); return { skipped: true }; }
-  const turns = parseInt(turnsRaw, 10);
-  const tokens = parseInt(tokensRaw, 10);
+  // Pick a preset (or "custom" → type the two numbers). Presets cover the
+  // common small/default/large tradeoffs so the user rarely has to type.
+  const PRESETS = [
+    { id: 'keep', label: `Keep current (${cur.turns} turns · ${cur.tokens} tokens)`, turns: cur.turns, tokens: cur.tokens },
+    { id: 'small', label: 'Small — 20 turns · 8k tokens', desc: 'cheaper, shorter memory', turns: 20, tokens: 8000 },
+    { id: 'default', label: 'Default — 40 turns · 16k tokens', turns: 40, tokens: 16000 },
+    { id: 'large', label: 'Large — 80 turns · 32k tokens', desc: 'more context, costs more', turns: 80, tokens: 32000 },
+    { id: 'custom', label: 'Custom…', desc: 'type your own turns + token budget' },
+  ];
+  const choice = await _pickChoice('Context window', PRESETS, { subtitle: 'how much past conversation to send each turn', fallback: 'keep' });
+  if (choice === 'keep') { write(`  ${dim('— kept defaults —')}\n\n`); return { skipped: true }; }
+  let turns, tokens;
+  if (choice === 'custom') {
+    turns = parseInt((await prompt(`  turns to keep (Enter = ${cur.turns}): `)).trim(), 10);
+    tokens = parseInt((await prompt(`  token budget (Enter = ${cur.tokens}): `)).trim(), 10);
+  } else {
+    const p = PRESETS.find((x) => x.id === choice);
+    turns = p ? p.turns : NaN;
+    tokens = p ? p.tokens : NaN;
+  }
   const cfg = readConfig();
   cf.chatWindowSet(cfg, {
     ...(Number.isFinite(turns) && turns > 0 ? { turns } : {}),
@@ -262,9 +280,10 @@ export async function runOrchestratorStep({ prompt, colors, write = (s) => proce
   // planner + workers are chosen from a list (arrow keys / filter), not typed.
   const { _pickProviderInteractive } = await import('../tui/pickers.mjs');
   const toSpec = (p) => (p && p.provider) ? (p.model ? `${p.provider}:${p.model}` : p.provider) : null;
+  const { _pickYesNo } = await import('../tui/pickers.mjs');
   write(`  ${dim('Multi-agent: a planner splits your task into subtasks, workers run them in parallel, then a synthesis step merges the results. Skip for a single agent.')}\n\n`);
-  const yn = (await prompt('  enable orchestration? [y/N] ')).trim().toLowerCase();
-  if (yn !== 'y' && yn !== 'yes') { write(`  ${dim('— skipped —')}\n\n`); return { skipped: true }; }
+  const enable = await _pickYesNo('Enable multi-agent orchestration?', { yesLabel: 'Enable', noLabel: 'Skip', defaultYes: false });
+  if (!enable) { write(`  ${dim('— skipped —')}\n\n`); return { skipped: true }; }
   const cfg = readConfig();
   const base = cfg.provider && cfg.provider !== 'orchestrator' ? cfg.provider : 'claude-cli';
   // Planner — pick from the provider/model list (Esc keeps the default).
