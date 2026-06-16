@@ -135,42 +135,76 @@ export async function verifyChannel(name, { env = process.env, fetchImpl } = {})
   }
 }
 
-// Interactive channel step. `prompt(label)` resolves to a trimmed string;
-// `write(text)` sinks UI output (defaults to process.stdout). Returns
-// { skipped, channel?, needsPlugin? }. Never echoes a secret field value.
-export async function runChannelStep({ cfgDir, prompt, colors, write = (s) => process.stdout.write(s) }) {
+// Configure ONE channel: prompt each credential field (secrets masked),
+// persist to .env + cfg.channels, echo a summary. Returns the persist entry.
+async function configureChannel({ cfgDir, spec, prompt, colors, write }) {
   const { dim, ok, warn } = colors;
-  const list = CHANNEL_CATALOG.map((c) => `${c.name}${c.builtin ? '' : ' *'}`).join(' · ');
-  write(`  ${dim('Where will you talk to the agent? Built-in: slack/telegram/matrix/http. (* = needs a plugin package.)')}\n`);
-  write(`  ${dim(list)}\n\n`);
-  const pick = (await prompt('  channel (Enter to skip): ')).trim().toLowerCase();
-  if (!pick) { write(`  ${dim('— skipped —')}\n\n`); return { skipped: true }; }
-  const spec = channelByName(pick);
-  if (!spec) { write(`  ${warn('skipped:')} unknown channel "${pick}"\n\n`); return { skipped: true }; }
-
   const answers = {};
   for (const f of spec.fields) {
     // Mask secret fields so tokens aren't echoed in plaintext to the terminal.
     const v = (await prompt(`  ${spec.label} — ${f.prompt}${f.optional ? ' (optional)' : ''}: `, { secret: !!f.secret })).trim();
     if (v) answers[f.key] = v;
   }
-  try {
-    const entry = persistChannel(cfgDir, pick, answers);
-    const credKeys = Object.keys(entry.envVars);
-    write(`  ${ok('✓ channel enabled:')} ${pick}  ${credKeys.length ? dim(`creds: ${credKeys.join(', ')}`) : ''}\n`);
-    for (const f of spec.fields) {
-      if (f.secret && answers[f.key]) write(`    ${dim(`${f.env} = ${mask(answers[f.key])}  (stored in ${cfgDir}/.env, 0600)`)}\n`);
-    }
-    if (entry.needsPlugin) {
-      write(`  ${warn('plugin required:')} ${entry.needsPlugin}\n`);
-      write(`    ${dim(`install with: lazyclaw channels install ${entry.needsPlugin}  (or npm install --prefix ${cfgDir} ${entry.needsPlugin})`)}\n`);
-    }
-    write('\n');
-    return { skipped: false, channel: pick, needsPlugin: entry.needsPlugin };
-  } catch (e) {
-    write(`  ${warn('skipped:')} ${e?.message || e}\n\n`);
-    return { skipped: true };
+  const entry = persistChannel(cfgDir, spec.name, answers);
+  const credKeys = Object.keys(entry.envVars);
+  write(`  ${ok('✓ channel enabled:')} ${spec.name}  ${credKeys.length ? dim(`creds: ${credKeys.join(', ')}`) : ''}\n`);
+  for (const f of spec.fields) {
+    if (f.secret && answers[f.key]) write(`    ${dim(`${f.env} = ${mask(answers[f.key])}  (stored in ${cfgDir}/.env, 0600)`)}\n`);
   }
+  if (entry.needsPlugin) {
+    write(`  ${warn('plugin required:')} ${entry.needsPlugin}\n`);
+    write(`    ${dim(`install with: lazyclaw channels install ${entry.needsPlugin}  (or npm install --prefix ${cfgDir} ${entry.needsPlugin})`)}\n`);
+  }
+  write('\n');
+  return entry;
+}
+
+// Interactive channel step. Picks the channel from an arrow-key list (no
+// typing the name), then prompts that channel's credential fields, and loops
+// so several channels can be set up in one pass. `prompt(label, {secret})`
+// resolves to a trimmed string; `write(text)` sinks UI output. Returns
+// { skipped, channels: [names], needsPlugin? }. Never echoes a secret value.
+export async function runChannelStep({ cfgDir, prompt, colors, write = (s) => process.stdout.write(s), pick }) {
+  const { dim, ok, warn } = colors;
+  // `pick` is the arrow-key list selector — injectable so tests can script it
+  // (the real _arrowMenu reads raw stdin, which a unit test can't drive).
+  const picker = pick || (await import('../tui/pickers.mjs'))._arrowMenu;
+  write(`  ${dim('Where will you talk to the agent? Pick one (arrow keys); set its credentials inline. (* = needs a plugin package.) You can add more than one.')}\n\n`);
+
+  const configured = [];
+  let needsPlugin = null;
+  while (true) {
+    const done = configured.length
+      ? { id: '__done__', label: `✓ Done (${configured.length} channel${configured.length === 1 ? '' : 's'} set)`, desc: 'finish the channel step' }
+      : { id: '__done__', label: 'Skip — no channel', desc: 'set one later with /channels <name> setup' };
+    const items = [done, ...CHANNEL_CATALOG.map((c) => ({
+      id: c.name,
+      label: `${c.label}${c.builtin ? '' : ' *'}`,
+      desc: configured.includes(c.name) ? '(already set — reconfigure)' : (c.builtin ? '' : `plugin: ${c.plugin}`),
+    }))];
+    const picked = await picker({
+      title: 'Step 3 · pick a channel to set up',
+      subtitle: 'Enter to configure · Esc / Done to finish',
+      items,
+      searchable: true,
+    });
+    // Esc / q / Ctrl-C / Done → leave the step.
+    const id = picked && typeof picked === 'object' ? picked.id : picked;
+    if (!id || id === '__done__' || id === 'BACK' || id === 'CANCEL') break;
+    const spec = channelByName(id);
+    if (!spec) { write(`  ${warn('skipped:')} unknown channel "${id}"\n\n`); continue; }
+    try {
+      const entry = await configureChannel({ cfgDir, spec, prompt, colors, write });
+      if (!configured.includes(id)) configured.push(id);
+      if (entry.needsPlugin) needsPlugin = entry.needsPlugin;
+    } catch (e) {
+      write(`  ${warn('skipped:')} ${e?.message || e}\n\n`);
+    }
+  }
+
+  if (!configured.length) { write(`  ${dim('— skipped —')}\n\n`); return { skipped: true }; }
+  write(`  ${ok('channels:')} ${configured.join(', ')}\n\n`);
+  return { skipped: false, channels: configured, needsPlugin };
 }
 
 // Outbound webhook step (moved verbatim-in-spirit from setup.mjs).

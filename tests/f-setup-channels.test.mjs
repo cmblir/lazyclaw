@@ -126,6 +126,16 @@ function scriptedPrompt(answers) {
 }
 const noColors = { accent: s=>s, bold: s=>s, dim: s=>s, ok: s=>s, warn: s=>s };
 
+// A scripted arrow-key picker: returns the queued item whose id matches the
+// next queued channel name, then '__done__'. Drives runChannelStep's `pick`.
+function scriptedPick(channelNames) {
+  const q = [...channelNames, '__done__'];
+  return async ({ items }) => {
+    const want = q.shift();
+    return items.find((it) => it.id === want) || items.find((it) => it.id === '__done__');
+  };
+}
+
 test('runChannelStep: selecting telegram + token persists and reports success', async () => {
   const dir = tmpCfgDir();
   const prevCfg = process.env.LAZYCLAW_CONFIG_DIR;
@@ -134,12 +144,13 @@ test('runChannelStep: selecting telegram + token persists and reports success', 
   try {
     const r = await runChannelStep({
       cfgDir: dir,
-      prompt: scriptedPrompt(['telegram', '111:aaa']),
+      pick: scriptedPick(['telegram']),
+      prompt: scriptedPrompt(['111:aaa']),
       colors: noColors,
       write: (s) => out.push(s),
     });
     assert.equal(r.skipped, false);
-    assert.equal(r.channel, 'telegram');
+    assert.deepEqual(r.channels, ['telegram']);
     assert.match(fs.readFileSync(path.join(dir, '.env'), 'utf8'), /TELEGRAM_BOT_TOKEN=111:aaa/);
     const rendered = out.join('');
     // The raw token must never be echoed.
@@ -154,9 +165,38 @@ test('runChannelStep: selecting telegram + token persists and reports success', 
 
 test('runChannelStep: empty selection skips cleanly', async () => {
   const dir = tmpCfgDir();
-  const r = await runChannelStep({ cfgDir: dir, prompt: scriptedPrompt(['']), colors: noColors, write: () => {} });
+  // pick immediately returns '__done__' (or Esc → 'BACK') → step skips.
+  const r = await runChannelStep({ cfgDir: dir, pick: scriptedPick([]), prompt: scriptedPrompt([]), colors: noColors, write: () => {} });
   assert.equal(r.skipped, true);
   assert.equal(fs.existsSync(path.join(dir, '.env')), false);
+});
+
+test('runChannelStep: Esc on the picker skips cleanly', async () => {
+  const dir = tmpCfgDir();
+  const r = await runChannelStep({ cfgDir: dir, pick: async () => 'BACK', prompt: scriptedPrompt([]), colors: noColors, write: () => {} });
+  assert.equal(r.skipped, true);
+});
+
+test('runChannelStep: configures multiple channels in one pass', async () => {
+  const dir = tmpCfgDir();
+  const prevCfg = process.env.LAZYCLAW_CONFIG_DIR;
+  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  try {
+    const r = await runChannelStep({
+      cfgDir: dir,
+      pick: scriptedPick(['telegram', 'slack']),
+      // telegram: token ; slack: bot token + app token (optional)
+      prompt: scriptedPrompt(['111:aaa', 'xoxb-tok', '']),
+      colors: noColors,
+      write: () => {},
+    });
+    assert.deepEqual(r.channels, ['telegram', 'slack']);
+    const env = fs.readFileSync(path.join(dir, '.env'), 'utf8');
+    assert.match(env, /TELEGRAM_BOT_TOKEN=111:aaa/);
+    assert.match(env, /SLACK_BOT_TOKEN=xoxb-tok/);
+  } finally {
+    if (prevCfg === undefined) delete process.env.LAZYCLAW_CONFIG_DIR; else process.env.LAZYCLAW_CONFIG_DIR = prevCfg;
+  }
 });
 
 test('runChannelStep: a plugin channel reports the install command', async () => {
@@ -167,7 +207,8 @@ test('runChannelStep: a plugin channel reports the install command', async () =>
   try {
     const r = await runChannelStep({
       cfgDir: dir,
-      prompt: scriptedPrompt(['discord', 'd1']),
+      pick: scriptedPick(['discord']),
+      prompt: scriptedPrompt(['d1']),
       colors: noColors,
       write: (s) => out.push(s),
     });
