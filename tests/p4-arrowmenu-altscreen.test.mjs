@@ -13,14 +13,16 @@ test('_arrowMenu uses the alternate screen buffer (no main-buffer push)', async 
   // We buffer writes into `out` and restore the real stdout the instant the
   // menu resolves, so node:test's own reporter output is never swallowed.
   const out = [];
+  let unrefCalled = false;
   const real = {
     soTTY: process.stdout.isTTY, soWrite: process.stdout.write.bind(process.stdout), soRows: process.stdout.rows,
-    siTTY: process.stdin.isTTY, siRaw: process.stdin.setRawMode, siResume: process.stdin.resume, siRef: process.stdin.ref,
+    siTTY: process.stdin.isTTY, siRaw: process.stdin.setRawMode, siResume: process.stdin.resume, siRef: process.stdin.ref, siUnref: process.stdin.unref,
   };
   process.stdout.isTTY = true; process.stdout.rows = 24;
   process.stdout.write = (s) => { out.push(String(s)); return true; };
   process.stdin.isTTY = true;
   process.stdin.setRawMode = () => {}; process.stdin.resume = () => {}; process.stdin.ref = () => {};
+  process.stdin.unref = () => { unrefCalled = true; };
   const t = setTimeout(() => process.stdin.emit('keypress', '', { name: 'return' }), 20);
   let picked;
   try {
@@ -28,7 +30,7 @@ test('_arrowMenu uses the alternate screen buffer (no main-buffer push)', async 
   } finally {
     clearTimeout(t);
     process.stdout.isTTY = real.soTTY; process.stdout.write = real.soWrite; process.stdout.rows = real.soRows;
-    process.stdin.isTTY = real.siTTY; process.stdin.setRawMode = real.siRaw; process.stdin.resume = real.siResume; process.stdin.ref = real.siRef;
+    process.stdin.isTTY = real.siTTY; process.stdin.setRawMode = real.siRaw; process.stdin.resume = real.siResume; process.stdin.ref = real.siRef; process.stdin.unref = real.siUnref;
   }
   const s = out.join('');
   assert.equal(picked && picked.id, 'a', 'return confirms the first row');
@@ -39,6 +41,9 @@ test('_arrowMenu uses the alternate screen buffer (no main-buffer push)', async 
   // main buffer was the scrollback-pollution bug.
   const tail = s.slice(s.indexOf('\x1b[?1049l') + 6);
   assert.ok(!tail.includes('\x1b[2J'), 'no main-buffer clear after leaving the alt screen');
+  // Releases stdin on cleanup so a one-shot wizard caller can exit instead of
+  // hanging at "Setup complete" (the ref'd-stdin hang bug).
+  assert.ok(unrefCalled, 'cleanup unref()s stdin so the process can exit');
 });
 
 test('_pickYesNo returns booleans and honours the default on cancel', async () => {

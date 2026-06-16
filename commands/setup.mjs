@@ -348,6 +348,13 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
   process.stdout.write(`    ${dim('•')} lazyclaw agent "..."          ${dim('— one-shot prompt')}\n`);
   process.stdout.write(`    ${dim('•')} lazyclaw doctor              ${dim('— diagnostic JSON')}\n`);
   process.stdout.write(`    ${dim('•')} lazyclaw setup               ${dim('— re-run this wizard any time')}\n\n`);
+
+  // Release stdin so `lazyclaw setup` returns to the shell instead of hanging
+  // at "Setup complete". The interactive prompts (_arrowMenu / _quickPrompt)
+  // resume()+ref() stdin to read input; without an unref the ref'd handle keeps
+  // the event loop alive after the last step. When setup is invoked from the
+  // launcher, the next menu resume()+ref()s stdin again, so this is safe there.
+  try { if (process.stdin.unref) process.stdin.unref(); } catch { /* best-effort */ }
 }
 
 // First-run welcome panel + delegated onboard. Drawn once before the

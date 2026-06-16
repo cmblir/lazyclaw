@@ -400,6 +400,13 @@ export async function _arrowMenu({ title, subtitle, footer, items, defaultIdx = 
       // scrollback. Fall back to a clear+home when the alt buffer wasn't used.
       if (altScreen) process.stdout.write('\x1b[?25h\x1b[?1049l');
       else process.stdout.write('\x1b[?25h\x1b[2J\x1b[H');
+      // Release stdin so a one-shot CLI caller (the setup / onboard wizard) can
+      // exit. We resume()+ref() stdin on entry to receive keypresses; if it's
+      // never unref'd, the event loop stays alive after the LAST picker and the
+      // process hangs at "Setup complete" instead of returning to the shell.
+      // The chat REPL re-refs stdin (via _pauseChatForSubMenu's finally) and
+      // its own readline keeps the loop alive, so this is safe there.
+      if (process.stdin.unref) process.stdin.unref();
     };
     process.stdin.on('keypress', onKey);
   });
