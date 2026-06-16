@@ -266,6 +266,14 @@ export async function _arrowMenu({ title, subtitle, footer, items, defaultIdx = 
   // before drawing so the picker always receives the first keypress.
   process.stdin.resume();
   if (process.stdin.ref) process.stdin.ref();
+  // Render on the ALTERNATE screen buffer (the same trick vim / less / fzf
+  // use). Without it, the menu's full-screen \x1b[2J clears land on the main
+  // buffer, interleave with the readline output from prior wizard steps, and
+  // every step pushes a screenful into scrollback — the "화면이 밀린다" bug.
+  // On the alt buffer the menu draws in isolation; leaving it (cleanup) restores
+  // the main buffer (and the wizard text on it) verbatim, with nothing pushed.
+  const altScreen = !!(process.stdout.isTTY);
+  if (altScreen) process.stdout.write('\x1b[?1049h');
   // Menu chrome via the theme gate: plain text under NO_COLOR / dumb / non-TTY.
   const accent = (s) => paint('38;5;208', s);
   const dim    = (s) => paint('2', s);
@@ -387,10 +395,41 @@ export async function _arrowMenu({ title, subtitle, footer, items, defaultIdx = 
     const cleanup = () => {
       process.stdin.off('keypress', onKey);
       if (process.stdin.setRawMode) process.stdin.setRawMode(false);
-      process.stdout.write('\x1b[?25h\x1b[2J\x1b[H');
+      // Show the cursor, then leave the alt screen → the main buffer (with the
+      // wizard's prior output) reappears exactly as it was, nothing pushed into
+      // scrollback. Fall back to a clear+home when the alt buffer wasn't used.
+      if (altScreen) process.stdout.write('\x1b[?25h\x1b[?1049l');
+      else process.stdout.write('\x1b[?25h\x1b[2J\x1b[H');
     };
     process.stdin.on('keypress', onKey);
   });
+}
+
+// Arrow-key yes/no — replaces the typed `[Y/n]` prompts in the wizard so the
+// user never types a letter. Returns a boolean. Esc / q resolve to the default.
+// Inherits _arrowMenu's non-TTY fallback (reads a line). `pick` is injectable
+// for tests.
+export async function _pickYesNo(title, { subtitle, yesLabel = 'Yes', noLabel = 'No', defaultYes = true, pick = _arrowMenu } = {}) {
+  const picked = await pick({
+    title,
+    subtitle,
+    items: [
+      { id: 'yes', label: yesLabel },
+      { id: 'no', label: noLabel },
+    ],
+    defaultIdx: defaultYes ? 0 : 1,
+  });
+  if (picked === 'BACK' || picked === 'CANCEL' || picked == null) return defaultYes;
+  const id = typeof picked === 'object' ? picked.id : picked;
+  return id === 'yes';
+}
+
+// Arrow-key single choice — `options` is [{ id, label, desc }]. Returns the
+// chosen id, or `fallback` on Esc/cancel. `pick` injectable for tests.
+export async function _pickChoice(title, options, { subtitle, defaultIdx = 0, fallback = null, pick = _arrowMenu } = {}) {
+  const picked = await pick({ title, subtitle, items: options, defaultIdx, searchable: false });
+  if (picked === 'BACK' || picked === 'CANCEL' || picked == null) return fallback;
+  return typeof picked === 'object' ? picked.id : picked;
 }
 
 // Bucket every registered provider into one of three auth-method
