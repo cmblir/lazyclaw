@@ -13,6 +13,39 @@ import {
 } from '../providers/model_catalogue.mjs';
 import { paint } from './theme.mjs';
 
+// Read exactly ONE line from a non-TTY stream (piped stdin) and hand the rest
+// back so the next reader (the next picker / a credential prompt) still gets
+// its input. The old fallbacks resolved the whole buffered payload at the
+// first newline — matching no id (skip) and swallowing every later line so the
+// following prompt hung. Pause before unshift so the buffered remainder isn't
+// dropped while no 'data' listener is attached.
+export function _readOneLine(stream) {
+  return new Promise((resolve) => {
+    let buf = '';
+    const done = (line) => {
+      stream.off('data', onData);
+      stream.off('end', onEnd);
+      resolve(line.replace(/\r$/, '').trim());
+    };
+    const onData = (chunk) => {
+      buf += chunk.toString();
+      const nl = buf.indexOf('\n');
+      if (nl === -1) return;
+      stream.pause();
+      const rest = buf.slice(nl + 1);
+      if (rest) stream.unshift(Buffer.from(rest, 'utf8'));
+      done(buf.slice(0, nl));
+    };
+    const onEnd = () => done(buf);
+    stream.on('data', onData);
+    stream.on('end', onEnd);
+    // A prior _readOneLine pauses the stream after unshifting its remainder.
+    // Adding a 'data' listener does NOT auto-resume an explicitly-paused
+    // stream, so resume() here or the next read would block on buffered input.
+    stream.resume();
+  });
+}
+
 export function _attachGhostAutocomplete(rl) {
   // Returns `{ dispose, suspend, resume }`. Dispose detaches the keypress +
   // rl 'line' listeners (leaking them is the v3.92 slow-exit bug). Suspend /
@@ -241,14 +274,7 @@ export async function _arrowMenu({ title, subtitle, footer, items, defaultIdx = 
     process.stderr.write(`${title}\n`);
     items.forEach((it, i) => process.stderr.write(`  ${i + 1}. ${it.label}${it.desc ? ' — ' + it.desc : ''}\n`));
     process.stderr.write('pick (number / id, blank for first): ');
-    const ans = await new Promise((resolve) => {
-      let buf = '';
-      const onData = (chunk) => {
-        buf += chunk.toString();
-        if (buf.includes('\n')) { process.stdin.off('data', onData); resolve(buf.trim()); }
-      };
-      process.stdin.on('data', onData);
-    });
+    const ans = await _readOneLine(process.stdin);
     if (!ans) return items[0];
     const byNum = parseInt(ans, 10);
     if (Number.isFinite(byNum) && byNum >= 1 && byNum <= items.length) return items[byNum - 1];
@@ -476,14 +502,7 @@ export async function _pickProviderInteractive() {
   // Non-TTY fallback — single-prompt picker, identical to before.
   if (!process.stdout.isTTY || !process.stdin.isTTY) {
     process.stdout.write(`provider [${providers.join('|')}]: `);
-    const ans = await new Promise((resolve) => {
-      let buf = '';
-      const onData = (chunk) => {
-        buf += chunk.toString();
-        if (buf.includes('\n')) { process.stdin.off('data', onData); resolve(buf.trim()); }
-      };
-      process.stdin.on('data', onData);
-    });
+    const ans = await _readOneLine(process.stdin);
     // v5.3.2 — non-TTY fallback used to be `providers[0]`, which was
     // whatever happened to be first in the registry (currently
     // anthropic). Pin to claude-cli to match the interactive onboard
