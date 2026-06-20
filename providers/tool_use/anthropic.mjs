@@ -137,10 +137,14 @@ export function parseResponse(json) {
     }
   }
   const text = textParts.join('');
+  // The model hit the output token ceiling mid-turn: the text or tool_use
+  // block is partial/garbage. Flag it so the runner stops instead of acting on
+  // a cut-off final answer or an incomplete tool call.
+  const truncated = json?.stop_reason === 'max_tokens';
   if (calls.length === 0) {
-    return { kind: 'final', text, raw: json };
+    return { kind: 'final', text, truncated, raw: json };
   }
-  return { kind: 'tool_calls', text, calls, assistantContent: content, raw: json };
+  return { kind: 'tool_calls', text, calls, truncated, assistantContent: content, raw: json };
 }
 
 // Anthropic accepts the agent_turn-native {role, content} shape

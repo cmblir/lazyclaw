@@ -137,14 +137,18 @@ export function parseResponse(json) {
     }
   }
   const text = textParts.join('');
+  // finishReason MAX_TOKENS = the turn was cut at the output ceiling; the text
+  // or functionCall args are partial. Flag it so the runner stops.
+  const truncated = candidate?.finishReason === 'MAX_TOKENS';
   if (calls.length === 0) {
-    return { kind: 'final', text, raw: json };
+    return { kind: 'final', text, truncated, raw: json };
   }
   // assistantContent is the entire model turn so the runner can echo it
   // back into `contents` for the next request.
   return {
     kind: 'tool_calls',
     text,
+    truncated,
     calls,
     assistantContent: candidate?.content || { role: 'model', parts },
     raw: json,

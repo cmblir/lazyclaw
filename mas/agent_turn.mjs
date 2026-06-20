@@ -196,6 +196,18 @@ export async function runAgentTurn({
     });
     if (resp.text) lastText = resp.text;
 
+    // The model hit its output token ceiling: the final answer or the tool
+    // call(s) are partial/garbage. Stop with an explicit error rather than
+    // returning a cut-off answer or running an incomplete tool call.
+    if (resp.truncated) {
+      await _maybePersistTrajectory('error');
+      return {
+        text: lastText, iterations, stoppedBy: 'truncated',
+        error: 'response truncated at the model output token limit (raise maxTokens)',
+        toolCalls,
+      };
+    }
+
     if (resp.kind === 'final') {
       await _maybePersistTrajectory('done');
       return { text: resp.text || '', iterations, stoppedBy: 'final', toolCalls };
@@ -221,6 +233,16 @@ export async function runAgentTurn({
     for (const call of resp.calls) {
       let result;
       let ok = true;
+      // The adapter could not parse this tool call's arguments (e.g. OpenAI
+      // emitted malformed JSON). Surface a tool error so the model can retry
+      // instead of silently running the tool with empty input.
+      if (call.parseError) {
+        result = { ok: false, error: call.parseError };
+        toolCalls.push({ id: call.id, name: call.name, input: call.input, result, ok: false });
+        results.push({ id: call.id, content: result, isError: true });
+        toolErrored = true;
+        continue;
+      }
       try {
         result = await runTool({
           agent, tool: call.name, args: call.input,

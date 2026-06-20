@@ -107,20 +107,29 @@ export function parseResponse(json) {
   const msg = choice?.message || {};
   const rawToolCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
   const text = typeof msg.content === 'string' ? msg.content : '';
+  // finish_reason 'length' = the response was cut at the token ceiling, so the
+  // content or a tool_call's arguments JSON is partial. Flag it so the runner
+  // stops instead of acting on truncated output / empty-parsed args.
+  const truncated = choice?.finish_reason === 'length';
   if (rawToolCalls.length === 0) {
-    return { kind: 'final', text, raw: json };
+    return { kind: 'final', text, truncated, raw: json };
   }
   const calls = rawToolCalls.map((tc) => {
     let input = {};
+    let parseError = null;
     const a = tc?.function?.arguments;
     if (typeof a === 'string') {
-      try { input = JSON.parse(a); } catch { input = {}; }
+      // Empty-string args mean "no arguments" → {}. A non-empty string that
+      // fails to parse is malformed: record the error so agent_turn surfaces a
+      // tool failure instead of silently running the tool with {}.
+      if (a.trim() === '') input = {};
+      else { try { input = JSON.parse(a); } catch (e) { input = {}; parseError = `malformed tool arguments: ${e.message}`; } }
     } else if (a && typeof a === 'object') {
       input = a;
     }
-    return { id: tc.id, name: tc?.function?.name, input };
+    return { id: tc.id, name: tc?.function?.name, input, ...(parseError ? { parseError } : {}) };
   });
-  return { kind: 'tool_calls', text, calls, assistantContent: msg, raw: json };
+  return { kind: 'tool_calls', text, calls, truncated, assistantContent: msg, raw: json };
 }
 
 // OpenAI accepts the agent_turn-native {role, content} shape directly.
