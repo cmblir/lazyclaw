@@ -23,6 +23,20 @@ const Z = 1.96; // 95% confidence two-sided
 
 export const DEFAULT_CROSS_CLI_DAMPEN = 0.85;
 
+// Below this many trials the 95% Wilson lower bound is punitively pessimistic
+// (wilsonLowerBound(1,1)=0.206, under the 0.3 archive floor), so a brand-new
+// skill from one successful task would be deleted on its first recall miss. For
+// small n we use the Beta(1,1) posterior mean (Laplace rule of succession,
+// (s+1)/(n+2)) — a gentle, data-aware "unproven" estimate that keeps a fresh
+// success above the floor while still archiving a fresh failure (0/1 → 0.33).
+export const MIN_TRIALS_FOR_WILSON = 3;
+
+export function laplaceMean(successes, trials) {
+  const s = Math.max(0, Number(successes) || 0);
+  const n = Math.max(0, Number(trials) || 0);
+  return (s + 1) / (n + 2);
+}
+
 export function wilsonLowerBound(successes, trials) {
   const s = Number(successes) || 0;
   const n = Number(trials) || 0;
@@ -83,8 +97,13 @@ export function computeConfidence({
   workerProvider = null,
   halfLifeMs,
   dampenFactor,
+  minTrials = MIN_TRIALS_FOR_WILSON,
 } = {}) {
-  const base = wilsonLowerBound(successes, trials);
+  // Too few trials for a meaningful Wilson bound → use the unproven Laplace
+  // prior; otherwise the conservative 95% lower bound takes over.
+  const base = (Number(trials) || 0) < minTrials
+    ? laplaceMean(successes, trials)
+    : wilsonLowerBound(successes, trials);
   const decayed = base * recencyDecay(ageMs, halfLifeMs);
   const dampened = crossCliDampen(decayed, trainerProvider, workerProvider, dampenFactor);
   return Math.max(0, Math.min(1, dampened));
