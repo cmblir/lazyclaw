@@ -8,6 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { TOOLS as webTools } from './web.mjs';
 import { scrubEnv } from '../scrub_env.mjs';
+import { spawnSandboxed } from '../../sandbox.mjs';
 
 function runProc(cmd, args, opts = {}) {
   return new Promise(resolve => {
@@ -15,7 +16,18 @@ function runProc(cmd, args, opts = {}) {
     // Default to a SECRET-SCRUBBED env (mirrors bash.mjs) so a snippet can't
     // read API keys/tokens out of process.env. A caller may pass an explicit
     // env to opt out.
-    try { p = spawn(cmd, args, { cwd: opts.cwd, env: opts.env || scrubEnv(process.env) }); }
+    //
+    // When a sandbox spec is present, run the SAME scrubbed interpreter
+    // invocation inside it (containment ADDED, never replacing the approval
+    // gate); a null/absent spec keeps the byte-stable bare-host path. The
+    // _spawnSandboxed injection seam defaults to the real impl (mirrors bash.mjs).
+    const env = opts.env || scrubEnv(process.env);
+    const spawnInSandbox = opts._spawnSandboxed || spawnSandboxed;
+    try {
+      p = opts.sandbox
+        ? spawnInSandbox(opts.sandbox, cmd, args, { cwd: opts.cwd, env })
+        : spawn(cmd, args, { cwd: opts.cwd, env });
+    }
     catch (e) { return resolve({ ok: false, error: e.message }); }
     let out = '', err = '';
     const timeout = setTimeout(() => { try { p.kill('SIGKILL'); } catch {} }, opts.timeoutMs || 30_000);
@@ -37,7 +49,10 @@ const python_exec = {
   },
   async exec(args, ctx) {
     const py = ctx?.python || process.env.LAZYCLAW_PYTHON || 'python3';
-    return runProc(py, ['-c', args.code], { cwd: ctx?.cwd, timeoutMs: args.timeoutMs });
+    return runProc(py, ['-c', args.code], {
+      cwd: ctx?.cwd, timeoutMs: args.timeoutMs,
+      sandbox: ctx?.sandbox, _spawnSandboxed: ctx?._spawnSandboxed,
+    });
   },
 };
 
@@ -51,7 +66,10 @@ const node_exec = {
   },
   async exec(args, ctx) {
     const node = ctx?.node || process.execPath;
-    return runProc(node, ['-e', args.code], { cwd: ctx?.cwd, timeoutMs: args.timeoutMs });
+    return runProc(node, ['-e', args.code], {
+      cwd: ctx?.cwd, timeoutMs: args.timeoutMs,
+      sandbox: ctx?.sandbox, _spawnSandboxed: ctx?._spawnSandboxed,
+    });
   },
 };
 
