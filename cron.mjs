@@ -192,14 +192,25 @@ export function buildPlist(name, schedule, command) {
   const dom   = expandField(parsed.dom,    { min: 1,  max: 31 });
   const month = expandField(parsed.month,  { min: 1,  max: 12 });
   const dow   = expandField(parsed.dow,    { min: 0,  max: 6  });
-  // launchd takes a single dict per fire-time. We expand the cron
-  // schedule into the cartesian product of (Minute × Hour × Day ×
-  // Month × Weekday); each null field means "every" so we encode
-  // nothing for it. For most schedules this is small (e.g. "every
-  // weekday 9 AM" = 5 entries).
-  const entries = cartesian([
-    minOrNull(min), minOrNull(hour), minOrNull(dom), minOrNull(month), minOrNull(dow),
-  ]);
+  // launchd takes a single dict per fire-time. We expand the cron schedule
+  // into the cartesian product of (Minute × Hour × Day × Month × Weekday);
+  // each null field means "every" so we encode nothing for it.
+  //
+  // BUT cron treats day-of-month and day-of-week with OR semantics when BOTH
+  // are restricted: `0 9 13 * 5` fires on the 13th OR on any Friday. A plain
+  // cartesian product ANDs them (only when the 13th IS a Friday) — diverging
+  // from crontab on Linux. So when both are restricted, emit the UNION of two
+  // sets: one keyed on Day (Weekday=every) and one on Weekday (Day=every).
+  let entries;
+  if (dom !== null && dow !== null) {
+    const byDom = cartesian([minOrNull(min), minOrNull(hour), dom, minOrNull(month), [null]]);
+    const byDow = cartesian([minOrNull(min), minOrNull(hour), [null], minOrNull(month), dow]);
+    entries = [...byDom, ...byDow];
+  } else {
+    entries = cartesian([
+      minOrNull(min), minOrNull(hour), minOrNull(dom), minOrNull(month), minOrNull(dow),
+    ]);
+  }
   const intervals = entries.map(([Minute, Hour, Day, Month, Weekday]) => {
     const dict = {};
     if (Minute  !== null) dict.Minute  = Minute;
