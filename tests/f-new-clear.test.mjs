@@ -36,8 +36,19 @@ import {
   ReplApp,
 } from '../tui/repl.mjs';
 import { onConversationReset, CLEAR_TERMINAL } from '../tui/repl_reset.mjs';
+import { _isInkResetCmd } from '../commands/chat.mjs';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ─── 0. The Ink slash handler maps /new|/reset|/clear to the NEW sentinel ───
+// _newReset returns a human string ('cleared — new conversation'), but repl.mjs
+// only wipes the screen on the 'NEW' sentinel. The Ink handler must translate
+// those reset commands to 'NEW' (like the 'EXIT' sentinel for /exit), or the
+// real /new never clears the terminal.
+test('_isInkResetCmd: /new, /reset, /clear signal the Ink NEW reset; others do not', () => {
+  for (const c of ['/new', '/reset', '/clear', '/NEW']) assert.equal(_isInkResetCmd(c), true, c);
+  for (const c of ['/usage', '/provider', '/help', '/news', '']) assert.equal(_isInkResetCmd(c), false, c);
+});
 
 // ─── 1. Pure reducer — reset empties the scrollback to splash-only ─────────
 

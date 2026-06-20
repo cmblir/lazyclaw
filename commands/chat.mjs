@@ -25,6 +25,14 @@ import { dispatchSlash as _dispatchSlash, parseSlashLine as _parseSlashLine, _ma
 import { SLASH_COMMANDS } from '../tui/slash_commands.mjs';
 import { wrapInteractiveProv, makeLegacyApprove } from './chat_hardening.mjs';
 
+// /new, /reset and /clear must signal the Ink REPL to wipe the screen +
+// scrollback via the 'NEW' sentinel (handled in tui/repl.mjs). _newReset itself
+// returns a human string for the string-rendering consumers, so the Ink handler
+// translates these commands here. Exported so the contract is unit-testable.
+export function _isInkResetCmd(cmd) {
+  return /^\/(new|reset|clear)$/i.test(String(cmd || ''));
+}
+
 // Legacy (non-Ink) slash routing for dispatcher-style, ctx-only commands.
 // The Ink REPL routes every slash through _dispatchSlash/SLASH_HANDLERS, but
 // the legacy readline path uses a hand-written switch (in cmdChat). This
@@ -284,9 +292,14 @@ export async function cmdChat(flags = {}) {
         const { cmd, args } = _parseSlashLine(line);
         // Thread the REPL's abort signal so Esc/Ctrl-C can stop a /loop.
         _inkCtx.loopSignal = signal || null;
-        return _dispatchSlash(cmd, args, _inkCtx, (chunk) => {
+        const result = await _dispatchSlash(cmd, args, _inkCtx, (chunk) => {
           try { process.stdout.write(chunk); } catch { /* swallow */ }
         });
+        // _newReset (/new, /reset, /clear) returns a human string, but repl.mjs
+        // only wipes the screen + scrollback on the 'NEW' sentinel. Translate
+        // here (mirrors the 'EXIT' sentinel) so the real /new actually clears.
+        if (_isInkResetCmd(cmd)) return 'NEW';
+        return result;
       };
       // v6.x slash-argument completion (two surfaces, see tui/slash_args.mjs):
       //   onArgList     → inline candidates rendered in the popup (login, hud,
