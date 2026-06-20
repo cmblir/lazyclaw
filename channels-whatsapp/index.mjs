@@ -10,6 +10,7 @@ export class WhatsappChannel extends Channel {
   constructor(opts = {}) {
     super('whatsapp');
     this._opts = opts || {};
+    this._loadDep = typeof opts.loadDep === 'function' ? opts.loadDep : ((s) => import(s));
     this._client = null;
     this._qrState = 'pending'; // pending | shown | authenticated | failed
     this._lastQr = null;
@@ -20,8 +21,8 @@ export class WhatsappChannel extends Channel {
 
   async start(handler, opts = {}) {
     await super.start(handler, opts);
-    const wweb = await import('whatsapp-web.js');
-    const qrt = await import('qrcode-terminal');
+    const wweb = await this._loadDep('whatsapp-web.js');
+    const qrt = await this._loadDep('qrcode-terminal');
     const { Client, LocalAuth } = wweb;
     this._client = new Client({
       authStrategy: new LocalAuth({ dataPath: this._opts.dataPath || './whatsapp' }),

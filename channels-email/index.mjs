@@ -15,15 +15,16 @@ export class EmailChannel extends Channel {
     this._imapOpts = opts.imap;
     this._smtpOpts = opts.smtp || {};
     this._from = opts.from || opts.imap.user;
+    this._loadDep = typeof opts.loadDep === 'function' ? opts.loadDep : ((s) => import(s));
     this._imap = null;
     this._transporter = null;
   }
 
   async start(handler, opts = {}) {
     await super.start(handler, opts);
-    const Imap = (await import('node-imap')).default;
-    const { simpleParser } = await import('mailparser');
-    const nodemailer = (await import('nodemailer')).default;
+    const Imap = (await this._loadDep('node-imap')).default;
+    const { simpleParser } = await this._loadDep('mailparser');
+    const nodemailer = (await this._loadDep('nodemailer')).default;
 
     this._transporter = nodemailer.createTransport({
       host: this._smtpOpts.host,

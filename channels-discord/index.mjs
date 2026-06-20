@@ -15,6 +15,10 @@ export class DiscordChannel extends Channel {
   constructor(opts = {}) {
     super('discord');
     this._token = opts.token || process.env.DISCORD_BOT_TOKEN || null;
+    // loadDep resolves the runtime dep from the config dir when the gateway
+    // injects it (lazyclaw channels install discord); falls back to a bare
+    // import so a dep installed alongside lazyclaw still works.
+    this._loadDep = typeof opts.loadDep === 'function' ? opts.loadDep : ((s) => import(s));
     this._client = null;
     this._lib = null;
   }
@@ -22,7 +26,7 @@ export class DiscordChannel extends Channel {
   async start(handler, opts = {}) {
     await super.start(handler, opts);
     if (!this._token) throw new Error('DiscordChannel: DISCORD_BOT_TOKEN missing');
-    this._lib = await import('discord.js');
+    this._lib = await this._loadDep('discord.js');
     const { Client, GatewayIntentBits, Partials } = this._lib;
     this._client = new Client({
       intents: [

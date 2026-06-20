@@ -14,6 +14,8 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { randomBytes } from 'node:crypto';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { configPath, readConfig, writeConfig, readVersionFromRepo } from '../lib/config.mjs';
 import { ensureRegistry } from '../lib/registry_boot.mjs';
 import { loadDotenvIfAny } from '../dotenv_min.mjs';
@@ -64,8 +66,60 @@ const DEFAULT_FACTORIES = {
 // log a warning and keep the other channels running. A factory that hands back
 // the wrong shape is caught lazily, when the returned transport factory is
 // invoked, so runGateway's per-channel try/catch turns it into a skip+warn.
-// `importer` is injectable for tests.
-export async function _loadPluginChannel(name, { importer } = {}) {
+// Resolve an in-tree adapter's runtime dependency from <cfgDir>/node_modules
+// (where `lazyclaw channels install <name>` puts it), falling back to a bare
+// import (dep installed alongside lazyclaw). The adapters do a bare
+// `import('discord.js')` which Node resolves from the adapter's own location —
+// NOT the config dir — so without this an installed dep is never found.
+export function _makeDepLoader(cfgDir) {
+  return async (specifier) => {
+    if (cfgDir) {
+      try {
+        // Anchor resolution inside <cfgDir>/node_modules. The anchor file need
+        // not exist; createRequire only uses its directory as the base.
+        const req = createRequire(path.join(cfgDir, 'node_modules', '_anchor_.js'));
+        const resolved = req.resolve(specifier);
+        return await import(pathToFileURL(resolved).href);
+      } catch { /* fall through to a bare import */ }
+    }
+    return import(specifier);
+  };
+}
+
+// Map the .env-derived credentials into each in-tree adapter's constructor opts
+// (the gateway loads .env into process.env at boot). discord/whatsapp also fall
+// back to env internally, but email has NO env fallback and threw
+// IMAP_CONFIG_MISSING when the gateway passed only { allowlist }.
+export function _pluginChannelOpts(name, env = process.env, cfgDir = '') {
+  switch (name) {
+    case 'discord':
+      return { token: env.DISCORD_BOT_TOKEN || null };
+    case 'email':
+      return {
+        imap: {
+          host: env.EMAIL_IMAP_HOST, user: env.EMAIL_IMAP_USER, password: env.EMAIL_IMAP_PASS,
+          port: env.EMAIL_IMAP_PORT ? Number(env.EMAIL_IMAP_PORT) : undefined,
+          tls: env.EMAIL_IMAP_TLS ? env.EMAIL_IMAP_TLS !== 'false' : undefined,
+        },
+        smtp: {
+          host: env.EMAIL_SMTP_HOST || env.EMAIL_IMAP_HOST, port: env.EMAIL_SMTP_PORT ? Number(env.EMAIL_SMTP_PORT) : undefined,
+          user: env.EMAIL_SMTP_USER || env.EMAIL_IMAP_USER, pass: env.EMAIL_SMTP_PASS || env.EMAIL_IMAP_PASS,
+        },
+      };
+    case 'whatsapp':
+      return { dataPath: path.join(cfgDir || '.', 'whatsapp') };
+    case 'signal':
+      return { account: env.SIGNAL_ACCOUNT || null };
+    case 'voice':
+      return { apiKey: env.OPENAI_API_KEY || null };
+    default:
+      return {};
+  }
+}
+
+// `importer` is injectable for tests. cfgDir + env let the factory resolve the
+// adapter's runtime dep from the config dir and thread credentials in.
+export async function _loadPluginChannel(name, { importer, cfgDir = '', env = process.env } = {}) {
   const load = importer || ((n) => import(`../channels-${n}/index.mjs`));
   let mod;
   try {
@@ -81,8 +135,9 @@ export async function _loadPluginChannel(name, { importer } = {}) {
     return null;
   }
   if (typeof channelFactory !== 'function') return null;
+  const loadDep = _makeDepLoader(cfgDir);
   return async ({ handler, logger, allowlist }) => {
-    const ch = channelFactory({ allowlist });
+    const ch = channelFactory({ allowlist, loadDep, ..._pluginChannelOpts(name, env, cfgDir) });
     if (!ch || typeof ch.start !== 'function' || typeof ch.send !== 'function' || typeof ch.stop !== 'function') {
       throw new Error(`plugin channel "${name}" does not conform to the channel interface (start/send/stop)`);
     }
@@ -186,7 +241,7 @@ export async function runGateway(flags = {}, deps = {}) {
       // (factory === null) rather than crashing the gateway.
       let factory = factories[name];
       if (!factory) {
-        factory = await _loadPluginChannel(name, { importer: deps.pluginImporter });
+        factory = await _loadPluginChannel(name, { importer: deps.pluginImporter, cfgDir, env: process.env });
         if (!factory) {
           skipped.push({ name, error: 'plugin channel did not conform (no usable register/factory)' });
           log(`[gateway] ${name}: skipped (plugin channel did not load or does not conform)\n`);
