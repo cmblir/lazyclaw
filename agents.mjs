@@ -16,11 +16,23 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { ensureValidName as cronEnsureValidName } from './cron.mjs';
+import * as toolRegistry from './mas/tools/registry.mjs';
 
 const AGENTS_DIRNAME = 'agents';
 
 export const DEFAULT_TOOLS = ['bash', 'read', 'write', 'grep', 'skill_view'];
-export const ALL_TOOLS = ['bash', 'read', 'write', 'grep', 'skill_view', 'web_search', 'web_fetch', 'slack_post'];
+
+// The valid tool set is derived from the LIVE tool registry (51+ tools), not a
+// hardcoded 8-name list with a stale, unregistered 'slack_post' — that list
+// rejected recall/delegate/git_*/edit/etc. and silently capped team agents.
+export function knownTools() {
+  return new Set([...DEFAULT_TOOLS, ...toolRegistry.listNames()]);
+}
+
+// Back-compat export: a snapshot of the registered tool names (the registry
+// self-populates at import). mcp:* tools register dynamically; validateTools
+// accepts them even when absent from this snapshot.
+export const ALL_TOOLS = [...knownTools()];
 
 export class AgentError extends Error {
   constructor(message, code) {
@@ -52,9 +64,12 @@ function validateTools(tools) {
   if (!Array.isArray(tools)) {
     throw new AgentError('tools must be an array', 'AGENT_BAD_TOOLS');
   }
-  const bad = tools.filter(t => !ALL_TOOLS.includes(t));
+  // Validate against the LIVE registry; accept mcp:* names (they register when
+  // their server starts) so a config referencing one isn't rejected at edit time.
+  const known = knownTools();
+  const bad = tools.filter(t => !known.has(t) && !/^mcp:/.test(String(t)));
   if (bad.length) {
-    throw new AgentError(`unknown tool(s): ${bad.join(', ')} — known: ${ALL_TOOLS.join(', ')}`, 'AGENT_BAD_TOOLS');
+    throw new AgentError(`unknown tool(s): ${bad.join(', ')}`, 'AGENT_BAD_TOOLS');
   }
   // Dedupe while preserving order.
   return [...new Set(tools)];
