@@ -8,6 +8,22 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Security
 
+- **Sensitive tools are confined by default.** `bash`, `python_exec`/`node_exec`,
+  the `git_*` tools, and the `os` tools now run inside an OS sandbox by default
+  (macOS `seatbelt`, Linux `bubblewrap`/`firejail`, auto-detected): writes are
+  limited to the workspace + temp, and secret directories (`~/.ssh`, `~/.aws`,
+  `~/.gnupg`, the lazyclaw config dir, …) are unreadable — even an approved
+  command can no longer exfiltrate host credentials or write outside the
+  workspace. The seatbelt profile is an allow-default base that carves out the
+  filesystem (a strict `deny default` profile silently killed `python3`/`node`
+  at the dyld stage on macOS). Network is allowed; the secret-scrubbed child env
+  still applies. Confinement is threaded at the agent entrypoints (task tick,
+  agentic chat, `task_spawn`), so `runTool`/`runAgentTurn` library defaults stay
+  byte-stable. Opt out with `cfg.sandbox.confine=false`; inspect the effective
+  posture with `lazyclaw sandbox status`. The keyless `gemini-cli` trust bypass
+  (`--skip-trust` + `GEMINI_CLI_TRUST_WORKSPACE`) is consolidated behind one
+  `trustWorkspace` switch. `browser_*` keeps its in-tool SSRF guard (Playwright
+  manages its own Chromium subprocess and is not OS-confined).
 - **Remote skills are sanitized on install.** A skill installed from
   GitHub/URL is injected into other agents' system prompts, but the body was
   copied verbatim; it now runs the same redact / `[[TASK_DONE]]`-defang /

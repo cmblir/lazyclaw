@@ -168,7 +168,8 @@ A framework-free SPA over the daemon's JSON API: Chat, Sessions, Workflows, Skil
 - **Durable recall** — one SQLite + FTS5 index over sessions, skills, trajectories, and memory; rebuildable from the corpus.
 - **Loops & goals** — durable foreground/`--detach` loops and cron-scheduled goals that survive restart.
 - **Personas** — layered SOUL / workspace / personality / role / user-model / skills compose into the system prompt.
-- **Sandboxes** — `local` / `docker` / `ssh` / `singularity` / `modal` / `daytona` behind one API; the `bash` tool runs inside the configured sandbox when one is set.
+- **Default-on confinement** — sensitive tools (`bash`, `python_exec`/`node_exec`, `git_*`, the `os` tools) run confined by default: writes are limited to the workspace + temp, secret dirs (`~/.ssh`, `~/.aws`, the config dir, …) are unreadable, and the secret-scrubbed env still applies. macOS uses `seatbelt`, Linux uses `bubblewrap`/`firejail` (auto-detected). Network is allowed; opt out with `cfg.sandbox.confine=false`. Run `lazyclaw sandbox status` to see the effective posture.
+- **Sandboxes** — `local` / `docker` / `ssh` / `singularity` / `modal` / `daytona` behind one API; pluggable backends for heavier isolation (containers, remote hosts) layered on top of the default local confinement.
 - **MCP** — stdio MCP servers in `cfg.mcp.servers` boot with the daemon; their tools register as `mcp:<server>:<tool>` (always approval-gated). `lazyclaw mcp list`.
 - **Daemon lifecycle** — `lazyclaw daemon status | stop | logs` over a pidfile; `maxTokens` in config raises the output cap; `LAZYCLAW_REQUEST_TIMEOUT_MS` sets the per-provider idle timeout (default 120s).
 

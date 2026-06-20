@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { configPath } from '../lib/config.mjs';
 import { resolveSandbox, listBackends } from '../sandbox/index.mjs';
+import { pickAvailableConfiner } from '../sandbox/spawn.mjs';
 
 export async function cmdBrowse(url, flags = {}) {
   if (!url) { console.error('Usage: lazyclaw browse <url> [--max-bytes <N>] [--timeout-ms <N>] [--meta]'); process.exit(2); }
@@ -30,6 +31,25 @@ export async function cmdSandbox(args, flags = {}) {
 
   if (!sub || sub === 'list') {
     for (const kind of listBackends()) process.stdout.write(`${kind}\n`);
+    return 0;
+  }
+
+  if (sub === 'status') {
+    // Show the EFFECTIVE default-on confinement posture for this host so the
+    // operator can audit what sensitive tools run under.
+    const cfg = _sandboxLoadConfigOrEmpty();
+    const sb = cfg.sandbox || {};
+    const off = sb.confine === false || sb.default === 'off' || sb.default === 'none';
+    const confiner = (sb.local && sb.local.confiner && sb.local.confiner !== 'auto')
+      ? sb.local.confiner
+      : pickAvailableConfiner();
+    const allowNet = sb.allowNet !== false;
+    process.stdout.write(`confinement: ${off ? 'OFF' : 'ON'} (default-on; opt out with cfg.sandbox.confine=false)\n`);
+    process.stdout.write(`host confiner: ${confiner}\n`);
+    process.stdout.write(`policy: writes → workspace + temp only · secret dirs unreadable · network ${allowNet ? 'allowed' : 'denied'}\n`);
+    if (!off && confiner === 'none') {
+      process.stdout.write('note: no OS confiner available on this host — sensitive tools run UNCONFINED. Install bubblewrap or firejail on Linux.\n');
+    }
     return 0;
   }
 
