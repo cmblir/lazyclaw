@@ -168,6 +168,12 @@ export function removeSkill(name, configDir = defaultConfigDir()) {
   const p = skillPath(name, configDir);
   if (fs.existsSync(p)) fs.unlinkSync(p);
   _invalidateSkillsCache(configDir);
+  // Drop the skill's FTS row too — unlinking the .md left a stale, still
+  // recallable index row. Lazy + best-effort so better-sqlite3 stays off the
+  // skills hot path and a delete hiccup never throws out of removeSkill.
+  import('./mas/index_db.mjs')
+    .then((idx) => { try { idx.deleteSkill(name, configDir); } catch { /* best-effort */ } })
+    .catch(() => { /* index unavailable */ });
 }
 
 export function skillExists(name, configDir = defaultConfigDir()) {

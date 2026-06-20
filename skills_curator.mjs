@@ -287,6 +287,12 @@ function moveToArchive(name, configDir, archivedAtMs) {
       throw err;
     }
   }
+  // Archiving must also drop the skill's FTS row, or a 90-day-idle skill stays
+  // recallable forever. Lazy + best-effort (keeps better-sqlite3 off the curate
+  // hot path; an index hiccup never fails the archival move).
+  import('./mas/index_db.mjs')
+    .then((idx) => { try { idx.deleteSkill(name, configDir); } catch { /* best-effort */ } })
+    .catch(() => { /* index unavailable */ });
   return dest;
 }
 

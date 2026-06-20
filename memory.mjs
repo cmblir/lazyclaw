@@ -23,6 +23,16 @@ const MEMORY_DIRNAME = 'memory';
 const RECENT_CAP = 200;
 const RECENT_KEEP_AFTER_DREAM = 50;
 
+// Best-effort, lazy write-through into the durable FTS recall index. Lazy so
+// better-sqlite3 stays off the chat hot path (this leaf module is touched on
+// every turn via appendRecent) until something actually curates memory; the
+// promise is swallowed so an index hiccup never breaks a memory write.
+function _indexMemorySafe(row, configDir) {
+  import('./mas/index_db.mjs')
+    .then((idx) => { try { idx.indexMemory(row, configDir); } catch { /* best-effort */ } })
+    .catch(() => { /* index module unavailable — recall just stays stale */ });
+}
+
 export function defaultConfigDir() {
   return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
 }
@@ -41,6 +51,9 @@ export function loadCore(configDir = defaultConfigDir()) {
 export function setCore(text, configDir = defaultConfigDir()) {
   fs.mkdirSync(memoryDir(configDir), { recursive: true });
   fs.writeFileSync(corePath(configDir), String(text || ''));
+  // Mirror into the recall index so curated core memory is durably searchable
+  // (the README "durable recall over … memory" claim) — not just readable.
+  _indexMemorySafe({ topic: 'core', kind: 'core', content: String(text || '') }, configDir);
 }
 
 export function loadRecent(n = 20, configDir = defaultConfigDir()) {
@@ -125,11 +138,17 @@ export async function dream(sessionId, { provider, model, apiKey } = {}, configD
 
   fs.mkdirSync(episodicDir(configDir), { recursive: true });
   const written = [];
+  // Index the episodic topics in the same pass. dream() is async, so we await
+  // the (lazy) index import once for a deterministic write-through; a failure
+  // is swallowed so consolidation still succeeds even if recall can't index.
+  let indexDb = null;
+  try { indexDb = await import('./mas/index_db.mjs'); } catch { /* recall stays stale */ }
   for (const t of topics) {
     if (!t || !t.topic) continue;
     const slug = String(t.topic).toLowerCase().replace(/[^a-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'untitled';
     const p = path.join(episodicDir(configDir), `${slug}.md`);
     fs.writeFileSync(p, `# ${slug}\n\n${t.summary || ''}\n`);
+    if (indexDb) { try { indexDb.indexMemory({ topic: slug, kind: 'episodic', content: String(t.summary || '') }, configDir); } catch { /* best-effort */ } }
     written.push(slug);
   }
 
