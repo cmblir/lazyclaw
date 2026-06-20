@@ -122,6 +122,22 @@ const open_url = {
   },
 };
 
+// Build the osascript `choose file` expression. The prompt is model-supplied
+// and gets interpolated into an AppleScript STRING literal, so it must escape
+// backslashes (first) and double-quotes, and strip newlines/control chars — a
+// raw `"`/`\`/newline would otherwise break out of the literal and run an
+// injected AppleScript expression (e.g. `do shell script`). Exported for tests.
+export function _buildChooseScript(kind, prompt) {
+  const fallback = kind === 'save' ? 'Save' : 'Choose';
+  const safe = String(prompt || fallback)
+    .replace(/[\r\n\t\v\f\0]+/g, ' ')
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"');
+  return kind === 'save'
+    ? `POSIX path of (choose file name with prompt "${safe}")`
+    : `POSIX path of (choose file with prompt "${safe}")`;
+}
+
 const file_dialog = {
   name: 'file_dialog', category: 'os', sensitive: true,
   description: 'Show an OS file picker. Returns selected path (or null on cancel).',
@@ -132,9 +148,7 @@ const file_dialog = {
   async exec(args, ctx) {
     const p = platformOf(ctx);
     if (p === 'darwin') {
-      const script = (args.kind === 'save')
-        ? 'POSIX path of (choose file name with prompt "' + (args.prompt || 'Save').replace(/"/g, '\\"') + '")'
-        : 'POSIX path of (choose file with prompt "'      + (args.prompt || 'Choose').replace(/"/g, '\\"') + '")';
+      const script = _buildChooseScript(args.kind, args.prompt);
       const r = spawnSync('osascript', ['-e', script], { encoding: 'utf8' });
       if (r.status !== 0) return { ok: true, path: null };
       return { ok: true, path: r.stdout.trim() };

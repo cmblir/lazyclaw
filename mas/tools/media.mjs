@@ -5,11 +5,23 @@
 // "configure X" error otherwise.
 
 import fs from 'node:fs';
+import path from 'node:path';
 import { fetch } from 'undici';
+
+// Confine a model-supplied path to the working directory. image_describe
+// UPLOADS the bytes to a third party (OpenAI), so — unlike `read` — it must
+// not be coaxed into exfiltrating an arbitrary host file (~/.ssh/id_rsa,
+// /etc/passwd). Returns the resolved path or null when it escapes cwd.
+function confineToCwd(p, cwd) {
+  const root = path.resolve(cwd || process.cwd());
+  const resolved = path.resolve(root, String(p || ''));
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) return null;
+  return resolved;
+}
 
 const image_describe = {
   name: 'image_describe', category: 'media', sensitive: true,
-  description: 'Describe an image. Requires OPENAI_API_KEY (gpt-4o vision) or ANTHROPIC_API_KEY (claude vision).',
+  description: 'Describe an image at a path inside the working directory. Requires OPENAI_API_KEY (gpt-4o vision).',
   parameters: {
     type: 'object',
     properties: { path: { type: 'string' }, prompt: { type: 'string' } },
@@ -17,8 +29,10 @@ const image_describe = {
   },
   async exec(args, ctx) {
     const env = ctx?.env || process.env;
-    if (!fs.existsSync(args.path)) return { ok: false, error: `image_describe: file not found ${args.path}` };
-    const b64 = fs.readFileSync(args.path).toString('base64');
+    const safePath = confineToCwd(args.path, ctx?.cwd);
+    if (!safePath) return { ok: false, error: `image_describe: path escapes the working directory: ${args.path}` };
+    if (!fs.existsSync(safePath)) return { ok: false, error: `image_describe: file not found ${args.path}` };
+    const b64 = fs.readFileSync(safePath).toString('base64');
     const prompt = args.prompt || 'Describe this image briefly.';
     if (env.OPENAI_API_KEY) {
       try {
