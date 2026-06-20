@@ -42,6 +42,7 @@
     <button data-tab="agents">Agents</button>
     <button data-tab="teams">Teams</button>
     <button data-tab="tasks">Tasks</button>
+    <button data-tab="team">Team Live</button>
     <button data-tab="trainer">Trainer</button>
     <button data-tab="recall">Recall</button>
     <button data-tab="sandbox">Sandbox</button>
@@ -184,6 +185,28 @@
         <span class="dim" id="tasks-meta">Tasks are created via <code>lazyclaw task start</code>.</span>
       </div>
       <div id="tasks-list"><div class="empty">Loading…</div></div>
+    </section>
+
+    <section id="tab-team">
+      <h2>Team Live</h2>
+      <div class="toolbar">
+        <label for="team-select" class="dim">Team</label>
+        <select id="team-select" aria-label="Select a team to watch"></select>
+        <button class="btn btn-secondary" onclick="LOADERS.team()">Refresh</button>
+        <span class="dim" id="team-conn" role="status" aria-live="polite">○ connecting…</span>
+      </div>
+      <div id="team-live" class="team-live">
+        <div id="team-canvas" class="team-canvas" role="tree" aria-label="Agent team">
+          <div class="empty">Loading…</div>
+        </div>
+        <aside id="team-detail" class="team-detail" aria-live="polite">
+          <div class="empty">Click an agent to see its harness and what it's working on.</div>
+        </aside>
+      </div>
+      <div class="team-feed-wrap">
+        <div class="label">Live activity</div>
+        <ul id="team-feed" class="team-feed" aria-live="polite"></ul>
+      </div>
     </section>
 
     <section id="tab-trainer">

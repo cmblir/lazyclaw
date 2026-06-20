@@ -267,3 +267,69 @@
       display: flex;
       justify-content: space-between;
     }
+
+    /* ── Team Live tab ─────────────────────────────────────────── */
+    .team-live { display: flex; gap: 16px; align-items: stretch; flex-wrap: wrap; }
+    .team-canvas {
+      flex: 2 1 420px; min-width: 0; min-height: 260px;
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 20px; display: flex; flex-direction: column; align-items: center; gap: 18px;
+    }
+    .team-detail {
+      flex: 1 1 280px; min-width: 0;
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px;
+      font-size: 13px;
+    }
+    /* tree: a lead row on top, a wrapping children row below, with connectors */
+    .team-row { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; }
+    .team-children { position: relative; padding-top: 18px; }
+    .team-children::before {
+      content: ''; position: absolute; top: 0; left: 50%; width: 1px; height: 18px;
+      background: var(--border); transform: translateX(-50%);
+    }
+    .tagent {
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      width: 104px; cursor: pointer; background: none; border: 0; color: inherit; font: inherit;
+      padding: 6px; border-radius: 10px;
+    }
+    .tagent:hover { background: rgba(217,179,90,0.06); }
+    .tagent:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .tagent[aria-selected="true"] { background: rgba(217,179,90,0.12); }
+    .tagent-avatar {
+      width: 56px; height: 56px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center; font-size: 26px;
+      background: #1e2130; border: 3px solid var(--idle-ring, #475569);
+    }
+    .tagent.working .tagent-avatar { border-color: #34d399; box-shadow: 0 0 0 4px rgba(52,211,153,0.16); }
+    .tagent.idle .tagent-avatar    { border-color: #475569; }
+    .tagent.delegating .tagent-avatar { animation: tdelegate 900ms ease-out; }
+    @keyframes tdelegate {
+      0%   { box-shadow: 0 0 0 0 rgba(217,179,90,0.55); }
+      100% { box-shadow: 0 0 0 14px rgba(217,179,90,0); }
+    }
+    .tagent-name { font-size: 12px; font-weight: 600; max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tagent-status { font-size: 10px; }
+    .tagent.working .tagent-status { color: #34d399; }
+    .tagent.idle .tagent-status    { color: var(--dim); }
+    .harness-badge {
+      font-size: 9px; background: #312e81; color: #c7d2fe; border-radius: 5px; padding: 1px 6px;
+      max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .team-detail h3 { margin: 0 0 6px; font-size: 15px; }
+    .team-detail .kv { margin: 8px 0; }
+    .team-detail .kv .label { color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .team-detail .activity { margin: 3px 0; color: #cbd5e1; line-height: 1.6; }
+    .team-feed-wrap { margin-top: 16px; }
+    .team-feed { list-style: none; margin: 6px 0 0; padding: 0; max-height: 180px; overflow-y: auto; font-size: 12px; }
+    .team-feed li { padding: 4px 0; border-top: 1px solid var(--border); color: var(--dim); }
+    .team-feed li .who { color: var(--fg, #e8e8f0); font-weight: 600; }
+    .team-feed li .arrow { color: #34d399; }
+
+    @media (max-width: 760px) {
+      .team-live { flex-direction: column; }
+      .team-canvas, .team-detail { flex: 1 1 auto; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .tagent.working .tagent-avatar { box-shadow: none; }
+      .tagent.delegating .tagent-avatar { animation: none; }
+    }

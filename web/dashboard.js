@@ -1358,6 +1358,196 @@
       }
     };
 
+    // ── Team Live tab ─────────────────────────────────────────────
+    // Real-time view of an agent team: avatar tiles with status rings +
+    // harness badges, click-to-drill-down, and live A→B delegation pulses,
+    // driven by the GET /events SSE stream (read via fetch so the bearer token
+    // still rides in the Authorization header — EventSource cannot set headers).
+    const TEAM = { team: null, agentsById: {}, status: {}, activity: {}, task: null, selected: null, streaming: false };
+
+    function harnessLabel(rec) {
+      const p = (rec && rec.provider) || '?';
+      const m = (rec && rec.model) || '';
+      return m ? `${p} · ${m}` : p;
+    }
+    function avatarGlyph(rec) {
+      if (rec && rec.iconEmoji) return rec.iconEmoji;
+      return (((rec && rec.name) || '?').slice(0, 1)).toUpperCase();
+    }
+    // Build the { name, children[] } tree rooted at the lead (mirrors teamTree).
+    function buildTeamTree(team, byId) {
+      const lead = team.lead;
+      const members = team.agents || [];
+      const kids = {};
+      for (const n of members) {
+        if (n === lead) continue;
+        const rec = byId[n];
+        const mgr = rec && rec.manager && members.includes(rec.manager) && rec.manager !== n ? rec.manager : lead;
+        (kids[mgr] = kids[mgr] || []).push(n);
+      }
+      const build = (name, seen) => {
+        if (seen.has(name)) return null;
+        const next = new Set(seen); next.add(name);
+        return { name, children: (kids[name] || []).sort().map((c) => build(c, next)).filter(Boolean) };
+      };
+      return build(lead, new Set());
+    }
+    function renderAgentTile(name) {
+      const rec = TEAM.agentsById[name] || { name };
+      const st = TEAM.status[name] || 'idle';
+      const btn = document.createElement('button');
+      btn.className = `tagent ${st}`;
+      btn.dataset.agent = name;
+      btn.setAttribute('role', 'treeitem');
+      btn.setAttribute('aria-selected', String(TEAM.selected === name));
+      btn.innerHTML =
+        `<div class="tagent-avatar" aria-hidden="true">${escapeHtml(avatarGlyph(rec))}</div>` +
+        `<div class="tagent-name">${escapeHtml(rec.displayName || name)}</div>` +
+        `<div class="tagent-status">${st === 'working' ? '● working' : '○ idle'}</div>` +
+        `<div class="harness-badge">${escapeHtml(harnessLabel(rec))}</div>`;
+      btn.addEventListener('click', () => selectTeamAgent(name));
+      return btn;
+    }
+    function renderTeamCanvas() {
+      const canvas = document.getElementById('team-canvas');
+      if (!canvas) return;
+      if (!TEAM.team) { canvas.innerHTML = '<div class="empty">No team selected.</div>'; return; }
+      const tree = buildTeamTree(TEAM.team, TEAM.agentsById);
+      canvas.innerHTML = '';
+      if (!tree) { canvas.innerHTML = '<div class="empty">This team has no lead.</div>'; return; }
+      const leadRow = document.createElement('div'); leadRow.className = 'team-row';
+      leadRow.appendChild(renderAgentTile(tree.name));
+      canvas.appendChild(leadRow);
+      const flat = [];
+      (function walk(n) { for (const c of n.children) { flat.push(c.name); walk(c); } })(tree);
+      if (flat.length) {
+        const wrap = document.createElement('div'); wrap.className = 'team-children';
+        const row = document.createElement('div'); row.className = 'team-row';
+        for (const n of flat) row.appendChild(renderAgentTile(n));
+        wrap.appendChild(row);
+        canvas.appendChild(wrap);
+      }
+    }
+    function selectTeamAgent(name) {
+      TEAM.selected = name;
+      document.querySelectorAll('#team-canvas .tagent').forEach((el) => {
+        el.setAttribute('aria-selected', String(el.dataset.agent === name));
+      });
+      renderTeamDetail();
+    }
+    function renderTeamDetail() {
+      const panel = document.getElementById('team-detail');
+      if (!panel) return;
+      const name = TEAM.selected;
+      if (!name) { panel.innerHTML = '<div class="empty">Click an agent to see its harness and what it\'s working on.</div>'; return; }
+      const rec = TEAM.agentsById[name] || { name };
+      const st = TEAM.status[name] || 'idle';
+      const acts = (TEAM.activity[name] || []).slice(-8).reverse();
+      panel.innerHTML =
+        `<h3>${escapeHtml(rec.displayName || name)} <span class="tagent-status ${st}">${st === 'working' ? '● working' : '○ idle'}</span></h3>` +
+        `<div class="kv"><span class="label">harness</span><div><span class="harness-badge">${escapeHtml(harnessLabel(rec))}</span></div></div>` +
+        `<div class="kv"><span class="label">role</span><div class="dim">${escapeHtml((rec.role || '').slice(0, 120) || '(none)')}</div></div>` +
+        `<div class="kv"><span class="label">current task</span><div>${escapeHtml(TEAM.task || '(idle)')}</div></div>` +
+        `<div class="kv"><span class="label">recent activity</span>` +
+          (acts.length ? acts.map((a) => `<div class="activity">▸ ${escapeHtml(a)}</div>`).join('') : '<div class="dim">no activity yet</div>') +
+        '</div>';
+    }
+    function teamFeedAdd(html) {
+      const ul = document.getElementById('team-feed');
+      if (!ul) return;
+      const li = document.createElement('li');
+      li.innerHTML = html;
+      ul.prepend(li);
+      while (ul.children.length > 40) ul.removeChild(ul.lastChild);
+    }
+    function pulseAgent(name) {
+      const el = document.querySelector(`#team-canvas .tagent[data-agent="${CSS.escape(name)}"]`);
+      if (!el) return;
+      el.classList.add('delegating');
+      setTimeout(() => el.classList.remove('delegating'), 950);
+    }
+    function inThisTeam(name) { return !!(TEAM.team && (TEAM.team.agents || []).includes(name)); }
+    function setAgentStatus(name, status) {
+      TEAM.status[name] = status === 'working' ? 'working' : 'idle';
+      const el = document.querySelector(`#team-canvas .tagent[data-agent="${CSS.escape(name)}"]`);
+      if (el) {
+        el.classList.toggle('working', status === 'working');
+        el.classList.toggle('idle', status !== 'working');
+        const s = el.querySelector('.tagent-status');
+        if (s) s.textContent = status === 'working' ? '● working' : '○ idle';
+      }
+      if (TEAM.selected === name) renderTeamDetail();
+    }
+    function onTeamEvent(type, d) {
+      if (type === 'task.start') { TEAM.task = d.title || '(task)'; teamFeedAdd(`<span class="who">task</span> started: ${escapeHtml(d.title || '')}`); renderTeamDetail(); return; }
+      if (type === 'task.done') { TEAM.task = null; teamFeedAdd(`<span class="who">task</span> ${escapeHtml(d.status || 'done')}`); renderTeamDetail(); return; }
+      if (type === 'agent.status' && inThisTeam(d.agent)) { setAgentStatus(d.agent, d.status); return; }
+      if (type === 'turn.start' && inThisTeam(d.agent)) { (TEAM.activity[d.agent] = TEAM.activity[d.agent] || []).push('turn started'); if (TEAM.selected === d.agent) renderTeamDetail(); return; }
+      if (type === 'tool.call' && inThisTeam(d.agent)) {
+        (TEAM.activity[d.agent] = TEAM.activity[d.agent] || []).push(`tool: ${d.tool}${d.ok === false ? ' ✗' : ''}`);
+        teamFeedAdd(`<span class="who">${escapeHtml(d.agent)}</span> ${escapeHtml(d.tool)}${d.ok === false ? ' ✗' : ''}`);
+        if (TEAM.selected === d.agent) renderTeamDetail();
+        return;
+      }
+      if (type === 'delegate' && (inThisTeam(d.from) || inThisTeam(d.to))) {
+        teamFeedAdd(`<span class="who">${escapeHtml(d.from || '?')}</span> <span class="arrow">→</span> <span class="who">${escapeHtml(d.to || '?')}</span>`);
+        if (inThisTeam(d.to)) pulseAgent(d.to);
+      }
+    }
+    async function startTeamStream() {
+      if (TEAM.streaming) return;
+      TEAM.streaming = true;
+      const conn = document.getElementById('team-conn');
+      try {
+        const r = await apiRaw('/events', {});
+        if (!r.ok || !r.body) { if (conn) conn.textContent = '○ events unavailable'; TEAM.streaming = false; return; }
+        if (conn) conn.textContent = '● live';
+        const reader = r.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let i;
+          while ((i = buf.indexOf('\n\n')) >= 0) {
+            const frame = buf.slice(0, i); buf = buf.slice(i + 2);
+            let ev = 'message', data = '';
+            for (const line of frame.split('\n')) {
+              if (line.startsWith('event:')) ev = line.slice(6).trim();
+              else if (line.startsWith('data:')) data += line.slice(5).trim();
+            }
+            if (data) { try { onTeamEvent(ev, JSON.parse(data)); } catch (_) { /* skip bad frame */ } }
+          }
+        }
+      } catch (_) {
+        if (conn) conn.textContent = '○ disconnected';
+      }
+      TEAM.streaming = false;
+    }
+    LOADERS.team = async function loadTeam() {
+      const sel = document.getElementById('team-select');
+      try {
+        const [teams, agents] = await Promise.all([api('/teams'), api('/agents')]);
+        const byId = {}; for (const a of agents) byId[a.name] = a;
+        if (!teams.length) {
+          document.getElementById('team-canvas').innerHTML = '<div class="empty">No teams yet — create one in the Teams tab.</div>';
+          return;
+        }
+        const cur = sel.value || teams[0].name;
+        sel.innerHTML = teams.map((t) => `<option value="${escapeHtml(t.name)}">${escapeHtml(t.displayName || t.name)}</option>`).join('');
+        sel.value = teams.some((t) => t.name === cur) ? cur : teams[0].name;
+        if (!sel._wired) { sel.addEventListener('change', () => LOADERS.team()); sel._wired = true; }
+        TEAM.team = teams.find((t) => t.name === sel.value) || teams[0];
+        TEAM.agentsById = byId;
+        renderTeamCanvas();
+        renderTeamDetail();
+        startTeamStream(); // idempotent — one persistent SSE reader
+      } catch (e) {
+        document.getElementById('team-canvas').innerHTML = `<div class="empty">Error: ${escapeHtml(e.message)}</div>`;
+      }
+    };
+
     // First load = chat tab.
     LOADERS.chat();
 
