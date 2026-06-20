@@ -19,10 +19,11 @@
 // REPL both treat AsyncIterable<string> as their only contract, so
 // non-streaming is transparent to callers.
 //
-// Why `--skip-trust` is hard-coded: lazyclaw orchestrator / workflow
-// subprocesses commonly run from /tmp or scratch dirs which gemini's
-// trusted-folder policy rejects. We are spawning gemini ourselves with
-// our own prompt, so the policy adds friction without security value.
+// The trusted-folder bypass (`--skip-trust` + GEMINI_CLI_TRUST_WORKSPACE) is
+// enabled by default because lazyclaw orchestrator / workflow subprocesses
+// commonly run from /tmp or scratch dirs that gemini's trusted-folder policy
+// rejects in headless -p mode. It is a genuine trust bypass, now consolidated
+// behind one switch (opts.trustWorkspace, default true) — see geminiArgs/geminiEnv.
 
 import { spawnSandboxed } from '../sandbox.mjs';
 
@@ -105,6 +106,34 @@ function extractUsage(stats) {
   return { inputTokens: input, outputTokens: output, totalCostUsd: 0 };
 }
 
+// The gemini trusted-folder bypass — needed because lazyclaw runs gemini from
+// scratch dirs (/tmp, worker cwds) that gemini's trusted-folder policy would
+// otherwise reject in headless -p mode. It is a GENUINE trust bypass, so it
+// lives behind ONE switch: opts.trustWorkspace (default true) gates BOTH the
+// --skip-trust flag AND the GEMINI_CLI_TRUST_WORKSPACE env that previously
+// duplicated it (so dropping one no longer silently left the other). Pass
+// trustWorkspace:false to enforce the policy — safest when the subprocess also
+// runs under confinement.
+export function geminiArgs(prompt, opts = {}) {
+  const args = [];
+  if (opts.trustWorkspace !== false) args.push('--skip-trust');
+  args.push('-p', prompt, '-o', 'json');
+  const model = resolveModel(opts.model);
+  if (model) args.push('-m', model);
+  return args;
+}
+
+export function geminiEnv(opts = {}) {
+  return {
+    ...process.env,
+    ...(opts.trustWorkspace !== false ? { GEMINI_CLI_TRUST_WORKSPACE: 'true' } : {}),
+    // Forward a lazyclaw-stored key as GEMINI_API_KEY so the "paste an API key"
+    // connect path authenticates the subprocess (the gemini CLI reads this env
+    // var). Omitted when blank so a Google-OAuth login is unaffected.
+    ...(opts.apiKey ? { GEMINI_API_KEY: String(opts.apiKey) } : {}),
+  };
+}
+
 export const geminiCliProvider = {
   name: 'gemini-cli',
   async *sendMessage(messages, opts = {}) {
@@ -112,9 +141,7 @@ export const geminiCliProvider = {
     const prompt = buildPrompt(messages, opts.system || messages.find(m => m.role === 'system')?.content);
     if (!prompt) return;
 
-    const args = ['--skip-trust', '-p', prompt, '-o', 'json'];
-    const model = resolveModel(opts.model);
-    if (model) args.push('-m', model);
+    const args = geminiArgs(prompt, opts);
 
     if (opts.signal?.aborted) throw new AbortError('aborted before spawn');
 
@@ -123,14 +150,7 @@ export const geminiCliProvider = {
       proc = spawnSandboxed(opts.sandbox || null, bin, args, {
         cwd: opts.cwd || process.cwd(),
         stdio: ['ignore', 'pipe', 'pipe'],
-        // Forward a lazyclaw-stored key as GEMINI_API_KEY so the "paste an API
-        // key" connect path authenticates the subprocess (the gemini CLI reads
-        // this env var). Omitted when blank so a Google-OAuth login is unaffected.
-        env: {
-          ...process.env,
-          GEMINI_CLI_TRUST_WORKSPACE: 'true',
-          ...(opts.apiKey ? { GEMINI_API_KEY: String(opts.apiKey) } : {}),
-        },
+        env: geminiEnv(opts),
       });
     } catch (err) {
       if (err && err.code === 'ENOENT') throw new CliMissingError();
@@ -209,3 +229,4 @@ export const geminiCliProvider = {
 };
 
 export { CliMissingError, CliExitError, AbortError, resolveModel, buildPrompt, extractUsage };
+// geminiArgs/geminiEnv are also exported at their definitions (trust-switch seam).
