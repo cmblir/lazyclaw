@@ -1314,6 +1314,9 @@ async function _task(args, ctx, write) {
       const userMsg = tokens.slice(2).join(' ').trim();
       try {
         if (typeof write === 'function') { try { write('  ↻ running task turn…\n'); } catch {} }
+        // Default-on isolation: confine every tool the team runs. Lazy-imported
+        // so the sandbox backends stay off the chat module-load path.
+        const { defaultSandboxSpec } = await import('../sandbox/index.mjs');
         const result = await router.runTaskTurn({
           task, team, agentsById,
           userMessage: userMsg || undefined,
@@ -1322,6 +1325,7 @@ async function _task(args, ctx, write) {
           logger: (line) => { if (typeof write === 'function') { try { write(line); } catch {} } },
           approve: _makeInkApprove(ctx),
           security: ctx.cfg?.security,
+          sandbox: defaultSandboxSpec(ctx.cfg, { cwd: process.cwd(), configDir: ctx.cfgDir }),
         });
         return `✓ task ${result.task.id} → ${result.task.status} (${result.iterations} agent turn(s)${result.stoppedBy ? `, stopped by ${result.stoppedBy}` : ''})`;
       } catch (e) {

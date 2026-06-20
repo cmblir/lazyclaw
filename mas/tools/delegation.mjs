@@ -41,7 +41,7 @@ async function dispatchSpawn(job) {
   if (!record) {
     return { ok: false, error: `task_spawn: unknown agent ${agentName}` };
   }
-  const result = await runner({ agent: record, userMessage: job?.prompt, configDir: job?.configDir });
+  const result = await runner({ agent: record, userMessage: job?.prompt, configDir: job?.configDir, sandbox: job?.sandbox });
   return { ok: true, text: result?.text || '', stoppedBy: result?.stoppedBy, iterations: result?.iterations };
 }
 
@@ -55,7 +55,8 @@ const task_spawn = {
   },
   async exec(args, ctx = {}) {
     if (!args?.agent || !args?.prompt) return { ok: false, error: 'task_spawn: agent + prompt required' };
-    return dispatchSpawn({ agent: args.agent, prompt: args.prompt, configDir: ctx.configDir });
+    // Propagate the outer turn's sandbox so a spawned sub-agent stays confined.
+    return dispatchSpawn({ agent: args.agent, prompt: args.prompt, configDir: ctx.configDir, sandbox: ctx.sandbox });
   },
 };
 

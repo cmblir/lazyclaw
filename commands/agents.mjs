@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import { configPath, readConfig, _resolveAuthKey, _resolveBaseUrl } from '../lib/config.mjs';
 import { ensureRegistry, getRegistry } from '../lib/registry_boot.mjs';
 import { loadDotenvIfAny as _loadDotenvShared } from '../dotenv_min.mjs';
+import { defaultSandboxSpec } from '../sandbox/index.mjs';
 
 // Thin .env loader wrapper kept local so the module stays self-contained.
 export function _loadDotenvIfAny(cfgDir) { return _loadDotenvShared(cfgDir); }
@@ -326,6 +327,9 @@ export async function cmdTask(sub, positional, flags = {}) {
           maxAgentTurns: flags['max-turns'] ? parseInt(flags['max-turns'], 10) : undefined,
           approve,
           security: cfg.security,
+          // Default-on isolation: confine every tool the team runs (filesystem
+          // to cwd, secrets unreadable, net allowed). Opt out via cfg.sandbox.
+          sandbox: defaultSandboxSpec(cfg, { cwd: process.cwd(), configDir: cfgDir }),
         });
         emitJson({ id: result.task.id, status: result.task.status, iterations: result.iterations, stoppedBy: result.stoppedBy });
       } catch (err) {

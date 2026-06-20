@@ -392,6 +392,10 @@ export async function runTaskTurn({
   signal,
   approve,
   security,
+  // Default-on isolation — the flat sandbox spec applied to every tool the
+  // agents run this task. Threaded from the entrypoint (task tick / REPL),
+  // which builds it via defaultSandboxSpec. undefined → bare (byte-stable).
+  sandbox,
   // E3 — a long-lived caller (e.g. the daemon) can pass a pre-started
   // SlackChannel to reuse across many task turns; run() then neither
   // creates nor stops it. When omitted, run() opens + closes its own.
@@ -477,7 +481,7 @@ export async function runTaskTurn({
         userMessage: '',
         history: ctx.history,
         taskId: current.id,
-        configDir, cwd, apiKey, fetchImpl, baseUrl, signal, approve, security,
+        configDir, cwd, apiKey, fetchImpl, baseUrl, signal, approve, security, sandbox,
         // C9 — enable Anthropic prompt caching for the static system
         // prefix + tool definitions. Non-anthropic adapters ignore
         // the flag (it's a no-op for OpenAI/Gemini/claude-cli).

@@ -77,6 +77,20 @@ test('task_spawn resolves agent name to a record before runAgentTurn', async () 
   fs.rmSync(configDir, { recursive: true, force: true });
 });
 
+test('task_spawn propagates the outer sandbox spec to the nested runner (default-on isolation)', async () => {
+  const configDir = tmpConfigDir();
+  registerAgent({ name: 'r2', provider: 'anthropic', model: 'x' }, configDir);
+  let received = null;
+  del.__setTurnRunner(async (job) => { received = job; return { text: 'ok', stoppedBy: 'final', iterations: 1 }; });
+  const t = del.TOOLS.find((x) => x.name === 'task_spawn');
+  const spec = { kind: 'local', confiner: 'auto' };
+  await t.exec({ agent: 'r2', prompt: 'go' }, { configDir, sandbox: spec });
+  del.__setTurnRunner(null);
+  // A spawned sub-agent must inherit the parent turn's confinement, not run free.
+  assert.equal(received.sandbox, spec, 'nested runner must receive the outer sandbox spec');
+  fs.rmSync(configDir, { recursive: true, force: true });
+});
+
 test('task_spawn on an unknown agent returns a clean error (no throw)', async () => {
   const configDir = tmpConfigDir();
   let called = false;

@@ -16,6 +16,8 @@
 //     bindings:     { '<workerName>': '<kind>' | { kind, ...overrides } },
 //   }
 
+import os from 'node:os';
+import path from 'node:path';
 import { SANDBOX_KINDS, SandboxError } from './base.mjs';
 import { LocalSandbox } from './local.mjs';
 import { DockerSandbox, parseSandboxSpec } from './docker.mjs';
@@ -64,4 +66,51 @@ export function resolveSandbox(cfg, workerName) {
     kind,
   };
   return new CTORS[kind](spec);
+}
+
+// Directories whose reads are blocked inside a confined child even though reads
+// are otherwise allowed — credential stores + the lazyclaw config dir (which
+// holds auth profiles and channel tokens).
+function defaultDenyRead(homeDir, configDir) {
+  const h = homeDir || os.homedir();
+  const dirs = [
+    path.join(h, '.ssh'),
+    path.join(h, '.aws'),
+    path.join(h, '.gnupg'),
+    path.join(h, '.config', 'gcloud'),
+    path.join(h, '.docker'),
+    path.join(h, '.kube'),
+    path.join(h, '.npmrc'),
+    path.join(h, '.netrc'),
+  ];
+  if (configDir) dirs.push(configDir);
+  return dirs;
+}
+
+// Build the flat sandbox spec applied BY DEFAULT to sensitive tool execution
+// (the tool hot path: bash, python_exec/node_exec, git_*, os_*). Returns null to
+// mean "no confinement" (bare host).
+//
+// Default-on policy (operator-chosen): confine every sensitive child-spawning
+// tool, with the filesystem confined to the workspace (cwd) + temp, secret dirs
+// unreadable, and network ALLOWED. Opt out with cfg.sandbox.confine === false or
+// cfg.sandbox.default of 'off'/'none'. An explicitly-configured docker backend
+// is honoured instead of local confinement.
+//
+// This is threaded in by the production entrypoints (task tick, agentic chat,
+// task_spawn); the library defaults of runTool/runAgentTurn stay null so direct
+// API callers and unit tests remain byte-stable.
+export function defaultSandboxSpec(cfg, { cwd, configDir } = {}) {
+  const sb = (cfg && cfg.sandbox) || {};
+  if (sb.confine === false || sb.default === 'off' || sb.default === 'none') return null;
+  if (sb.default === 'docker' && sb.docker && sb.docker.image) {
+    return { kind: 'docker', ...sb.docker };
+  }
+  return {
+    kind: 'local',
+    confiner: sb.local?.confiner || 'auto',
+    readWrite: [cwd || process.cwd()],
+    denyRead: defaultDenyRead(sb.homeDir, configDir),
+    allowNet: sb.allowNet !== false,
+  };
 }

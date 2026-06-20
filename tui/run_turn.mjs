@@ -27,6 +27,7 @@
 
 import { Chalk } from 'chalk';
 import { chatAgenticGet, chatPlanModeGet, effectiveChatTools } from '../config_features.mjs';
+import { defaultSandboxSpec } from '../sandbox/index.mjs';
 
 // Force ANSI on these turn-status markers regardless of stdout TTY detection:
 // the Ink path routes them through React state (Ink preserves embedded SGR
@@ -113,6 +114,10 @@ async function _runAgenticTurn({ ctx, messages, sysMsg, activeProvName, activeMo
       apiKey: ctx.resolveAuthKey(activeProvName),
       approve: ctx.approve,
       security: ctx.cfg?.security,
+      // Default-on isolation: an explicit --sandbox spec wins; otherwise confine
+      // by default (cwd-confined fs, secrets blocked, net allowed). Opt out via
+      // cfg.sandbox.confine=false → defaultSandboxSpec returns null (bare).
+      sandbox: ctx.sandboxSpec || defaultSandboxSpec(ctx.cfg, { cwd: process.cwd(), configDir: ctx.cfgDir }),
       cache: true,
       usePromptStack: false,
       signal,

@@ -101,6 +101,34 @@ test('(b) agentic ON routes to runAgentTurn with a chat agent record carrying co
   assert.ok(writes.join('').includes('agentic answer'), 'final answer must be rendered');
 });
 
+test('(b2) agentic ON applies default-on confinement (sandbox spec threaded to runAgentTurn)', async () => {
+  const captured = {};
+  const ctx = makeRunTurnCtx({
+    cfg: { provider: 'mock', model: 'mock-m', chat: { agentic: true } },
+    provider: mockProv({}),
+    messages: [{ role: 'system', content: 's' }],
+    runAgentTurnImpl: async (args) => { captured.args = args; return { text: 'a', stoppedBy: 'final', toolCalls: [] }; },
+  });
+  await makeRunTurn({ ctx, writeFn: () => {} })('hi', new AbortController().signal);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.ok(captured.args.sandbox, 'a default sandbox spec must be threaded when no --sandbox is given');
+  assert.equal(captured.args.sandbox.kind, 'local');
+  assert.equal(captured.args.sandbox.confiner, 'auto');
+});
+
+test('(b3) cfg.sandbox.confine=false opts out of default-on confinement (no sandbox)', async () => {
+  const captured = {};
+  const ctx = makeRunTurnCtx({
+    cfg: { provider: 'mock', model: 'mock-m', chat: { agentic: true }, sandbox: { confine: false } },
+    provider: mockProv({}),
+    messages: [{ role: 'system', content: 's' }],
+    runAgentTurnImpl: async (args) => { captured.args = args; return { text: 'a', stoppedBy: 'final', toolCalls: [] }; },
+  });
+  await makeRunTurn({ ctx, writeFn: () => {} })('hi', new AbortController().signal);
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(captured.args.sandbox, null, 'confine:false must disable confinement');
+});
+
 test('(c) plan mode intersects tools to read-only (no bash/write in agent record)', async () => {
   const captured = {};
   const messages = [];
