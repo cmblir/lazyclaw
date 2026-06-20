@@ -146,7 +146,7 @@ The REPL has slash commands for everything you'd otherwise edit config for — p
 lazyclaw dashboard          # local web UI on http://127.0.0.1:19600
 ```
 
-A framework-free SPA over the daemon's JSON API: Chat, Sessions, Workflows, Skills, Providers, Rates, Metrics, Doctor, Config, Status, Agents, Teams, Tasks, Trainer, Recall, Sandbox, Channels — 17 tabs, dark amber theme.
+A framework-free SPA over the daemon's JSON API: Chat, Sessions, Workflows, Skills, Providers, Rates, Metrics, Doctor, Config, Status, Agents, Teams, Tasks, **Team Live**, Trainer, Recall, Sandbox, Channels — 18 tabs, dark amber theme. The **Team Live** tab is a real-time org view: avatar tiles with status rings + harness badges (`provider · model`), live agent-A→B delegation, and click-to-drill-down (harness, current task, recent activity), streamed over Server-Sent Events (`GET /events`).
 
 ## Providers
 
@@ -168,6 +168,7 @@ A framework-free SPA over the daemon's JSON API: Chat, Sessions, Workflows, Skil
 - **Durable recall** — one SQLite + FTS5 index over sessions, skills, trajectories, and memory; rebuildable from the corpus.
 - **Loops & goals** — durable foreground/`--detach` loops and cron-scheduled goals that survive restart.
 - **Personas** — layered SOUL / workspace / personality / role / user-model / skills compose into the system prompt.
+- **Agent teams, live** — build a hierarchy (a planner agent with sub-agents on different harnesses, e.g. a data-engineer on `gemini-cli` and a backend on `claude-cli`) via each agent's `manager`; a Slack message to a team's channel auto-routes into the multi-agent loop, and the **Team Live** dashboard tab shows who is doing what, on which harness, and the real-time A→B delegation as it happens.
 - **Default-on confinement** — sensitive tools (`bash`, `python_exec`/`node_exec`, `git_*`, the `os` tools) run confined by default: writes are limited to the workspace + temp, secret dirs (`~/.ssh`, `~/.aws`, the config dir, …) are unreadable, and the secret-scrubbed env still applies. macOS uses `seatbelt`, Linux uses `bubblewrap`/`firejail` (auto-detected). Network is allowed; opt out with `cfg.sandbox.confine=false`. Run `lazyclaw sandbox status` to see the effective posture.
 - **Sandboxes** — `local` / `docker` / `ssh` / `singularity` / `modal` / `daytona` behind one API; pluggable backends for heavier isolation (containers, remote hosts) layered on top of the default local confinement.
 - **MCP** — stdio MCP servers in `cfg.mcp.servers` boot with the daemon; their tools register as `mcp:<server>:<tool>` (always approval-gated). `lazyclaw mcp list`.

@@ -6,6 +6,21 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Live agent-team dashboard.** Agents gain an optional `manager` field, so a
+  team forms an org tree (a planner with sub-agents on different harnesses — e.g.
+  a data-engineer on `gemini-cli`, a backend on `claude-cli`). A new in-process
+  event bus (`mas/events.mjs`) streams agent activity over `GET /events`
+  (Server-Sent Events) — `task`/`turn`/`tool.call`/`agent.status`/`delegate`
+  events emitted by the mention router, agent-turn loop, and `task_spawn`. The
+  new **Team Live** dashboard tab renders the team as avatar tiles with status
+  rings + harness badges, animates real-time agent-A→B delegation, and opens a
+  click-to-drill-down panel (harness, current task, recent activity). A Slack
+  message to a channel bound to a team (`team.slackChannel`) now auto-routes into
+  the multi-agent task loop instead of a single-shot reply, so the team works the
+  request and the dashboard shows it live.
+
 ### Security
 
 - **Sensitive tools are confined by default.** `bash`, `python_exec`/`node_exec`,
