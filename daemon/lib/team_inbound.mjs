@@ -1,0 +1,56 @@
+// daemon/lib/team_inbound.mjs — Slack→team auto-routing for POST /inbound.
+//
+// When the inbound channel is bound to a team (team.slackChannel), drive the
+// multi-agent task loop (mention_router.runTaskTurn) — which emits live
+// dashboard events as the agents work — instead of a single-shot provider
+// reply. Returns { reply, team, taskId } when handled, or null to fall through
+// to the existing single-shot path (byte-stable for unbound channels).
+//
+// Collaborators are static-imported except mention_router (lazy, since it pulls
+// in the agent-turn machinery); `_runTaskTurn` is a test injection seam.
+
+import { listTeams, teamForChannel } from '../../teams.mjs';
+import { getAgent } from '../../agents.mjs';
+import { registerTask } from '../../tasks.mjs';
+import { defaultSandboxSpec } from '../../sandbox/index.mjs';
+
+export async function routeInboundToTeam({
+  cfg, channel, text, configDir, apiKey, baseUrl, logger, slackSender, _runTaskTurn,
+} = {}) {
+  if (!channel || !text) return null;
+  const team = teamForChannel(listTeams(configDir), channel);
+  if (!team) return null;
+
+  // Load the team's agent records; bail (fall through) if the lead drifted away.
+  const agentsById = {};
+  for (const name of (team.agents || [])) {
+    const rec = getAgent(name, configDir);
+    if (rec) agentsById[name] = rec;
+  }
+  if (!agentsById[team.lead]) return null;
+
+  const task = registerTask({
+    title: String(text).slice(0, 80) || '(channel task)',
+    team: team.name,
+    lead: team.lead,
+    slackChannel: channel,
+  }, configDir);
+
+  const runTaskTurn = _runTaskTurn
+    || (await import('../../mas/mention_router.mjs')).runTaskTurn;
+
+  const result = await runTaskTurn({
+    task, team, agentsById, userMessage: text,
+    configDir, apiKey, baseUrl, logger, slackSender,
+    // Default-on confinement for every tool the team runs (opt out via cfg).
+    sandbox: defaultSandboxSpec(cfg, { cwd: process.cwd(), configDir }),
+  });
+
+  const turns = (result && result.task && result.task.turns) || [];
+  const lastAssistant = [...turns].reverse().find((t) => t && t.agent && t.agent !== 'user' && t.text);
+  return {
+    reply: lastAssistant ? lastAssistant.text : '(team finished with no reply)',
+    team: team.name,
+    taskId: (result && result.task && result.task.id) || task.id,
+  };
+}

@@ -3,6 +3,7 @@
 // HTTP response. Bodies are unchanged; only the dispatch wrapper is new.
 import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, checkCostCap, accumulateMetricsFromCost, accountTurnCost, resolveProvider, openThreads, handoffWithRollback, openDedup, enqueueLearning } from './_deps.mjs';
 import { randomBytes } from 'node:crypto';
+import { routeInboundToTeam } from '../lib/team_inbound.mjs';
 
 // F5 — mint a fresh session id for a newly-seen channel:externalId binding.
 // Kept filename-local (threads.mjs's newThreadId isn't exported); the `ib_`
@@ -192,6 +193,22 @@ export async function inbound(c) {
           // pending TTL and retries would be silently dropped.
           let dedupRecorded = false;
           try {
+          // L3 — Slack→team auto-routing. When the inbound channel is bound to a
+          // team (team.slackChannel), drive the multi-agent task loop (which
+          // emits live dashboard events as the agents work) and return its final
+          // reply. Falls through to the single-shot path when no team is bound,
+          // keeping existing single-agent channels byte-stable.
+          if (channel) {
+            const teamRouted = await routeInboundToTeam({
+              cfg, channel, text, configDir: cfgDir,
+              apiKey: cfg['api-key'], logger,
+            }).catch((err) => { logger(`[inbound] team routing failed: ${err?.message || err}\n`); return null; });
+            if (teamRouted) {
+              const out = { reply: teamRouted.reply, threadId: body.threadId || null, team: teamRouted.team, taskId: teamRouted.taskId };
+              if (dedup) { dedup.record(dedupKey, { reply: teamRouted.reply, threadId: out.threadId }); dedupRecorded = true; }
+              return writeJson(res, 200, out);
+            }
+          }
           let threads = null;
           let bound = null;
           let sessionId = null;

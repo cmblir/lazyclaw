@@ -231,3 +231,11 @@ export function teamTree(team, agentsById = {}) {
   };
   return build(lead, new Set());
 }
+
+// Find the team bound to an inbound channel id (team.slackChannel), or null.
+// Used by the daemon to auto-route a Slack message to a team's multi-agent loop.
+export function teamForChannel(teams, channel) {
+  if (!channel) return null;
+  const c = String(channel);
+  return (teams || []).find((t) => t && t.slackChannel && String(t.slackChannel) === c) || null;
+}
