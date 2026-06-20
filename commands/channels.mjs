@@ -200,9 +200,40 @@ export async function cmdChannels(sub, positional = [], flags = {}) {
 
   if (sub === 'install') {
     const name = positional[0];
-    if (!name) { process.stderr.write('usage: lazyclaw channels install <@lazyclaw/channel-name>\n'); process.exit(2); }
-    const info = await loader.install(name);
-    process.stdout.write(`installed ${info.name}@${info.version}\n`);
+    if (!name) { process.stderr.write('usage: lazyclaw channels install <name>   (e.g. discord, email, whatsapp)\n'); process.exit(2); }
+    const { isPluginName } = await import('../channels/loader.mjs');
+    // Back-compat: an explicit @lazyclaw/channel-* spec still routes through the
+    // legacy plugin loader (for anyone shipping a real published package).
+    if (isPluginName(name)) {
+      const info = await loader.install(name);
+      process.stdout.write(`installed ${info.name}@${info.version}\n`);
+      return;
+    }
+    const { channelByName, channelReadiness } = await import('./setup_channels.mjs');
+    const spec = channelByName(name.toLowerCase());
+    if (!spec) { process.stderr.write(`unknown channel: ${name} (known: ${KNOWN_CHANNELS.join(', ')})\n`); process.exit(2); }
+    if (spec.builtin) { process.stdout.write(`channel ${spec.name} is built in — no install needed.\n`); return; }
+    if (spec.binary && (!spec.deps || !spec.deps.length)) {
+      process.stderr.write(`channel ${spec.name} needs the external "${spec.binary}" binary on your PATH (not an npm package). Install it from its project, then: lazyclaw channels enable ${spec.name}\n`);
+      process.exit(2);
+    }
+    const deps = spec.deps || [];
+    if (!deps.length) { process.stdout.write(`channel ${spec.name} needs no runtime package — set creds with \`lazyclaw setup\`, then \`lazyclaw channels enable ${spec.name}\`.\n`); return; }
+    // Install the in-tree adapter's runtime deps INTO the config dir; the
+    // gateway resolves them from there (commands/gateway.mjs _loadPluginChannel).
+    const { spawnSync } = await import('node:child_process');
+    process.stdout.write(`installing ${deps.join(', ')} into ${cfgDir} …\n`);
+    const res = spawnSync('npm', ['install', '--no-audit', '--no-fund', '--prefix', cfgDir, ...deps], { stdio: 'inherit', env: process.env });
+    if (res.status !== 0) { process.stderr.write(`npm install failed (exit ${res.status})\n`); process.exit(1); }
+    const r = channelReadiness(spec.name, cfgDir);
+    if (r.ready) {
+      const cfg = readConfig();
+      channelSetEnabled(cfg, spec.name, true);
+      writeConfig(cfg);
+      process.stdout.write(`installed ${deps.join(', ')} — channel ${spec.name} enabled.\n`);
+    } else {
+      process.stdout.write(`installed ${deps.join(', ')}. Still missing: ${[...r.missingDeps, r.missingBinary].filter(Boolean).join(', ')}.\n`);
+    }
     return;
   }
   if (sub === 'remove' || sub === 'uninstall') {

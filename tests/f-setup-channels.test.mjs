@@ -9,6 +9,7 @@ import {
   buildChannelEntry,
   persistChannel,
   runChannelStep,
+  channelReadiness,
 } from '../commands/setup_channels.mjs';
 import { KNOWN_CHANNELS } from '../daemon/routes/ops.mjs';
 
@@ -89,11 +90,12 @@ test('CHANNEL_CATALOG covers exactly the daemon KNOWN channel names', () => {
   );
 });
 
-test('buildChannelEntry(slack) maps the token to SLACK_BOT_TOKEN, enables, no plugin', () => {
+test('buildChannelEntry(slack) maps the token to SLACK_BOT_TOKEN, builtin, no deps', () => {
   const e = buildChannelEntry('slack', { token: 'xoxb-123' });
   assert.deepEqual(e.envVars, { SLACK_BOT_TOKEN: 'xoxb-123' });
-  assert.deepEqual(e.channelConfig, { enabled: true });
-  assert.equal(e.needsPlugin, null);
+  assert.equal(e.builtin, true);
+  assert.deepEqual(e.deps, []);
+  assert.equal(e.binary, null);
 });
 
 test('buildChannelEntry(telegram) uses TELEGRAM_BOT_TOKEN', () => {
@@ -110,16 +112,25 @@ test('buildChannelEntry(matrix) collects homeserver + access token + user id', (
   });
 });
 
-test('buildChannelEntry(discord) reports the plugin package and uses DISCORD_BOT_TOKEN', () => {
+test('buildChannelEntry(discord) reports the real runtime dep (not a 404 npm package) and uses DISCORD_BOT_TOKEN', () => {
   const e = buildChannelEntry('discord', { token: 'd1' });
   assert.deepEqual(e.envVars, { DISCORD_BOT_TOKEN: 'd1' });
-  assert.equal(e.needsPlugin, '@lazyclaw/channel-discord');
+  assert.equal(e.builtin, false);
+  assert.deepEqual(e.deps, ['discord.js']);
 });
 
-test('buildChannelEntry(http) is bind-only — no env vars, still enabled', () => {
+test('CHANNEL_CATALOG no longer points at unpublished @lazyclaw/channel-* packages', () => {
+  for (const c of CHANNEL_CATALOG) {
+    assert.equal(c.plugin, undefined, `${c.name} must not carry a @lazyclaw plugin pointer`);
+    if (!c.builtin) assert.ok(Array.isArray(c.deps) || c.binary, `${c.name} must declare a real dep or binary`);
+  }
+});
+
+test('buildChannelEntry(http) is bind-only — no env vars, builtin', () => {
   const e = buildChannelEntry('http', {});
   assert.deepEqual(e.envVars, {});
-  assert.deepEqual(e.channelConfig, { enabled: true });
+  assert.equal(e.builtin, true);
+  assert.deepEqual(e.deps, []);
 });
 
 test('buildChannelEntry(unknown) throws', () => {
@@ -228,7 +239,7 @@ test('runChannelStep: configures multiple channels in one pass', async () => {
   }
 });
 
-test('runChannelStep: a plugin channel reports the install command', async () => {
+test('runChannelStep: an in-tree channel with a missing dep is saved DISABLED with an honest install hint (no 404 package)', async () => {
   const dir = tmpCfgDir();
   const prevCfg = process.env.LAZYCLAW_CONFIG_DIR;
   process.env.LAZYCLAW_CONFIG_DIR = dir;
@@ -241,19 +252,31 @@ test('runChannelStep: a plugin channel reports the install command', async () =>
       colors: noColors,
       write: (s) => out.push(s),
     });
-    assert.equal(r.needsPlugin, '@lazyclaw/channel-discord');
+    // discord.js is not installed in the temp cfgDir → not ready.
+    assert.equal(r.needsPlugin, 'discord.js');
     const rendered = out.join('');
-    assert.match(rendered, /@lazyclaw\/channel-discord/);
-    // The manual npm fallback must be a real, working command: `npm install
-    // --prefix <cfgDir> <pkg>` (the exact equivalent of the loader's plain
-    // `npm install` run with cwd: configDir). The broken `npm i -w <dir>` form
-    // errors with "No workspaces found", so it must never be printed.
-    assert.ok(
-      rendered.includes(`npm install --prefix ${dir} @lazyclaw/channel-discord`),
-      'must print the working npm install --prefix fallback',
-    );
-    assert.doesNotMatch(rendered, / -w /, 'must not print the broken npm -w workspace fallback');
+    // Never advertises the unpublished @lazyclaw/channel-* package.
+    assert.doesNotMatch(rendered, /@lazyclaw\/channel-/, 'must not point at a 404 npm package');
+    // Points at the REAL runtime dep + the working install command.
+    assert.match(rendered, /discord\.js/);
+    assert.ok(rendered.includes('lazyclaw channels install discord'), 'must print the real install command');
+    assert.ok(rendered.includes(`npm install --prefix ${dir} discord.js`), 'must show the equivalent npm --prefix command');
+    // And the channel is NOT enabled until the dep is present.
+    const cfg = JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'));
+    assert.equal(cfg.channels.discord.enabled, false, 'in-tree channel stays disabled until its dep is installed');
+    assert.deepEqual(cfg.channels.discord.pending.deps, ['discord.js']);
   } finally {
     if (prevCfg === undefined) delete process.env.LAZYCLAW_CONFIG_DIR; else process.env.LAZYCLAW_CONFIG_DIR = prevCfg;
   }
+});
+
+test('channelReadiness: builtins are always ready; an in-tree channel with no installed dep is not', () => {
+  const dir = tmpCfgDir();
+  assert.equal(channelReadiness('slack', dir).ready, true);
+  assert.equal(channelReadiness('http', dir).ready, true);
+  const discord = channelReadiness('discord', dir);
+  assert.equal(discord.ready, false);
+  assert.deepEqual(discord.missingDeps, ['discord.js']);
+  // voice declares no runtime package → ready once selected (creds only).
+  assert.equal(channelReadiness('voice', dir).ready, true);
 });

@@ -9,12 +9,20 @@
 // and the dashboard read. Plugin channels are recorded the same way with an
 // honest "needs a plugin package" notice — we never pretend a channel works
 // when it requires an uninstalled package or an external binary.
+import fs from 'node:fs';
+import path from 'node:path';
 import { readConfig, writeConfig } from '../lib/config.mjs';
 import { writeDotenvMerge } from '../dotenv_min.mjs';
 import { messageAdd } from '../config_features.mjs';
 
 // fields[].key is the answer key; .env is the env var it maps to; .secret
 // masks it on echo; .optional lets the user skip it.
+//
+// The five non-builtin channels are NOT separate npm packages — they ship
+// IN-TREE under channels-<name>/ and the gateway runs them directly. What they
+// need is a RUNTIME dependency: an npm package (`deps`) installed into the
+// config dir, or an external `binary` on PATH. (The old catalog pointed at
+// unpublished `@lazyclaw/channel-*` packages, so `channels install` 404'd.)
 export const CHANNEL_CATALOG = [
   { name: 'slack',    builtin: true,  label: 'Slack',
     fields: [
@@ -30,29 +38,62 @@ export const CHANNEL_CATALOG = [
       { key: 'userId',     env: 'MATRIX_USER_ID', prompt: 'User id (@you:matrix.org)' },
     ] },
   { name: 'http',     builtin: true,  label: 'HTTP (generic inbound endpoint)', fields: [] },
-  { name: 'discord',  builtin: false, plugin: '@lazyclaw/channel-discord', label: 'Discord',
+  { name: 'discord',  builtin: false, deps: ['discord.js'], label: 'Discord',
     fields: [{ key: 'token', env: 'DISCORD_BOT_TOKEN', prompt: 'Bot token', secret: true }] },
-  { name: 'email',    builtin: false, plugin: '@lazyclaw/channel-email', label: 'Email (IMAP/SMTP)',
+  { name: 'email',    builtin: false, deps: ['node-imap', 'nodemailer', 'mailparser'], label: 'Email (IMAP/SMTP)',
     fields: [
       { key: 'host', env: 'EMAIL_IMAP_HOST', prompt: 'IMAP host' },
       { key: 'user', env: 'EMAIL_IMAP_USER', prompt: 'IMAP user' },
       { key: 'pass', env: 'EMAIL_IMAP_PASS', prompt: 'IMAP password', secret: true },
     ] },
-  { name: 'signal',   builtin: false, plugin: '@lazyclaw/channel-signal', label: 'Signal (needs signal-cli)',
+  { name: 'signal',   builtin: false, binary: 'signal-cli', label: 'Signal (needs signal-cli)',
     fields: [{ key: 'account', env: 'SIGNAL_ACCOUNT', prompt: 'Signal account (+15551234567)' }] },
-  { name: 'voice',    builtin: false, plugin: '@lazyclaw/channel-voice', label: 'Voice (Whisper transcription)',
+  { name: 'voice',    builtin: false, deps: [], label: 'Voice (Whisper transcription)',
     fields: [{ key: 'apiKey', env: 'OPENAI_API_KEY', prompt: 'OpenAI API key (whisper)', secret: true }] },
-  { name: 'whatsapp', builtin: false, plugin: '@lazyclaw/channel-whatsapp', label: 'WhatsApp (web session)',
+  { name: 'whatsapp', builtin: false, deps: ['whatsapp-web.js', 'qrcode-terminal'], label: 'WhatsApp (web session)',
     fields: [] },
 ];
+
+// Is a runtime npm dep installed into <cfgDir>/node_modules? (the in-tree
+// adapter resolves it from there; see commands/gateway.mjs _loadPluginChannel).
+export function depInstalled(dep, cfgDir) {
+  if (!cfgDir) return false;
+  return fs.existsSync(path.join(cfgDir, 'node_modules', dep, 'package.json'));
+}
+
+// Is an external binary on PATH? (signal needs signal-cli.)
+export function binaryOnPath(bin) {
+  const PATH = process.env.PATH || '';
+  const exts = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
+  for (const dir of PATH.split(path.delimiter).filter(Boolean)) {
+    for (const ext of exts) {
+      try { if (fs.existsSync(path.join(dir, bin + ext))) return true; } catch { /* skip */ }
+    }
+  }
+  return false;
+}
+
+// Can this channel actually run right now? Builtins always; in-tree channels
+// only once their runtime dep (npm package) / external binary is present.
+// Returns { ready, missingDeps:[], missingBinary:null }.
+export function channelReadiness(name, cfgDir) {
+  const spec = channelByName(name);
+  if (!spec) return { ready: false, missingDeps: [], missingBinary: null };
+  if (spec.builtin) return { ready: true, missingDeps: [], missingBinary: null };
+  const missingDeps = (spec.deps || []).filter((d) => !depInstalled(d, cfgDir));
+  const missingBinary = spec.binary && !binaryOnPath(spec.binary) ? spec.binary : null;
+  return { ready: missingDeps.length === 0 && !missingBinary, missingDeps, missingBinary };
+}
 
 export function channelByName(name) {
   return CHANNEL_CATALOG.find((c) => c.name === name) || null;
 }
 
-// Pure: turn collected answers into { envVars, channelConfig, needsPlugin }.
-// Empty/whitespace answers are dropped so a skipped optional field doesn't
-// write an empty env var.
+// Pure: turn collected answers into { envVars, deps, binary, builtin }. Empty/
+// whitespace answers are dropped so a skipped optional field doesn't write an
+// empty env var. `deps`/`binary` describe the runtime requirement the in-tree
+// channel needs to actually run (replaces the old, unpublished `@lazyclaw/
+// channel-*` plugin pointer).
 export function buildChannelEntry(name, answers = {}) {
   const spec = channelByName(name);
   if (!spec) throw new Error(`unknown channel: ${name}`);
@@ -63,8 +104,9 @@ export function buildChannelEntry(name, answers = {}) {
   }
   return {
     envVars,
-    channelConfig: { enabled: true },
-    needsPlugin: spec.builtin ? null : spec.plugin,
+    builtin: !!spec.builtin,
+    deps: spec.deps || [],
+    binary: spec.binary || null,
   };
 }
 
@@ -78,9 +120,17 @@ export function persistChannel(cfgDir, name, answers) {
   if (Object.keys(entry.envVars).length) writeDotenvMerge(cfgDir, entry.envVars);
   const cfg = readConfig();
   cfg.channels = cfg.channels && typeof cfg.channels === 'object' ? cfg.channels : {};
-  cfg.channels[name] = { ...(cfg.channels[name] || {}), ...entry.channelConfig };
+  // Don't mark a channel enabled until it can actually run — a plugin channel
+  // whose runtime dep / binary is still missing is recorded but left disabled
+  // (with the missing requirement) so the gateway never tries (and fails) to
+  // start it. `channels enable <name>` flips it once the dep is installed.
+  const r = channelReadiness(name, cfgDir);
+  const section = { ...(cfg.channels[name] || {}), enabled: r.ready };
+  if (!r.ready) section.pending = { deps: r.missingDeps, binary: r.missingBinary };
+  else delete section.pending;
+  cfg.channels[name] = section;
   writeConfig(cfg);
-  return entry;
+  return { ...entry, ready: r.ready, missingDeps: r.missingDeps, missingBinary: r.missingBinary };
 }
 
 const mask = (v) => {
@@ -147,13 +197,23 @@ async function configureChannel({ cfgDir, spec, prompt, colors, write }) {
   }
   const entry = persistChannel(cfgDir, spec.name, answers);
   const credKeys = Object.keys(entry.envVars);
-  write(`  ${ok('✓ channel enabled:')} ${spec.name}  ${credKeys.length ? dim(`creds: ${credKeys.join(', ')}`) : ''}\n`);
+  const status = entry.ready ? ok('✓ channel enabled:') : warn('• channel saved (not yet enabled):');
+  write(`  ${status} ${spec.name}  ${credKeys.length ? dim(`creds: ${credKeys.join(', ')}`) : ''}\n`);
   for (const f of spec.fields) {
     if (f.secret && answers[f.key]) write(`    ${dim(`${f.env} = ${mask(answers[f.key])}  (stored in ${cfgDir}/.env, 0600)`)}\n`);
   }
-  if (entry.needsPlugin) {
-    write(`  ${warn('plugin required:')} ${entry.needsPlugin}\n`);
-    write(`    ${dim(`install with: lazyclaw channels install ${entry.needsPlugin}  (or npm install --prefix ${cfgDir} ${entry.needsPlugin})`)}\n`);
+  // Honest requirement notice: these channels ship in-tree but need a runtime
+  // dependency before the gateway can start them. We never point at a package
+  // that doesn't exist.
+  if (!entry.ready) {
+    if (entry.missingDeps && entry.missingDeps.length) {
+      write(`  ${warn('needs a runtime package:')} ${entry.missingDeps.join(', ')}\n`);
+      write(`    ${dim(`install with: lazyclaw channels install ${spec.name}  (runs: npm install --prefix ${cfgDir} ${entry.missingDeps.join(' ')})`)}\n`);
+    }
+    if (entry.missingBinary) {
+      write(`  ${warn('needs an external binary:')} ${entry.missingBinary} (must be on your PATH)\n`);
+    }
+    write(`    ${dim(`then enable it with: lazyclaw channels enable ${spec.name}`)}\n`);
   }
   write('\n');
   return entry;
@@ -169,7 +229,7 @@ export async function runChannelStep({ cfgDir, prompt, colors, write = (s) => pr
   // `pick` is the arrow-key list selector — injectable so tests can script it
   // (the real _arrowMenu reads raw stdin, which a unit test can't drive).
   const picker = pick || (await import('../tui/pickers.mjs'))._arrowMenu;
-  write(`  ${dim('Where will you talk to the agent? Pick one (arrow keys); set its credentials inline. (* = needs a plugin package.) You can add more than one.')}\n\n`);
+  write(`  ${dim('Where will you talk to the agent? Pick one (arrow keys); set its credentials inline. (* = ships in-tree but needs a runtime package/binary.) You can add more than one.')}\n\n`);
 
   const configured = [];
   let needsPlugin = null;
@@ -180,7 +240,7 @@ export async function runChannelStep({ cfgDir, prompt, colors, write = (s) => pr
     const items = [done, ...CHANNEL_CATALOG.map((c) => ({
       id: c.name,
       label: `${c.label}${c.builtin ? '' : ' *'}`,
-      desc: configured.includes(c.name) ? '(already set — reconfigure)' : (c.builtin ? '' : `plugin: ${c.plugin}`),
+      desc: configured.includes(c.name) ? '(already set — reconfigure)' : (c.builtin ? '' : `needs: ${(c.deps && c.deps.length) ? c.deps.join(', ') : (c.binary || 'creds only')}`),
     }))];
     const picked = await picker({
       title: 'Step 3 · pick a channel to set up',
@@ -196,7 +256,7 @@ export async function runChannelStep({ cfgDir, prompt, colors, write = (s) => pr
     try {
       const entry = await configureChannel({ cfgDir, spec, prompt, colors, write });
       if (!configured.includes(id)) configured.push(id);
-      if (entry.needsPlugin) needsPlugin = entry.needsPlugin;
+      if (!entry.ready && entry.missingDeps && entry.missingDeps.length) needsPlugin = entry.missingDeps.join(', ');
     } catch (e) {
       write(`  ${warn('skipped:')} ${e?.message || e}\n\n`);
     }

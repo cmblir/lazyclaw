@@ -1783,7 +1783,7 @@ async function _channels(args, ctx = {}) {
         items: channelMod.CHANNEL_CATALOG.map((c) => ({
           id: c.name,
           label: c.label,
-          desc: c.builtin ? '' : `plugin: ${c.plugin}`,
+          desc: c.builtin ? '' : `needs: ${(c.deps && c.deps.length) ? c.deps.join(', ') : (c.binary || 'creds only')}`,
         })),
       });
       chName = sel && typeof sel === 'object' ? sel.id : sel;
@@ -1814,12 +1814,18 @@ async function _channels(args, ctx = {}) {
     }
     const path = await import('node:path');
     const cfgDirX = ctx.cfgDir || path.dirname(cfgMod.configPath());
-    channelMod.persistChannel(cfgDirX, chName, answers);
-    // Mirror enabled flag onto the in-session cfg so a follow-up list is fresh.
-    if (ctx.cfg) { ctx.cfg.channels = ctx.cfg.channels || {}; ctx.cfg.channels[chName] = { ...(ctx.cfg.channels[chName] || {}), enabled: true }; }
+    const entry = channelMod.persistChannel(cfgDirX, chName, answers);
+    // Mirror the PERSISTED enabled state onto the in-session cfg so a follow-up
+    // list is fresh — an in-tree channel whose runtime dep is missing stays
+    // disabled (persistChannel gates it) rather than being force-enabled.
+    if (ctx.cfg) { ctx.cfg.channels = ctx.cfg.channels || {}; ctx.cfg.channels[chName] = { ...(ctx.cfg.channels[chName] || {}), enabled: !!entry.ready }; }
     const setKeys = Object.keys(answers);
-    const plugin = spec.builtin ? '' : `\n(plugin required — install: lazyclaw channels install ${spec.plugin})`;
-    return `✓ ${spec.label} credentials saved (${setKeys.join(', ') || 'none'}) → channel enabled${plugin}`;
+    let note = '';
+    if (!entry.ready) {
+      if (entry.missingDeps && entry.missingDeps.length) note += `\n(needs ${entry.missingDeps.join(', ')} — run: lazyclaw channels install ${chName})`;
+      if (entry.missingBinary) note += `\n(needs the ${entry.missingBinary} binary on your PATH)`;
+    }
+    return `✓ ${spec.label} credentials saved (${setKeys.join(', ') || 'none'}) → ${entry.ready ? 'channel enabled' : 'saved (enable once the requirement is installed)'}${note}`;
   }
 
   // `/channels <name> test` — verify the stored credentials with a live call.
