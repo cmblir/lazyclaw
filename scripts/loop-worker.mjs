@@ -64,9 +64,14 @@ const sessions = await import(path.join(REPO_ROOT, 'sessions.mjs'));
 const loopEngine = await import(path.join(REPO_ROOT, 'loop-engine.mjs'));
 const registryUrl = path.join(REPO_ROOT, 'providers', 'registry.mjs');
 const { PROVIDERS } = await import(registryUrl);
+const { readConfig, _resolveAuthKey } = await import(path.join(REPO_ROOT, 'lib', 'config.mjs'));
 
 const cfgDir = process.env.LAZYCLAW_CONFIG_DIR || loops.defaultConfigDir();
 const sessionId = args['session-existing'] || `loop:${loopId}`;
+
+// Resolve the auth key the SAME way the foreground loop does — the worker used
+// process.env.LAZYCLAW_API_KEY||'' and so failed auth against anthropic/openai.
+const cfg = readConfig();
 
 const provName = args.provider || 'mock';
 const prov = PROVIDERS[provName];
@@ -111,7 +116,7 @@ async function sendOnce(messages, signal) {
   }
   let acc = '';
   for await (const chunk of prov.sendMessage(messages, {
-    apiKey: process.env.LAZYCLAW_API_KEY || '',
+    apiKey: _resolveAuthKey(cfg, provName),
     model: args.model,
     signal,
   })) {
@@ -144,6 +149,24 @@ const onIteration = ({ i, max: m, reply }) => {
   }, cfgDir);
 };
 
+// Honour --use-memory / --recall exactly like the foreground loop: rebuild a
+// system message from core/recall memory before each iteration. The detach
+// path forwards the flags now (buildDetachArgv); without this the worker would
+// see them and still ignore them.
+const memMod = (args['use-memory'] || args.recall) ? await import(path.join(REPO_ROOT, 'memory.mjs')) : null;
+const buildSystem = memMod ? (() => {
+  const parts = [];
+  if (args['use-memory']) {
+    const core = memMod.loadCore(cfgDir);
+    if (core && core.trim()) parts.push(core);
+  }
+  if (args.recall) {
+    const text = memMod.recall(String(args.recall), { topN: 3 }, cfgDir);
+    if (text && text.trim()) parts.push(text);
+  }
+  return parts.join('\n\n---\n\n');
+}) : null;
+
 try {
   const result = await loopEngine.runLoop({
     prompt: args.prompt || '',
@@ -154,6 +177,7 @@ try {
     persist,
     onIteration,
     signal: ac.signal,
+    buildSystem,
   });
   if (!terminating) {
     const finalStatus = result.stoppedBy === 'abort' ? 'killed' : 'completed';

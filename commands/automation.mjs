@@ -10,6 +10,21 @@ import { loadDotenvIfAny as _loadDotenvShared } from '../dotenv_min.mjs';
 // Thin .env loader wrapper kept local so the module stays self-contained.
 export function _loadDotenvIfAny(cfgDir) { return _loadDotenvShared(cfgDir); }
 
+// Build the detached loop-worker argv. Pure + exported so the flag-forwarding
+// contract is unit-testable: --use-memory / --recall MUST reach the worker, or
+// `loop --detach --use-memory` silently runs with no memory (the worker only
+// builds a system message when it sees the flags).
+export function buildDetachArgv(worker, { loopId, prompt, max, provName, cfgDir, until, requestedSession, model, useMemory, recall } = {}) {
+  const argv = [worker, '--loop-id', loopId, '--prompt', prompt,
+    '--max', String(max), '--provider', provName, '--cfg-dir', cfgDir];
+  if (until) { argv.push('--until', String(until)); }
+  if (requestedSession) { argv.push('--session-existing', requestedSession); }
+  if (model) { argv.push('--model', String(model)); }
+  if (useMemory) { argv.push('--use-memory'); }
+  if (recall) { argv.push('--recall', String(recall)); }
+  return argv;
+}
+
 export async function cmdCron(sub, positional, flags = {}) {
   const cron = await import('../cron.mjs');
   const cfg = readConfig();
@@ -169,11 +184,11 @@ export async function cmdLoop(prompt, flags = {}) {
     // <repo>/scripts/loop-worker.mjs (was a sibling when cmdLoop was in cli.mjs).
     const here = path.dirname(new URL(import.meta.url).pathname);
     const worker = path.join(here, '..', 'scripts', 'loop-worker.mjs');
-    const argv = [worker, '--loop-id', loopId, '--prompt', prompt,
-      '--max', String(max), '--provider', provName, '--cfg-dir', cfgDir];
-    if (flags.until) { argv.push('--until', String(flags.until)); }
-    if (requestedSession) { argv.push('--session-existing', requestedSession); }
-    if (model) { argv.push('--model', String(model)); }
+    const argv = buildDetachArgv(worker, {
+      loopId, prompt, max, provName, cfgDir,
+      until: flags.until, requestedSession, model,
+      useMemory: flags['use-memory'], recall: flags.recall,
+    });
     const child = spawn(process.execPath, argv, {
       detached: true,
       stdio: 'ignore',
