@@ -7,11 +7,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { TOOLS as webTools } from './web.mjs';
+import { scrubEnv } from '../scrub_env.mjs';
 
 function runProc(cmd, args, opts = {}) {
   return new Promise(resolve => {
     let p;
-    try { p = spawn(cmd, args, { cwd: opts.cwd, env: opts.env || process.env }); }
+    // Default to a SECRET-SCRUBBED env (mirrors bash.mjs) so a snippet can't
+    // read API keys/tokens out of process.env. A caller may pass an explicit
+    // env to opt out.
+    try { p = spawn(cmd, args, { cwd: opts.cwd, env: opts.env || scrubEnv(process.env) }); }
     catch (e) { return resolve({ ok: false, error: e.message }); }
     let out = '', err = '';
     const timeout = setTimeout(() => { try { p.kill('SIGKILL'); } catch {} }, opts.timeoutMs || 30_000);
@@ -25,7 +29,7 @@ function runProc(cmd, args, opts = {}) {
 
 const python_exec = {
   name: 'python_exec', category: 'coding', sensitive: true,
-  description: 'Run a Python snippet in a sandboxed subprocess. 30s timeout.',
+  description: 'Run a Python snippet in a subprocess (secret env vars stripped). 30s timeout.',
   parameters: {
     type: 'object',
     properties: { code: { type: 'string' }, timeoutMs: { type: 'number' } },
@@ -39,7 +43,7 @@ const python_exec = {
 
 const node_exec = {
   name: 'node_exec', category: 'coding', sensitive: true,
-  description: 'Run a Node.js snippet in a sandboxed subprocess. 30s timeout.',
+  description: 'Run a Node.js snippet in a subprocess (secret env vars stripped). 30s timeout.',
   parameters: {
     type: 'object',
     properties: { code: { type: 'string' }, timeoutMs: { type: 'number' } },
