@@ -3,10 +3,21 @@
 
 import { execFileSync } from 'node:child_process';
 
-export function available() {
-  if (process.platform !== 'darwin') return false;
-  try { execFileSync('sandbox-exec', ['-h'], { stdio: 'ignore' }); return true; }
+// Probe whether a usable `sandbox-exec` is present. The argument object is a
+// test seam: `platform` overrides the OS gate and `probe` overrides the real
+// invocation so the try/catch semantics are verifiable without a host sandbox.
+export function available({ platform = process.platform, probe = _realProbe } = {}) {
+  if (platform !== 'darwin') return false;
+  try { probe(); return true; }
   catch { return false; }
+}
+
+// Run a no-op (`/usr/bin/true`) under a permissive profile. This actually
+// exercises the sandboxing path. NOTE: `-h` is NOT a help flag on macOS — it is
+// an illegal option that exits non-zero, so the previous `sandbox-exec -h`
+// probe reported seatbelt unavailable on every mac.
+function _realProbe() {
+  execFileSync('sandbox-exec', ['-p', '(version 1)(allow default)', '/usr/bin/true'], { stdio: 'ignore' });
 }
 
 // Escape a path for an SBPL double-quoted string literal. Without this a path

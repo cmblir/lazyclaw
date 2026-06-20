@@ -48,6 +48,27 @@ test('firejail confiner emits firejail --private --net=none', () => {
   assert.equal(out.at(-1), 'claude');
 });
 
+test('seatbelt.available() gates on platform and a real no-op probe (not -h)', () => {
+  // Regression: the probe ran `sandbox-exec -h`, but -h is an illegal option on
+  // macOS (non-zero exit), so available() threw → returned false on EVERY mac
+  // and auto-confiner selection could never pick seatbelt. The probe must
+  // exercise a real sandbox invocation. A probe seam lets us assert the
+  // try/catch + platform gate without a real sandbox-exec on every host.
+  assert.equal(seatbelt.available({ platform: 'darwin', probe: () => {} }), true);
+  assert.equal(seatbelt.available({ platform: 'darwin', probe: () => { throw new Error('broken'); } }), false);
+  assert.equal(seatbelt.available({ platform: 'linux', probe: () => {} }), false);
+});
+
+test('seatbelt.available() reports true on a real macOS host (catches the -h regression)', () => {
+  // sandbox-exec is a core macOS binary; the fixed real probe must succeed.
+  // Off darwin the confiner is legitimately unavailable.
+  if (process.platform === 'darwin') {
+    assert.equal(seatbelt.available(), true);
+  } else {
+    assert.equal(seatbelt.available(), false);
+  }
+});
+
 test('landlock confiner is unavailable and refuses to build argv (no silent no-op)', () => {
   // It used to return the argv UNCHANGED, so selecting confiner:landlock ran
   // the command with zero confinement while reporting itself available — a
