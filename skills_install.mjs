@@ -28,6 +28,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { Readable } from 'node:stream';
+import { sanitizeSkillBody, neutralizeRoleLabels } from './mas/redact.mjs';
 
 const GITHUB_SPEC = /^([\w.-]+)\/([\w.-]+)(?:@([^:]+))?(?::(.+))?$/;
 const SKILL_EXT = '.md';
@@ -213,8 +214,15 @@ export function installPickedSkills(picked, configDir, opts = {}) {
       skipped.push({ name, reason: 'exists', dst });
       continue;
     }
-    fs.copyFileSync(f.abs, dst);
-    installed.push({ name, src: f.relative, dst, bytes: fs.statSync(dst).size });
+    // A remote skill body is injected into other agents' system prompts, so
+    // sanitize it on the way in — same pass the synth path uses (redact
+    // secrets, defang the [[TASK_DONE]] router marker, strip control chars,
+    // cap size) PLUS neutralize forged role labels ([System]/[User]) since
+    // remote content is fully untrusted. No code is executed either way.
+    const raw = fs.readFileSync(f.abs, 'utf8');
+    const clean = sanitizeSkillBody(neutralizeRoleLabels(raw));
+    fs.writeFileSync(dst, clean);
+    installed.push({ name, src: f.relative, dst, bytes: Buffer.byteLength(clean, 'utf8'), sanitized: clean !== raw });
   }
   return { installed, skipped };
 }

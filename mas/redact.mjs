@@ -58,6 +58,37 @@ export function redactConfigTree(value, mask = () => '[REDACTED]', keyName = '')
   return value;
 }
 
+const MAX_SKILL_BODY_BYTES = 8 * 1024;
+
+// Sanitise a skill body before it is persisted and later loaded into other
+// agents' context — for BOTH synthesised skills and remotely-installed ones:
+// redact secrets, neutralise the [[TASK_DONE]] router marker (so reference
+// material can't drive the router loop), strip control characters, and cap the
+// size. Lives here (zero-dep) so the install path can use it without pulling
+// better-sqlite3 in via skill_synth.
+export function sanitizeSkillBody(text) {
+  let s = redactSecrets(text);
+  s = s.replace(/\[\[TASK_DONE\]\]/g, '[[task-done]]');
+  // Strip control characters except tab/newline/carriage-return.
+  s = s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
+  if (Buffer.byteLength(s, 'utf8') > MAX_SKILL_BODY_BYTES) {
+    s = Buffer.from(s, 'utf8').subarray(0, MAX_SKILL_BODY_BYTES).toString('utf8').replace(/\uFFFD+$/, '') + '\n\n\u2026[truncated]';
+  }
+  return s;
+}
+
+// Sanitise the one-line description (it lands in every agent's system prompt
+// via the skills index): redact, collapse to a single line, neutralise the
+// marker, cap to 120 chars.
+export function sanitizeDescription(text) {
+  return redactSecrets(text)
+    .replace(/\[\[TASK_DONE\]\]/g, '[[task-done]]')
+    .replace(/[\u0000-\u001F\u007F]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+}
+
 // Neutralise forged conversation role labels embedded in untrusted model
 // text. The reflection/synthesis transcript is rendered as
 // `[User]/[System]/<agent>` lines from the TRUSTED turn.agent field; a

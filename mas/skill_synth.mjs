@@ -17,45 +17,19 @@
 
 import * as skills from '../skills.mjs';
 import { runTextCompletion } from './provider_adapters.mjs';
-import { redactSecrets, neutralizeRoleLabels } from './redact.mjs';
+import { redactSecrets, neutralizeRoleLabels, sanitizeSkillBody, sanitizeDescription } from './redact.mjs';
 import { indexSkill as _indexSkill } from './index_db.mjs';
 import { parseFrontmatter } from '../skills.mjs';
 
 const SECTION_RE = /^#{1,6}\s+/;
 const MAX_NAME_LEN = 48;
-const MAX_BODY_BYTES = 8 * 1024;
 
-// Re-export the shared secret redactor (mas/redact.mjs) so existing
-// callers of skill_synth.redactSecrets keep working while the single
-// implementation is shared with agent_memory.reflectOnce.
-export { redactSecrets };
-
-// Sanitise an agent-authored skill body before it is persisted and
-// later loaded into other agents' context: redact secrets, neutralise
-// the task-termination marker (so reference material can't drive the
-// router loop), strip control characters, and cap the size.
-export function sanitizeSkillBody(text) {
-  let s = redactSecrets(text);
-  s = s.replace(/\[\[TASK_DONE\]\]/g, '[[task-done]]');
-  // Strip control characters except tab/newline/carriage-return.
-  s = s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '');
-  if (Buffer.byteLength(s, 'utf8') > MAX_BODY_BYTES) {
-    s = Buffer.from(s, 'utf8').subarray(0, MAX_BODY_BYTES).toString('utf8').replace(/\uFFFD+$/, '') + '\n\n…[truncated]';
-  }
-  return s;
-}
-
-// Sanitise the one-line description (it lands in every agent's system
-// prompt via the skills index): redact, collapse to a single line,
-// neutralise the marker, cap to 120 chars.
-export function sanitizeDescription(text) {
-  return redactSecrets(text)
-    .replace(/\[\[TASK_DONE\]\]/g, '[[task-done]]')
-    .replace(/[\u0000-\u001F\u007F]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 120);
-}
+// Re-export the shared redaction/sanitisation primitives (mas/redact.mjs) so
+// existing callers of skill_synth.{redactSecrets,sanitizeSkillBody,
+// sanitizeDescription} keep working. They live in the zero-dep redact module
+// now so the remote skill-install path can reuse them without pulling in
+// better-sqlite3 via this module.
+export { redactSecrets, sanitizeSkillBody, sanitizeDescription };
 
 // Lowercase, collapse every run of non-alphanumerics into a single
 // dash, and strip leading/trailing dashes. Empty input (or input with
