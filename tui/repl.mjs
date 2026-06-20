@@ -465,6 +465,9 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
         subtitle: opts.subtitle || '',
         items: Array.isArray(opts.items) ? opts.items : [],
         searchable: opts.searchable !== false,
+        // Carry the secret flag so a credential entry (api-key / token) masks
+        // the typed query — dropping it here echoed the secret in plaintext.
+        secret: !!opts.secret,
         resolve,
       });
     });
@@ -629,6 +632,7 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
             selectedIndex: modalIdx,
             query: modalQuery,
             searchable: modal.searchable,
+            secret: modal.secret,
           })
         : null,
       // 4) Status bar (sticky, single row above input). flexShrink:0 so
