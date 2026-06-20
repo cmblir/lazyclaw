@@ -10,7 +10,7 @@
 // paths are byte-identical to docker.mjs's spawnSandboxed and there is zero
 // behaviour change. The default-OFF posture is unchanged.
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { buildDockerArgs } from './docker.mjs';
 import { SandboxError } from './base.mjs';
 import * as seatbelt from './confiners/seatbelt.mjs';
@@ -108,6 +108,37 @@ export function spawnSandboxed(spec, bin, args, spawnOpts = {}) {
   }
   throw new SandboxError(
     `spawnSandboxed shim handles docker+local only; got "${spec.kind}"`,
+    'SANDBOX_UNSUPPORTED',
+  );
+}
+
+/**
+ * Synchronous mirror of {@link spawnSandboxed} for callers that shell out via
+ * spawnSync (e.g. mas/tools/git.mjs). Same kind handling, just sync:
+ *
+ *  - null          → bare spawnSync (byte-identical to a plain spawnSync)
+ *  - kind 'docker' → spawnSync('docker', buildDockerArgs(...)) (byte-identical)
+ *  - kind 'local'  → wrap argv via confiner, then spawnSync the wrapper
+ *  - anything else → SANDBOX_UNSUPPORTED
+ *
+ * @param {object|null} spec
+ * @param {string} bin
+ * @param {string[]} args
+ * @param {object} [spawnOpts]
+ * @returns {import('node:child_process').SpawnSyncReturns<string>}
+ */
+export function spawnSyncSandboxed(spec, bin, args, spawnOpts = {}) {
+  if (!spec) return spawnSync(bin, args, spawnOpts);
+  if (spec.kind === 'docker') {
+    const dockerArgs = buildDockerArgs(spec, [bin, ...args], { cwd: spawnOpts.cwd });
+    return spawnSync('docker', dockerArgs, spawnOpts);
+  }
+  if (spec.kind === 'local') {
+    const wrapped = buildLocalArgv(spec, bin, args);
+    return spawnSync(wrapped[0], wrapped.slice(1), spawnOpts);
+  }
+  throw new SandboxError(
+    `spawnSyncSandboxed shim handles docker+local only; got "${spec.kind}"`,
     'SANDBOX_UNSUPPORTED',
   );
 }

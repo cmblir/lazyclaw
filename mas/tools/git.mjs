@@ -2,6 +2,7 @@
 // sensitive writes (commit/push). All shell out to git in ctx.cwd.
 
 import { spawnSync } from 'node:child_process';
+import { spawnSyncSandboxed } from '../../sandbox.mjs';
 
 function git(cwd, args, opts = {}) {
   // M11 / C12 — detect a missing git binary (Windows without
@@ -10,8 +11,17 @@ function git(cwd, args, opts = {}) {
   // {ok:false} with a cryptic spawn error, which made the
   // "lazyclaw doctor" path the only reliable signal. Now any agent
   // touching this tool also gets a one-line diagnostic.
+  //
+  // CAPABILITY-ONLY sandbox seam: when opts.sandbox is truthy the git
+  // invocation is routed through the synchronous sandbox dispatcher
+  // (default-on isolation, step iii). No current caller threads a spec, so
+  // the bare spawnSync path below is byte-identical to the historical call.
   const exe = process.env.GIT_EXECUTABLE || 'git';
-  const r = spawnSync(exe, args, { cwd, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+  const r = opts.sandbox
+    ? (opts._spawnSyncSandboxed || spawnSyncSandboxed)(
+        opts.sandbox, exe, args, { cwd, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 },
+      )
+    : spawnSync(exe, args, { cwd, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
   if (r.error && r.error.code === 'ENOENT') {
     return {
       ok: false,
@@ -29,7 +39,7 @@ const git_status = {
   name: 'git_status', category: 'git', sensitive: false,
   description: 'Run `git status` in the workspace.',
   parameters: { type: 'object', properties: {} },
-  async exec(_args, ctx) { return git(ctx?.cwd, ['status']); },
+  async exec(_args, ctx) { return git(ctx?.cwd, ['status'], { sandbox: ctx?.sandbox, _spawnSyncSandboxed: ctx?._spawnSyncSandboxed }); },
 };
 
 const git_diff = {
@@ -40,7 +50,7 @@ const git_diff = {
     const ar = ['diff'];
     if (args?.staged) ar.push('--staged');
     if (args?.path) ar.push('--', args.path);
-    return git(ctx?.cwd, ar);
+    return git(ctx?.cwd, ar, { sandbox: ctx?.sandbox, _spawnSyncSandboxed: ctx?._spawnSyncSandboxed });
   },
 };
 
@@ -50,7 +60,7 @@ const git_log = {
   parameters: { type: 'object', properties: { limit: { type: 'number' } } },
   async exec(args, ctx) {
     const n = Math.max(1, Math.min(args?.limit || 10, 100));
-    const r = git(ctx?.cwd, ['log', `-n${n}`, '--pretty=format:%H%x09%an%x09%aI%x09%s']);
+    const r = git(ctx?.cwd, ['log', `-n${n}`, '--pretty=format:%H%x09%an%x09%aI%x09%s'], { sandbox: ctx?.sandbox, _spawnSyncSandboxed: ctx?._spawnSyncSandboxed });
     if (!r.ok) return r;
     const commits = r.stdout.trim().split('\n').filter(Boolean).map(line => {
       const [hash, author, date, subject] = line.split('\t');
@@ -64,7 +74,7 @@ const git_blame = {
   name: 'git_blame', category: 'git', sensitive: false,
   description: 'Run `git blame <path>`.',
   parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
-  async exec(args, ctx) { return git(ctx?.cwd, ['blame', '--', args.path]); },
+  async exec(args, ctx) { return git(ctx?.cwd, ['blame', '--', args.path], { sandbox: ctx?.sandbox, _spawnSyncSandboxed: ctx?._spawnSyncSandboxed }); },
 };
 
 const git_branch = {
@@ -72,7 +82,7 @@ const git_branch = {
   description: 'List branches.',
   parameters: { type: 'object', properties: {} },
   async exec(_args, ctx) {
-    const r = git(ctx?.cwd, ['branch', '--all', '--format=%(refname:short)%09%(upstream:short)%09%(HEAD)']);
+    const r = git(ctx?.cwd, ['branch', '--all', '--format=%(refname:short)%09%(upstream:short)%09%(HEAD)'], { sandbox: ctx?.sandbox, _spawnSyncSandboxed: ctx?._spawnSyncSandboxed });
     if (!r.ok) return r;
     const branches = r.stdout.trim().split('\n').filter(Boolean).map(line => {
       const [name, upstream, head] = line.split('\t');
@@ -96,12 +106,12 @@ const git_commit = {
   },
   async exec(args, ctx) {
     if (Array.isArray(args.paths) && args.paths.length) {
-      const a = git(ctx?.cwd, ['add', '--', ...args.paths]);
+      const a = git(ctx?.cwd, ['add', '--', ...args.paths], { sandbox: ctx?.sandbox, _spawnSyncSandboxed: ctx?._spawnSyncSandboxed });
       if (!a.ok) return a;
     }
     const ar = ['commit', '-m', args.message];
     if (args.amend) ar.splice(1, 0, '--amend');
-    return git(ctx?.cwd, ar);
+    return git(ctx?.cwd, ar, { sandbox: ctx?.sandbox, _spawnSyncSandboxed: ctx?._spawnSyncSandboxed });
   },
 };
 
@@ -120,7 +130,7 @@ const git_push = {
     if (args?.force) ar.push('--force-with-lease');
     if (args?.remote) ar.push(args.remote);
     if (args?.branch) ar.push(args.branch);
-    return git(ctx?.cwd, ar);
+    return git(ctx?.cwd, ar, { sandbox: ctx?.sandbox, _spawnSyncSandboxed: ctx?._spawnSyncSandboxed });
   },
 };
 

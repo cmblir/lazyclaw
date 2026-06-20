@@ -11,5 +11,5 @@ export {
 // {kind:'local'} confiner support on top of the byte-identical null/docker
 // paths. bash.mjs + the 3 CLI providers import it via this shim, so they
 // transparently get the upgraded dispatcher.
-export { spawnSandboxed } from './sandbox/spawn.mjs';
+export { spawnSandboxed, spawnSyncSandboxed } from './sandbox/spawn.mjs';
 export { SandboxError } from './sandbox/base.mjs';
