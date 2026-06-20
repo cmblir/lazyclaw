@@ -52,7 +52,11 @@ test('buildLocalArgv seatbelt wraps argv with sandbox-exec -p profile', () => {
   );
   assert.equal(out[0], 'sandbox-exec');
   assert.equal(out[1], '-p');
-  assert.match(out[2], /\(deny default\)/);
+  // filesystem-confinement profile: allow-default base, writes confined to the
+  // workspace, network denied when allowNet:false (see seatbelt.mjs rationale).
+  assert.match(out[2], /\(allow default\)/);
+  assert.match(out[2], /\(deny file-write\*\)/);
+  assert.match(out[2], /\(allow file-write\* [^\n]*\(subpath "\/work"\)/);
   assert.deepEqual(out.slice(3), ['claude', '-p']);
 });
 

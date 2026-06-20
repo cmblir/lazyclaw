@@ -36,20 +36,34 @@ function sbplPath(p) {
   return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
+// Temp dirs are always writable — interpreters and tools need scratch space, and
+// confining writes to the workspace alone breaks too much (e.g. node/npm caches).
+const TMP_WRITABLE = ['/tmp', '/private/tmp', '/private/var/folders'];
+
+// Build a FILESYSTEM-CONFINEMENT profile, not a strict deny-default one. A
+// `(deny default)` profile silently kills dynamically-linked binaries (python3,
+// node, git) at the dyld/mach bootstrap stage on modern macOS — confinement that
+// breaks every real interpreter is worse than none. Instead we start from
+// `(allow default)` and carve out the high-value protections: writes are denied
+// everywhere except the workspace + temp, and named secret dirs stay unreadable
+// even though reads are otherwise allowed. Network is allowed unless opts.allowNet
+// is explicitly false.
+//
+//   opts.readWrite : string[]  workspace roots that may be written (default [cwd])
+//   opts.denyRead  : string[]  dirs whose reads are blocked (e.g. ~/.ssh, ~/.aws)
+//   opts.allowNet  : boolean   default false → adds (deny network*)
 export function buildArgv(argv, opts = {}) {
-  const readOnly = opts.readOnly || [];
   const readWrite = opts.readWrite || [process.cwd()];
+  const denyRead = opts.denyRead || [];
   const allowNet = opts.allowNet === true;
+  const writable = [...TMP_WRITABLE, ...readWrite];
   const profile = [
     '(version 1)',
-    '(deny default)',
-    '(allow process-fork)',
-    '(allow process-exec)',
-    '(allow signal)',
-    '(allow sysctl-read)',
-    allowNet ? '(allow network*)' : '(deny network*)',
-    ...readOnly.map(p => `(allow file-read* (subpath "${sbplPath(p)}"))`),
-    ...readWrite.map(p => `(allow file-read* file-write* (subpath "${sbplPath(p)}"))`),
+    '(allow default)',
+    '(deny file-write*)',
+    `(allow file-write* ${writable.map(p => `(subpath "${sbplPath(p)}")`).join(' ')})`,
+    ...denyRead.map(p => `(deny file-read* (subpath "${sbplPath(p)}"))`),
+    ...(allowNet ? [] : ['(deny network*)']),
   ].join('\n');
   return ['sandbox-exec', '-p', profile, ...argv];
 }

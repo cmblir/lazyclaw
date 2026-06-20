@@ -14,17 +14,31 @@ test('confiner=none → no wrapping; argv passes through', async () => {
   await sess.close();
 });
 
-test('seatbelt confiner emits sandbox-exec with -p profile', () => {
+test('seatbelt emits a filesystem-confinement profile (allow-default base, writes confined, secrets unreadable)', () => {
   const out = seatbelt.buildArgv(['claude', '-p', 'x'], {
-    readOnly: ['/etc'], readWrite: ['/Users/me/proj'], allowNet: false,
+    readWrite: ['/Users/me/proj'], denyRead: ['/Users/me/.ssh'], allowNet: false,
   });
   assert.equal(out[0], 'sandbox-exec');
   assert.equal(out[1], '-p');
-  assert.match(out[2], /\(version 1\)/);
-  assert.match(out[2], /\(deny default\)/);
-  assert.match(out[2], /\(allow file-read\* \(subpath "\/etc"\)\)/);
-  assert.match(out[2], /\(allow file-read\* file-write\* \(subpath "\/Users\/me\/proj"\)\)/);
+  const profile = out[2];
+  assert.match(profile, /\(version 1\)/);
+  // allow-default base: a (deny default) profile silently kills dynamically-linked
+  // interpreters (python3/node) at the dyld/mach bootstrap stage on macOS. We start
+  // permissive and carve out the filesystem — the high-value protection.
+  assert.match(profile, /\(allow default\)/);
+  // writes denied everywhere except the workspace roots (+ temp)
+  assert.match(profile, /\(deny file-write\*\)/);
+  assert.match(profile, /\(allow file-write\* [^\n]*\(subpath "\/Users\/me\/proj"\)/);
+  // secret dirs stay unreadable even though reads are allowed by default
+  assert.match(profile, /\(deny file-read\* \(subpath "\/Users\/me\/\.ssh"\)\)/);
+  // allowNet:false denies network on top of the allow-default base
+  assert.match(profile, /\(deny network\*\)/);
   assert.deepEqual(out.slice(3), ['claude', '-p', 'x']);
+});
+
+test('seatbelt allowNet:true leaves network allowed (no deny network*)', () => {
+  const out = seatbelt.buildArgv(['claude'], { readWrite: ['/w'], allowNet: true });
+  assert.doesNotMatch(out[2], /\(deny network\*\)/);
 });
 
 test('bubblewrap confiner emits bwrap --bind / --ro-bind', () => {
