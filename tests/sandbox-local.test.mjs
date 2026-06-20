@@ -103,3 +103,23 @@ test('LocalSandbox throws on unknown confiner', () => {
   assert.throws(() => new LocalSandbox({ kind: 'local', confiner: 'doesnotexist' }),
     /unknown confiner/i);
 });
+
+test('LocalSandbox confiner=auto constructs without throwing and _wrap behaves', async () => {
+  // Platform-robust: on a host with no available confiner this resolves to none
+  // (argv passes through); on darwin/linux with a confiner it wraps. Either way
+  // construction must NOT throw and the original argv must survive at the tail.
+  const sb = new LocalSandbox({
+    kind: 'local',
+    confiner: 'auto',
+    readWrite: ['/work'],
+    allowNet: false,
+  });
+  const sess = await sb.open();
+  const wrapped = sess._wrap(['claude', '-p']);
+  assert.equal(wrapped.at(-1), '-p');
+  assert.equal(wrapped.at(-2), 'claude');
+  // first elem is either the bare bin (resolved to none) or a real wrapper —
+  // never a landlock no-op (landlock is fail-closed / never auto-picked).
+  assert.ok(['claude', 'sandbox-exec', 'bwrap', 'firejail'].includes(wrapped[0]));
+  await sess.close();
+});

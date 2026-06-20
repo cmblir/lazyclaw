@@ -3,6 +3,7 @@
 
 import { spawn, spawnSync } from 'node:child_process';
 import { Sandbox, SandboxSession, SandboxError } from './base.mjs';
+import { pickAvailableConfiner } from './spawn.mjs';
 import * as seatbelt from './confiners/seatbelt.mjs';
 import * as bubblewrap from './confiners/bubblewrap.mjs';
 import * as firejail from './confiners/firejail.mjs';
@@ -45,7 +46,12 @@ class LocalSession extends SandboxSession {
 export class LocalSandbox extends Sandbox {
   constructor(spec) {
     super(spec);
-    const key = spec.confiner || 'none';
+    // Resolve 'auto' to a concrete confiner (or none) at construction so
+    // _wrap() never sees 'auto' and the genuinely-unknown-key guard below
+    // still fires for typos. 'auto' that resolves to 'none' → no wrapping.
+    const key = spec.confiner === 'auto'
+      ? pickAvailableConfiner()
+      : (spec.confiner || 'none');
     if (key !== 'none' && !(key in CONFINERS)) {
       throw new SandboxError(`unknown confiner "${key}"`, 'SANDBOX_BAD_CONFINER');
     }
