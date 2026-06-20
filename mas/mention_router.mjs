@@ -111,6 +111,8 @@ export function buildTurnContext({ task, team, agent, agentRecord, teammates, co
       cfgDir: configDir,
       agent: agentRecord,
       workspace: task?.workspace || agentRecord.workspace || '',
+      // Recall prior sessions/trajectories/memories relevant to this task.
+      query: [task?.title, task?.description].filter(Boolean).join(' ').slice(0, 500),
     }) || '';
   } catch { /* best-effort — see comment above */ }
   // When composePromptStack emitted a Role layer (layer 3) we drop the

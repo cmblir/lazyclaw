@@ -137,6 +137,8 @@ export async function runAgentTurn({
         cfgDir: configDir,
         agent,
         workspace: agent.workspace || '',
+        // Auto-inject top-k recalled context relevant to THIS user message.
+        query: userMessage,
       });
       if (stacked && stacked.trim()) systemPrompt = stacked;
     } catch { /* best-effort — never block a turn on stack composition */ }

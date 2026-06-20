@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { composePromptStack } from '../mas/prompt_stack.mjs';
+import { runAgentTurn } from '../mas/agent_turn.mjs';
 import * as idx from '../mas/index_db.mjs';
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lc-pstack-'));
@@ -41,4 +42,30 @@ test('composePromptStack with a query but no matches adds no recall layer', () =
 test('composePromptStack recall is best-effort — a fresh dir with no index never throws', () => {
   const dir = tmp();
   assert.doesNotThrow(() => composePromptStack({ cfgDir: dir, query: 'anything' }));
+});
+
+test('runAgentTurn (usePromptStack) injects recalled context for the user message into the system prompt', async () => {
+  const dir = tmp();
+  idx.indexMemory({ topic: 'incident', kind: 'episodic', content: 'zephyrgate had an outage last tuesday, a rollback fixed it' }, dir);
+  let capturedBody = null;
+  const fetchImpl = async (_url, opts) => {
+    capturedBody = opts?.body;
+    return { ok: true, json: async () => ({ choices: [{ finish_reason: 'stop', message: { content: 'ok' } }] }) };
+  };
+  const prev = process.env.LAZYCLAW_NO_TRAJECTORY;
+  process.env.LAZYCLAW_NO_TRAJECTORY = '1';
+  try {
+    await runAgentTurn({
+      agent: { provider: 'openai', model: 'gpt-4', role: 'helper', tools: [] },
+      userMessage: 'what is the zephyrgate status',
+      usePromptStack: true,
+      configDir: dir,
+      fetchImpl, apiKey: 'k',
+    });
+  } finally {
+    if (prev === undefined) delete process.env.LAZYCLAW_NO_TRAJECTORY; else process.env.LAZYCLAW_NO_TRAJECTORY = prev;
+  }
+  assert.ok(capturedBody, 'the adapter made a request');
+  assert.match(String(capturedBody), /Relevant recalled context/, 'recall layer reached the system prompt');
+  assert.match(String(capturedBody), /zephyrgate had an outage/, 'the recalled content is in the request body');
 });

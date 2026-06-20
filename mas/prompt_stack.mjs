@@ -43,8 +43,14 @@ function lastRecentLine(cfgDir) {
 // any index/FTS hiccup yields no layer rather than breaking prompt composition.
 function recalledLayer(dir, query, k) {
   if (!query || !String(query).trim()) return '';
+  // FTS5 ANDs space-separated terms, so a natural-language message rarely
+  // matches a prior doc. Build an OR query over the significant terms (bm25
+  // still ranks rarer, more-relevant matches first) and pass it raw — each
+  // term is [a-z0-9] only, so no FTS operator can be injected.
+  const terms = [...new Set((String(query).toLowerCase().match(/[a-z0-9]{3,}/g) || []))].slice(0, 12);
+  if (!terms.length) return '';
   try {
-    const r = _recall(String(query), { configDir: dir, scope: ['sessions', 'trajectories', 'memories'], k });
+    const r = _recall(terms.join(' OR '), { configDir: dir, scope: ['sessions', 'trajectories', 'memories'], k, raw: true });
     const hits = (r && Array.isArray(r.hits)) ? r.hits : [];
     const lines = hits
       .map((h) => `- [${h.scope}] ${String(h.snippet || '').replace(/\s+/g, ' ').trim()}`)
