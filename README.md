@@ -36,7 +36,7 @@ The first run is a **phased wizard** (Hermes-style — get one clean chat workin
 1. **Provider + model** — arrow-key picker (`claude-cli` is keyless; gemini/openai/anthropic take an API key).
 2. **Verify** — a one-token ping confirms the provider answers.
 3. **Context window** — how much history to keep per turn (optional).
-4. **Channel** — Slack / Telegram / Matrix / HTTP built in; Discord / Email / Signal / Voice / WhatsApp via plugins (optional).
+4. **Channel** — Slack / Telegram / Matrix / HTTP built in; Discord / Email / Voice / WhatsApp ship in-tree (need a runtime dep via `lazyclaw channels install <name>`), Signal needs `signal-cli` (optional).
 5. **Workspace / skills / webhook** (optional).
 6. **Orchestration** — turn on the planner + workers pipeline (optional).
 
@@ -67,7 +67,7 @@ After every turn, a fire-and-forget loop records the trajectory and distils reus
 
 ## Talk to it anywhere
 
-Connect a channel and **the same agent** answers there — every listener forwards into the always-on daemon's shared session store, so chat, the dashboard, and all channels are one agent with one memory (and context follows across channels). Slack, Telegram, Matrix, and HTTP are built in; Discord, Email, Signal, Voice, and WhatsApp install as `@lazyclaw/channel-*` plugins.
+Connect a channel and **the same agent** answers there — every listener forwards into the always-on daemon's shared session store, so chat, the dashboard, and all channels are one agent with one memory (and context follows across channels). Slack, Telegram, Matrix, and HTTP are built in; Discord, Email, Voice, and WhatsApp ship in-tree and run once their runtime dependency is installed into the config dir (`lazyclaw channels install <name>`), and Signal needs the external `signal-cli` binary on your PATH.
 
 ```bash
 lazyclaw service install              # 1) the always-on daemon (the shared brain)
@@ -79,7 +79,7 @@ lazyclaw slack listen --daemon-url http://127.0.0.1:19600   # non-default daemon
 
 lazyclaw channels                     # view configured channels
 lazyclaw channels enable|disable slack
-lazyclaw channels install @lazyclaw/channel-discord
+lazyclaw channels install discord     # installs discord.js into ~/.lazyclaw and enables the channel
 ```
 
 A listener is a thin forwarder: it owns the channel socket (Slack Socket Mode needs no public URL, just an app-level `xapp-` token) and POSTs each message to the daemon's `/inbound`, which binds the conversation to a persistent session and runs the provider. It needs a reachable daemon (`lazyclaw service install`, or `lazyclaw daemon`); override the target with `--daemon-url` / `LAZYCLAW_DAEMON_URL`. Set it all up from the wizard's channel step, or `/channels` in chat.

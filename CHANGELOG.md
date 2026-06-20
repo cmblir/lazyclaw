@@ -8,12 +8,56 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Security
 
+- **The default (unauthenticated) daemon no longer leaks nested API keys.**
+  `GET /config` and `GET /config/<key>` shallow-copied the config and masked
+  only the top-level `api-key`, serving `customProviders[].apiKey`,
+  `authProfiles` key material, and channel bot tokens in cleartext to any
+  local process. Both endpoints now deep-redact every secret-named value at
+  any nesting depth (numeric budgets like `chatWindow.tokens` are preserved).
+- **`python_exec` / `node_exec` no longer hand the full secret env to the
+  snippet.** They spawned with `env: process.env` while claiming a "sandboxed
+  subprocess"; the child env is now scrubbed of secrets (as `bash` already
+  was) and the false "sandboxed" wording is dropped.
+- **In-chat credential entry is masked.** `/provider key`, `/login apikey`,
+  and `/channels` credential prompts echoed the typed API key/bot token in
+  plaintext (the picker dropped the `secret` flag); the modal now renders
+  bullets.
+
 - **`lazyclaw export` no longer leaks per-provider secrets.** Redaction
   previously masked only the top-level `api-key`; it now deep-redacts any
   secret-named config value and the `authProfiles[<provider>][].key` entries
   (keeping `label` so the bundle stays inspectable). `lazyclaw import`
   reciprocally strips the `***REDACTED***` placeholder so it is never
   persisted into `config.json`. `--include-secrets` still exports verbatim.
+
+### Fixed
+
+- **Channel setup no longer points at packages that don't exist.** The five
+  non-builtin channels (Discord/Email/Signal/Voice/WhatsApp) ship in-tree, but
+  setup + `channels install` told you to install unpublished
+  `@lazyclaw/channel-*` npm packages (which 404'd) and marked the channel
+  enabled even when its runtime dependency was absent. Now the catalog
+  declares each channel's real requirement (an npm package like `discord.js`,
+  or the `signal-cli` binary), `channels install <name>` installs the real
+  deps into `~/.lazyclaw`, the gateway resolves them from there, a channel is
+  enabled only once its requirement is present, and the wizard verifies the
+  credentials it just saved (✓/✗).
+- **Piped/scripted `lazyclaw setup` no longer hangs.** The non-TTY picker
+  fallback read the whole piped buffer at once (skipping the channel and
+  starving the next prompt); it now reads exactly one line and hands the rest
+  back.
+- **`/new` (and `/reset`, `/clear`) actually clear the screen** in the Ink
+  REPL, instead of resetting state while leaving the prior conversation on
+  screen.
+- **The self-learning loop no longer deletes its own fresh skills.** A new
+  skill was scored `0.21`, already under its own `0.3` archive floor, so the
+  first recall miss removed it; fresh skills now use a neutral prior.
+- **`dream()` / `setCore()` memory and removed skills are written through to
+  the recall index**, so "durable recall over memory" holds without a manual
+  `index rebuild`.
+- **`loop --detach --use-memory` honours memory and uses the real auth key**
+  (the worker dropped the flags and sent an empty key).
+- **MCP tool failures (`isError`) surface as failures**, not silent success.
 
 ### Added
 
