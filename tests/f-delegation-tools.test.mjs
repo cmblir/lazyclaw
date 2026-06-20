@@ -15,6 +15,7 @@ import path from 'node:path';
 import * as del from '../mas/tools/delegation.mjs';
 import * as orch from '../providers/orchestrator.mjs';
 import { registerAgent } from '../agents.mjs';
+import { subscribe, _reset as _resetEvents } from '../mas/events.mjs';
 
 function tmpConfigDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-deleg-'));
@@ -74,6 +75,25 @@ test('task_spawn resolves agent name to a record before runAgentTurn', async () 
   assert.equal(received.userMessage, 'do research');
   assert.equal(received.configDir, configDir);
 
+  fs.rmSync(configDir, { recursive: true, force: true });
+});
+
+test('task_spawn emits a live delegate event (caller → callee) for the dashboard', async () => {
+  _resetEvents();
+  const configDir = tmpConfigDir();
+  registerAgent({ name: 'callee', provider: 'anthropic', model: 'x' }, configDir);
+  const got = [];
+  const unsub = subscribe((e) => got.push(e));
+  del.__setTurnRunner(async () => ({ text: 'ok', stoppedBy: 'final', iterations: 1 }));
+  const t = del.TOOLS.find((x) => x.name === 'task_spawn');
+  await t.exec({ agent: 'callee', prompt: 'go' }, { configDir, taskId: 'tk1', agent: { name: 'planner' } });
+  del.__setTurnRunner(null);
+  unsub();
+  const ev = got.find((e) => e.type === 'delegate');
+  assert.ok(ev, 'a delegate event must be emitted');
+  assert.equal(ev.from, 'planner');
+  assert.equal(ev.to, 'callee');
+  assert.equal(ev.taskId, 'tk1');
   fs.rmSync(configDir, { recursive: true, force: true });
 });
 

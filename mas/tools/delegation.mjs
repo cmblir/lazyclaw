@@ -2,6 +2,10 @@
 // Both lazy-import providers/orchestrator.mjs / mas/agent_turn.mjs to
 // avoid pulling those into every process that imports the registry.
 
+// events.mjs is featherweight (zero-dep pub/sub), so a static import is fine —
+// it does not pull agent_turn/orchestrator into the registry load path.
+import { emit as emitEvent } from '../events.mjs';
+
 let _dispatcher = null;
 export function __setDispatcher(fn) { _dispatcher = fn; }
 
@@ -55,6 +59,8 @@ const task_spawn = {
   },
   async exec(args, ctx = {}) {
     if (!args?.agent || !args?.prompt) return { ok: false, error: 'task_spawn: agent + prompt required' };
+    // Live A→B delegation event for the dashboard (caller → spawned agent).
+    emitEvent('delegate', { taskId: ctx.taskId, from: ctx.agent?.name, to: args.agent });
     // Propagate the outer turn's sandbox so a spawned sub-agent stays confined.
     return dispatchSpawn({ agent: args.agent, prompt: args.prompt, configDir: ctx.configDir, sandbox: ctx.sandbox });
   },

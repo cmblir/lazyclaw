@@ -27,6 +27,7 @@ import * as skillSynth from './skill_synth.mjs';
 import * as skills from '../skills.mjs';
 import { composePromptStack } from './prompt_stack.mjs';
 import { finalizeTerminalStop } from './router_termination.mjs';
+import { emit as emitEvent } from './events.mjs';
 
 export class MentionRouterError extends Error {
   constructor(message, code) {
@@ -452,6 +453,10 @@ export async function runTaskTurn({
   let iterations = 0;
   let stoppedBy = 'idle';
 
+  // Live activity events for the dashboard (mas/events bus → GET /events SSE).
+  // emit() never throws, so these are pure side-channels that can't affect the turn.
+  emitEvent('task.start', { taskId: current.id, team: team.name, title: current.title || '' });
+
   while (queue.length > 0 && iterations < maxAgentTurns) {
     if (signal?.aborted) { stoppedBy = 'abort'; break; }
     const speaker = queue.shift();
@@ -469,6 +474,9 @@ export async function runTaskTurn({
     // real reply lands so we never leave a stale placeholder in the
     // thread.
     const typing = await postTypingPlaceholder({ task: current, agentRecord, logger, sender: slackSender });
+
+    emitEvent('turn.start', { taskId: current.id, agent: speaker, provider: agentRecord.provider, model: agentRecord.model });
+    emitEvent('agent.status', { agent: speaker, status: 'working' });
 
     let result;
     try {
@@ -491,6 +499,8 @@ export async function runTaskTurn({
       await clearTypingPlaceholder(typing, logger);
       logger(`[router] agent "${speaker}" threw: ${err?.message || err}\n`);
       current = tasksMod.appendTurn(current.id, { agent: speaker, text: `(error: ${err?.message || err})`, ts: new Date().toISOString(), error: true }, configDir);
+      emitEvent('turn.end', { taskId: current.id, agent: speaker, stoppedBy: 'error' });
+      emitEvent('agent.status', { agent: speaker, status: 'idle' });
       continue;
     }
     await clearTypingPlaceholder(typing, logger);
@@ -498,6 +508,8 @@ export async function runTaskTurn({
     const replyText = (result.text || '').trim();
     const ts = new Date().toISOString();
     current = tasksMod.appendTurn(current.id, { agent: speaker, text: replyText, ts, toolCalls: result.toolCalls?.length ? result.toolCalls : undefined }, configDir);
+    emitEvent('turn.end', { taskId: current.id, agent: speaker, stoppedBy: result.stoppedBy });
+    emitEvent('agent.status', { agent: speaker, status: 'idle' });
 
     // Slack mirror — only the user-visible text, with the agent name
     // prefixed so a human reader can follow who said what.
@@ -505,6 +517,7 @@ export async function runTaskTurn({
 
     if (replyText.includes(DONE_MARKER)) {
       current = tasksMod.patchTask(current.id, { status: 'done' }, configDir);
+      emitEvent('task.done', { taskId: current.id, status: 'done' });
       await postToThread({ task: current, agentRecord: null, text: `:white_check_mark: ${DONE_MARKER} — task closed by *${agentRecord.displayName || speaker}*.`, logger, sender: slackSender });
       stoppedBy = 'done';
       // Phase 18: fire one reflection LLM call per participating agent
@@ -528,7 +541,10 @@ export async function runTaskTurn({
     }
 
     const mentions = extractMentions(replyText, team.agents, speaker);
-    for (const m of mentions) queue.push(m);
+    for (const m of mentions) {
+      emitEvent('delegate', { taskId: current.id, from: speaker, to: m });
+      queue.push(m);
+    }
 
     // When a non-lead speaker doesn't hand off, return control to the
     // lead so the conversation doesn't strand mid-team. The lead can
@@ -540,6 +556,11 @@ export async function runTaskTurn({
   if (iterations >= maxAgentTurns) stoppedBy = 'budget';
   // C3 — strand-proof a non-DONE exit: terminal status + stop note (no-op for 'done'); task activates post-failure learning.
   current = await finalizeTerminalStop({ stoppedBy, iterations, current, configDir, tasksMod, postToThread, slackSender, logger, task: current });
+  // A non-DONE exit (idle/budget/abort) still ends the task — the DONE path
+  // already emitted task.done above, so only emit here for the other exits.
+  if (stoppedBy !== 'done') {
+    emitEvent('task.done', { taskId: current.id, status: current.status, stoppedBy });
+  }
   // Close the Slack client for the whole run, but only if WE opened it.
   if (ownSlackSender && slackSender) await slackSender.stop().catch(() => {});
   return { task: current, iterations, stoppedBy };

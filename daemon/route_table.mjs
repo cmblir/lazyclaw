@@ -21,6 +21,7 @@ import * as skills from './routes/skills.mjs';
 import * as conversation from './routes/conversation.mjs';
 import * as registry from './routes/registry.mjs';
 import * as ops from './routes/ops.mjs';
+import * as events from './routes/events.mjs';
 
 export const ROUTES = [
   { m: (c) => c.route === 'GET /' || c.route === 'GET /dashboard' || c.route === 'GET /dashboard/', h: meta.dashboard },
@@ -30,6 +31,7 @@ export const ROUTES = [
   { m: (c) => c.route === 'POST /exec/request', h: conversation.execRequest },
   { m: (c) => c.route === 'GET /health' || c.route === 'GET /healthz', h: meta.health },
   { m: (c) => c.route === 'GET /metrics', h: meta.metrics },
+  { m: (c) => c.route === 'GET /events', h: events.events },
   { m: (c) => c.route === 'GET /providers', h: providers.providersList },
   { m: (c) => c.req.method === 'GET' && !!c.providerMatch && c.providerMatch[1] !== 'test', h: providers.providerGet },
   { m: (c) => c.route === 'GET /providers/test', h: providers.providersTest },

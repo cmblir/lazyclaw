@@ -27,6 +27,7 @@ import * as gemini from '../providers/tool_use/gemini.mjs';
 import * as claudeCli from '../providers/tool_use/claude_cli.mjs';
 import { put as _trajPut } from './trajectory_store.mjs';
 import { composePromptStack } from './prompt_stack.mjs';
+import { emit as emitEvent } from './events.mjs';
 
 export class AgentTurnError extends Error {
   constructor(message, code) {
@@ -241,6 +242,7 @@ export async function runAgentTurn({
       if (call.parseError) {
         result = { ok: false, error: call.parseError };
         toolCalls.push({ id: call.id, name: call.name, input: call.input, result, ok: false });
+        emitEvent('tool.call', { taskId, agent: agent.name, tool: call.name, ok: false });
         results.push({ id: call.id, content: result, isError: true });
         toolErrored = true;
         continue;
@@ -260,6 +262,7 @@ export async function runAgentTurn({
         }
       }
       toolCalls.push({ id: call.id, name: call.name, input: call.input, result, ok });
+      emitEvent('tool.call', { taskId, agent: agent.name, tool: call.name, ok });
       results.push({ id: call.id, content: result, isError: !ok });
       if (!ok) toolErrored = true;
     }
