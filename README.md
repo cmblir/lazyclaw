@@ -174,10 +174,7 @@ A framework-free SPA over the daemon's JSON API: Chat, Sessions, Workflows, Skil
 
 ## Configuration & security
 
-Config is plain JSON at `~/.lazyclaw/config.json`; channel + provider secrets live in `~/.lazyclaw/.env` (written 0600, never logged). Move the dir with `LAZYCLAW_CONFIG_DIR=/path`.
-
-> [!WARNING]
-> Treat `~/.lazyclaw/config.json` like a shell rc — values resolved with `$(...)` execute at load. Don't paste an untrusted snippet without reading it.
+Config is plain JSON at `~/.lazyclaw/config.json` — parsed with `JSON.parse`, no shell or code execution; channel + provider secrets live in `~/.lazyclaw/.env` (written 0600, never logged). Move the dir with `LAZYCLAW_CONFIG_DIR=/path`.
 
 Sensitive tools deny by default unless an approval hook grants them; `config.json` and workflow state are written owner-only; secrets are scrubbed from the `bash` tool's child env and redacted from trajectories and synthesised skills.
 
