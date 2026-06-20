@@ -165,6 +165,9 @@ function scriptedPrompt(answers) {
   };
 }
 const noColors = { accent: s=>s, bold: s=>s, dim: s=>s, ok: s=>s, warn: s=>s };
+// Offline fetch stub so credential-verification (verifyChannel) never touches
+// the network in tests that aren't asserting the verify path.
+const offlineFetch = async () => ({ ok: true, json: async () => ({ ok: false, description: 'offline-stub' }) });
 
 // A scripted arrow-key picker: returns the queued item whose id matches the
 // next queued channel name, then '__done__'. Drives runChannelStep's `pick`.
@@ -188,6 +191,7 @@ test('runChannelStep: selecting telegram + token persists and reports success', 
       prompt: scriptedPrompt(['111:aaa']),
       colors: noColors,
       write: (s) => out.push(s),
+      fetchImpl: offlineFetch,
     });
     assert.equal(r.skipped, false);
     assert.deepEqual(r.channels, ['telegram']);
@@ -198,6 +202,51 @@ test('runChannelStep: selecting telegram + token persists and reports success', 
     // And the masked echo must actually be present — a deleted/weakened mask
     // would still pass the absence check above, so assert the masked form too.
     assert.match(rendered, /TELEGRAM_BOT_TOKEN = 111…aa/, 'masked token must be emitted');
+  } finally {
+    if (prevCfg === undefined) delete process.env.LAZYCLAW_CONFIG_DIR; else process.env.LAZYCLAW_CONFIG_DIR = prevCfg;
+  }
+});
+
+test('runChannelStep: verifies a builtin channel credential and reports ✓ on success', async () => {
+  const dir = tmpCfgDir();
+  const prevCfg = process.env.LAZYCLAW_CONFIG_DIR;
+  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  const out = [];
+  // Fake fetch: telegram getMe returns ok.
+  const fetchImpl = async () => ({ json: async () => ({ ok: true, result: { username: 'mybot' } }) });
+  try {
+    await runChannelStep({
+      cfgDir: dir,
+      pick: scriptedPick(['telegram']),
+      prompt: scriptedPrompt(['111:aaa']),
+      colors: noColors,
+      write: (s) => out.push(s),
+      fetchImpl,
+    });
+    const rendered = out.join('');
+    assert.match(rendered, /✓ verified/, 'a good token must report verified');
+    assert.match(rendered, /mybot/, 'verify detail surfaces the bot identity');
+  } finally {
+    if (prevCfg === undefined) delete process.env.LAZYCLAW_CONFIG_DIR; else process.env.LAZYCLAW_CONFIG_DIR = prevCfg;
+  }
+});
+
+test('runChannelStep: a rejected credential reports ✗ not verified during setup', async () => {
+  const dir = tmpCfgDir();
+  const prevCfg = process.env.LAZYCLAW_CONFIG_DIR;
+  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  const out = [];
+  const fetchImpl = async () => ({ json: async () => ({ ok: false, description: 'Unauthorized' }) });
+  try {
+    await runChannelStep({
+      cfgDir: dir,
+      pick: scriptedPick(['telegram']),
+      prompt: scriptedPrompt(['bad-token']),
+      colors: noColors,
+      write: (s) => out.push(s),
+      fetchImpl,
+    });
+    assert.match(out.join(''), /✗ not verified/, 'a bad token must be flagged at setup time');
   } finally {
     if (prevCfg === undefined) delete process.env.LAZYCLAW_CONFIG_DIR; else process.env.LAZYCLAW_CONFIG_DIR = prevCfg;
   }
@@ -229,6 +278,7 @@ test('runChannelStep: configures multiple channels in one pass', async () => {
       prompt: scriptedPrompt(['111:aaa', 'xoxb-tok', '']),
       colors: noColors,
       write: () => {},
+      fetchImpl: offlineFetch,
     });
     assert.deepEqual(r.channels, ['telegram', 'slack']);
     const env = fs.readFileSync(path.join(dir, '.env'), 'utf8');

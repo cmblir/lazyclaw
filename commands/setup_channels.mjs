@@ -187,7 +187,7 @@ export async function verifyChannel(name, { env = process.env, fetchImpl } = {})
 
 // Configure ONE channel: prompt each credential field (secrets masked),
 // persist to .env + cfg.channels, echo a summary. Returns the persist entry.
-async function configureChannel({ cfgDir, spec, prompt, colors, write }) {
+async function configureChannel({ cfgDir, spec, prompt, colors, write, fetchImpl }) {
   const { dim, ok, warn } = colors;
   const answers = {};
   for (const f of spec.fields) {
@@ -201,6 +201,17 @@ async function configureChannel({ cfgDir, spec, prompt, colors, write }) {
   write(`  ${status} ${spec.name}  ${credKeys.length ? dim(`creds: ${credKeys.join(', ')}`) : ''}\n`);
   for (const f of spec.fields) {
     if (f.secret && answers[f.key]) write(`    ${dim(`${f.env} = ${mask(answers[f.key])}  (stored in ${cfgDir}/.env, 0600)`)}\n`);
+  }
+  // Verify the credentials with a cheap live call (same probe as `channels
+  // test`) so a typo'd token is caught here, not later in chat. The creds were
+  // just written to .env; verifyChannel reads from env, so merge them in.
+  // ok=null (http / plugins) prints nothing.
+  if (credKeys.length) {
+    try {
+      const ver = await verifyChannel(spec.name, { env: { ...process.env, ...entry.envVars }, fetchImpl });
+      if (ver.ok === true) write(`  ${ok('✓ verified:')} ${dim(ver.detail || '')}\n`);
+      else if (ver.ok === false) write(`  ${warn('✗ not verified:')} ${ver.detail || ''}${ver.hint ? dim(`  (${ver.hint})`) : ''}\n`);
+    } catch { /* verification is best-effort — never block setup on it */ }
   }
   // Honest requirement notice: these channels ship in-tree but need a runtime
   // dependency before the gateway can start them. We never point at a package
@@ -224,7 +235,7 @@ async function configureChannel({ cfgDir, spec, prompt, colors, write }) {
 // so several channels can be set up in one pass. `prompt(label, {secret})`
 // resolves to a trimmed string; `write(text)` sinks UI output. Returns
 // { skipped, channels: [names], needsPlugin? }. Never echoes a secret value.
-export async function runChannelStep({ cfgDir, prompt, colors, write = (s) => process.stdout.write(s), pick }) {
+export async function runChannelStep({ cfgDir, prompt, colors, write = (s) => process.stdout.write(s), pick, fetchImpl }) {
   const { dim, ok, warn } = colors;
   // `pick` is the arrow-key list selector — injectable so tests can script it
   // (the real _arrowMenu reads raw stdin, which a unit test can't drive).
@@ -254,7 +265,7 @@ export async function runChannelStep({ cfgDir, prompt, colors, write = (s) => pr
     const spec = channelByName(id);
     if (!spec) { write(`  ${warn('skipped:')} unknown channel "${id}"\n\n`); continue; }
     try {
-      const entry = await configureChannel({ cfgDir, spec, prompt, colors, write });
+      const entry = await configureChannel({ cfgDir, spec, prompt, colors, write, fetchImpl });
       if (!configured.includes(id)) configured.push(id);
       if (!entry.ready && entry.missingDeps && entry.missingDeps.length) needsPlugin = entry.missingDeps.join(', ');
     } catch (e) {
