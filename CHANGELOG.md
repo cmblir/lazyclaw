@@ -8,6 +8,31 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Security
 
+- **Remote skills are sanitized on install.** A skill installed from
+  GitHub/URL is injected into other agents' system prompts, but the body was
+  copied verbatim; it now runs the same redact / `[[TASK_DONE]]`-defang /
+  control-strip pass as synthesized skills, plus role-label neutralization.
+- **`env` scrubbing catches the real secret names.** The bash/coding child
+  env now drops `*_KEY`/`*_KEY_ID`, connection strings (`DATABASE_URL`, …),
+  `SSH_AUTH_SOCK`, and any value that is a `scheme://user:pass@host` URL —
+  previously `STRIPE_SECRET_KEY`/`SUPABASE_KEY`/`AWS_ACCESS_KEY_ID` leaked.
+- **`image_describe` is confined to the working directory** (it uploads the
+  bytes to OpenAI, so it can no longer be coaxed into exfiltrating an
+  arbitrary host file), and `file_dialog` escapes the model-supplied prompt
+  to close an AppleScript-injection hole.
+
+### Fixed
+
+- **tool_use turns truncated at the token ceiling are caught.** Anthropic /
+  OpenAI / Gemini adapters now flag `max_tokens`/`length`/`MAX_TOKENS` and the
+  agent stops instead of acting on a partial answer or empty tool args; the
+  OpenAI adapter also surfaces malformed tool-call JSON as a tool error rather
+  than silently running with `{}`.
+- **Team agents can be granted any registered tool.** Agent tool grants are
+  validated against the live 51-tool registry instead of a hardcoded 8-name
+  list (with a stale, unregistered `slack_post`).
+- **launchd cron honours cron's OR semantics** for restricted day-of-month ×
+  day-of-week, matching crontab on Linux.
 - **The default (unauthenticated) daemon no longer leaks nested API keys.**
   `GET /config` and `GET /config/<key>` shallow-copied the config and masked
   only the top-level `api-key`, serving `customProviders[].apiKey`,
