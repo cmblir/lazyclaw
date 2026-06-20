@@ -32,7 +32,10 @@ export function writeDotenvMerge(cfgDir, vars) {
   const lines = [];
   const seen = new Set();
   const existing = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
-  for (const line of existing.split(/\r?\n/)) {
+  // Splitting '' yields [''] — one empty element that would be pushed ahead of
+  // the vars and surface as a leading blank line in a brand-new .env. Only walk
+  // existing lines when there is actual content to preserve.
+  for (const line of existing ? existing.split(/\r?\n/) : []) {
     const m = line.match(/^\s*([A-Z_][A-Z0-9_]*)\s*=/);
     if (m && Object.prototype.hasOwnProperty.call(vars, m[1])) {
       seen.add(m[1]);

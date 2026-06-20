@@ -27,6 +27,14 @@ test('writeDotenvMerge creates .env at 0600 with the given vars', () => {
   assert.match(fs.readFileSync(p, 'utf8'), /^TELEGRAM_BOT_TOKEN=123:abc$/m);
 });
 
+test('writeDotenvMerge does not write a leading blank line into a fresh .env', () => {
+  const dir = tmpCfgDir();
+  writeDotenvMerge(dir, { SLACK_BOT_TOKEN: 'xoxb-1' });
+  const raw = fs.readFileSync(path.join(dir, '.env'), 'utf8');
+  assert.ok(!raw.startsWith('\n'), 'fresh .env must not begin with a blank line');
+  assert.match(raw, /^SLACK_BOT_TOKEN=xoxb-1$/m);
+});
+
 test('writeDotenvMerge preserves existing keys and overwrites only collisions', () => {
   const dir = tmpCfgDir();
   fs.writeFileSync(path.join(dir, '.env'), '# comment\nEXISTING=keep\nSLACK_BOT_TOKEN=old\n');
