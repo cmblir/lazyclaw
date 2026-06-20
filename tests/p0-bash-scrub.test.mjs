@@ -38,6 +38,23 @@ test('isSecretKey classification', () => {
   }
 });
 
+test('isSecretKey catches the previously-missed real secret names', () => {
+  // The old final-segment-noun regex let these through.
+  for (const k of ['SUPABASE_KEY', 'ENCRYPTION_KEY', 'STRIPE_SECRET_KEY', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'SSH_AUTH_SOCK', 'DATABASE_URL', 'GH_TOKEN']) {
+    assert.equal(isSecretKey(k), true, k);
+  }
+  // …without over-matching benign names.
+  for (const k of ['KEYBOARD', 'TOKENIZER', 'MODEL', 'MONKEY', 'BASE_URL', 'PUBLIC_URL', 'PATH']) {
+    assert.equal(isSecretKey(k), false, k);
+  }
+});
+
+test('scrubEnv drops a value that is a credential-bearing URL even under a benign name', () => {
+  const out = scrubEnv({ BASE_URL: 'https://api.example.com', SOME_URL: 'postgres://user:p4ss@host:5432/db' });
+  assert.equal(out.BASE_URL, 'https://api.example.com', 'a plain URL is kept');
+  assert.equal(out.SOME_URL, undefined, 'a URL with embedded user:password must be scrubbed');
+});
+
 test('bash child cannot read an inherited secret env var', async () => {
   process.env.LZ_TEST_API_KEY = 'SHHH-SECRET-123';
   process.env.LZ_TEST_PLAIN = 'keepme-456';
