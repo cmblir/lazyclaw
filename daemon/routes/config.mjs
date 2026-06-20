@@ -2,6 +2,7 @@
 // Each handler takes the per-request dispatch context `c` and returns the
 // HTTP response. Bodies are unchanged; only the dispatch wrapper is new.
 import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, checkCostCap, accumulateMetricsFromCost, resolveProvider } from './_deps.mjs';
+import { redactConfigTree } from '../../mas/redact.mjs';
 
 export async function configValidate(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
@@ -23,12 +24,13 @@ export async function configValidate(c) {
 
 export async function configGet(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
-          // Mirror of `lazyclaw config list`. Returns every stored key
-          // with the api-key value masked — lets a dashboard or script
-          // inspect the active configuration without shelling to the CLI.
+          // Mirror of `lazyclaw config list`. Returns every stored key with
+          // ALL credential material masked — a shallow copy that masked only
+          // the top-level 'api-key' leaked customProviders[].apiKey,
+          // authProfiles key material, and channel bot tokens in cleartext to
+          // any local process (the daemon defaults to no auth token).
           const cfg = ctx.readConfig();
-          const safe = { ...cfg };
-          if (safe['api-key']) safe['api-key'] = maskApiKey(safe['api-key']);
+          const safe = redactConfigTree(cfg, maskApiKey);
           return writeJson(res, 200, safe);
 }
 
@@ -43,7 +45,10 @@ export async function configKeyGet(c) {
             return writeJson(res, 404, { error: 'key not found', key });
           }
           const raw = cfg[key];
-          const value = key === 'api-key' ? maskApiKey(raw) : raw;
+          // Deep-redact: GET /config/customProviders (or any nested cargo) must
+          // not return cleartext apiKey/token material. A scalar non-secret key
+          // (provider, model) passes through unchanged.
+          const value = redactConfigTree(raw, maskApiKey, key);
           return writeJson(res, 200, { key, value });
 }
 

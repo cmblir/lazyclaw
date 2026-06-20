@@ -34,6 +34,30 @@ export function redactSecrets(text) {
     .replace(/\b([\w-]*(?:key|token|secret|password))\s*[:=]\s*["']?[^\s"']+/gi, '$1=[REDACTED]');
 }
 
+// Object keys whose STRING values carry credential material. Matched
+// case-insensitively as a substring of each key, so apiKey / api-key /
+// botToken / appToken / accessToken / clientSecret / authorization / password
+// / privateKey are all caught at any nesting depth. Only STRING values are
+// masked, so a numeric budget (chatWindow.tokens) or a rate card never is.
+const SENSITIVE_KEY_RE = /(api[-_]?key|apikey|secret|passwd|password|token|authorization|credential|bearer|private[-_]?key|access[-_]?key)/i;
+
+// Deep-redact a config-shaped value: recursively clone, masking the string
+// value of any secret-named key. Structure, arrays, numbers, and non-secret
+// strings are preserved; the input is never mutated. `mask` lets the caller
+// substitute a hinted masker (maskApiKey) instead of the default sentinel.
+export function redactConfigTree(value, mask = () => '[REDACTED]', keyName = '') {
+  if (Array.isArray(value)) return value.map((v) => redactConfigTree(v, mask));
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = redactConfigTree(v, mask, k);
+    return out;
+  }
+  if (typeof value === 'string' && keyName && SENSITIVE_KEY_RE.test(keyName)) {
+    return value ? mask(value) : value;
+  }
+  return value;
+}
+
 // Neutralise forged conversation role labels embedded in untrusted model
 // text. The reflection/synthesis transcript is rendered as
 // `[User]/[System]/<agent>` lines from the TRUSTED turn.agent field; a
