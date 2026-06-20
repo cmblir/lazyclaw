@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { skillsIndex } from '../skills.mjs';
 import { loadCore, recentPath, defaultConfigDir } from '../memory.mjs';
+import { recall as _recall } from './index_db.mjs';
 
 function readOpt(p) {
   try { return fs.readFileSync(p, 'utf8').trim(); }
@@ -36,7 +37,25 @@ function lastRecentLine(cfgDir) {
   } catch { return ''; }
 }
 
-export function composePromptStack({ cfgDir, agent, workspace, sessionId } = {}) {
+// Top-k recalled context for the CURRENT user message. Off (and byte-stable)
+// when no `query` is passed. Scoped to prior sessions / trajectories /
+// memories — the skill index already has its own layer above. Best-effort:
+// any index/FTS hiccup yields no layer rather than breaking prompt composition.
+function recalledLayer(dir, query, k) {
+  if (!query || !String(query).trim()) return '';
+  try {
+    const r = _recall(String(query), { configDir: dir, scope: ['sessions', 'trajectories', 'memories'], k });
+    const hits = (r && Array.isArray(r.hits)) ? r.hits : [];
+    const lines = hits
+      .map((h) => `- [${h.scope}] ${String(h.snippet || '').replace(/\s+/g, ' ').trim()}`)
+      .filter((l) => l.length > 6);
+    return lines.length ? `## Relevant recalled context\n${lines.join('\n')}` : '';
+  } catch {
+    return '';
+  }
+}
+
+export function composePromptStack({ cfgDir, agent, workspace, sessionId, query, recallK = 5 } = {}) {
   const dir = cfgDir || defaultConfigDir();
   const a = agent || {};
   const parts = [];
@@ -75,6 +94,10 @@ export function composePromptStack({ cfgDir, agent, workspace, sessionId } = {})
   // 7. trajectory tail (sessionId may be ignored — recent.jsonl is global)
   const tail = lastRecentLine(dir);
   if (tail) parts.push(`## Most-recent turn\n${tail}`);
+
+  // 8. recalled context for the current message (opt-in via `query`).
+  const recalled = recalledLayer(dir, query, recallK);
+  if (recalled) parts.push(recalled);
 
   return parts.join('\n\n');
 }
