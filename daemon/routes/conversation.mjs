@@ -1,7 +1,7 @@
 // Daemon route handlers (conversation), extracted verbatim from makeHandler (D5).
 // Each handler takes the per-request dispatch context `c` and returns the
 // HTTP response. Bodies are unchanged; only the dispatch wrapper is new.
-import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, checkCostCap, accumulateMetricsFromCost, resolveProvider, openThreads, handoffWithRollback, openDedup, enqueueLearning } from './_deps.mjs';
+import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, checkCostCap, accumulateMetricsFromCost, accountTurnCost, resolveProvider, openThreads, handoffWithRollback, openDedup, enqueueLearning } from './_deps.mjs';
 import { randomBytes } from 'node:crypto';
 
 // F5 — mint a fresh session id for a newly-seen channel:externalId binding.
@@ -67,7 +67,9 @@ export async function chat(c) {
             apiKey: cfg['api-key'],
             model: body.model || cfg.model,
             thinking: thinkingBudget > 0 ? { enabled: true, budgetTokens: thinkingBudget } : undefined,
-            onUsage: body.usage ? (u) => { captured = u; } : undefined,
+            // Always capture usage so the cost cap can track real spend;
+            // body.usage only controls whether we RETURN it to the caller.
+            onUsage: (u) => { captured = u; },
           };
           // Cost lookup: body.cost:true asks the daemon to attach a cost
           // block when usage was captured AND cfg.rates has a card for
@@ -75,17 +77,13 @@ export async function chat(c) {
           // calls. Inline rather than helper-extract because the two
           // response paths (stream / non-stream) need to bind it
           // differently (SSE event vs JSON field).
-          const computeCost = () => {
-            if (!body.cost || !captured || !cfg.rates) return null;
-            try {
-              const c = costFromUsage(
-                { provider: provName, model: body.model || cfg.model, usage: captured },
-                cfg.rates,
-              );
-              if (c) accumulateMetricsFromCost(metrics, captured, c);
-              return c;
-            } catch { return null; }
-          };
+          // Always accumulate cost into metrics (so checkCostCap tracks real
+          // spend on the NEXT request); return the cost block only when
+          // body.cost asked for it. Call once per turn.
+          const account = () => accountTurnCost({
+            metrics, usage: captured, provider: provName, model: body.model || cfg.model,
+            rates: cfg.rates, wantCost: body.cost, costFromUsage,
+          });
           if (body.stream === true) {
             writeSseHead(res);
             // Abort the provider when the SSE client disconnects — otherwise it
@@ -101,8 +99,8 @@ export async function chat(c) {
                 await new Promise(r => setImmediate(r));
               }
               if (!ac.signal.aborted) {
-                if (captured) writeSse(res, 'usage', captured);
-                const cost = computeCost();
+                const cost = account();
+                if (captured && body.usage) writeSse(res, 'usage', captured);
                 if (cost) writeSse(res, 'cost', cost);
                 writeSse(res, 'done', { ok: true });
               }
@@ -116,9 +114,9 @@ export async function chat(c) {
           let acc = '';
           try {
             for await (const chunk of prov.sendMessage(messages, sendOpts)) acc += chunk;
-            const cost = computeCost();
+            const cost = account();
             const out = { reply: acc };
-            if (captured) out.usage = captured;
+            if (captured && body.usage) out.usage = captured;
             if (cost) out.cost = cost;
             return writeJson(res, 200, out);
           } catch (err) {
@@ -363,19 +361,14 @@ export async function agent(c) {
             apiKey: cfg['api-key'],
             model,
             thinking: thinkingBudget > 0 ? { enabled: true, budgetTokens: thinkingBudget } : undefined,
-            onUsage: body.usage ? (u) => { agentCaptured = u; } : undefined,
+            // Always capture usage for cap accounting; body.usage gates the return.
+            onUsage: (u) => { agentCaptured = u; },
           };
-          const computeAgentCost = () => {
-            if (!body.cost || !agentCaptured || !cfg.rates) return null;
-            try {
-              const c = costFromUsage(
-                { provider: provName, model, usage: agentCaptured },
-                cfg.rates,
-              );
-              if (c) accumulateMetricsFromCost(metrics, agentCaptured, c);
-              return c;
-            } catch { return null; }
-          };
+          // Accumulate unconditionally; return the cost block only when asked.
+          const accountAgent = () => accountTurnCost({
+            metrics, usage: agentCaptured, provider: provName, model,
+            rates: cfg.rates, wantCost: body.cost, costFromUsage,
+          });
 
           if (body.stream === true) {
             writeSseHead(res);
@@ -395,8 +388,8 @@ export async function agent(c) {
               }
               if (sid && !ac.signal.aborted) ctx.sessionsMod.appendTurn(sid, 'assistant', acc, cfgDir);
               if (!ac.signal.aborted) {
-                if (agentCaptured) writeSse(res, 'usage', agentCaptured);
-                const cost = computeAgentCost();
+                const cost = accountAgent();
+                if (agentCaptured && body.usage) writeSse(res, 'usage', agentCaptured);
                 if (cost) writeSse(res, 'cost', cost);
                 writeSse(res, 'done', { ok: true });
               }
@@ -418,9 +411,9 @@ export async function agent(c) {
           try {
             for await (const chunk of prov.sendMessage(messages, agentSendOpts)) acc += chunk;
             if (sid) ctx.sessionsMod.appendTurn(sid, 'assistant', acc, cfgDir);
-            const cost = computeAgentCost();
+            const cost = accountAgent();
             const out = { reply: acc };
-            if (agentCaptured) out.usage = agentCaptured;
+            if (agentCaptured && body.usage) out.usage = agentCaptured;
             if (cost) out.cost = cost;
             return writeJson(res, 200, out);
           } catch (err) {

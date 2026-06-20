@@ -28,3 +28,21 @@ export function accumulateMetricsFromCost(metrics, usage, cost) {
     if (Number.isFinite(usage.outputTokens)) metrics.tokensTotal.outputTokens += usage.outputTokens;
   }
 }
+
+// Account one turn's cost against the running metrics so the cost cap tracks
+// real spend, and return the cost block ONLY when the caller asked for it.
+//
+// The previous /chat + /agent code only accumulated when the CALLER set
+// body.cost — but no bundled client does, so the cap never tripped. Here
+// accumulation is unconditional whenever a rate card resolves a cost;
+// `wantCost` (body.cost) just controls whether the cost block is returned to
+// the client. `costFromUsage` is injected to keep this module pure/testable.
+export function accountTurnCost({ metrics, usage, provider, model, rates, wantCost, costFromUsage }) {
+  if (!usage || !rates || typeof costFromUsage !== 'function') return null;
+  let cost = null;
+  try {
+    cost = costFromUsage({ provider, model, usage }, rates);
+    if (cost) accumulateMetricsFromCost(metrics, usage, cost);
+  } catch { return null; }
+  return wantCost ? cost : null;
+}

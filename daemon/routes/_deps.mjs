@@ -27,7 +27,7 @@ export {
   fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse,
   statusForProviderError,
 } from '../lib/respond.mjs';
-export { checkCostCap, accumulateMetricsFromCost } from '../lib/cost.mjs';
+export { checkCostCap, accumulateMetricsFromCost, accountTurnCost } from '../lib/cost.mjs';
 export { resolveProvider } from '../lib/provider.mjs';
 // F5/F6 — cross-channel handoff: the threads store + the rollback-aware
 // migration helper, so the conversation routes can bind inbound messages to a
