@@ -18,6 +18,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { tightenIfLoose } from './secure_write.mjs';
 
 const MEMORY_DIRNAME = 'memory';
 const RECENT_CAP = 200;
@@ -51,6 +52,7 @@ export function loadCore(configDir = defaultConfigDir()) {
 export function setCore(text, configDir = defaultConfigDir()) {
   fs.mkdirSync(memoryDir(configDir), { recursive: true });
   fs.writeFileSync(corePath(configDir), String(text || ''));
+  tightenIfLoose(corePath(configDir)); // curated memory may hold pasted secrets → owner-only
   // Mirror into the recall index so curated core memory is durably searchable
   // (the README "durable recall over … memory" claim) — not just readable.
   _indexMemorySafe({ topic: 'core', kind: 'core', content: String(text || '') }, configDir);
@@ -91,6 +93,7 @@ export function appendRecent(sessionId, role, content, configDir = defaultConfig
       ts: Date.now(),
     }) + '\n';
     fs.appendFileSync(recentPath(configDir), line);
+    tightenIfLoose(recentPath(configDir)); // recency log may hold pasted secrets → owner-only
     // Cheap stat-based check to avoid read-rewrite on every append.
     const st = fs.statSync(recentPath(configDir));
     if (st.size > 1_000_000) {
@@ -148,6 +151,7 @@ export async function dream(sessionId, { provider, model, apiKey } = {}, configD
     const slug = String(t.topic).toLowerCase().replace(/[^a-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'untitled';
     const p = path.join(episodicDir(configDir), `${slug}.md`);
     fs.writeFileSync(p, `# ${slug}\n\n${t.summary || ''}\n`);
+    tightenIfLoose(p); // episodic summaries are conversation-derived → owner-only
     if (indexDb) { try { indexDb.indexMemory({ topic: slug, kind: 'episodic', content: String(t.summary || '') }, configDir); } catch { /* best-effort */ } }
     written.push(slug);
   }
@@ -158,6 +162,7 @@ export async function dream(sessionId, { provider, model, apiKey } = {}, configD
     const lines = fs.readFileSync(rp, 'utf8').split('\n').filter(Boolean);
     if (lines.length > RECENT_KEEP_AFTER_DREAM) {
       fs.writeFileSync(rp, lines.slice(-RECENT_KEEP_AFTER_DREAM).join('\n') + '\n');
+      tightenIfLoose(rp);
     }
   }
   return { topics: written };
