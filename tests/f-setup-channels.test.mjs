@@ -57,6 +57,27 @@ test('writeDotenvMerge round-trips through loadDotenvIfAny', () => {
   if (before === undefined) delete process.env.MATRIX_ACCESS_TOKEN; else process.env.MATRIX_ACCESS_TOKEN = before;
 });
 
+test('loadDotenvIfAny falls back to the configured dir when called with no cfgDir', () => {
+  // The /channels test slash path called loadDotenvIfAny(ctx.cfgDir) with an
+  // undefined cfgDir → path.join(undefined,'.env') threw, was swallowed by a
+  // try/catch, and the .env was silently never loaded → verifyChannel saw no
+  // token and reported a false "no token set".
+  const dir = tmpCfgDir();
+  fs.writeFileSync(path.join(dir, '.env'), 'SLACK_BOT_TOKEN=xoxb-fallback\n');
+  const prevDir = process.env.LAZYCLAW_CONFIG_DIR;
+  const prevTok = process.env.SLACK_BOT_TOKEN;
+  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  delete process.env.SLACK_BOT_TOKEN;
+  try {
+    const r = loadDotenvIfAny();
+    assert.equal(process.env.SLACK_BOT_TOKEN, 'xoxb-fallback');
+    assert.ok(r.loaded >= 1);
+  } finally {
+    if (prevDir === undefined) delete process.env.LAZYCLAW_CONFIG_DIR; else process.env.LAZYCLAW_CONFIG_DIR = prevDir;
+    if (prevTok === undefined) delete process.env.SLACK_BOT_TOKEN; else process.env.SLACK_BOT_TOKEN = prevTok;
+  }
+});
+
 // ── Task 2: catalog + buildChannelEntry (pure) ──────────────────────────
 
 test('CHANNEL_CATALOG covers exactly the daemon KNOWN channel names', () => {

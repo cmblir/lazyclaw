@@ -6,9 +6,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { writeTextSecure } from './secure_write.mjs';
+import { configPath } from './lib/config.mjs';
+
+// Resolve the .env directory, falling back to the active config dir. Callers
+// that forward an undefined ctx.cfgDir (the /channels test slash path) used to
+// crash here (path.join(undefined,…)) and have the throw swallowed, silently
+// skipping every credential — so default rather than throw.
+function resolveCfgDir(cfgDir) {
+  return cfgDir || path.dirname(configPath());
+}
 
 export function loadDotenvIfAny(cfgDir) {
-  const p = path.join(cfgDir, '.env');
+  const p = path.join(resolveCfgDir(cfgDir), '.env');
   if (!fs.existsSync(p)) return { path: p, loaded: 0 };
   let loaded = 0;
   const raw = fs.readFileSync(p, 'utf8');
@@ -28,7 +37,7 @@ export function loadDotenvIfAny(cfgDir) {
 // (no quoting) — callers pass already-trimmed strings. Returns the path.
 // Mirror of loadDotenvIfAny so .env read + write live together.
 export function writeDotenvMerge(cfgDir, vars) {
-  const p = path.join(cfgDir, '.env');
+  const p = path.join(resolveCfgDir(cfgDir), '.env');
   const lines = [];
   const seen = new Set();
   const existing = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
