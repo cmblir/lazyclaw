@@ -28,3 +28,4 @@ blob-report/
 
 # Logs
 *.log
+.superpowers/
