@@ -59,7 +59,14 @@ export async function startServer({ name, command, args = [], env = {}, allowGlo
             .filter(c => c.type === 'text')
             .map(c => c.text)
             .join('\n');
-          return { ok: true, text, raw: res };
+          // MCP reports TOOL-level failures as { isError: true } WITHOUT
+          // throwing (only protocol/transport faults throw). Surface it as a
+          // failure so the agent doesn't reason forward on a failed call.
+          if (res?.isError) {
+            return { ok: false, error: `${toolName}: ${text || 'tool reported isError'}`, raw: res };
+          }
+          // Pass structuredContent through when the server provides it.
+          return { ok: true, text, structured: res?.structuredContent, raw: res };
         } catch (e) {
           return { ok: false, error: `${toolName}: ${e.message}` };
         }

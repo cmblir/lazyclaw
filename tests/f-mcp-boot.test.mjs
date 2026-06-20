@@ -136,3 +136,23 @@ test('CLI: `mcp list` prints configured servers and exits 0', () => {
   assert.equal(r.status, 0, `mcp list should exit 0, got ${r.status}\n${r.stderr}`);
   assert.match(r.stdout, /cfgserver/, 'configured server name printed');
 });
+
+// §isError: MCP tool-level failures arrive as { isError:true } WITHOUT
+// throwing. exec() only caught throws, so the agent received { ok:true } and
+// reasoned forward on a failed operation. isError must map to a failure.
+test('an MCP tool that returns isError surfaces as ok:false, not a silent success', async () => {
+  mcpClient.__setTransport({
+    connect: async () => ({
+      listTools: async () => ({ tools: [{ name: 'do_thing', inputSchema: { type: 'object', properties: {} } }] }),
+      callTool: async () => ({ isError: true, content: [{ type: 'text', text: 'permission denied' }] }),
+      close: async () => {},
+    }),
+  });
+  await mcpClient.startServer({ name: 'errsrv', command: 'fake' });
+  const tool = registry.lookup('mcp:errsrv:do_thing');
+  const r = await tool.exec({});
+  assert.equal(r.ok, false, 'isError:true must map to ok:false');
+  assert.match(r.error, /permission denied/, 'error carries the tool failure text');
+  await mcpClient.stopServer('errsrv');
+  mcpClient.__setTransport(null);
+});
