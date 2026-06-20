@@ -90,6 +90,10 @@ function defaultShape(name) {
     tools: [...DEFAULT_TOOLS],
     tags: [],
     iconEmoji: '',
+    // Optional parent agent (hierarchy). '' = top-level. A team's org tree is
+    // derived from members' manager links (see teams.teamTree). Validated to
+    // reference a registered agent and to never form a cycle.
+    manager: '',
     // Phase 18 — agent memory write trigger. 'auto' means the router
     // fires a reflection LLM call on terminal `done`; 'manual' waits
     // for `lazyclaw agent reflect`; 'off' disables writes entirely.
@@ -120,7 +124,34 @@ function writeAtomic(filePath, obj) {
 const VALID_MEMORY_WRITE = ['auto', 'manual', 'off'];
 const VALID_SKILL_WRITE = ['auto', 'manual', 'off'];
 
-export function registerAgent({ name, displayName, role = '', provider = 'claude-cli', model = '', tools, tags = [], iconEmoji = '', memoryWrite, memoryMaxChars, skillWrite } = {}, configDir = defaultConfigDir()) {
+// Validate a proposed `manager` (parent agent) for `name`: it must reference a
+// registered agent, may not be the agent itself, and may not close a cycle
+// (i.e. `name` must not already be an ancestor of the proposed manager).
+// Returns the normalised manager string ('' when none).
+function validateManager(name, manager, configDir) {
+  if (!manager) return '';
+  const mgr = String(manager);
+  if (mgr === name) {
+    throw new AgentError(`agent "${name}" cannot manage itself`, 'AGENT_BAD_MANAGER');
+  }
+  if (!getAgent(mgr, configDir)) {
+    throw new AgentError(`unknown manager "${mgr}" (not a registered agent)`, 'AGENT_BAD_MANAGER');
+  }
+  let cur = mgr;
+  const visited = new Set();
+  while (cur) {
+    if (cur === name) {
+      throw new AgentError(`manager "${manager}" would create a cycle`, 'AGENT_MANAGER_CYCLE');
+    }
+    if (visited.has(cur)) break; // pre-existing cycle elsewhere — stop walking
+    visited.add(cur);
+    const rec = getAgent(cur, configDir);
+    cur = rec && rec.manager ? String(rec.manager) : null;
+  }
+  return mgr;
+}
+
+export function registerAgent({ name, displayName, role = '', provider = 'claude-cli', model = '', tools, tags = [], iconEmoji = '', memoryWrite, memoryMaxChars, skillWrite, manager } = {}, configDir = defaultConfigDir()) {
   ensureValidName(name);
   const p = agentPath(name, configDir);
   if (fs.existsSync(p)) {
@@ -147,6 +178,7 @@ export function registerAgent({ name, displayName, role = '', provider = 'claude
     memoryWrite: mw,
     memoryMaxChars: Number.isFinite(+memoryMaxChars) && +memoryMaxChars > 0 ? +memoryMaxChars : 12 * 1024,
     skillWrite: sw,
+    manager: validateManager(name, manager, configDir),
   };
   writeAtomic(p, data);
   return data;
@@ -187,6 +219,9 @@ export function patchAgent(name, patch, configDir = defaultConfigDir()) {
   }
   if (patch.skillWrite !== undefined && !VALID_SKILL_WRITE.includes(patch.skillWrite)) {
     throw new AgentError(`skillWrite must be one of ${VALID_SKILL_WRITE.join(', ')}`, 'AGENT_BAD_SKILL_WRITE');
+  }
+  if (patch.manager !== undefined) {
+    next.manager = validateManager(name, patch.manager, configDir);
   }
   writeAtomic(agentPath(name, configDir), next);
   return next;

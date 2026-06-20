@@ -197,3 +197,37 @@ export function parseListFlag(raw) {
   if (s === '') return [];
   return s.split(',').map(x => x.trim()).filter(Boolean);
 }
+
+// Build the team's org tree for the dashboard: a nested { agent, children[] }
+// rooted at team.lead. A member nests under its `manager` when that manager is
+// also a team member; otherwise (no manager, or a manager outside the team) it
+// attaches directly under the lead, so the result is always a single tree.
+//
+// @param {{lead:string, agents:string[]}} team
+// @param {Record<string, object>} agentsById  name → agent record
+export function teamTree(team, agentsById = {}) {
+  const lead = team && team.lead;
+  if (!lead) return null;
+  const memberNames = new Set((team.agents || []));
+  const byManager = new Map(); // manager name → child names
+  for (const n of memberNames) {
+    if (n === lead) continue;
+    const rec = agentsById[n];
+    const mgr = rec && rec.manager && memberNames.has(rec.manager) && rec.manager !== n
+      ? rec.manager
+      : lead;
+    if (!byManager.has(mgr)) byManager.set(mgr, []);
+    byManager.get(mgr).push(n);
+  }
+  const build = (name, seen) => {
+    if (seen.has(name)) return null; // cycle guard (defensive — register/patch reject cycles)
+    const next = new Set(seen).add(name);
+    const node = { agent: agentsById[name] || { name }, children: [] };
+    for (const child of (byManager.get(name) || []).sort()) {
+      const c = build(child, next);
+      if (c) node.children.push(c);
+    }
+    return node;
+  };
+  return build(lead, new Set());
+}
