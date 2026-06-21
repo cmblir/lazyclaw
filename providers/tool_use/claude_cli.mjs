@@ -147,6 +147,33 @@ async function readUntilDone(proc) {
   });
 }
 
+// Build the `claude` argv for the tool-use path. Runs LEAN by default —
+// single-sourced with providers/claude_cli.mjs's policy — so this path (agentic
+// chat / every mention-router team turn / the per-turn trainer calls) does NOT
+// re-load the user's CLAUDE.md/skills/hooks/MCP (~180k tokens/spawn, measured).
+// It previously omitted the lean flags, which is why the streaming provider's
+// lean fix didn't help these paths. Pass lean:false to restore the full env.
+export function buildToolUseArgs({ prompt, model, system, tools = [], permissionMode = 'bypassPermissions', lean } = {}) {
+  const args = [
+    '-p', prompt,
+    '--output-format', 'stream-json',
+    '--include-partial-messages',
+    '--verbose',
+    '--permission-mode', permissionMode,
+  ];
+  if (lean !== false) {
+    args.push('--setting-sources', '', '--strict-mcp-config');
+  }
+  if (model) args.push('--model', model);
+  if (system && String(system).trim()) {
+    args.push('--system-prompt', String(system));
+  }
+  // Phase 19: pass the lazyclaw whitelist through to claude's --tools even when
+  // empty (an empty string explicitly disables every tool).
+  args.push('--tools', toClaudeTools(tools));
+  return args;
+}
+
 export async function callOnce({
   messages,
   tools = [],
@@ -158,6 +185,7 @@ export async function callOnce({
   signal,
   bin,
   cwd,
+  lean,
   permissionMode = 'bypassPermissions',
 } = {}) {
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -167,21 +195,7 @@ export async function callOnce({
   if (!prompt) {
     throw new ClaudeCliToolUseError('messages produced an empty prompt', 'NO_PROMPT');
   }
-  const args = [
-    '-p', prompt,
-    '--output-format', 'stream-json',
-    '--include-partial-messages',
-    '--verbose',
-    '--permission-mode', permissionMode,
-  ];
-  if (model) args.push('--model', model);
-  if (system && String(system).trim()) {
-    args.push('--system-prompt', String(system));
-  }
-  // Phase 19: pass the lazyclaw whitelist through to claude's --tools
-  // even when empty (an empty string explicitly disables every tool).
-  const toolsArg = toClaudeTools(tools);
-  args.push('--tools', toolsArg);
+  const args = buildToolUseArgs({ prompt, model, system, tools, permissionMode, lean });
 
   const binPath = bin || process.env.LAZYCLAW_CLAUDE_BIN || DEFAULT_BIN;
   let proc;
