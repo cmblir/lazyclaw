@@ -5,6 +5,8 @@
 // provider, …) so a workflow can never reach ambient I/O on its own.
 
 import { isSafeUrl } from '../mas/tools/web.mjs';
+import { spawnSyncSandboxed } from '../sandbox.mjs';
+import { scrubEnv } from '../mas/scrub_env.mjs';
 
 // http: { url, method?, headers?, body?, json? } → { status, ok, body|json }.
 // SSRF-guarded with the same policy as the web tool (loopback / RFC1918 /
@@ -42,12 +44,51 @@ export function llmNode({ provider, apiKey, model: defaultModel } = {}) {
   };
 }
 
+// shell: { command } or { bin, args[] } → { code, stdout, stderr }. Runs through
+// spawnSyncSandboxed (confined by `sandbox`) with a SCRUBBED env (the snippet
+// can't read API keys), argv as an ARRAY (no shell-string injection). This is a
+// powerful capability — it is NEVER granted by the daemon route (run_request),
+// only by a CLI / trusted runner that opts in via buildCaps({ shell: ... }).
+export function shellNode({ spawnSyncImpl = spawnSyncSandboxed, sandbox = null, env, timeoutMs = 30_000, maxBuffer = 10 * 1024 * 1024 } = {}) {
+  return (cfg, ctx) => {
+    const bin = cfg?.bin || 'sh';
+    const args = Array.isArray(cfg?.args) ? cfg.args.map(String) : ['-c', String(cfg?.command ?? '')];
+    const r = spawnSyncImpl(sandbox, bin, args, {
+      encoding: 'utf8',
+      env: env || scrubEnv(process.env),
+      timeout: Number.isFinite(cfg?.timeoutMs) ? cfg.timeoutMs : timeoutMs,
+      maxBuffer,
+      signal: ctx?.signal,
+    });
+    return { code: r?.status ?? null, stdout: r?.stdout || '', stderr: r?.stderr || '' };
+  };
+}
+
+// channel-send: { to | threadId, text } → { ts, ok }. The sender is INJECTED and
+// already started — the node never constructs a channel client itself (no
+// ambient I/O, no per-node socket). CLI / trusted runners only.
+export function channelSendNode({ sender } = {}) {
+  return async (cfg) => {
+    if (!sender || typeof sender.send !== 'function') throw new Error('channel-send node: no sender granted');
+    const to = cfg?.to ?? cfg?.threadId;
+    if (!to) throw new Error('channel-send node: "to" (channel/thread) is required');
+    const opts = {};
+    if (cfg.username) opts.username = cfg.username;
+    if (cfg.icon_emoji) opts.icon_emoji = cfg.icon_emoji;
+    const res = await sender.send(String(to), String(cfg.text ?? ''), opts);
+    return { ts: res?.ts || null, ok: true };
+  };
+}
+
 // Assemble caps.nodeTypes from a grants object. Only granted types appear, so a
-// caller that grants nothing gets the safe built-ins only.
-//   buildCaps({ http: true|{fetchImpl}, llm: { provider, apiKey, model } })
+// caller that grants nothing gets the safe built-ins only. http/llm are safe
+// enough for the daemon route; shell/channel are CLI/trusted-only.
+//   buildCaps({ http: true|{fetchImpl}, llm: {provider}, shell: {sandbox}, channel: {sender} })
 export function buildCaps(grants = {}) {
   const nodeTypes = {};
   if (grants.http) nodeTypes.http = httpNode(grants.http === true ? {} : grants.http);
   if (grants.llm) nodeTypes.llm = llmNode(grants.llm === true ? {} : grants.llm);
+  if (grants.shell) nodeTypes.shell = shellNode(grants.shell === true ? {} : grants.shell);
+  if (grants.channel) nodeTypes['channel-send'] = channelSendNode(grants.channel === true ? {} : grants.channel);
   return { nodeTypes };
 }
