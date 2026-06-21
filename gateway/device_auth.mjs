@@ -421,7 +421,7 @@ export class PairingStore {
    * @param {{ deviceId: string, platform?: string, label?: string }} args
    * @returns {{ requestId: string, status: 'pending' }}
    */
-  requestPairing({ deviceId, platform = '', label = '' } = {}) {
+  requestPairing({ deviceId, platform = '', label = '', role = '', scopes = [] } = {}) {
     if (!deviceId || typeof deviceId !== 'string') {
       throw new Error('requestPairing requires a deviceId');
     }
@@ -440,6 +440,10 @@ export class PairingStore {
       deviceId,
       platform: String(platform || ''),
       label: String(label || ''),
+      // Capability metadata from the signed payload (read-only vs approver).
+      // Persisted so approve() can stamp it on the device for authz.
+      role: String(role || ''),
+      scopes: Array.isArray(scopes) ? scopes.map(String) : [],
       status: 'pending',
       createdAt: nowIso(),
     };
@@ -473,6 +477,8 @@ export class PairingStore {
       deviceId: req.deviceId,
       platform: req.platform || '',
       label: req.label || '',
+      role: req.role || '',
+      scopes: Array.isArray(req.scopes) ? req.scopes : [],
       token,
       approvedAt: nowIso(),
     };
