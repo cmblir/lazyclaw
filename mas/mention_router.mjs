@@ -313,6 +313,10 @@ export async function runTaskTurn({
   signal,
   approve,
   security,
+  // Fired with { provider, model, usage } after each agent turn that reported
+  // usage, so the caller prices each turn against that agent's rate card and
+  // feeds the cost cap (mixed-provider teams account correctly). No-op default.
+  onUsage,
   // Default-on isolation — the flat sandbox spec applied to every tool the
   // agents run this task. Threaded from the entrypoint (task tick / REPL),
   // which builds it via defaultSandboxSpec. undefined → bare (byte-stable).
@@ -424,6 +428,13 @@ export async function runTaskTurn({
       continue;
     }
     await clearTypingPlaceholder(typing, logger);
+
+    // Report this turn's spend with its provider+model. Best-effort — a
+    // throwing/absent callback never affects the loop.
+    if (result.usage && typeof onUsage === 'function') {
+      try { onUsage({ provider: agentRecord.provider, model: agentRecord.model, usage: result.usage }); }
+      catch { /* never let cost accounting break the turn */ }
+    }
 
     const replyText = (result.text || '').trim();
     const ts = new Date().toISOString();
