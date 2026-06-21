@@ -160,6 +160,12 @@ export async function runAgentTurn({
   const toolCalls = [];
   let iterations = 0;
   let lastText = '';
+  // Accumulate token usage across every callOnce in this turn's tool loop so
+  // the caller (e.g. the team router → cost cap) can account for what the turn
+  // spent. Stays null until an adapter actually reports usage.
+  const usageTotal = { inputTokens: 0, outputTokens: 0 };
+  let usageSeen = false;
+  const _usage = () => (usageSeen ? { ...usageTotal } : null);
   if (trajectoryRef && typeof trajectoryRef === 'object' && !trajectoryRef.startedAt) trajectoryRef.startedAt = Date.now();
 
   const _maybePersistTrajectory = async (outcome) => {
@@ -191,13 +197,18 @@ export async function runAgentTurn({
   };
 
   while (iterations < maxIterations) {
-    if (signal?.aborted) return { text: lastText, iterations, stoppedBy: 'abort', toolCalls };
+    if (signal?.aborted) return { text: lastText, iterations, stoppedBy: 'abort', toolCalls, usage: _usage() };
     iterations++;
     const resp = await adapter.callOnce({
       messages, tools, model: agent.model, apiKey, system: systemPrompt,
       fetchImpl, baseUrl, signal, cache,
     });
     if (resp.text) lastText = resp.text;
+    if (resp.usage) {
+      usageTotal.inputTokens += resp.usage.inputTokens || 0;
+      usageTotal.outputTokens += resp.usage.outputTokens || 0;
+      usageSeen = true;
+    }
 
     // The model hit its output token ceiling: the final answer or the tool
     // call(s) are partial/garbage. Stop with an explicit error rather than
@@ -207,13 +218,13 @@ export async function runAgentTurn({
       return {
         text: lastText, iterations, stoppedBy: 'truncated',
         error: 'response truncated at the model output token limit (raise maxTokens)',
-        toolCalls,
+        toolCalls, usage: _usage(),
       };
     }
 
     if (resp.kind === 'final') {
       await _maybePersistTrajectory('done');
-      return { text: resp.text || '', iterations, stoppedBy: 'final', toolCalls };
+      return { text: resp.text || '', iterations, stoppedBy: 'final', toolCalls, usage: _usage() };
     }
 
     // tool_calls path: echo the model's assistant turn back so future
@@ -275,10 +286,10 @@ export async function runAgentTurn({
     // provider returned a malformed envelope) bails out here.
     if (toolErrored && process.env.LAZYCLAW_TOOL_STRICT === '1') {
       await _maybePersistTrajectory('failed');
-      return { text: lastText, iterations, stoppedBy: 'tool_error', toolCalls };
+      return { text: lastText, iterations, stoppedBy: 'tool_error', toolCalls, usage: _usage() };
     }
   }
 
   await _maybePersistTrajectory('abandoned');
-  return { text: lastText, iterations, stoppedBy: 'budget', toolCalls };
+  return { text: lastText, iterations, stoppedBy: 'budget', toolCalls, usage: _usage() };
 }
