@@ -26,6 +26,12 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Changed
 
+- **SSE streaming yields only under real backpressure.** The `/chat` and
+  `/agent` token streams awaited a full event-loop turn (`setImmediate`) after
+  EVERY token, even when the socket's write buffer wasn't full. `writeSse` now
+  returns the data-frame `res.write()` result, and the loops yield only when it
+  signals a full buffer — dropping one event-loop turn per token in the common
+  case while still relieving backpressure for a slow consumer.
 - **The post-task learning hook runs its two trainer calls in parallel.**
   `synthesizeSkill` and `updateUserModel` are independent LLM calls
   (`updateUserModel` doesn't consume the synthesised skill), but ran

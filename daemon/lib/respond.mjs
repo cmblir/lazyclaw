@@ -77,7 +77,11 @@ export function writeSseHead(res) {
   });
 }
 
+// Returns the data-frame res.write() result: false when the socket's write
+// buffer is full (backpressure), true otherwise. Streaming loops use this to
+// yield the event loop ONLY when the buffer is full, instead of paying an
+// event-loop turn on every token.
 export function writeSse(res, event, data) {
   if (event) res.write(`event: ${event}\n`);
-  res.write(`data: ${JSON.stringify(data)}\n\n`);
+  return res.write(`data: ${JSON.stringify(data)}\n\n`);
 }

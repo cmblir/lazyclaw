@@ -96,8 +96,10 @@ export async function chat(c) {
             try {
               for await (const chunk of prov.sendMessage(messages, { ...sendOpts, signal: ac.signal })) {
                 if (ac.signal.aborted) break;
-                writeSse(res, 'token', { text: chunk });
-                await new Promise(r => setImmediate(r));
+                // Yield the event loop only under backpressure (socket buffer
+                // full) instead of on every token — writeSse returns false when
+                // the buffer is full.
+                if (!writeSse(res, 'token', { text: chunk })) await new Promise(r => setImmediate(r));
               }
               if (!ac.signal.aborted) {
                 const cost = account();
@@ -404,9 +406,9 @@ export async function agent(c) {
               for await (const chunk of prov.sendMessage(messages, { ...agentSendOpts, signal: ac.signal })) {
                 if (ac.signal.aborted) break;
                 acc += chunk;
-                writeSse(res, 'token', { text: chunk });
-                // Backpressure: yield so the caller can read each frame.
-                await new Promise(r => setImmediate(r));
+                // Backpressure: yield the event loop only when the socket
+                // buffer is full (writeSse returns false), not on every token.
+                if (!writeSse(res, 'token', { text: chunk })) await new Promise(r => setImmediate(r));
               }
               if (sid && !ac.signal.aborted) ctx.sessionsMod.appendTurn(sid, 'assistant', acc, cfgDir);
               if (!ac.signal.aborted) {
