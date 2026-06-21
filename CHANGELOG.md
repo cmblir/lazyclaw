@@ -8,6 +8,14 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Changed
 
+- **Chat replies no longer block on the FTS index write.** `sessions.appendTurn`
+  runs on the reply path (before the answer is flushed to the client), but it
+  mirrored each turn into the better-sqlite3 FTS index inline via a static
+  import — a fully-synchronous `INSERT`, plus a first-turn schema-create, sat
+  directly on the user-visible latency path. The mirror write is now deferred
+  off the calling tick behind a dynamic import (mirroring `tasks.mjs`), so the
+  only thing on the reply path is the durable JSONL append; recall is unchanged
+  (the row still lands, just a tick later).
 - **`claude-cli` chat is dramatically faster (whole-codebase perf pass).** A
   user message used to cold-spawn `claude -p` THREE times (1 answer + 2 trainer)
   and let Claude Code run an unbounded internal agent loop. Fixes: the internal

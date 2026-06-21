@@ -15,10 +15,13 @@ function tmp() {
   return d;
 }
 
-test('appendTurn writes through to fts_sessions', () => {
+test('appendTurn writes through to fts_sessions', async () => {
   const dir = tmp();
   openIndex(dir);
   appendTurn('s_hook_1', 'user', 'investigate the slack reaction noise', dir);
+  // The FTS mirror write is deferred off the reply tick (see sessions.mjs) —
+  // flush a few ticks so the fire-and-forget write-through lands before recall.
+  for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r));
   const out = recall('reaction', { configDir: dir, scope: ['sessions'] });
   assert.ok(out.hits.length >= 1, `no session hit; got ${JSON.stringify(out.hits)}`);
   assert.equal(out.hits[0].metadata.session_id, 's_hook_1');
