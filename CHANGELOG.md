@@ -38,6 +38,13 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Changed
 
+- **Opt-in agentic orchestrator workers (`cfg.orchestrator.agenticWorkers`).**
+  An EXECUTE-phase worker could only stream text — it couldn't use tools. With
+  `agenticWorkers: true` each worker runs through `runAgentTurn` instead, so it
+  can do real work with its tools (shell / file read / grep / recall) and then
+  report. Tool calls are confined by the caller's sandbox; the loop is bounded
+  by `workerMaxIterations` (default 8) and propagates the abort signal. Off by
+  default — the text-streaming path is byte-stable.
 - **The orchestrator runs its worker pool in parallel by default.** A bounded
   parallel dispatch existed for `cfg.orchestrator.concurrency >= 2`, but the
   default when it was unset was `1` (sequential), so an unconfigured fleet ran

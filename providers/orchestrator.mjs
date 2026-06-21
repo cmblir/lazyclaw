@@ -93,6 +93,18 @@ function _bestPlanArray(text) {
 // explicit 0/1 still selects the sequential live-streaming path.
 const DEFAULT_CONCURRENCY = 3;
 
+// Opt-in agentic workers (cfg.orchestrator.agenticWorkers): an EXECUTE worker
+// runs through runAgentTurn so it can actually DO work with its tools (shell,
+// file read, recall) instead of only streaming text. Default OFF — the
+// text-streaming path is byte-stable. Tool calls are confined by the sandbox
+// the caller passes; the loop is bounded by workerMaxIterations.
+const DEFAULT_WORKER_TOOLS = ['bash', 'read', 'grep', 'recall'];
+const DEFAULT_WORKER_MAX_ITERATIONS = 8;
+const AGENTIC_WORKER_ROLE =
+  'You are an orchestrator worker. Complete ONLY the assigned subtask. Use your ' +
+  'tools (shell, file read, grep, recall) to do real work when useful, then report ' +
+  'the result concisely. Do not ask questions — act, then summarise what you found.';
+
 const PLANNER_SYSTEM = `You are an orchestrator that decomposes a user request into independent subtasks for parallel worker agents.
 
 Rules:
@@ -272,6 +284,44 @@ export function makeOrchestratorProvider(opts = {}) {
       const rawConcurrency = Number.isFinite(o.concurrency) ? Math.floor(o.concurrency) : DEFAULT_CONCURRENCY;
       const concurrency = Math.max(1, Math.min(rawConcurrency, workers.length));
       yield `### 2. Executing ${trimmed.length} subtask${trimmed.length === 1 ? '' : 's'}${concurrency > 1 ? ` (concurrency=${concurrency}, parallel)` : ''}\n\n`;
+
+      // Run one worker on one subtask through the agentic tool loop. Confined by
+      // the caller's sandbox; bounded by workerMaxIterations; abort-propagating.
+      const _runAgenticWorker = async (worker, sub) => {
+        const { runAgentTurn } = await import('../mas/agent_turn.mjs');
+        const r = await runAgentTurn({
+          agent: {
+            name: worker.name, provider: worker.name, model: worker.model,
+            role: AGENTIC_WORKER_ROLE,
+            tools: Array.isArray(o.workerTools) ? o.workerTools : DEFAULT_WORKER_TOOLS,
+          },
+          userMessage: sub.task,
+          configDir: callerOpts.configDir,
+          cwd: callerOpts.cwd,
+          apiKey: keyResolver(cfg, worker.name),
+          fetchImpl: callerOpts.fetchImpl,
+          sandbox: callerOpts.sandbox,
+          signal: callerOpts.signal,
+          maxIterations: Number.isFinite(o.workerMaxIterations) ? o.workerMaxIterations : DEFAULT_WORKER_MAX_ITERATIONS,
+        });
+        return r.text || '';
+      };
+      // Worker output as a chunk stream. agenticWorkers OFF (default) → the
+      // provider's live token stream, byte-stable. ON → one buffered chunk with
+      // the agent turn's final answer (tool work happened inside).
+      const _workerChunks = async function* (worker, sub) {
+        if (o.agenticWorkers) {
+          const text = await _runAgenticWorker(worker, sub);
+          if (text) yield text;
+          return;
+        }
+        yield* worker.prov.sendMessage([{ role: 'user', content: sub.task }], {
+          apiKey: keyResolver(cfg, worker.name),
+          model: worker.model || undefined,
+          signal: callerOpts.signal,
+        });
+      };
+
       const results = [];
       if (concurrency <= 1) {
         // Sequential streaming path — historical default, preserved.
@@ -281,11 +331,7 @@ export function makeOrchestratorProvider(opts = {}) {
           yield `**Subtask ${sub.id}** \`${worker.name}${worker.model ? ':' + worker.model : ''}\` — ${sub.task}\n\n`;
           let res = '';
           try {
-            for await (const chunk of worker.prov.sendMessage([{ role: 'user', content: sub.task }], {
-              apiKey: keyResolver(cfg, worker.name),
-              model: worker.model || undefined,
-              signal: callerOpts.signal,
-            })) {
+            for await (const chunk of _workerChunks(worker, sub)) {
               const s = String(chunk);
               res += s;
               yield s;
@@ -308,11 +354,7 @@ export function makeOrchestratorProvider(opts = {}) {
           const chunks = [];
           let error = null;
           try {
-            for await (const chunk of worker.prov.sendMessage([{ role: 'user', content: sub.task }], {
-              apiKey: keyResolver(cfg, worker.name),
-              model: worker.model || undefined,
-              signal: callerOpts.signal,
-            })) {
+            for await (const chunk of _workerChunks(worker, sub)) {
               chunks.push(String(chunk));
             }
           } catch (e) {
