@@ -121,70 +121,78 @@ export async function _runPostTask(ctx, logger) {
     errors.push({ step: 'confidence', error: String(e?.message || e) });
   }
 
-  // 3. synthesizeSkill (best-effort — needs an agent + provider key).
-  //    All v5 frontmatter fields land here (trained_by, confidence,
-  //    trajectory_ref) so the produced SKILL.md is ready for recall +
-  //    cross-CLI dampening without a follow-up patch.
-  if (ctx.agent && ctx.task) {
-    try {
-      results.skill = await skillSynth.synthesizeSkill({
-        agent: { ...ctx.agent, provider: trainer.provider, model: trainer.model },
-        task: ctx.task,
-        apiKey: ctx.apiKey,
-        baseUrl: ctx.baseUrl,
-        fetchImpl: ctx.fetchImpl,
-        outcome: 'done',
-        trainedBy: trainer.provider,
-        trainedOnModel: trainer.model,
-        trajectoryRef: results.trajectory?.id || null,
-        confidence: results.confidence,
-      });
-      // Persist the produced SKILL.md into the shared skills/ dir so the
-      // next agent turn's recall surfaces it. installSynthesized forwards
-      // every v5 frontmatter field (see Group A — C6 fix in skill_synth).
-      if (results.skill && ctx.configDir) {
-        try {
-          results.installed = skillSynth.installSynthesized({
-            name: results.skill.name,
-            description: results.skill.description,
-            body: results.skill.body,
-            sourceTask: ctx.task.id || '',
-            createdBy: 'agent',
-            trainedBy: trainer.provider,
-            trainedOnModel: trainer.model,
-            trajectoryRef: results.trajectory?.id || null,
-            confidence: results.confidence,
-            outcome: 'done',
-          }, ctx.configDir);
-        } catch (e) {
-          errors.push({ step: 'skillInstall', error: String(e?.message || e) });
-          logger(`[learning] skill install failed: ${e?.message || e}\n`);
+  // 3 + 4. synthesizeSkill and updateUserModel are independent trainer/LLM
+  //    calls — updateUserModel does not consume results.skill — so run them
+  //    concurrently instead of awaiting one whole network round-trip before
+  //    starting the other. Each branch keeps its own try/catch so a failure in
+  //    one can never poison the other (module contract, top of file), and they
+  //    write disjoint keys of the shared results/errors objects.
+  await Promise.allSettled([
+    // 3. synthesizeSkill (best-effort — needs an agent + provider key). All v5
+    //    frontmatter fields land here (trained_by, confidence, trajectory_ref)
+    //    so the produced SKILL.md is ready for recall + cross-CLI dampening.
+    (async () => {
+      if (!(ctx.agent && ctx.task)) return;
+      try {
+        results.skill = await skillSynth.synthesizeSkill({
+          agent: { ...ctx.agent, provider: trainer.provider, model: trainer.model },
+          task: ctx.task,
+          apiKey: ctx.apiKey,
+          baseUrl: ctx.baseUrl,
+          fetchImpl: ctx.fetchImpl,
+          outcome: 'done',
+          trainedBy: trainer.provider,
+          trainedOnModel: trainer.model,
+          trajectoryRef: results.trajectory?.id || null,
+          confidence: results.confidence,
+        });
+        // Persist the produced SKILL.md into the shared skills/ dir so the
+        // next agent turn's recall surfaces it. installSynthesized forwards
+        // every v5 frontmatter field (see Group A — C6 fix in skill_synth).
+        if (results.skill && ctx.configDir) {
+          try {
+            results.installed = skillSynth.installSynthesized({
+              name: results.skill.name,
+              description: results.skill.description,
+              body: results.skill.body,
+              sourceTask: ctx.task.id || '',
+              createdBy: 'agent',
+              trainedBy: trainer.provider,
+              trainedOnModel: trainer.model,
+              trajectoryRef: results.trajectory?.id || null,
+              confidence: results.confidence,
+              outcome: 'done',
+            }, ctx.configDir);
+          } catch (e) {
+            errors.push({ step: 'skillInstall', error: String(e?.message || e) });
+            logger(`[learning] skill install failed: ${e?.message || e}\n`);
+          }
         }
+      } catch (e) {
+        errors.push({ step: 'skill', error: String(e?.message || e) });
+        logger(`[learning] skill synth failed: ${e?.message || e}\n`);
       }
-    } catch (e) {
-      errors.push({ step: 'skill', error: String(e?.message || e) });
-      logger(`[learning] skill synth failed: ${e?.message || e}\n`);
-    }
-  }
-
-  // 4. updateUserModel — needs session turns (any normalised
-  //    [{role, content}] list). Falls back to task.turns translated.
-  if (ctx.sessionTurns || ctx.task?.turns) {
-    try {
-      results.userModel = await userModeler.updateUserModel({
-        sessionTurns: ctx.sessionTurns || _toSessionTurns(ctx.task.turns),
-        provider: trainer.provider,
-        model: trainer.model,
-        apiKey: ctx.apiKey,
-        baseUrl: ctx.baseUrl,
-        fetchImpl: ctx.fetchImpl,
-        configDir: ctx.configDir,
-      });
-    } catch (e) {
-      errors.push({ step: 'userModel', error: String(e?.message || e) });
-      logger(`[learning] user model update failed: ${e?.message || e}\n`);
-    }
-  }
+    })(),
+    // 4. updateUserModel — needs session turns (any normalised [{role,content}]
+    //    list). Falls back to task.turns translated.
+    (async () => {
+      if (!(ctx.sessionTurns || ctx.task?.turns)) return;
+      try {
+        results.userModel = await userModeler.updateUserModel({
+          sessionTurns: ctx.sessionTurns || _toSessionTurns(ctx.task.turns),
+          provider: trainer.provider,
+          model: trainer.model,
+          apiKey: ctx.apiKey,
+          baseUrl: ctx.baseUrl,
+          fetchImpl: ctx.fetchImpl,
+          configDir: ctx.configDir,
+        });
+      } catch (e) {
+        errors.push({ step: 'userModel', error: String(e?.message || e) });
+        logger(`[learning] user model update failed: ${e?.message || e}\n`);
+      }
+    })(),
+  ]);
 
   return { trigger: 'post-task', results, errors };
 }

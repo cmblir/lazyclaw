@@ -26,6 +26,12 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Changed
 
+- **The post-task learning hook runs its two trainer calls in parallel.**
+  `synthesizeSkill` and `updateUserModel` are independent LLM calls
+  (`updateUserModel` doesn't consume the synthesised skill), but ran
+  sequentially — a full network round-trip for one before the other started.
+  They now run concurrently via `Promise.allSettled`, each keeping its own
+  error isolation, halving the background learning pass's wall-clock.
 - **Dashboard static assets are served from memory, not re-read per request.**
   Every GET for `dashboard.html` / `.css` / `.js` and the 20 avatar PNGs ran a
   synchronous `fs.readFileSync` of the whole file, blocking the event loop on
