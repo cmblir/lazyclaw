@@ -140,13 +140,18 @@ test('C7 — post-task learning hook is invoked once via queueMicrotask after a 
   // shows up, the hook fired.
   const cfgDir = tmpCfg();
   const messages = [];
-  const provider = makeMockProvider({ reply: 'hello' });
+  // A SUBSTANTIVE turn — the learning hook is now gated to skip trivial
+  // greetings/one-liners (see _shouldLearn / f-learning-gate.test.mjs), so the
+  // turn must be worth learning from for the hook to fire.
+  const reply = 'The sandbox confiner is selected by platform and the robust profile carves out '
+    + 'the filesystem so dynamically-linked interpreters still run while writes stay confined. ';
+  const provider = makeMockProvider({ reply });
   const ctx = makeCtx({ provider, messages, cfgDir });
   // Inject a known sessionId so listByTaskId can find it.
   ctx.getSessionId = () => 'task-runturn-1';
 
   const runTurn = makeRunTurn({ ctx, writeFn: () => {} });
-  await runTurn('hi there', new AbortController().signal);
+  await runTurn('Walk me through exactly how the sandbox confiner is selected per platform and why the strict deny-default profile failed on macOS.', new AbortController().signal);
 
   // queueMicrotask deferred; give the dynamic import + I/O a moment.
   await new Promise((r) => setTimeout(r, 300));

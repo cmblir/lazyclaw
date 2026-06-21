@@ -64,8 +64,24 @@ const PLAN_MODE_ADDENDUM = 'You are in PLAN mode. Propose a plan; do not mutate 
 // Fire the post-task learning loop on every successful chat turn (v5 Group A
 // C1). Fire-and-forget via queueMicrotask so the next prompt is never blocked
 // on trajectory write / synth. Shared by the streaming and agentic paths.
+// Decide whether a chat turn is worth a learning pass. The hook otherwise
+// spawns TWO extra `claude` processes (skill synth + user-model) on EVERY turn,
+// tripling per-message spawns and competing with the user's next turn for the
+// subscription. Skip greetings/acks, trivially short exchanges, and empty
+// (aborted/failed) replies — none warrant a durable SKILL.md or a user model.
+export function _shouldLearn(messages) {
+  const last2 = (messages || []).slice(-2);
+  const user = String(last2.find((m) => m && m.role === 'user')?.content || '').trim();
+  const reply = String(last2.find((m) => m && m.role !== 'user')?.content || '').trim();
+  if (!reply) return false;
+  if ((user + ' ' + reply).trim().length < 280) return false;
+  if (/^(hi|hey|hello|yo|thanks|thank you|thx|ty|ok|okay|k|sure|nice|cool|got it|ㅇㅇ|ㄱㅅ|ㄳ|고마워|감사|안녕|넵|네)\b/i.test(user)) return false;
+  return true;
+}
+
 function _fireLearningHook(ctx, messages, activeProvName, activeModel, transcript) {
   try {
+    if (!_shouldLearn(messages)) return;
     queueMicrotask(() => {
       import('../mas/learning.mjs').then((mod) => mod.runLearning('post-task', {
         agent: { name: 'chat', provider: activeProvName, model: activeModel, role: '' },
