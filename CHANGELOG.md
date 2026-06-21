@@ -36,6 +36,19 @@ Versioning: [SemVer](https://semver.org/).
   system sources; identical inputs still hash identically so real hits are
   unaffected.
 
+### Added
+
+- **Device tokens get a TTL, capability scope, and `nodes rotate`.** A paired
+  device's bearer token never expired and carried no authorization. Now:
+  `approve`/`rotate` can stamp an `expiresAt` (`--ttl <ms>`), and the gateway
+  rejects an expired token on every authenticated route; the signed pairing
+  payload's `role`/`scopes` are persisted, and a `read-only` device is blocked
+  (403) from resolving an exec approval (the one mutating gateway action);
+  `lazyclaw nodes rotate <deviceId>` re-issues a token in place (the old one
+  stops working immediately) without ever printing it. Fully backward-
+  compatible: a legacy record with no `expiresAt` never expires and a role-less
+  device keeps its prior behaviour.
+
 ### Changed
 
 - **Chat surfaces per-turn recall.** The streaming chat path sent a fixed system

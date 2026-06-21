@@ -204,8 +204,26 @@ export async function cmdNodes(sub, positional, flags = {}) {
       console.log(JSON.stringify(store.revoke(deviceId)));
       return;
     }
+    case 'rotate': {
+      const deviceId = positional[0];
+      if (!deviceId) {
+        console.error('Usage: lazyclaw nodes rotate <deviceId> [--ttl <ms>]');
+        process.exit(2);
+      }
+      const ttlRaw = flags.ttl;
+      const ttlMs = (ttlRaw !== undefined && ttlRaw !== true) ? Number(ttlRaw) : undefined;
+      const { PairingStore } = await import('../gateway/device_auth.mjs');
+      const store = new PairingStore(path.dirname(configPath()));
+      try {
+        const { expiresAt } = store.rotate(deviceId, { ttlMs });
+        // Like approve, the token is intentionally NOT printed — the device
+        // receives its rotated token on its next /gateway/connect.
+        console.log(JSON.stringify({ ok: true, rotated: deviceId, ...(expiresAt ? { expiresAt } : {}), note: 'device receives its new token on next /gateway/connect' }));
+      } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }
+      return;
+    }
     default:
-      console.error('Usage: lazyclaw nodes <list|register|remove|pending|approve <requestId>|revoke <deviceId>|devices> ...');
+      console.error('Usage: lazyclaw nodes <list|register|remove|pending|approve <requestId>|revoke <deviceId>|rotate <deviceId>|devices> ...');
       process.exit(2);
   }
 }
