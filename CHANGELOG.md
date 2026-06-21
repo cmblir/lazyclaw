@@ -128,6 +128,14 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **`lazyclaw mcp add / remove / call`.** MCP servers were manageable only by
+  hand-editing `cfg.mcp.servers`, and there was no way to invoke a tool from the
+  CLI. `mcp add <name> --command <cmd> [--args "…"] [--allow-glob <glob>]
+  [--env "K=V …"]` and `mcp remove <name>` mutate the config (atomic 0600 write,
+  duplicate-name rejected, name validated as the `mcp:<name>:<tool>` namespace);
+  `mcp call <server> <tool> [--args-json '{…}']` spawns the server in-process,
+  runs one tool through the approval-gated registry, and tears it down.
+  `mcp list` (configured + connected) is unchanged.
 - **Live agent-team dashboard.** Agents gain an optional `manager` field, so a
   team forms an org tree (a planner with sub-agents on different harnesses — e.g.
   a data-engineer on `gemini-cli`, a backend on `claude-cli`). A new in-process

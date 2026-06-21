@@ -225,25 +225,10 @@ async function main() {
       break;
     }
     case 'mcp': {
-      // Read-only MCP surface (v1). `mcp list` prints the configured servers
-      // (cfg.mcp.servers) and any servers currently connected in this process.
-      // start/stop are daemon-boot driven (cfg.mcp.servers) — no CLI mutation
-      // in v1 (follow-up).
-      if (rest.positional[0] !== 'list') {
-        console.error('Usage: lazyclaw mcp list');
-        process.exit(2);
-      }
-      const cfg = readConfig();
-      const configured = (cfg?.mcp?.servers || []).map(s => ({
-        name: s.name, command: s.command, args: s.args || [], allowGlob: s.allowGlob || '*',
-      }));
-      // listServers() reports servers connected in *this* process. The CLI is
-      // a short-lived process that never boots them, so this is normally empty
-      // — surfaced anyway so the same command works when run inside the daemon.
-      let connected = [];
-      try { connected = (await import('./mcp/client.mjs')).listServers(); }
-      catch { /* mcp client unavailable — report configured only */ }
-      console.log(JSON.stringify({ ok: true, configured, connected }, null, 2));
+      // list (configured + connected) / add / remove / call. Config mutation
+      // (add/remove) edits cfg.mcp.servers; servers (re)spawn at daemon boot.
+      const sub = rest.positional[0];
+      await (await import('./commands/mcp.mjs')).cmdMcp(sub, rest.positional.slice(1), rest.flags);
       break;
     }
     case 'chat': {
