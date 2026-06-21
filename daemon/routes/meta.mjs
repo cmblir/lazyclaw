@@ -27,6 +27,19 @@ export async function dashboardCss(c) {
   return serveWebFile(c, 'dashboard.css', 'text/css; charset=utf-8');
 }
 
+// Serve a role avatar sprite (web/avatars/NN.png, NN = 01..20). The index is
+// validated to two digits before it reaches serveWebFile so no `..` traversal
+// is possible.
+export async function avatar(c) {
+  const m = /^\/avatars\/(\d{2})\.png$/.exec(c.path || '');
+  const n = m && Number(m[1]);
+  if (!n || n < 1 || n > 20) {
+    c.res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+    return c.res.end('not found\n');
+  }
+  return serveWebFile(c, `avatars/${m[1]}.png`, 'image/png');
+}
+
 export async function dashboardJs(c) {
   return serveWebFile(c, 'dashboard.js', 'text/javascript; charset=utf-8');
 }

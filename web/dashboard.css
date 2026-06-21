@@ -297,8 +297,19 @@
     .tagent[aria-selected="true"] { background: rgba(217,179,90,0.12); }
     .tagent-avatar {
       width: 56px; height: 56px; border-radius: 50%;
-      display: flex; align-items: center; justify-content: center; font-size: 26px;
-      background: #1e2130; border: 3px solid var(--idle-ring, #475569);
+      position: relative; overflow: hidden;
+      display: flex; align-items: center; justify-content: center; font-size: 24px;
+      background: #1e2130; border: 3px solid #475569;
+    }
+    .tagent-avatar img {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      object-fit: cover; object-position: center 12%;
+      image-rendering: pixelated;
+    }
+    .detail-avatar {
+      width: 30px; height: 30px; border-radius: 50%; object-fit: cover;
+      object-position: center 12%; image-rendering: pixelated; vertical-align: middle;
+      margin-right: 8px; background: #1e2130; border: 2px solid #475569;
     }
     .tagent.working .tagent-avatar { border-color: #34d399; box-shadow: 0 0 0 4px rgba(52,211,153,0.16); }
     .tagent.idle .tagent-avatar    { border-color: #475569; }

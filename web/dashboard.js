@@ -1374,6 +1374,42 @@
       if (rec && rec.iconEmoji) return rec.iconEmoji;
       return (((rec && rec.name) || '?').slice(0, 1)).toUpperCase();
     }
+    // Map an agent to one of the 20 pixel-art role avatars (web/avatars/NN.png).
+    // Explicit agent.avatar (1..20) wins; otherwise infer from name/role/tags by
+    // keyword (specific roles first so "data engineer" beats "data"); else PM.
+    const AVATAR_ROLES = [
+      [2, ['backend', 'back-end', 'back end', '백엔드', 'server', 'api']],
+      [3, ['frontend', 'front-end', 'front end', '프론트', 'react', 'vue', 'css']],
+      [7, ['data engineer', 'data-engineer', 'dataeng', '데이터 엔지니어', '데이터엔지니어', 'etl', 'pipeline']],
+      [4, ['devops', 'infra', '인프라', '데브옵스', 'sre', 'kubernetes', 'k8s', 'ops']],
+      [5, ['qa', 'tester', 'test engineer', '테스트', '품질', 'quality']],
+      [6, ['analyst', 'analytics', '분석', 'bi']],
+      [8, ['research', '리서치', '조사', 'scholar']],
+      [9, ['ux', 'ui design', 'designer', '디자이너', '디자인', 'design']],
+      [10, ['copywriter', 'copy', 'content writer', '카피', '콘텐츠', 'writer']],
+      [11, ['marketer', 'marketing', 'growth', '마케터', '마케팅', '그로스']],
+      [12, ['seo']],
+      [13, ['sales', '영업', '세일즈']],
+      [14, ['support', 'customer', '고객', 'cs ', 'helpdesk']],
+      [15, ['legal', 'compliance', '법무', '컴플라이언스']],
+      [16, ['finance', 'account', '재무', '회계']],
+      [17, ['security', '보안', 'sec ', 'infosec', 'appsec']],
+      [18, ['tech writer', 'documentation', 'docs', '테크니컬', '문서']],
+      [19, ['code review', 'reviewer', '리뷰', '코드 리뷰']],
+      [20, ['orchestrat', '오케스트레이터', '코디네이터', '총괄', 'conductor']],
+      [1, ['pm', 'product', 'planner', '기획', 'manager', 'coordinator', 'lead']],
+    ];
+    function avatarIndexFor(rec) {
+      const explicit = rec && Number(rec.avatar);
+      if (explicit >= 1 && explicit <= 20) return explicit;
+      const hay = [rec && rec.name, rec && rec.displayName, rec && rec.role, ...(rec && rec.tags || [])]
+        .filter(Boolean).join(' ').toLowerCase();
+      for (const [idx, keys] of AVATAR_ROLES) {
+        if (keys.some((k) => hay.includes(k))) return idx;
+      }
+      return 1; // generic PM look
+    }
+    function avatarSrc(rec) { return `/avatars/${String(avatarIndexFor(rec)).padStart(2, '0')}.png`; }
     // Build the { name, children[] } tree rooted at the lead (mirrors teamTree).
     function buildTeamTree(team, byId) {
       const lead = team.lead;
@@ -1401,7 +1437,7 @@
       btn.setAttribute('role', 'treeitem');
       btn.setAttribute('aria-selected', String(TEAM.selected === name));
       btn.innerHTML =
-        `<div class="tagent-avatar" aria-hidden="true">${escapeHtml(avatarGlyph(rec))}</div>` +
+        `<div class="tagent-avatar" aria-hidden="true"><span class="tagent-glyph">${escapeHtml(avatarGlyph(rec))}</span><img src="${avatarSrc(rec)}" alt="" onerror="this.remove()"></div>` +
         `<div class="tagent-name">${escapeHtml(rec.displayName || name)}</div>` +
         `<div class="tagent-status">${st === 'working' ? '● working' : '○ idle'}</div>` +
         `<div class="harness-badge">${escapeHtml(harnessLabel(rec))}</div>`;
@@ -1444,7 +1480,7 @@
       const st = TEAM.status[name] || 'idle';
       const acts = (TEAM.activity[name] || []).slice(-8).reverse();
       panel.innerHTML =
-        `<h3>${escapeHtml(rec.displayName || name)} <span class="tagent-status ${st}">${st === 'working' ? '● working' : '○ idle'}</span></h3>` +
+        `<h3><img class="detail-avatar" src="${avatarSrc(rec)}" alt="" onerror="this.remove()">${escapeHtml(rec.displayName || name)} <span class="tagent-status ${st}">${st === 'working' ? '● working' : '○ idle'}</span></h3>` +
         `<div class="kv"><span class="label">harness</span><div><span class="harness-badge">${escapeHtml(harnessLabel(rec))}</span></div></div>` +
         `<div class="kv"><span class="label">role</span><div class="dim">${escapeHtml((rec.role || '').slice(0, 120) || '(none)')}</div></div>` +
         `<div class="kv"><span class="label">current task</span><div>${escapeHtml(TEAM.task || '(idle)')}</div></div>` +

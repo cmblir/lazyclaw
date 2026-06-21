@@ -27,6 +27,7 @@ export const ROUTES = [
   { m: (c) => c.route === 'GET /' || c.route === 'GET /dashboard' || c.route === 'GET /dashboard/', h: meta.dashboard },
   { m: (c) => c.route === 'GET /dashboard.css', h: meta.dashboardCss },
   { m: (c) => c.route === 'GET /dashboard.js', h: meta.dashboardJs },
+  { m: (c) => c.req.method === 'GET' && /^\/avatars\/\d{2}\.png$/.test(c.path || ''), h: meta.avatar },
   { m: (c) => c.route === 'GET /version', h: meta.version },
   { m: (c) => c.route === 'POST /exec/request', h: conversation.execRequest },
   { m: (c) => c.route === 'GET /health' || c.route === 'GET /healthz', h: meta.health },
