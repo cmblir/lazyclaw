@@ -80,3 +80,25 @@ test('a failing node stops the workflow and reports failedAt', async () => {
   assert.equal(r.failedAt, 'bad');
   assert.match(r.error.message, /kaboom/);
 });
+
+test('pure data nodes: json parse/stringify, merge, default', async () => {
+  const def = {
+    nodes: [
+      { id: 'raw', type: 'set', config: { value: '{"name":"Ada","age":36}' } },
+      { id: 'obj', type: 'json', config: { parse: '{{raw}}' } },
+      { id: 'extra', type: 'set', config: { value: { role: 'eng' } } },
+      { id: 'merged', type: 'merge', config: { values: ['{{obj}}', '{{extra}}'] } },
+      { id: 'name', type: 'default', config: { value: '{{merged.name}}', fallback: 'anon' } },
+      { id: 'missing', type: 'default', config: { value: '{{merged.nope}}', fallback: 'anon' } },
+      { id: 'back', type: 'json', config: { stringify: '{{merged}}' } },
+    ],
+  };
+  const r = await runWorkflow(def);
+  assert.equal(r.success, true);
+  assert.deepEqual(r.session.obj, { name: 'Ada', age: 36 });
+  assert.deepEqual(r.session.merged, { name: 'Ada', age: 36, role: 'eng' });
+  assert.equal(r.session.name, 'Ada');
+  assert.equal(r.session.missing, 'anon', 'default falls back when the ref is empty');
+  assert.equal(typeof r.session.back, 'string');
+  assert.match(r.session.back, /"role":"eng"/);
+});

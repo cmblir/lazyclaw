@@ -52,4 +52,16 @@ export const NODE_TYPES = {
   // A string built from prior outputs. cfg.text already had its {{refs}}
   // interpolated by the compiler, so this just returns the resolved string.
   template: (cfg) => String(cfg?.text ?? ''),
+  // Parse a JSON string ({ parse }) into a value, or stringify ({ stringify }).
+  // Lets a downstream node {{ref}} into an http body's fields, etc.
+  json: (cfg) => {
+    if (cfg && 'parse' in cfg) { try { return JSON.parse(String(cfg.parse)); } catch { return null; } }
+    if (cfg && 'stringify' in cfg) return JSON.stringify(cfg.stringify);
+    return null;
+  },
+  // Shallow-merge a list of objects into one (later entries win).
+  merge: (cfg) => Object.assign({}, ...((Array.isArray(cfg?.values) ? cfg.values : []).filter((v) => v && typeof v === 'object'))),
+  // { value } unless it is null/undefined/'' — then { fallback }. Useful after
+  // an optional http/llm step that may have produced nothing.
+  default: (cfg) => { const v = cfg?.value; return (v === null || v === undefined || v === '') ? (cfg?.fallback ?? null) : v; },
 };
