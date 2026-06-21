@@ -82,6 +82,9 @@ export function compileWorkflow(def, caps = {}) {
 // Compile + run a declarative workflow sequentially. Returns the executor's
 // { success, results, session } (session[id] = each node's output).
 export async function runWorkflow(def, opts = {}) {
-  const { nodes } = compileWorkflow(def, opts.caps || {});
+  const { nodes, bag } = compileWorkflow(def, opts.caps || {});
+  // Seed the run input so a node can reference it as {{input}} (e.g. the text of
+  // an inbound Slack message that triggered the workflow).
+  if (opts.input !== undefined) bag.input = opts.input;
   return runSequential(nodes, opts.input ?? null, { signal: opts.signal });
 }

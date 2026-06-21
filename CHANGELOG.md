@@ -38,9 +38,12 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
-- **Hermes-style workflow automation — `lazyclaw workflow add/run` + cron.**
-  A declarative workflow can now be stored by name (`cfg.workflows[<name>]`) and
-  run on a schedule. `workflow add <name> <def.json> [--channel slack:#x]
+- **Hermes-style workflow automation — `lazyclaw workflow add/run`, cron, and
+  Slack triggers.** A declarative workflow can now be stored by name
+  (`cfg.workflows[<name>]`), run on a schedule, AND triggered by an inbound
+  Slack message: when a message arrives on a workflow-bound channel
+  (`--channel slack:#x`), the daemon runs that workflow with the message as
+  `{{input}}` and replies with its output (an unbound channel is unchanged). `workflow add <name> <def.json> [--channel slack:#x]
   [--cron "<spec>"] [--reply-node <id>]` persists it (and installs an OS cron
   job `lazyclaw workflow run <name>` when `--cron` is given); `workflow run
   <name>` executes the def and posts its reply (the named reply node, else the

@@ -48,3 +48,23 @@ test('validWorkflowName mirrors the cron name grammar', () => {
   assert.ok(!validWorkflowName(''));
   assert.ok(!validWorkflowName('a:b'));
 });
+
+import { workflowForChannel } from '../workflow/named.mjs';
+import { runWorkflow } from '../workflow/declarative.mjs';
+
+test('workflowForChannel resolves a channel-bound workflow', () => {
+  const cfg = cfgWith({
+    ops: { def: { nodes: [{ id: 'x', type: 'set', config: { value: 1 } }] }, channel: 'slack:#ops' },
+    other: { def: { nodes: [{ id: 'y', type: 'set', config: { value: 2 } }] } },
+  });
+  assert.equal(workflowForChannel(cfg, '#ops')?.name, 'ops');
+  assert.equal(workflowForChannel(cfg, 'ops')?.name, 'ops'); // bare name matches the stripped binding
+  assert.equal(workflowForChannel(cfg, 'C999'), null);
+  assert.equal(workflowForChannel(cfg, ''), null);
+});
+
+test('{{input}} resolves to the run input (the inbound message text)', async () => {
+  const def = { nodes: [{ id: 'echo', type: 'template', config: { text: 'you said: {{input}}' } }] };
+  const r = await runWorkflow(def, { input: 'deploy now' });
+  assert.equal(r.session.echo, 'you said: deploy now');
+});

@@ -30,6 +30,23 @@ export function listNamedWorkflows(cfg) {
   }));
 }
 
+// Find the named workflow bound to an inbound channel (entry.channel, e.g.
+// "slack:#ops" or "slack:C123"), or null. Used by POST /inbound to trigger a
+// workflow on a Slack message. Matches the channel id/name after stripping the
+// "slack:"/"#" prefixes so a binding written either way still resolves.
+export function workflowForChannel(cfg, channel) {
+  if (!channel) return null;
+  const ws = (cfg && cfg.workflows && typeof cfg.workflows === 'object') ? cfg.workflows : {};
+  const c = String(channel).replace(/^#/, '');
+  for (const name of Object.keys(ws)) {
+    const bound = ws[name] && ws[name].channel;
+    if (!bound || !ws[name].def) continue;
+    const target = String(bound).replace(/^slack:/, '').replace(/^#/, '');
+    if (target === c) return { name, ...ws[name] };
+  }
+  return null;
+}
+
 // Run a stored workflow by name. opts is forwarded to runDeclarativeRequest
 // (providerLookup for the llm node, fetchImpl, input, sessionId, signal).
 export async function runNamedWorkflow(name, cfg, opts = {}) {

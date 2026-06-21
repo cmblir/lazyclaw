@@ -234,6 +234,23 @@ export async function inbound(c) {
               if (dedup) { dedup.record(dedupKey, { reply: teamRouted.reply, threadId: out.threadId }); dedupRecorded = true; }
               return writeJson(res, 200, out);
             }
+            // No team bound — is the channel bound to a named workflow? If so,
+            // run it with the message as {{input}} and reply with its output.
+            // Falls through (byte-stable) when nothing is bound.
+            const { workflowForChannel, runNamedWorkflow, namedReplyText } = await import('../../workflow/named.mjs');
+            const wf = workflowForChannel(cfg, channel);
+            if (wf) {
+              try {
+                const wfResult = await runNamedWorkflow(wf.name, cfg, { providerLookup: (n) => PROVIDERS[n] || null, input: text });
+                const reply = namedReplyText(wfResult, wf) || '(workflow finished with no reply)';
+                const out = { reply, threadId: body.threadId || null, workflow: wf.name };
+                if (dedup) { dedup.record(dedupKey, { reply, threadId: out.threadId }); dedupRecorded = true; }
+                return writeJson(res, 200, out);
+              } catch (err) {
+                try { logger?.warn?.('inbound_workflow_failed', { workflow: wf.name, err: err?.message || String(err) }); } catch { /* best-effort */ }
+                // fall through to the single-shot provider reply
+              }
+            }
           }
           let threads = null;
           let bound = null;
