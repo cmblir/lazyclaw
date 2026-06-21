@@ -46,3 +46,21 @@ export function accountTurnCost({ metrics, usage, provider, model, rates, wantCo
   } catch { return null; }
   return wantCost ? cost : null;
 }
+
+// Build the onUsage handler the team multi-agent loop fires per agent turn.
+// Each turn carries its own { provider, model, usage } so a mixed-provider team
+// is priced against the right rate card; the spend lands in metrics so the cost
+// cap covers team traffic (which used to bypass it entirely), and onBreach() is
+// called once accumulated spend trips the cap so the caller can abort the loop
+// mid-run. Best-effort: a cost-accounting hiccup never breaks a turn.
+export function makeTeamUsageAccountant({ metrics, costCap, rates, costFromUsage, onBreach }) {
+  return ({ provider, model, usage }) => {
+    try {
+      if (usage && rates && typeof costFromUsage === 'function') {
+        const cost = costFromUsage({ provider, model, usage }, rates);
+        if (cost) accumulateMetricsFromCost(metrics, usage, cost);
+      }
+      if (typeof onBreach === 'function' && checkCostCap(metrics, costCap)) onBreach();
+    } catch { /* best-effort — never break a turn on accounting */ }
+  };
+}

@@ -15,7 +15,7 @@ import { registerTask } from '../../tasks.mjs';
 import { defaultSandboxSpec } from '../../sandbox/index.mjs';
 
 export async function routeInboundToTeam({
-  cfg, channel, text, configDir, apiKey, baseUrl, logger, slackSender, onUsage, _runTaskTurn,
+  cfg, channel, text, configDir, apiKey, baseUrl, logger, slackSender, onUsage, signal, _runTaskTurn,
 } = {}) {
   if (!channel || !text) return null;
   const team = teamForChannelCached(channel, configDir);
@@ -50,6 +50,8 @@ export async function routeInboundToTeam({
     // Forward per-agent-turn usage so the daemon can price each turn against
     // its agent's rate card and feed the cost cap (team spend was invisible).
     onUsage,
+    // Abort signal so the daemon can stop the loop mid-run once the cap trips.
+    signal,
     // Default-on confinement for every tool the team runs (opt out via cfg).
     sandbox: defaultSandboxSpec(cfg, { cwd: process.cwd(), configDir }),
   });

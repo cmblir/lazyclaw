@@ -8,6 +8,18 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **Team (channel-bound) turns now count toward the cost cap.** A Slack channel
+  bound to a team drove a multi-agent loop whose spend was invisible: the
+  tool-use adapters dropped token usage, `runAgentTurn` never surfaced it, and
+  the inbound route never accounted it — so the cap was checked once at
+  admission but team spend was never added, and it never tripped on team
+  traffic. The whole chain now carries usage: the anthropic/openai/gemini
+  adapters expose normalized `{ inputTokens, outputTokens }`, `runAgentTurn`
+  accumulates it, `runTaskTurn` fires `onUsage` per agent turn with that agent's
+  `provider`+`model` (so a mixed-provider team prices each turn against the
+  right rate card), and the daemon accumulates it into metrics and aborts the
+  loop mid-run once the cap trips. claude-cli agents bill a flat $0 so they
+  don't move the cap.
 - **`config validate` stops false-flagging valid keys.** `KNOWN_KEYS` listed
   only 9 top-level keys, so a dozen keys the rest of the codebase actually reads
   (`sandbox`, `channels`, `cron`, `pairing`, `authProfiles`,

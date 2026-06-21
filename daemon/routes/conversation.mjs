@@ -1,7 +1,7 @@
 // Daemon route handlers (conversation), extracted verbatim from makeHandler (D5).
 // Each handler takes the per-request dispatch context `c` and returns the
 // HTTP response. Bodies are unchanged; only the dispatch wrapper is new.
-import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, checkCostCap, accumulateMetricsFromCost, accountTurnCost, resolveProvider, openThreads, handoffWithRollback, openDedup, enqueueLearning } from './_deps.mjs';
+import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, checkCostCap, accumulateMetricsFromCost, accountTurnCost, makeTeamUsageAccountant, resolveProvider, openThreads, handoffWithRollback, openDedup, enqueueLearning } from './_deps.mjs';
 import { randomBytes } from 'node:crypto';
 import { routeInboundToTeam } from '../lib/team_inbound.mjs';
 
@@ -201,9 +201,17 @@ export async function inbound(c) {
           // reply. Falls through to the single-shot path when no team is bound,
           // keeping existing single-agent channels byte-stable.
           if (channel) {
+            // Account every team agent turn's spend so the cost cap covers team
+            // traffic (it used to bypass the cap entirely), and abort the loop
+            // mid-run the moment accumulated spend breaches the cap.
+            const teamAc = new AbortController();
+            const teamOnUsage = makeTeamUsageAccountant({
+              metrics, costCap, rates: cfg.rates, costFromUsage, onBreach: () => teamAc.abort(),
+            });
             const teamRouted = await routeInboundToTeam({
               cfg, channel, text, configDir: cfgDir,
               apiKey: cfg['api-key'], logger,
+              onUsage: teamOnUsage, signal: teamAc.signal,
             }).catch((err) => {
               // `logger` here is the daemon's structured logger (object|null), not a
               // function — use its method API, never call it directly.
