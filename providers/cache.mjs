@@ -47,7 +47,15 @@ function hashKey(messages, model, opts) {
     messages,
     model: model || null,
     thinking: opts?.thinking || null,
-    system: opts?.system || null,
+    // The system prompt can arrive three ways: opts.system, the static/volatile
+    // split (opts.systemStatic / opts.systemVolatile — what the REPL caller
+    // uses), or an embedded role:system message. Fold ALL of them into the key
+    // so two calls that differ only in their static system can't collide and
+    // serve one another's cached reply. (When system lives in messages it is
+    // already in the key via `messages`; the explicit field is belt-and-suspenders.)
+    system: opts?.system || (Array.isArray(messages) ? messages.find?.((m) => m?.role === 'system')?.content : null) || null,
+    systemStatic: opts?.systemStatic || null,
+    systemVolatile: opts?.systemVolatile || null,
     tools: opts?.tools || null,
     toolChoice: opts?.toolChoice || null,
   };

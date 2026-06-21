@@ -6,6 +6,17 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Response-cache key now covers the static/volatile system prompt.**
+  `withResponseCache`'s `hashKey` folded in only `opts.system`, ignoring
+  `opts.systemStatic` / `opts.systemVolatile` (the fields the REPL caller
+  actually uses) and any embedded `role:system` message. A caller that varied
+  only its static system with a fixed `messages` array could collide on one key
+  and be served another call's cached reply. The key now folds in all three
+  system sources; identical inputs still hash identically so real hits are
+  unaffected.
+
 ### Changed
 
 - **Skill bodies are read from disk once, not every agent turn.** `loadSkill`
