@@ -553,6 +553,46 @@ export class PairingStore {
   }
 
   /**
+   * Re-issue a fresh token for an already-approved device WITHOUT a new pairing
+   * handshake. The old token stops authenticating immediately; non-secret
+   * metadata (platform/label/role/scopes) is preserved. A positive ttlMs stamps
+   * a fresh expiresAt; omitting it clears any prior expiry (never-expires).
+   * Throws when the device is unknown or was never approved.
+   * @returns {{ deviceId: string, token: string, expiresAt?: number }}
+   */
+  rotate(deviceId, { ttlMs, nowMs = Date.now() } = {}) {
+    const dev = this._data.devices[deviceId];
+    if (!dev || typeof dev.token !== 'string' || dev.token.length === 0) {
+      throw new Error(`cannot rotate: no approved device ${deviceId}`);
+    }
+    dev.token = freshToken();
+    dev.rotatedAt = nowIso();
+    if (Number.isFinite(ttlMs) && ttlMs > 0 && Number.isFinite(nowMs)) dev.expiresAt = nowMs + ttlMs;
+    else delete dev.expiresAt;
+    this._persist();
+    return { deviceId, token: dev.token, ...(dev.expiresAt ? { expiresAt: dev.expiresAt } : {}) };
+  }
+
+  /**
+   * Non-secret view of a device record (NEVER includes the token) — for the
+   * gateway authz layer (role/scopes) and the `nodes` CLI. null when unknown.
+   * @returns {{ deviceId, platform, label, role, scopes, expiresAt, approvedAt } | null}
+   */
+  deviceInfo(deviceId) {
+    const dev = this._data.devices[deviceId];
+    if (!dev) return null;
+    return {
+      deviceId: dev.deviceId,
+      platform: dev.platform || '',
+      label: dev.label || '',
+      role: dev.role || '',
+      scopes: Array.isArray(dev.scopes) ? dev.scopes : [],
+      expiresAt: dev.expiresAt,
+      approvedAt: dev.approvedAt,
+    };
+  }
+
+  /**
    * All pending pairing requests (awaiting an explicit approve()), newest
    * first. Tokens are never part of a request record, so this is safe to
    * surface in a CLI listing.
