@@ -27,6 +27,13 @@ const SKILL_EXT = '.md';
 // that want to be explicit.
 const _indexCache = new Map();  // cfgDir → { mtimeMs, skills, index }
 
+// Per-skill BODY cache, keyed by `${cfgDir}::${name}` → { mtimeMs, body }.
+// composeSystemPrompt calls loadSkill once per requested skill on every
+// POST /agent reply, so an unchanged skill .md used to be re-read from disk
+// each turn. Keyed by file mtime so a live edit (or installSkill rewrite)
+// busts the entry; install/removeSkill also clear it explicitly.
+const _bodyCache = new Map();
+
 export function _invalidateSkillsCache(configDir = defaultConfigDir()) {
   _indexCache.delete(configDir);
 }
@@ -152,8 +159,15 @@ export function skillsIndex(configDir = defaultConfigDir()) {
 
 export function loadSkill(name, configDir = defaultConfigDir()) {
   const p = skillPath(name, configDir);
-  if (!fs.existsSync(p)) throw new Error(`skill not found: ${name}`);
-  return fs.readFileSync(p, 'utf8');
+  let mtimeMs;
+  try { mtimeMs = fs.statSync(p).mtimeMs; }
+  catch { throw new Error(`skill not found: ${name}`); }
+  const key = `${configDir}::${name}`;
+  const hit = _bodyCache.get(key);
+  if (hit && hit.mtimeMs === mtimeMs) return hit.body;
+  const body = fs.readFileSync(p, 'utf8');
+  _bodyCache.set(key, { mtimeMs, body });
+  return body;
 }
 
 export function installSkill(name, content, configDir = defaultConfigDir()) {
@@ -161,6 +175,7 @@ export function installSkill(name, content, configDir = defaultConfigDir()) {
   fs.mkdirSync(path.dirname(p), { recursive: true });
   fs.writeFileSync(p, content);
   _invalidateSkillsCache(configDir);
+  _bodyCache.delete(`${configDir}::${name}`);
   return p;
 }
 
@@ -168,6 +183,7 @@ export function removeSkill(name, configDir = defaultConfigDir()) {
   const p = skillPath(name, configDir);
   if (fs.existsSync(p)) fs.unlinkSync(p);
   _invalidateSkillsCache(configDir);
+  _bodyCache.delete(`${configDir}::${name}`);
   // Drop the skill's FTS row too — unlinking the .md left a stale, still
   // recallable index row. Lazy + best-effort so better-sqlite3 stays off the
   // skills hot path and a delete hiccup never throws out of removeSkill.

@@ -8,6 +8,11 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Changed
 
+- **Skill bodies are read from disk once, not every agent turn.** `loadSkill`
+  did a fresh `readFileSync` per call, and `composeSystemPrompt` calls it once
+  per requested skill on every `POST /agent` reply — so each turn re-read every
+  selected skill `.md`. The skills *index* was already cached; now the per-skill
+  *body* is too (mtime-keyed, so a live edit or `installSkill` rewrite busts it).
 - **Inbound Slack routing no longer rescans the teams directory per message.**
   Auto-routing a channel message to its team called
   `teamForChannel(listTeams(configDir), channel)` — a full `teams/` readdir + a
