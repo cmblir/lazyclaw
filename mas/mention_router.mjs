@@ -27,6 +27,7 @@ import * as skillSynth from './skill_synth.mjs';
 import * as skills from '../skills.mjs';
 import { composePromptStack } from './prompt_stack.mjs';
 import { finalizeTerminalStop } from './router_termination.mjs';
+import { postToThread, postTypingPlaceholder, clearTypingPlaceholder } from './router_posting.mjs';
 import { emit as emitEvent } from './events.mjs';
 
 export class MentionRouterError extends Error {
@@ -220,82 +221,10 @@ export function buildSkillsBlock(configDir) {
 // silently ignores them when the scope is missing). The message text
 // is no longer manually prefixed with the agent name because the
 // custom username already shows it in Slack's UI.
-async function postToThread({ task, agentRecord, text, logger = () => {}, sender }) {
-  if (!task.slackChannel || !task.slackThreadTs) return null;
-  let slack = sender;
-  let owned = false;
-  if (!slack) {
-    const { SlackChannel } = await import('../channels/slack.mjs');
-    slack = new SlackChannel({ requireInbound: false });
-    owned = true;
-    try {
-      await slack.start(async () => '', {});
-    } catch (err) {
-      logger(`[router] slack start failed: ${err?.message || err}\n`);
-      return null;
-    }
-  }
-  const threadId = `${task.slackChannel}:${task.slackThreadTs}`;
-  // When we have a real agent persona, push the text under that
-  // persona's username + icon. Otherwise (user message or system note)
-  // fall back to the bot's default identity with no decoration.
-  let body;
-  let sendOpts = {};
-  if (agentRecord) {
-    body = String(text);
-    if (agentRecord.displayName) sendOpts.username = agentRecord.displayName;
-    if (agentRecord.iconEmoji) sendOpts.icon_emoji = agentRecord.iconEmoji;
-  } else {
-    body = String(text);
-  }
-  try {
-    const res = await slack.send(threadId, body, sendOpts);
-    return res?.ts || null;
-  } catch (err) {
-    logger(`[router] slack send failed: ${err?.message || err}\n`);
-    return null;
-  } finally {
-    if (owned) await slack.stop().catch(() => {});
-  }
-}
+//
+// The Slack thread I/O helpers (postToThread / postTypingPlaceholder /
+// clearTypingPlaceholder) live in ./router_posting.mjs.
 
-// "X is thinking…" placeholder posted into the thread before an agent
-// turn so a human reader knows work is happening. Returns the ts of
-// the placeholder so the caller can delete it once the real reply is
-// in. No-op when Slack isn't wired or the post fails.
-async function postTypingPlaceholder({ task, agentRecord, logger = () => {}, sender }) {
-  if (!task.slackChannel || !task.slackThreadTs) return { ts: null, sender: null };
-  let slack = sender;
-  let owned = false;
-  if (!slack) {
-    const { SlackChannel } = await import('../channels/slack.mjs');
-    slack = new SlackChannel({ requireInbound: false });
-    owned = true;
-    try {
-      await slack.start(async () => '', {});
-    } catch (err) {
-      logger(`[router] slack start failed: ${err?.message || err}\n`);
-      return { ts: null, sender: null };
-    }
-  }
-  const threadId = `${task.slackChannel}:${task.slackThreadTs}`;
-  const sendOpts = {};
-  if (agentRecord?.displayName) sendOpts.username = agentRecord.displayName;
-  if (agentRecord?.iconEmoji)   sendOpts.icon_emoji = agentRecord.iconEmoji;
-  try {
-    const res = await slack.send(threadId, `_:hourglass_flowing_sand: thinking…_`, sendOpts);
-    return { ts: res?.ts || null, sender: slack, owned, channel: task.slackChannel };
-  } catch (err) {
-    logger(`[router] slack typing post failed: ${err?.message || err}\n`);
-    if (owned) await slack.stop().catch(() => {});
-    return { ts: null, sender: null, owned: false };
-  }
-}
-
-// Fire one reflection LLM call per agent that actually spoke during
-// this task. Each successful reflection is prepended to the agent's
-// memory file. Failures are logged but never thrown — a sticky
-// transcript that won't reflect shouldn't poison the user's terminal.
 // The agents that actually spoke during a task — the set both the
 // reflection and skill-synthesis post-task hooks iterate. 'user' and
 // 'system' pseudo-agents are excluded so an agent who never spoke
@@ -361,15 +290,6 @@ async function autoSynthSkills({ task, agentsById, apiKey, baseUrl, fetchImpl, c
       logger(`[skill] synthesis failed for ${name}: ${err?.message || err}\n`);
     }
   }
-}
-
-async function clearTypingPlaceholder(placeholder, logger) {
-  if (!placeholder?.ts || !placeholder?.channel || !placeholder?.sender) return;
-  const slack = placeholder.sender;
-  try { await slack.deleteMessage(placeholder.channel, placeholder.ts); }
-  catch (err) { logger(`[router] slack typing delete failed: ${err?.message || err}\n`); }
-  // Only stop a client we created here; a shared sender is closed once by run().
-  finally { if (placeholder.owned) await slack.stop().catch(() => {}); }
 }
 
 // Run agents in this team until the queue empties or budget runs out.

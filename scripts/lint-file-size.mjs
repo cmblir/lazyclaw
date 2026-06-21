@@ -40,7 +40,6 @@ const ALLOW = {
   'commands/workflow.mjs': 661,
   'tui/repl.mjs': 661,
   'commands/automation.mjs': 582,
-  'mas/mention_router.mjs': 540,
 };
 
 function walk(dir, out) {
