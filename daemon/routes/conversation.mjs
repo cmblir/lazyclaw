@@ -202,7 +202,12 @@ export async function inbound(c) {
             const teamRouted = await routeInboundToTeam({
               cfg, channel, text, configDir: cfgDir,
               apiKey: cfg['api-key'], logger,
-            }).catch((err) => { logger(`[inbound] team routing failed: ${err?.message || err}\n`); return null; });
+            }).catch((err) => {
+              // `logger` here is the daemon's structured logger (object|null), not a
+              // function — use its method API, never call it directly.
+              try { logger?.warn?.('inbound_team_routing_failed', { err: err?.message || String(err) }); } catch { /* best-effort */ }
+              return null;
+            });
             if (teamRouted) {
               const out = { reply: teamRouted.reply, threadId: body.threadId || null, team: teamRouted.team, taskId: teamRouted.taskId };
               if (dedup) { dedup.record(dedupKey, { reply: teamRouted.reply, threadId: out.threadId }); dedupRecorded = true; }

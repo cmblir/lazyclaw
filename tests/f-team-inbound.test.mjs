@@ -20,6 +20,20 @@ test('teamForChannel matches a team by its slackChannel (or null)', () => {
   assert.equal(teamForChannel(teams, ''), null);
 });
 
+test('routeInboundToTeam tolerates a non-function logger (daemon ctx.logger is a structured object/null)', async () => {
+  const d = tmp();
+  registerAgent({ name: 'lead', provider: 'claude-cli' }, d);
+  registerTeam({ name: 'solo', agents: ['lead'], lead: 'lead', slackChannel: 'C-s' }, d);
+  let loggerType = null;
+  const fakeRun = async (args) => { loggerType = typeof args.logger; return { task: { id: args.task.id, turns: [{ agent: 'lead', text: 'hi there' }] } }; };
+  // The daemon route passes a structured logger OBJECT (with .info/.warn) or null,
+  // never a (line)=>{} function — runTaskTurn must still receive a callable logger.
+  const out = await routeInboundToTeam({ cfg: {}, channel: 'C-s', text: 'go', configDir: d, logger: { info() {}, warn() {} }, _runTaskTurn: fakeRun });
+  assert.equal(out.reply, 'hi there');
+  assert.equal(loggerType, 'function', 'runTaskTurn must always receive a function logger');
+  fs.rmSync(d, { recursive: true, force: true });
+});
+
 test('routeInboundToTeam returns null when no team is bound to the channel', async () => {
   const d = tmp();
   const out = await routeInboundToTeam({ cfg: {}, channel: 'C-unbound', text: 'hi', configDir: d });
@@ -38,7 +52,7 @@ test('routeInboundToTeam drives runTaskTurn for a channel-bound team and returns
     seen = args;
     return { task: { id: args.task.id, turns: [
       { agent: 'user', text: args.userMessage },
-      { agent: 'planner', text: 'analysed the backlog' },
+      { agent: 'planner', text: 'analysed the backlog [[TASK_DONE]]' },
     ] }, iterations: 1, stoppedBy: 'done' };
   };
 
@@ -50,6 +64,7 @@ test('routeInboundToTeam drives runTaskTurn for a channel-bound team and returns
   assert.ok(out, 'a channel-bound team must be routed');
   assert.equal(out.team, 'prod');
   assert.equal(out.reply, 'analysed the backlog');
+  assert.ok(!out.reply.includes('[[TASK_DONE]]'), 'the internal done marker must be stripped from the reply');
   // runTaskTurn received the team, its loaded agents, and the inbound text
   assert.equal(seen.team.name, 'prod');
   assert.equal(seen.userMessage, 'analyse the backlog');

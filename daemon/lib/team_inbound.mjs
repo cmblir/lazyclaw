@@ -39,17 +39,25 @@ export async function routeInboundToTeam({
   const runTaskTurn = _runTaskTurn
     || (await import('../../mas/mention_router.mjs')).runTaskTurn;
 
+  // runTaskTurn expects a (line)=>{} logger. The daemon route passes a structured
+  // logger object (with .info/.warn) or null — coerce to a callable so the loop
+  // never throws "logger is not a function".
+  const safeLogger = typeof logger === 'function' ? logger : () => {};
+
   const result = await runTaskTurn({
     task, team, agentsById, userMessage: text,
-    configDir, apiKey, baseUrl, logger, slackSender,
+    configDir, apiKey, baseUrl, logger: safeLogger, slackSender,
     // Default-on confinement for every tool the team runs (opt out via cfg).
     sandbox: defaultSandboxSpec(cfg, { cwd: process.cwd(), configDir }),
   });
 
   const turns = (result && result.task && result.task.turns) || [];
   const lastAssistant = [...turns].reverse().find((t) => t && t.agent && t.agent !== 'user' && t.text);
+  // Strip the internal [[TASK_DONE]] control marker from the channel-facing reply.
+  const reply = (lastAssistant ? lastAssistant.text : '(team finished with no reply)')
+    .replace(/\[\[TASK_DONE\]\]/g, '').trim();
   return {
-    reply: lastAssistant ? lastAssistant.text : '(team finished with no reply)',
+    reply: reply || '(team finished with no reply)',
     team: team.name,
     taskId: (result && result.task && result.task.id) || task.id,
   };
