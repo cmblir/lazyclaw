@@ -14,7 +14,7 @@
 const KNOWN_KEYS = new Set([
   'provider', 'model', 'api-key', 'rates', 'trainer', 'orchestrator', 'persona', 'customProviders', 'chat',
   'sandbox', 'channels', 'authProfiles', 'authActiveProfile', 'nodes', 'messaging', 'pairing',
-  'cron', 'mcp', 'orchestra', 'security', 'skills', 'workspace', 'recall',
+  'cron', 'mcp', 'orchestra', 'security', 'skills', 'workspace', 'recall', 'workflows',
 ]);
 
 /**

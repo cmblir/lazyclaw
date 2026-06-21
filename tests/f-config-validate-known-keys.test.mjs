@@ -15,7 +15,7 @@ test('known top-level config keys are not flagged as unknown', () => {
     provider: 'mock',
     sandbox: {}, pairing: [], channels: {}, authProfiles: {}, authActiveProfile: 'x',
     nodes: {}, messaging: {}, cron: {}, mcp: {}, orchestra: {}, security: {}, skills: [], workspace: 'w',
-    recall: { embeddings: { enabled: false } },
+    recall: { embeddings: { enabled: false } }, workflows: {},
   };
   const r = validateConfig(cfg, { mock: {} });
   const unknown = r.warnings.filter((w) => /unknown top-level key/.test(w));
