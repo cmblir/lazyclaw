@@ -33,6 +33,7 @@ import {
   PairingStore,
   deviceIdFromPublicKey,
   verifyConnect,
+  parsePayload,
 } from './device_auth.mjs';
 import { redactSecrets } from '../mas/redact.mjs';
 
@@ -154,8 +155,12 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
     const token = bearerToken(req);
     const deviceId = String(req.headers?.['x-device-id'] || '').trim();
     if (!token || !deviceId) return null;
-    if (!store().verifyToken(deviceId, token)) return null;
-    return { deviceId };
+    const st = store();
+    // Inject nowFn so an EXPIRED token (device TTL) is rejected across every
+    // authenticated route, not just freshly after issue.
+    if (!st.verifyToken(deviceId, token, nowFn())) return null;
+    const info = st.deviceInfo(deviceId);
+    return { deviceId, role: info?.role || '', scopes: Array.isArray(info?.scopes) ? info.scopes : [] };
   }
 
   async function handle(req, res, { readBody }) {
@@ -214,8 +219,22 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
       if (existing) {
         receipt = { requestId: existing.requestId };
       } else {
+        // role + scopes come from the SIGNATURE-VERIFIED payload (tamper-
+        // evident), not the unsigned body fields, so a client can't forge its
+        // own capabilities. parsePayload is safe here — verifyConnect passed.
+        let role = '';
+        let scopes = [];
         try {
-          receipt = st.requestPairing({ deviceId, platform, label });
+          const parsed = parsePayload(payload);
+          if (parsed) {
+            role = String(parsed.role || '');
+            scopes = typeof parsed.scopes === 'string' && parsed.scopes
+              ? parsed.scopes.split(',').filter(Boolean)
+              : (Array.isArray(parsed.scopes) ? parsed.scopes : []);
+          }
+        } catch { /* fall back to no capability — default device */ }
+        try {
+          receipt = st.requestPairing({ deviceId, platform, label, role, scopes });
         } catch (err) {
           // Pending-requests ceiling hit — shed load rather than 500.
           if (err && err.code === 'PAIRING_CAP') {
@@ -238,6 +257,13 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
     if (m === 'POST' && p === '/gateway/exec/resolve') {
       const ident = authDevice(req);
       if (!ident) return writeJson(res, 401, { ok: false, reason: 'invalid device token' });
+      // Capability gate: a read-only device may observe (whoami/events/pending)
+      // but MUST NOT resolve an exec approval (the one mutating gateway action).
+      // Backward-compatible: only an EXPLICITLY read-only role is denied; legacy
+      // devices (role '') and approvers keep the prior behaviour.
+      if (ident.role === 'read-only') {
+        return writeJson(res, 403, { ok: false, reason: 'insufficient scope: a read-only device cannot resolve exec approvals' });
+      }
       const body = await readJsonBody(req, readBody);
       if (body && body.__tooLarge) return writeJson(res, 413, { ok: false, reason: 'request body too large' });
       if (!body || !body.id) return writeJson(res, 400, { ok: false, reason: 'id and decision are required' });

@@ -182,7 +182,7 @@ export function buildSignPayload({
 // must stay in lock-step with buildSignPayload's field order. Returns null
 // for a malformed / wrong-version payload so the caller can reject cleanly
 // rather than throwing.
-function parsePayload(payload) {
+export function parsePayload(payload) {
   if (typeof payload !== 'string') return null;
   const parts = payload.split(FIELD_SEP);
   if (parts.length !== 11) return null;
