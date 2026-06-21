@@ -153,7 +153,7 @@ async function readUntilDone(proc) {
 // re-load the user's CLAUDE.md/skills/hooks/MCP (~180k tokens/spawn, measured).
 // It previously omitted the lean flags, which is why the streaming provider's
 // lean fix didn't help these paths. Pass lean:false to restore the full env.
-export function buildToolUseArgs({ prompt, model, system, tools = [], permissionMode = 'bypassPermissions', lean } = {}) {
+export function buildToolUseArgs({ prompt, model, system, tools = [], permissionMode = 'bypassPermissions', lean, maxTurns } = {}) {
   const args = [
     '-p', prompt,
     '--output-format', 'stream-json',
@@ -164,6 +164,11 @@ export function buildToolUseArgs({ prompt, model, system, tools = [], permission
   if (lean !== false) {
     args.push('--setting-sources', '', '--strict-mcp-config');
   }
+  // Bound Claude Code's internal autonomous loop. This adapter DOES let the
+  // agent use tools (--tools whitelist below), but the internal loop was
+  // otherwise uncapped (lazyclaw's own maxIterations is a no-op for claude-cli).
+  const cap = maxTurns == null ? 16 : maxTurns;
+  if (cap > 0) args.push('--max-turns', String(cap));
   if (model) args.push('--model', model);
   if (system && String(system).trim()) {
     args.push('--system-prompt', String(system));
@@ -186,6 +191,7 @@ export async function callOnce({
   bin,
   cwd,
   lean,
+  maxTurns,
   permissionMode = 'bypassPermissions',
 } = {}) {
   if (!Array.isArray(messages) || messages.length === 0) {
@@ -195,7 +201,7 @@ export async function callOnce({
   if (!prompt) {
     throw new ClaudeCliToolUseError('messages produced an empty prompt', 'NO_PROMPT');
   }
-  const args = buildToolUseArgs({ prompt, model, system, tools, permissionMode, lean });
+  const args = buildToolUseArgs({ prompt, model, system, tools, permissionMode, lean, maxTurns });
 
   const binPath = bin || process.env.LAZYCLAW_CLAUDE_BIN || DEFAULT_BIN;
   let proc;

@@ -31,3 +31,21 @@ test('model alias is still appended under lean', () => {
   const args = buildArgs('hi', { model: 'opus' });
   assert.deepEqual(args.slice(-2), ['--model', 'opus']);
 });
+
+test('streaming chat is BOUNDED by default: --max-turns 1 + --tools "" (no autonomous loop)', () => {
+  // Without this, a plain chat question triggers Claude Code's full internal
+  // agent loop (measured 6-11 internal model calls, 90-126s). One turn, no tools.
+  const args = buildArgs('hi', {});
+  const mt = args.indexOf('--max-turns');
+  assert.ok(mt >= 0, '--max-turns must be present');
+  assert.equal(args[mt + 1], '1');
+  const ti = args.indexOf('--tools');
+  assert.ok(ti >= 0);
+  assert.equal(args[ti + 1], '', 'tools disabled for a plain completion');
+});
+
+test('callers can raise the bound (maxTurns) and pass a tools whitelist', () => {
+  const args = buildArgs('hi', { maxTurns: 8, tools: 'Read,Grep' });
+  assert.equal(args[args.indexOf('--max-turns') + 1], '8');
+  assert.equal(args[args.indexOf('--tools') + 1], 'Read,Grep');
+});

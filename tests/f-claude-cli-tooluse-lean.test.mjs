@@ -26,6 +26,15 @@ test('tool-use adapter lean:false restores the full environment', () => {
   assert.ok(!args.includes('--strict-mcp-config'));
 });
 
+test('tool-use adapter bounds the internal loop with --max-turns (default cap, overridable)', () => {
+  const def = buildToolUseArgs({ prompt: 'hi', tools: [] });
+  const mt = def.indexOf('--max-turns');
+  assert.ok(mt >= 0, 'a default --max-turns cap must bound the agentic loop');
+  assert.ok(Number(def[mt + 1]) > 0);
+  const capped = buildToolUseArgs({ prompt: 'hi', tools: [], maxTurns: 6 });
+  assert.equal(capped[capped.indexOf('--max-turns') + 1], '6');
+});
+
 test('tool-use adapter still maps model + system + tools whitelist', () => {
   const args = buildToolUseArgs({ prompt: 'hi', model: 'sonnet', system: 'be brief', tools: [{ name: 'bash' }, { name: 'read' }] });
   const mi = args.indexOf('--model'); assert.equal(args[mi + 1], 'sonnet');

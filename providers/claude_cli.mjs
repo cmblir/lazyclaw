@@ -127,6 +127,15 @@ export function buildArgs(prompt, opts = {}) {
   if (opts.lean !== false) {
     args.push('--setting-sources', '', '--strict-mcp-config');
   }
+  // Bound Claude Code's internal autonomous agent loop. A plain chat/worker
+  // completion is ONE turn with NO built-in tools — without this a single
+  // question can trigger Claude Code's full Read/Grep/Bash exploration loop
+  // (measured 6-11 internal model calls, 90-126s) instead of just answering.
+  // Callers that genuinely want agentic behavior raise maxTurns and pass a
+  // tools whitelist (the agentic/team path uses the tool-use adapter instead).
+  const maxTurns = opts.maxTurns == null ? 1 : opts.maxTurns;
+  if (maxTurns > 0) args.push('--max-turns', String(maxTurns));
+  args.push('--tools', opts.tools == null ? '' : String(opts.tools));
   const modelAlias = resolveModelAlias(opts.model);
   if (modelAlias) args.push('--model', modelAlias);
   return args;
