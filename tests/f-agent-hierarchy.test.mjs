@@ -3,10 +3,22 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { registerAgent, patchAgent, getAgent, AgentError } from '../agents.mjs';
 import { teamTree } from '../teams.mjs';
 
 function tmp() { return fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-hier-')); }
+const CLI = new URL('../cli.mjs', import.meta.url).pathname;
+
+test('CLI: agent add --manager persists the manager (hierarchy from the command line)', () => {
+  const d = tmp();
+  const run = (args) => spawnSync('node', [CLI, ...args], { env: { ...process.env, LAZYCLAW_CONFIG_DIR: d }, encoding: 'utf8' });
+  assert.equal(run(['agent', 'add', 'boss', '--provider', 'claude-cli']).status, 0);
+  const r = run(['agent', 'add', 'report', '--provider', 'claude-cli', '--manager', 'boss']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(getAgent('report', d).manager, 'boss', 'CLI --manager must reach registerAgent');
+  fs.rmSync(d, { recursive: true, force: true });
+});
 
 test('registerAgent stores an optional manager (parent agent)', () => {
   const d = tmp();

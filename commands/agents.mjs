@@ -488,7 +488,7 @@ export async function cmdAgentRegistry(sub, positional, flags = {}) {
       return;
     }
     case 'add': {
-      if (!name) { console.error('Usage: lazyclaw agent add <name> [--role "..."] [--provider X] [--model Y] [--display "..."] [--tools bash,read,write,grep,skill_view] [--tags a,b] [--skill-write auto|manual|off]'); process.exit(2); }
+      if (!name) { console.error('Usage: lazyclaw agent add <name> [--role "..."] [--provider X] [--model Y] [--display "..."] [--manager <agent>] [--tools bash,read,write,grep,skill_view] [--tags a,b] [--skill-write auto|manual|off]'); process.exit(2); }
       const tools = agentsMod.parseToolsFlag(flags.tools);
       try {
         const a = agentsMod.registerAgent({
@@ -500,6 +500,7 @@ export async function cmdAgentRegistry(sub, positional, flags = {}) {
           tools: tools === null ? undefined : tools,
           tags: agentsMod.parseToolsFlag(flags.tags) || [],
           skillWrite: flags['skill-write'],
+          manager: flags.manager,
         }, cfgDir);
         emitJson(a);
       } catch (err) {
