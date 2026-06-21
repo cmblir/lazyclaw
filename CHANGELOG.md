@@ -128,6 +128,16 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **Declarative workflows (foundation).** Workflows were hand-written `.mjs`
+  passing arbitrary node functions to the executor. You can now author a
+  workflow as DATA — `{ nodes: [{ id, type, config, deps?, timeoutMs?, retry? }] }`
+  (`workflow/declarative.mjs`) — compiled onto the existing executor
+  (ordering / timeout / retry / cleanup / cancellation unchanged). Data flows
+  between nodes by `{{ref}}` (e.g. `{{fetchUser.name}}`, including nested + whole-
+  value refs). Built-in node types are safe (`set`, `template`); side-effecting
+  types (http / shell / llm / channel-send) are injected by the runner via
+  `caps.nodeTypes` — capability injection, not ambient power. (Next: those I/O
+  node types, YAML input, and a daemon HTTP run route.)
 - **Opt-in hybrid recall — embedding similarity blended with FTS5 (off by
   default).** Recall stayed pure-FTS5 bm25. Now, when `cfg.recall.embeddings` is
   enabled, the `recall` tool embeds the query and re-ranks the FTS candidates by
