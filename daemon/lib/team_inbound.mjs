@@ -9,7 +9,7 @@
 // Collaborators are static-imported except mention_router (lazy, since it pulls
 // in the agent-turn machinery); `_runTaskTurn` is a test injection seam.
 
-import { listTeams, teamForChannel } from '../../teams.mjs';
+import { teamForChannelCached } from '../../teams.mjs';
 import { getAgent } from '../../agents.mjs';
 import { registerTask } from '../../tasks.mjs';
 import { defaultSandboxSpec } from '../../sandbox/index.mjs';
@@ -18,7 +18,7 @@ export async function routeInboundToTeam({
   cfg, channel, text, configDir, apiKey, baseUrl, logger, slackSender, _runTaskTurn,
 } = {}) {
   if (!channel || !text) return null;
-  const team = teamForChannel(listTeams(configDir), channel);
+  const team = teamForChannelCached(channel, configDir);
   if (!team) return null;
 
   // Load the team's agent records; bail (fall through) if the lead drifted away.

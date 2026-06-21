@@ -8,6 +8,14 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Changed
 
+- **Inbound Slack routing no longer rescans the teams directory per message.**
+  Auto-routing a channel message to its team called
+  `teamForChannel(listTeams(configDir), channel)` — a full `teams/` readdir + a
+  `JSON.parse` of every team file + a linear scan, on every inbound. A new
+  `teamForChannelCached` builds a `slackChannel`→team index once and reuses it
+  until the directory changes (`register`/`patch`/`removeTeam` invalidate it,
+  and the dir-mtime key also catches manual edits), so the lookup is an O(1)
+  `Map.get`.
 - **The prompt-stack composer stops re-reading static files every loop pass.**
   `composePromptStack` runs once per iteration of the per-message agent loop and
   re-read four static config files (global `SOUL.md`, workspace `SOUL.md`,

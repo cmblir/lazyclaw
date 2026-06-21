@@ -98,6 +98,7 @@ export function registerTeam({ name, displayName, agents = [], lead = null, slac
     slackChannel: String(slackChannel || ''),
   };
   writeAtomic(p, data);
+  _invalidateTeamIndex(configDir);
   return data;
 }
 
@@ -133,6 +134,7 @@ export function patchTeam(name, patch, configDir = defaultConfigDir()) {
   if (patch.agents !== undefined) next.agents = [...new Set(patch.agents)];
   validateAgentRefs(next.agents, next.lead, configDir);
   writeAtomic(teamPath(name, configDir), next);
+  _invalidateTeamIndex(configDir);
   return next;
 }
 
@@ -142,6 +144,7 @@ export function removeTeam(name, configDir = defaultConfigDir()) {
     throw new TeamError(`no team "${name}"`, 'TEAM_NO_TEAM');
   }
   fs.unlinkSync(p);
+  _invalidateTeamIndex(configDir);
   return { name, removed: true };
 }
 
@@ -238,4 +241,37 @@ export function teamForChannel(teams, channel) {
   if (!channel) return null;
   const c = String(channel);
   return (teams || []).find((t) => t && t.slackChannel && String(t.slackChannel) === c) || null;
+}
+
+// slackChannel→team index, keyed by configDir and the teams/ dir mtime. Every
+// inbound Slack message used to re-scan the whole teams/ directory (readdir + N
+// JSON.parse) just to find one channel's team; this builds the lookup once and
+// reuses it until the directory changes. register/patch/removeTeam invalidate
+// explicitly (deterministic), and the dir-mtime key also catches manual edits.
+const _channelIndex = new Map();  // configDir → { mtimeMs, byChannel: Map<channel, team> }
+
+export function _invalidateTeamIndex(configDir = defaultConfigDir()) {
+  _channelIndex.delete(configDir);
+}
+
+// O(1) channel→team lookup for the inbound hot path. Returns null when no team
+// is bound to the channel (or there is no teams/ directory yet).
+export function teamForChannelCached(channel, configDir = defaultConfigDir()) {
+  if (!channel) return null;
+  const dir = teamsDir(configDir);
+  let mtimeMs = 0;
+  try { mtimeMs = fs.statSync(dir).mtimeMs; }
+  catch { return null; }  // no teams dir → no team bound to anything
+  const cached = _channelIndex.get(configDir);
+  let byChannel;
+  if (cached && cached.mtimeMs === mtimeMs) {
+    byChannel = cached.byChannel;
+  } else {
+    byChannel = new Map();
+    for (const t of listTeams(configDir)) {
+      if (t && t.slackChannel) byChannel.set(String(t.slackChannel), t);
+    }
+    _channelIndex.set(configDir, { mtimeMs, byChannel });
+  }
+  return byChannel.get(String(channel)) || null;
 }
