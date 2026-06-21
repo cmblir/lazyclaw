@@ -148,7 +148,12 @@ export function closeIndex(configDir = defaultConfigDir()) {
 }
 
 function _stmts(configDir) {
-  if (!_handles.has(configDir)) openIndex(configDir);
+  // Hot path (recall + session/trajectory writes). Skip the O(index-size)
+  // PRAGMA integrity_check here — because each turn is a fresh process, paying
+  // it on the first index touch stalls the first user turn by 50-80ms+ (and
+  // growing). It is reserved for `doctor` / `index rebuild`, which open/run it
+  // explicitly; corruption then surfaces at query time (logged) instead.
+  if (!_handles.has(configDir)) openIndex(configDir, { runIntegrityCheck: false });
   return _handles.get(configDir).stmts;
 }
 
