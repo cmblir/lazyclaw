@@ -8,6 +8,16 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Changed
 
+- **CLI providers retry transient upstream throttles instead of failing hard.**
+  `claude-cli` / `codex-cli` / `gemini-cli` surface server-side throttling by
+  exiting non-zero with the throttle text on stderr (e.g. claude's "Server
+  temporarily limiting requests (not your usage limit)"). Every non-zero exit
+  used to map to a non-retriable `CLI_EXIT`, so a transient throttle killed the
+  call — and a fan-out of agents — outright. A new `classifyCliExit`
+  (`providers/cli_error.mjs`) maps those throttles (overload, 429/5xx) to a
+  retriable `RATE_LIMIT` with a short backoff, while keeping a genuine usage cap
+  ("reached your usage limit", out of credits) non-retriable so it still fails
+  fast.
 - **Chat replies no longer block on the FTS index write.** `sessions.appendTurn`
   runs on the reply path (before the answer is flushed to the client), but it
   mirrored each turn into the better-sqlite3 FTS index inline via a static

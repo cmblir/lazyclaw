@@ -26,6 +26,7 @@
 // behind one switch (opts.trustWorkspace, default true) — see geminiArgs/geminiEnv.
 
 import { spawnSandboxed } from '../sandbox.mjs';
+import { classifyCliExit } from './cli_error.mjs';
 
 class AbortError extends Error {
   constructor(message = 'aborted') {
@@ -47,7 +48,10 @@ class CliExitError extends Error {
   constructor(code, signal, stderr) {
     super(`gemini CLI exited ${code ?? signal}: ${String(stderr).slice(0, 400)}`);
     this.name = 'GeminiCliExitError';
-    this.code = 'CLI_EXIT';
+    // Transient upstream throttle → retriable RATE_LIMIT; genuine cap → CLI_EXIT.
+    const cls = classifyCliExit(stderr);
+    this.code = cls.code;
+    if (cls.retryAfterMs !== undefined) this.retryAfterMs = cls.retryAfterMs;
     this.exitCode = code;
     this.signal = signal;
     this.stderr = stderr;

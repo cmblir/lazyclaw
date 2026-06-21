@@ -19,6 +19,7 @@
 
 import { spawn } from 'node:child_process';
 import { spawnSandboxed } from '../sandbox.mjs';
+import { classifyCliExit } from './cli_error.mjs';
 
 class AbortError extends Error {
   constructor(message = 'aborted') {
@@ -40,7 +41,12 @@ class CliExitError extends Error {
   constructor(code, signal, stderr) {
     super(`claude CLI exited ${code ?? signal}: ${String(stderr).slice(0, 400)}`);
     this.name = 'ClaudeCliExitError';
-    this.code = 'CLI_EXIT';
+    // A transient upstream throttle (claude's "Server temporarily limiting
+    // requests", overload, 429/5xx) maps to a retriable RATE_LIMIT so
+    // withRateLimitRetry retries it; a genuine usage cap stays CLI_EXIT.
+    const cls = classifyCliExit(stderr);
+    this.code = cls.code;
+    if (cls.retryAfterMs !== undefined) this.retryAfterMs = cls.retryAfterMs;
     this.exitCode = code;
     this.signal = signal;
     this.stderr = stderr;

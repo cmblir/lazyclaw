@@ -25,6 +25,7 @@
 //     point at a deterministic shim script.
 
 import { spawn } from 'node:child_process';
+import { classifyCliExit } from '../cli_error.mjs';
 
 const DEFAULT_BIN = 'claude';
 const LAZYCLAW_TO_CLAUDE_TOOL = {
@@ -137,7 +138,13 @@ async function readUntilDone(proc) {
     proc.on('error', reject);
     proc.on('close', (code) => {
       if (code !== 0) {
-        return reject(new ClaudeCliToolUseError(`claude CLI exit ${code}: ${stderr.slice(0, 300)}`, 'CLAUDE_CLI_EXIT', stderr));
+        // Transient upstream throttle → retriable RATE_LIMIT; otherwise keep
+        // the non-retriable CLAUDE_CLI_EXIT code.
+        const cls = classifyCliExit(stderr);
+        const exitCode = cls.code === 'RATE_LIMIT' ? 'RATE_LIMIT' : 'CLAUDE_CLI_EXIT';
+        const err = new ClaudeCliToolUseError(`claude CLI exit ${code}: ${stderr.slice(0, 300)}`, exitCode, stderr);
+        if (cls.retryAfterMs !== undefined) err.retryAfterMs = cls.retryAfterMs;
+        return reject(err);
       }
       // Prefer accumulated stream deltas; fall back to the assistant
       // record or the final result text when streaming was disabled.
