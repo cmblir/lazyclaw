@@ -71,7 +71,7 @@ test('index with no sub exits 2 with an index-specific usage message', () => {
   const dir = tmpCfg();
   const r = runCli(['index'], dir);
   assert.equal(r.status, 2, `expected exit 2, got ${r.status}; stdout=${r.stdout}`);
-  assert.match(r.stderr, /Usage: lazyclaw index rebuild/);
+  assert.match(r.stderr, /Usage: lazyclaw index <rebuild\|embed>/);
 });
 
 // (b) a bad sub is rejected the same way.
@@ -79,5 +79,5 @@ test('index with a bad sub exits 2 with an index-specific usage message', () => 
   const dir = tmpCfg();
   const r = runCli(['index', 'bogus'], dir);
   assert.equal(r.status, 2, `expected exit 2, got ${r.status}; stdout=${r.stdout}`);
-  assert.match(r.stderr, /Usage: lazyclaw index rebuild/);
+  assert.match(r.stderr, /Usage: lazyclaw index <rebuild\|embed>/);
 });

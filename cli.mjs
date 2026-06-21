@@ -199,11 +199,25 @@ async function main() {
       // FTS index recovery surface documented by mas/index_db.mjs and the
       // doctor failure-log. reindexAll (NOT the destructive rebuild) drops the
       // db and repopulates from the on-disk corpus, so recall is never left empty.
-      if (rest.positional[0] !== 'rebuild') {
-        console.error('Usage: lazyclaw index rebuild');
+      const indexSub = rest.positional[0];
+      const cfgDir = path.dirname(configPath());
+      if (indexSub === 'embed') {
+        // Opt-in hybrid recall: embed FTS rows that lack a vector. No-op when
+        // cfg.recall.embeddings is off (then it just reports 0 embedded).
+        try {
+          const indexDb = await import('./mas/index_db.mjs');
+          const embedded = await indexDb.backfillEmbeddings(cfgDir, readConfig());
+          console.log(JSON.stringify({ ok: true, embedded }));
+          process.exit(0);
+        } catch (e) {
+          console.error(`index embed failed: ${e.message}`);
+          process.exit(1);
+        }
+      }
+      if (indexSub !== 'rebuild') {
+        console.error('Usage: lazyclaw index <rebuild|embed>');
         process.exit(2);
       }
-      const cfgDir = path.dirname(configPath());
       try {
         const indexDb = await import('./mas/index_db.mjs');
         indexDb.reindexAll(cfgDir);

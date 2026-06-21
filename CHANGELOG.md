@@ -128,6 +128,18 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **Opt-in hybrid recall — embedding similarity blended with FTS5 (off by
+  default).** Recall stayed pure-FTS5 bm25. Now, when `cfg.recall.embeddings` is
+  enabled, the `recall` tool embeds the query and re-ranks the FTS candidates by
+  a fused bm25 + cosine score, so semantically-close hits surface even when the
+  keyword ranking is flat. Embeddings come from a pluggable source
+  (`mas/embedder.mjs`): OpenAI / Gemini (needs a key) or a local Ollama embed
+  model (keyless). The $0 chat-subscription user has no embedding source and
+  rides pure FTS5 — we deliberately bundle **no** heavy local model. No new hard
+  dependency: doc vectors are stored as BLOBs and cosine runs in JS (sqlite-vec
+  is a possible future optimization for very large indices). `lazyclaw index
+  embed` backfills doc vectors off the hot path. Default behavior is byte-stable
+  pure-FTS5.
 - **Opt-in wall-clock cap on streaming replies (`cfg.chat.maxStreamMs`).** The
   daemon's `/chat` and `/agent` SSE streams only had a per-chunk idle timeout,
   so a model that streams steadily could run unbounded. Set

@@ -46,6 +46,13 @@ function _defaultConfigDir() {
   return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
 }
 
+// Read config.json from the tool's own configDir (not the env), so hybrid
+// recall reads the right config when the dir is passed explicitly. Best-effort.
+function _readCfg(configDir) {
+  try { return JSON.parse(fs.readFileSync(path.join(configDir || _defaultConfigDir(), 'config.json'), 'utf8')); }
+  catch { return {}; }
+}
+
 // Minimal frontmatter parser — read just the cross_cli_tested provider
 // list for a skill by name. Returns [] when the file is missing or
 // parse fails (best-effort ranking helper, not a strict loader).
@@ -105,8 +112,21 @@ export async function exec(args, { configDir } = {}) {
     } catch (err) {
       return { ok: false, error: `recall: openIndex failed — ${err?.message || err}` };
     }
+    // Hybrid recall: when cfg.recall.embeddings is enabled, embed the query and
+    // pass the vector so index_db re-ranks candidates by semantic similarity.
+    // Opt-in + best-effort — any embed failure falls back to pure FTS5.
+    let queryVector, weights;
     try {
-      out = indexRecall(query, { configDir, scope: scopes, k });
+      const cfg = _readCfg(configDir);
+      const { getEmbedder } = await import('../embedder.mjs');
+      const embedder = getEmbedder(cfg);
+      if (embedder) {
+        const [v] = await embedder.embed([query]);
+        if (v && v.length) { queryVector = v; weights = cfg.recall?.embeddings?.weights; }
+      }
+    } catch { /* fall back to pure FTS */ }
+    try {
+      out = indexRecall(query, { configDir, scope: scopes, k, ...(queryVector ? { queryVector, weights } : {}) });
     } catch (err) {
       return { ok: false, error: `recall: query failed — ${err?.message || err}` };
     }
