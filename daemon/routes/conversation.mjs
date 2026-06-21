@@ -1,7 +1,7 @@
 // Daemon route handlers (conversation), extracted verbatim from makeHandler (D5).
 // Each handler takes the per-request dispatch context `c` and returns the
 // HTTP response. Bodies are unchanged; only the dispatch wrapper is new.
-import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, checkCostCap, accumulateMetricsFromCost, accountTurnCost, makeTeamUsageAccountant, resolveProvider, openThreads, handoffWithRollback, openDedup, enqueueLearning } from './_deps.mjs';
+import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, armStreamDeadline, checkCostCap, accumulateMetricsFromCost, accountTurnCost, makeTeamUsageAccountant, resolveProvider, openThreads, handoffWithRollback, openDedup, enqueueLearning } from './_deps.mjs';
 import { randomBytes } from 'node:crypto';
 import { routeInboundToTeam } from '../lib/team_inbound.mjs';
 
@@ -93,6 +93,10 @@ export async function chat(c) {
             const ac = new AbortController();
             req.on('aborted', () => ac.abort());
             res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+            // Opt-in wall-clock cap (cfg.chat.maxStreamMs): the per-chunk idle
+            // timeout can't bound a model that streams steadily for minutes.
+            const maxStreamMs = Number(cfg.chat?.maxStreamMs) || 0;
+            const _deadline = armStreamDeadline(ac, maxStreamMs);
             try {
               for await (const chunk of prov.sendMessage(messages, { ...sendOpts, signal: ac.signal })) {
                 if (ac.signal.aborted) break;
@@ -101,6 +105,8 @@ export async function chat(c) {
                 // the buffer is full.
                 if (!writeSse(res, 'token', { text: chunk })) await new Promise(r => setImmediate(r));
               }
+              // Tell the client the reply was cut by the cap (vs a clean finish).
+              if (_deadline.hit()) writeSse(res, 'truncated', { reason: 'maxStreamMs', maxStreamMs });
               if (!ac.signal.aborted) {
                 const cost = account();
                 if (captured && body.usage) writeSse(res, 'usage', captured);
@@ -109,9 +115,14 @@ export async function chat(c) {
               }
               return res.end();
             } catch (err) {
-              if (err?.code === 'ABORT' || ac.signal.aborted) return res.end();
+              if (err?.code === 'ABORT' || ac.signal.aborted) {
+                if (_deadline.hit()) writeSse(res, 'truncated', { reason: 'maxStreamMs', maxStreamMs });
+                return res.end();
+              }
               writeSse(res, 'error', { message: err?.message || String(err) });
               return res.end();
+            } finally {
+              _deadline.disarm();
             }
           }
           let acc = '';
@@ -409,6 +420,10 @@ export async function agent(c) {
             const ac = new AbortController();
             req.on('aborted', () => ac.abort());
             res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+            // Opt-in wall-clock cap (cfg.chat.maxStreamMs) — bounds a turn that
+            // streams steadily past the per-chunk idle timeout.
+            const maxStreamMs = Number(cfg.chat?.maxStreamMs) || 0;
+            const _deadline = armStreamDeadline(ac, maxStreamMs);
             let acc = '';
             try {
               for await (const chunk of prov.sendMessage(messages, { ...agentSendOpts, signal: ac.signal })) {
@@ -418,7 +433,10 @@ export async function agent(c) {
                 // buffer is full (writeSse returns false), not on every token.
                 if (!writeSse(res, 'token', { text: chunk })) await new Promise(r => setImmediate(r));
               }
-              if (sid && !ac.signal.aborted) ctx.sessionsMod.appendTurn(sid, 'assistant', acc, cfgDir);
+              // On a cap-hit we still persist the partial turn (it's real output)
+              // but tell the client it was truncated rather than a clean finish.
+              if (_deadline.hit()) writeSse(res, 'truncated', { reason: 'maxStreamMs', maxStreamMs });
+              if (sid && (!ac.signal.aborted || _deadline.hit())) ctx.sessionsMod.appendTurn(sid, 'assistant', acc, cfgDir);
               if (!ac.signal.aborted) {
                 const cost = accountAgent();
                 if (agentCaptured && body.usage) writeSse(res, 'usage', agentCaptured);
@@ -428,11 +446,14 @@ export async function agent(c) {
               return res.end();
             } catch (err) {
               if (err?.code === 'ABORT' || ac.signal.aborted) {
+                if (_deadline.hit()) writeSse(res, 'truncated', { reason: 'maxStreamMs', maxStreamMs });
                 // Client gave up — partial assistant turn is discarded.
                 return res.end();
               }
               writeSse(res, 'error', { message: err?.message || String(err) });
               return res.end();
+            } finally {
+              _deadline.disarm();
             }
           }
 

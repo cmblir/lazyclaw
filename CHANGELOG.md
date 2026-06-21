@@ -128,6 +128,13 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **Opt-in wall-clock cap on streaming replies (`cfg.chat.maxStreamMs`).** The
+  daemon's `/chat` and `/agent` SSE streams only had a per-chunk idle timeout,
+  so a model that streams steadily could run unbounded. Set
+  `cfg.chat.maxStreamMs` to abort the turn after that many milliseconds; the
+  client gets a `truncated` SSE event (reason `maxStreamMs`) so it can tell a
+  capped reply from a clean finish or a disconnect. Unset/≤0 is a no-op —
+  existing streams are byte-stable.
 - **`lazyclaw mcp add / remove / call`.** MCP servers were manageable only by
   hand-editing `cfg.mcp.servers`, and there was no way to invoke a tool from the
   CLI. `mcp add <name> --command <cmd> [--args "…"] [--allow-glob <glob>]

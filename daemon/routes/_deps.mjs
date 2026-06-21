@@ -25,7 +25,7 @@ export { validateRates } from '../../rates-validate.mjs';
 
 export {
   fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse,
-  statusForProviderError,
+  statusForProviderError, armStreamDeadline,
 } from '../lib/respond.mjs';
 export { checkCostCap, accumulateMetricsFromCost, accountTurnCost, makeTeamUsageAccountant } from '../lib/cost.mjs';
 export { resolveProvider } from '../lib/provider.mjs';

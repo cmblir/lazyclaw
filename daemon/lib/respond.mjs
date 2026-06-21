@@ -85,3 +85,18 @@ export function writeSse(res, event, data) {
   if (event) res.write(`event: ${event}\n`);
   return res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
+
+// Opt-in wall-clock cap for a streaming response. The provider's per-chunk
+// idle timeout can't bound a model that streams steadily for minutes, so a
+// caller can abort the whole turn after `maxMs`. Aborting `ac` stops the
+// provider; the loop then breaks and the caller can tell the client it was
+// truncated (vs a client disconnect) via hit(). No-op when maxMs is unset/<=0.
+// The timer is unref'd so it never keeps the process alive.
+export function armStreamDeadline(ac, maxMs) {
+  const ms = Number(maxMs) || 0;
+  if (ms <= 0) return { disarm: () => {}, hit: () => false };
+  let fired = false;
+  const t = setTimeout(() => { fired = true; try { ac.abort(); } catch { /* already done */ } }, ms);
+  if (t && typeof t.unref === 'function') t.unref();
+  return { disarm: () => clearTimeout(t), hit: () => fired };
+}
