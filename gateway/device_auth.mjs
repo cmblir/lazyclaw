@@ -460,7 +460,7 @@ export class PairingStore {
    * @param {string} requestId
    * @returns {{ deviceId: string, token: string }}
    */
-  approve(requestId) {
+  approve(requestId, { ttlMs, nowMs = Date.now() } = {}) {
     const req = this._data.requests[requestId];
     if (!req) {
       throw new Error(`unknown pairing request: ${requestId}`);
@@ -469,17 +469,23 @@ export class PairingStore {
       throw new Error(`request not pending: ${requestId} (status=${req.status})`);
     }
     const token = freshToken();
-    this._data.devices[req.deviceId] = {
+    const dev = {
       deviceId: req.deviceId,
       platform: req.platform || '',
       label: req.label || '',
       token,
       approvedAt: nowIso(),
     };
+    // Optional TTL: stamp an absolute expiry only when a positive ttlMs is
+    // given. Omitting it keeps the legacy never-expires record.
+    if (Number.isFinite(ttlMs) && ttlMs > 0 && Number.isFinite(nowMs)) {
+      dev.expiresAt = nowMs + ttlMs;
+    }
+    this._data.devices[req.deviceId] = dev;
     req.status = 'approved';
     req.approvedAt = nowIso();
     this._persist();
-    return { deviceId: req.deviceId, token };
+    return { deviceId: req.deviceId, token, ...(dev.expiresAt ? { expiresAt: dev.expiresAt } : {}) };
   }
 
   /**
@@ -518,14 +524,20 @@ export class PairingStore {
    * @param {string} presentedToken
    * @returns {boolean}
    */
-  verifyToken(deviceId, presentedToken) {
-    const stored = this.tokenFor(deviceId);
+  verifyToken(deviceId, presentedToken, nowMs) {
+    const dev = this._data.devices[deviceId];
+    const stored = dev && typeof dev.token === 'string' && dev.token.length > 0 ? dev.token : null;
     if (typeof stored !== 'string' || stored.length === 0) return false;
     if (typeof presentedToken !== 'string' || presentedToken.length === 0) return false;
     const a = Buffer.from(stored, 'utf8');
     const b = Buffer.from(presentedToken, 'utf8');
     if (a.length !== b.length) return false; // length mismatch — cannot timingSafeEqual
-    return crypto.timingSafeEqual(a, b);
+    // Constant-time compare FIRST, expiry AFTER — so response timing can't leak
+    // "expired" vs "wrong token". TTL is only enforced when both the record has
+    // an expiresAt AND the caller injects a nowMs (legacy callers/records skip).
+    if (!crypto.timingSafeEqual(a, b)) return false;
+    if (typeof dev.expiresAt === 'number' && Number.isFinite(nowMs) && nowMs >= dev.expiresAt) return false;
+    return true;
   }
 
   /**
