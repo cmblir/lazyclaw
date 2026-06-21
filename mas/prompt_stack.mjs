@@ -20,9 +20,37 @@ import { skillsIndex } from '../skills.mjs';
 import { loadCore, recentPath, defaultConfigDir } from '../memory.mjs';
 import { recall as _recall } from './index_db.mjs';
 
+// Static layer files (global SOUL.md, workspace SOUL.md, personality, USER.md)
+// are re-read on every composePromptStack call — and that runs once per
+// iteration of the per-message agent loop (mention_router), where these layers
+// are byte-identical every pass. Memoize by path + mtime so an unchanged file
+// is read from disk once, not N times; editing the file bumps its mtime and
+// busts the entry, so correctness is preserved. Mirrors the skills.mjs
+// _indexCache pattern. Layers 7-8 (recent.jsonl tail, FTS recall) deliberately
+// stay un-memoized — they are meant to be volatile per turn.
+const _readCache = new Map();  // path → { mtimeMs, content }
+
+export function _invalidateReadCache() { _readCache.clear(); }
+
 function readOpt(p) {
-  try { return fs.readFileSync(p, 'utf8').trim(); }
-  catch { return ''; }
+  let mtimeMs;
+  try {
+    mtimeMs = fs.statSync(p).mtimeMs;
+  } catch {
+    // Missing/unreadable — drop any stale entry and return empty.
+    _readCache.delete(p);
+    return '';
+  }
+  const hit = _readCache.get(p);
+  if (hit && hit.mtimeMs === mtimeMs) return hit.content;
+  try {
+    const content = fs.readFileSync(p, 'utf8').trim();
+    _readCache.set(p, { mtimeMs, content });
+    return content;
+  } catch {
+    _readCache.delete(p);
+    return '';
+  }
 }
 
 function lastRecentLine(cfgDir) {

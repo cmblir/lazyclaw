@@ -8,6 +8,14 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Changed
 
+- **The prompt-stack composer stops re-reading static files every loop pass.**
+  `composePromptStack` runs once per iteration of the per-message agent loop and
+  re-read four static config files (global `SOUL.md`, workspace `SOUL.md`,
+  personality, `USER.md`) from disk on every call through an unmemoized
+  `readOpt`. Those layers are byte-identical across a loop, so the reads were
+  pure waste. `readOpt` is now mtime-memoized (same pattern as the skills
+  index): an unchanged file is read once, and editing it busts the cache. The
+  volatile layers (recent-turn tail, FTS recall) are untouched.
 - **CLI providers retry transient upstream throttles instead of failing hard.**
   `claude-cli` / `codex-cli` / `gemini-cli` surface server-side throttling by
   exiting non-zero with the throttle text on stderr (e.g. claude's "Server
