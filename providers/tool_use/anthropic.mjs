@@ -141,10 +141,15 @@ export function parseResponse(json) {
   // block is partial/garbage. Flag it so the runner stops instead of acting on
   // a cut-off final answer or an incomplete tool call.
   const truncated = json?.stop_reason === 'max_tokens';
+  // Normalize token usage so agent_turn can accumulate spend across the loop
+  // (and team turns can feed the cost cap). null when the response omits it.
+  const usage = json?.usage
+    ? { inputTokens: json.usage.input_tokens || 0, outputTokens: json.usage.output_tokens || 0 }
+    : null;
   if (calls.length === 0) {
-    return { kind: 'final', text, truncated, raw: json };
+    return { kind: 'final', text, truncated, usage, raw: json };
   }
-  return { kind: 'tool_calls', text, calls, truncated, assistantContent: content, raw: json };
+  return { kind: 'tool_calls', text, calls, truncated, usage, assistantContent: content, raw: json };
 }
 
 // Anthropic accepts the agent_turn-native {role, content} shape

@@ -111,8 +111,13 @@ export function parseResponse(json) {
   // content or a tool_call's arguments JSON is partial. Flag it so the runner
   // stops instead of acting on truncated output / empty-parsed args.
   const truncated = choice?.finish_reason === 'length';
+  // Normalize token usage so agent_turn can accumulate spend across the loop
+  // (and team turns can feed the cost cap). null when the response omits it.
+  const usage = json?.usage
+    ? { inputTokens: json.usage.prompt_tokens || 0, outputTokens: json.usage.completion_tokens || 0 }
+    : null;
   if (rawToolCalls.length === 0) {
-    return { kind: 'final', text, truncated, raw: json };
+    return { kind: 'final', text, truncated, usage, raw: json };
   }
   const calls = rawToolCalls.map((tc) => {
     let input = {};
@@ -129,7 +134,7 @@ export function parseResponse(json) {
     }
     return { id: tc.id, name: tc?.function?.name, input, ...(parseError ? { parseError } : {}) };
   });
-  return { kind: 'tool_calls', text, calls, truncated, assistantContent: msg, raw: json };
+  return { kind: 'tool_calls', text, calls, truncated, usage, assistantContent: msg, raw: json };
 }
 
 // OpenAI accepts the agent_turn-native {role, content} shape directly.

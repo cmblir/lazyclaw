@@ -140,8 +140,14 @@ export function parseResponse(json) {
   // finishReason MAX_TOKENS = the turn was cut at the output ceiling; the text
   // or functionCall args are partial. Flag it so the runner stops.
   const truncated = candidate?.finishReason === 'MAX_TOKENS';
+  // Normalize token usage so agent_turn can accumulate spend across the loop
+  // (and team turns can feed the cost cap). null when the response omits it.
+  const um = json?.usageMetadata;
+  const usage = um
+    ? { inputTokens: um.promptTokenCount || 0, outputTokens: um.candidatesTokenCount || 0 }
+    : null;
   if (calls.length === 0) {
-    return { kind: 'final', text, truncated, raw: json };
+    return { kind: 'final', text, truncated, usage, raw: json };
   }
   // assistantContent is the entire model turn so the runner can echo it
   // back into `contents` for the next request.
@@ -150,6 +156,7 @@ export function parseResponse(json) {
     text,
     truncated,
     calls,
+    usage,
     assistantContent: candidate?.content || { role: 'model', parts },
     raw: json,
   };
