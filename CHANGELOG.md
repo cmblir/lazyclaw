@@ -8,6 +8,13 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **`config validate` stops false-flagging valid keys.** `KNOWN_KEYS` listed
+  only 9 top-level keys, so a dozen keys the rest of the codebase actually reads
+  (`sandbox`, `channels`, `cron`, `pairing`, `authProfiles`,
+  `authActiveProfile`, `nodes`, `messaging`, `mcp`, `orchestra`, `security`,
+  `skills`, `workspace`) were reported as "unknown top-level key" warnings on a
+  perfectly valid config. They're now recognised; a genuinely unknown key still
+  warns.
 - **Response-cache key now covers the static/volatile system prompt.**
   `withResponseCache`'s `hashKey` folded in only `opts.system`, ignoring
   `opts.systemStatic` / `opts.systemVolatile` (the fields the REPL caller

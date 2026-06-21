@@ -6,7 +6,16 @@
 // `GET /config/validate` (daemon) so both produce bit-for-bit
 // identical output.
 
-const KNOWN_KEYS = new Set(['provider', 'model', 'api-key', 'rates', 'trainer', 'orchestrator', 'persona', 'customProviders', 'chat']);
+// Top-level cfg.json keys the codebase reads. Anything else warns (a likely
+// typo). Kept in sync with the actual readers: sandbox (tui/run_turn,
+// sandbox/index), channels/authProfiles/authActiveProfile/nodes/messaging/
+// pairing (config_features), cron (cron.mjs), mcp + orchestra (daemon.mjs),
+// security (gateway_guard), skills + workspace (commands/chat).
+const KNOWN_KEYS = new Set([
+  'provider', 'model', 'api-key', 'rates', 'trainer', 'orchestrator', 'persona', 'customProviders', 'chat',
+  'sandbox', 'channels', 'authProfiles', 'authActiveProfile', 'nodes', 'messaging', 'pairing',
+  'cron', 'mcp', 'orchestra', 'security', 'skills', 'workspace',
+]);
 
 /**
  * @param {Record<string, unknown>} cfg
