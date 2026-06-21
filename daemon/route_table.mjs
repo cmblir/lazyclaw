@@ -55,6 +55,7 @@ export const ROUTES = [
   { m: (c) => c.route === 'GET /sessions/search', h: sessions.sessionsSearch },
   { m: (c) => c.req.method === 'GET' && !!c.sessionExportMatch, h: sessions.sessionExport },
   { m: (c) => c.req.method === 'GET' && !!c.sessionMatch, h: sessions.sessionGet },
+  { m: (c) => c.route === 'POST /workflows/run', h: workflows.workflowRun },
   { m: (c) => c.route === 'GET /workflows/aggregate', h: workflows.workflowsAggregate },
   { m: (c) => c.route === 'GET /workflows', h: workflows.workflowsList },
   { m: (c) => c.req.method === 'GET' && !!c.workflowMatch, h: workflows.workflowGet },

@@ -222,3 +222,29 @@ export async function workflowDelete(c) {
           }
 }
 
+
+// POST /workflows/run — run a DECLARATIVE workflow (data, not code) safely.
+// The definition comes from the body ({workflow:{...}} or the def directly);
+// caps are derived from the daemon config (http SSRF-guarded + the configured
+// llm provider), never from the workflow, so a posted workflow can't spawn a
+// process or reach private hosts. Auth-gated like every non-gateway route.
+export async function workflowRun(c) {
+  const { ctx, req, res } = c;
+  let body;
+  try { body = await readJson(req); }
+  catch (e) { return writeJson(res, 400, { error: `invalid JSON body: ${e.message}` }); }
+  const def = (body && typeof body === 'object' && body.workflow) ? body.workflow : body;
+  const cfg = ctx.readConfig();
+  try {
+    const { runDeclarativeRequest } = await import('../../workflow/run_request.mjs');
+    const out = await runDeclarativeRequest(def, cfg, {
+      providerLookup: (name) => PROVIDERS[name] || null,
+      input: body && typeof body === 'object' ? body.input : undefined,
+    });
+    return writeJson(res, out.success ? 200 : 500, out);
+  } catch (e) {
+    // WorkflowError (bad definition) → 400; anything else → 500.
+    const code = e?.code && String(e.code).startsWith('WF_') ? 400 : 500;
+    return writeJson(res, code, { error: e?.message || String(e), code: e?.code });
+  }
+}
