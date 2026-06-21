@@ -4,6 +4,27 @@
 import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, checkCostCap, accumulateMetricsFromCost, resolveProvider } from './_deps.mjs';
 import { fileURLToPath } from 'node:url';
 
+// In-memory byte cache for the dashboard's static assets (HTML/CSS/JS + the 20
+// avatar PNGs). These were re-read from disk with a synchronous fs.readFileSync
+// on EVERY request — each GET blocked the event loop reading the whole file.
+// They are shipped, read-only install assets, so cache the bytes; key by file
+// mtime so a dev edit (or reinstall) is still picked up without a daemon
+// restart. Avoids the per-request read of the (largest) PNG bodies.
+const _assetCache = new Map();  // absolute path → { mtimeMs, body: Buffer }
+
+export function _clearAssetCache() { _assetCache.clear(); }
+
+// Read a file, serving the bytes from _assetCache when its mtime is unchanged.
+// Throws (ENOENT etc.) when the file is missing — callers keep their 404/503.
+export function _readAssetCached(filePath) {
+  const mtimeMs = fs.statSync(filePath).mtimeMs;
+  const hit = _assetCache.get(filePath);
+  if (hit && hit.mtimeMs === mtimeMs) return hit.body;
+  const body = fs.readFileSync(filePath);
+  _assetCache.set(filePath, { mtimeMs, body });
+  return body;
+}
+
 // Serve a static asset that lives alongside the dashboard HTML in web/.
 // Used for the split-out dashboard.css / dashboard.js (CLAUDE.md §7: one
 // file = one responsibility). Same loopback origin as the JSON API, so no
@@ -14,7 +35,7 @@ function serveWebFile(c, filename, contentType) {
   try {
     const here = nodePath.dirname(fileURLToPath(import.meta.url));
     const filePath = nodePath.join(here, '..', '..', 'web', filename);
-    const body = fs.readFileSync(filePath);
+    const body = _readAssetCached(filePath);
     res.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-cache' });
     return res.end(body);
   } catch (e) {
@@ -53,12 +74,9 @@ export async function dashboard(c) {
           // helpful text response when the file is missing (someone
           // ran the daemon out of a partial install).
           try {
-            const fs = await import('node:fs');
-            const path = await import('node:path');
-            const url = await import('node:url');
-            const here = path.dirname(url.fileURLToPath(import.meta.url));
-            const htmlPath = path.join(here, '..', '..', 'web', 'dashboard.html');
-            const body = fs.readFileSync(htmlPath, 'utf8');
+            const here = nodePath.dirname(fileURLToPath(import.meta.url));
+            const htmlPath = nodePath.join(here, '..', '..', 'web', 'dashboard.html');
+            const body = _readAssetCached(htmlPath);
             res.writeHead(200, {
               'content-type': 'text/html; charset=utf-8',
               'cache-control': 'no-cache',

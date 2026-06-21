@@ -19,6 +19,12 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Changed
 
+- **Dashboard static assets are served from memory, not re-read per request.**
+  Every GET for `dashboard.html` / `.css` / `.js` and the 20 avatar PNGs ran a
+  synchronous `fs.readFileSync` of the whole file, blocking the event loop on
+  each request. Assets are now served from an mtime-keyed in-memory cache (read
+  once per unchanged file; a dev edit still busts it), and `dashboard()` drops
+  its per-request `await import('node:fs')`.
 - **Skill bodies are read from disk once, not every agent turn.** `loadSkill`
   did a fresh `readFileSync` per call, and `composeSystemPrompt` calls it once
   per requested skill on every `POST /agent` reply — so each turn re-read every
