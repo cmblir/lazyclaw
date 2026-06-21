@@ -110,6 +110,28 @@ function extractTextDelta(obj) {
   return '';
 }
 
+// Build the `claude` argv. By DEFAULT lazyclaw runs claude LEAN: lazyclaw
+// supplies its own system prompt, so claude must NOT inherit the user's global
+// CLAUDE.md / skills / hooks / MCP servers. Loading them made every turn pull
+// ~180k tokens (measured) and let Claude Code act on the user's personal config
+// instead of lazyclaw's prompt — slow and off-task. `--setting-sources ''`
+// loads none of user/project/local; `--strict-mcp-config` (no --mcp-config)
+// loads no MCP servers. Pass opts.lean=false to restore the full environment.
+export function buildArgs(prompt, opts = {}) {
+  const args = [
+    '-p', prompt,
+    '--output-format', 'stream-json',
+    '--include-partial-messages',
+    '--verbose',
+  ];
+  if (opts.lean !== false) {
+    args.push('--setting-sources', '', '--strict-mcp-config');
+  }
+  const modelAlias = resolveModelAlias(opts.model);
+  if (modelAlias) args.push('--model', modelAlias);
+  return args;
+}
+
 export const claudeCliProvider = {
   name: 'claude-cli',
   /**
@@ -128,14 +150,7 @@ export const claudeCliProvider = {
     const prompt = buildPrompt(messages, opts.system || messages.find(m => m.role === 'system')?.content);
     if (!prompt) return;
 
-    const args = [
-      '-p', prompt,
-      '--output-format', 'stream-json',
-      '--include-partial-messages',
-      '--verbose',
-    ];
-    const modelAlias = resolveModelAlias(opts.model);
-    if (modelAlias) args.push('--model', modelAlias);
+    const args = buildArgs(prompt, opts);
 
     if (opts.signal?.aborted) throw new AbortError('aborted before spawn');
 
@@ -248,3 +263,4 @@ export const claudeCliProvider = {
 };
 
 export { CliMissingError, CliExitError, AbortError, resolveModelAlias, buildPrompt };
+// buildArgs is also exported at its definition (lean-flag seam).

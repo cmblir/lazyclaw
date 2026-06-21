@@ -6,6 +6,19 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **`claude-cli` runs lean — much faster and on-task.** The provider spawned
+  `claude` in the user's normal environment, so every turn loaded the user's
+  global `CLAUDE.md`, skills, hooks, and all configured MCP servers (~180k
+  tokens, measured, running from a project dir) and let Claude Code act on that
+  personal config instead of lazyclaw's prompt — slow, and off-task. It now
+  runs `claude` with `--setting-sources ''` (no user/project/local settings)
+  and `--strict-mcp-config` (no MCP), so lazyclaw's own system prompt drives a
+  clean session: per-turn context dropped ~10× (≈180k → ≈18k) and responses
+  stop being polluted by the user's skills/CLAUDE.md. Pass the provider
+  `lean: false` to restore the full Claude Code environment.
+
 ### Added
 
 - **Live agent-team dashboard.** Agents gain an optional `manager` field, so a
