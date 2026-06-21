@@ -69,7 +69,7 @@ function lastRecentLine(cfgDir) {
 // when no `query` is passed. Scoped to prior sessions / trajectories /
 // memories — the skill index already has its own layer above. Best-effort:
 // any index/FTS hiccup yields no layer rather than breaking prompt composition.
-function recalledLayer(dir, query, k) {
+export function recalledLayer(dir, query, k) {
   if (!query || !String(query).trim()) return '';
   // FTS5 ANDs space-separated terms, so a natural-language message rarely
   // matches a prior doc. Build an OR query over the significant terms (bm25

@@ -38,6 +38,14 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Changed
 
+- **Chat surfaces per-turn recall.** The streaming chat path sent a fixed system
+  prompt, so it never pulled in context relevant to the CURRENT message — only
+  the agentic path (which rebuilds the prompt stack per turn) did. Each user
+  message now gets a fresh recall layer prepended to it before sending (the
+  stored session keeps the original). It rides the user turn rather than the
+  system because a warm `claude-cli` persistent session fixes its system at
+  spawn and every provider reads the user message. Best-effort + lazy (an empty
+  or missing index never blocks a reply); opt out with `cfg.chat.recall=false`.
 - **Opt-in agentic orchestrator workers (`cfg.orchestrator.agenticWorkers`).**
   An EXECUTE-phase worker could only stream text — it couldn't use tools. With
   `agenticWorkers: true` each worker runs through `runAgentTurn` instead, so it

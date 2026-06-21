@@ -61,6 +61,28 @@ function _errorHint(err) {
 const PLAN_MODE_ADDENDUM = 'You are in PLAN mode. Propose a plan; do not mutate '
   + 'anything. List the steps you would take and the tools you would use, then stop.';
 
+// Per-turn recall injection (roadmap #7). The streaming chat path sends a fixed
+// system prompt, so it never surfaced context relevant to THIS message (only the
+// agentic path, which rebuilds the prompt stack per turn, did). Prepend a fresh
+// recall layer to the CURRENT user message — not the system — because a warm
+// claude-cli persistent session fixes its system at spawn, and every provider
+// reads the user turn. Transient: returns a COPY for the send; the stored
+// session keeps the original message. recallLayer is injected (lazy-imported by
+// the caller) so better-sqlite3 stays off this module's static graph.
+export function _injectRecall(messages, cfgDir, recallLayerFn) {
+  try {
+    if (typeof recallLayerFn !== 'function' || !Array.isArray(messages)) return messages;
+    let idx = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i] && messages[i].role === 'user') { idx = i; break; }
+    }
+    if (idx < 0) return messages;
+    const layer = recallLayerFn(cfgDir, String(messages[idx].content || ''), 5);
+    if (!layer || !String(layer).trim()) return messages;
+    return messages.map((m, i) => (i === idx ? { ...m, content: `${layer}\n\n${m.content}` } : m));
+  } catch { return messages; }
+}
+
 // Fire the post-task learning loop on every successful chat turn (v5 Group A
 // C1). Fire-and-forget via queueMicrotask so the next prompt is never blocked
 // on trajectory write / synth. Shared by the streaming and agentic paths.
@@ -239,11 +261,22 @@ export function makeRunTurn({ ctx, writeFn }) {
       const maxTokens = (typeof cfgMaxTokens === 'number' && Number.isFinite(cfgMaxTokens) && cfgMaxTokens > 0)
         ? cfgMaxTokens
         : undefined;
+      // Roadmap #7 — per-turn recall: surface context relevant to THIS message
+      // by prepending a fresh recall layer to the current user turn (off via
+      // cfg.chat.recall=false). Best-effort + lazy-imported so an empty/missing
+      // index never blocks a reply and better-sqlite3 stays off the static graph.
+      let sendMessages = messages;
+      if (ctx.cfg?.chat?.recall !== false) {
+        try {
+          const { recalledLayer } = await import('../mas/prompt_stack.mjs');
+          sendMessages = _injectRecall(messages, ctx.cfgDir, recalledLayer);
+        } catch { /* recall is best-effort — never block a turn */ }
+      }
       // C8 — prompt-cache the static system prefix. The Anthropic
       // provider prefers `systemStatic` when present; non-Anthropic
       // providers ignore the field and fall back to the legacy
       // single-block path with `cache:true`.
-      for await (const chunk of prov.sendMessage(messages, {
+      for await (const chunk of prov.sendMessage(sendMessages, {
         apiKey: ctx.resolveAuthKey(activeProvName),
         model: activeModel,
         sandbox: ctx.sandboxSpec,
