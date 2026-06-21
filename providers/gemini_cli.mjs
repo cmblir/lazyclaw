@@ -225,9 +225,12 @@ export const geminiCliProvider = {
       }
     } finally {
       if (opts.signal) opts.signal.removeEventListener('abort', onAbort);
-      if (!proc.killed && exitInfo === null) {
-        try { proc.kill('SIGTERM'); } catch (_) { /* ignore */ }
-      }
+      // Unlike the streaming claude-cli/codex-cli providers (which yield chunks
+      // while the child still runs and so need a mid-stream-bail kill), gemini
+      // buffers the whole turn and `await`s the close/spawn-error race BEFORE the
+      // single yield above. By the time this finally runs the child has already
+      // exited (or we threw on spawnError before reaching here), so there is no
+      // live subprocess to reap — the old `exitInfo === null` guard was dead.
     }
   },
 };
