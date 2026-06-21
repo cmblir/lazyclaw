@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { redactSecrets } from './redact.mjs';
+import { f32ToBlob, blobToF32, blendHybrid } from './recall_blend.mjs';
 
 const SCHEMA_VERSION = 1;
 const _handles = new Map();   // configDir → { db, stmts }
@@ -64,6 +65,13 @@ function ensureSchema(db) {
       topic UNINDEXED, kind UNINDEXED
     );
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+    -- Opt-in hybrid recall (roadmap #4): doc embeddings keyed to the FTS row's
+    -- implicit rowid + scope. Stored as a Float32 BLOB; cosine runs in JS (no
+    -- native vector extension). Empty/unused unless cfg.recall.embeddings is on.
+    CREATE TABLE IF NOT EXISTS embeddings (
+      scope TEXT, rowid_ref INTEGER, vec BLOB,
+      PRIMARY KEY (scope, rowid_ref)
+    );
   `);
   const cur = db.prepare("SELECT value FROM meta WHERE key='schema_version'").get();
   if (!cur) {
@@ -95,26 +103,31 @@ function prepareStatements(db) {
     deleteSkill: db.prepare(`DELETE FROM fts_skills WHERE skill_name = ?`),
     deleteTrajectory: db.prepare(`DELETE FROM fts_trajectories WHERE trajectory_id = ?`),
     deleteMemory: db.prepare(`DELETE FROM fts_memories WHERE topic = ? AND kind = ?`),
+    // Hybrid recall: query/insert doc embeddings by (scope, FTS rowid).
+    getEmbedding: db.prepare(`SELECT vec FROM embeddings WHERE scope = ? AND rowid_ref = ?`),
+    putEmbedding: db.prepare(`INSERT OR REPLACE INTO embeddings(scope, rowid_ref, vec) VALUES (?, ?, ?)`),
     queries: {
+      // `rowid` (FTS5 implicit) is selected so a stored embedding can be joined
+      // back to its row for the cosine blend; recall() strips it from metadata.
       sessions: db.prepare(
         `SELECT 'sessions' AS scope, bm25(fts_sessions) AS bm25,
                 snippet(fts_sessions, 0, '<mark>', '</mark>', '...', 16) AS snippet,
-                session_id, turn_idx, role, ts
+                rowid AS rowid, session_id, turn_idx, role, ts
            FROM fts_sessions WHERE content MATCH ? ORDER BY bm25 LIMIT ?`),
       skills: db.prepare(
         `SELECT 'skills' AS scope, bm25(fts_skills) AS bm25,
                 snippet(fts_skills, 0, '<mark>', '</mark>', '...', 16) AS snippet,
-                skill_name, trained_by, group_name
+                rowid AS rowid, skill_name, trained_by, group_name
            FROM fts_skills WHERE content MATCH ? ORDER BY bm25 LIMIT ?`),
       trajectories: db.prepare(
         `SELECT 'trajectories' AS scope, bm25(fts_trajectories) AS bm25,
                 snippet(fts_trajectories, 0, '<mark>', '</mark>', '...', 16) AS snippet,
-                trajectory_id, agent, outcome
+                rowid AS rowid, trajectory_id, agent, outcome
            FROM fts_trajectories WHERE content MATCH ? ORDER BY bm25 LIMIT ?`),
       memories: db.prepare(
         `SELECT 'memories' AS scope, bm25(fts_memories) AS bm25,
                 snippet(fts_memories, 0, '<mark>', '</mark>', '...', 16) AS snippet,
-                topic, kind
+                rowid AS rowid, topic, kind
            FROM fts_memories WHERE content MATCH ? ORDER BY bm25 LIMIT ?`),
     },
   };
@@ -281,15 +294,21 @@ export function recall(query, opts = {}) {
   // Over-fetch when a where-filter is set: post-filter can drop most
   // hits, so request 2x k from FTS5 so the final trimmed slice has
   // enough to fill k. Capped at the FTS5-side 200 hard limit.
-  const fetchK = whereKeys.length ? Math.min(200, k * 2) : k;
+  // Hybrid blend over the same candidates needs a wider FTS pool to re-rank.
+  const blend = !!(opts.queryVector && opts.queryVector.length);
+  const fetchK = blend ? Math.min(200, Math.max(k * 4, 40))
+    : (whereKeys.length ? Math.min(200, k * 2) : k);
   const hits = [];
+  const rowmeta = [];  // parallel to hits: { scope, rowid } for the cosine join
   for (const sc of scope) {
     const stmt = s.queries[sc];
     if (!stmt) continue;
     try {
       const rows = stmt.all(safeQuery, fetchK);
       for (const r of rows) {
-        const { scope: sc2, bm25, snippet, ...metadata } = r;
+        // `rowid` is destructured OUT so it never leaks into the returned
+        // metadata (keeps the hit shape byte-stable for non-blend callers).
+        const { scope: sc2, bm25, snippet, rowid, ...metadata } = r;
         // snippet() wraps the matched term in <mark>..</mark>; recall hits
         // are fed verbatim into agent prompts, where the markup is noise.
         // Return plain text — strip the tags FTS5 injected.
@@ -306,6 +325,7 @@ export function recall(query, opts = {}) {
           if (skip) continue;
         }
         hits.push({ scope: sc2, rank: hits.length, bm25, snippet: plainSnippet, metadata });
+        rowmeta.push({ scope: sc2, rowid });
       }
     } catch (e) {
       // FTS5 MATCH syntax errors are caller mistakes; skip silently.
@@ -314,11 +334,57 @@ export function recall(query, opts = {}) {
       if (!/syntax error|no such column/i.test(e.message)) throw e;
     }
   }
-  hits.sort((a, b) => a.bm25 - b.bm25);
-  const trimmed = hits.slice(0, k);
+  // Opt-in hybrid re-rank when the caller supplies a query vector; otherwise
+  // the exact pure-FTS bm25 order (today's behavior) is preserved.
+  const getVec = (sc, rid) => { const row = s.getEmbedding.get(sc, rid); return row ? blobToF32(row.vec) : null; };
+  const ordered = blend
+    ? blendHybrid(hits, rowmeta, opts.queryVector, getVec, opts.weights)
+    : hits.sort((a, b) => a.bm25 - b.bm25);
+  const trimmed = ordered.slice(0, k);
   for (let i = 0; i < trimmed.length; i++) trimmed[i].rank = i;
   const elapsedNs = process.hrtime.bigint() - t0;
   return { query, hits: trimmed, latencyMs: Number(elapsedNs) / 1e6 };
+}
+
+// Backfill doc embeddings for FTS rows that don't have one yet. Opt-in: a no-op
+// (returns 0) when cfg.recall.embeddings is off or no embedder resolves (the
+// default / $0 path). Runs OFF the chat write hot path — call it explicitly
+// (a reindex, a CLI command, or a background pass) so a network embedding call
+// never lands on a reply. Best-effort: embed/store failures are swallowed and
+// logged so a flaky embedder can never corrupt the FTS index. Returns the
+// number of rows embedded.
+export async function backfillEmbeddings(configDir = defaultConfigDir(), cfg = {}, opts = {}) {
+  const { getEmbedder } = await import('./embedder.mjs');
+  const embedder = getEmbedder(cfg, opts);
+  if (!embedder) return 0;
+  const db = openIndex(configDir, { runIntegrityCheck: false });
+  const s = _stmts(configDir);
+  const limit = Number(opts.limit) || 500;
+  const SCOPES = {
+    sessions: 'fts_sessions', skills: 'fts_skills',
+    trajectories: 'fts_trajectories', memories: 'fts_memories',
+  };
+  let embedded = 0;
+  for (const [scope, table] of Object.entries(SCOPES)) {
+    let rows;
+    try {
+      rows = db.prepare(
+        `SELECT f.rowid AS rowid, f.content AS content FROM ${table} f
+          WHERE f.rowid NOT IN (SELECT rowid_ref FROM embeddings WHERE scope = ?)
+          LIMIT ?`).all(scope, limit);
+    } catch { continue; }
+    if (!rows.length) continue;
+    let vecs;
+    try { vecs = await embedder.embed(rows.map((r) => r.content)); }
+    catch (e) { _logIndexFailure(configDir, `embed:${scope}`, e); continue; }
+    for (let i = 0; i < rows.length; i++) {
+      const v = vecs[i];
+      if (!v || !v.length) continue;
+      try { s.putEmbedding.run(scope, rows[i].rowid, f32ToBlob(v)); embedded++; }
+      catch { /* swallow — never break the backfill on a single bad row */ }
+    }
+  }
+  return embedded;
 }
 
 export function integrityCheck(configDir = defaultConfigDir()) {
