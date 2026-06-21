@@ -8,6 +8,19 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Changed
 
+- **`claude-cli` chat is dramatically faster (whole-codebase perf pass).** A
+  user message used to cold-spawn `claude -p` THREE times (1 answer + 2 trainer)
+  and let Claude Code run an unbounded internal agent loop. Fixes: the internal
+  loop is now bounded (`--max-turns`/`--tools`; measured "make a team" 126s → 9.4s);
+  the per-turn learning hook is gated so trivial turns don't spawn 2 extra
+  `claude` (greetings/acks/short/empty turns skip synth + user-model); the
+  SQLite `integrity_check` is no longer paid on the recall/session-write hot
+  paths; and `readConfig` is mtime-cached (was re-parsed on every daemon
+  request). Opt-in **persistent session** (`cfg.chat.persistentSession=true`,
+  new `providers/claude_cli_session.mjs`) keeps one warm `claude
+  --input-format stream-json` child per conversation so the harness boots once
+  instead of every turn (measured turn 2+ ~1.1s vs ~2.2s), preserving the $0 Pro
+  subscription.
 - **`claude-cli` runs lean — much faster and on-task.** The provider spawned
   `claude` in the user's normal environment, so every turn loaded the user's
   global `CLAUDE.md`, skills, hooks, and all configured MCP servers (~180k

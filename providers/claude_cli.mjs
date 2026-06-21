@@ -156,6 +156,35 @@ export const claudeCliProvider = {
    */
   async *sendMessage(messages, opts = {}) {
     const bin = opts.bin || 'claude';
+
+    // Opt-in persistent stream-json session: reuse ONE warm `claude` per
+    // conversation (the harness boots once, not every turn). Send only the NEW
+    // user turn — the session holds prior context server-side. We must NOT fall
+    // back to a fresh one-shot spawn once a chunk has been yielded (that would
+    // re-run the turn), so only fall through on a PRE-yield failure.
+    if (opts.persistent && opts.sessionKey) {
+      const last = [...messages].reverse().find((m) => m && m.role === 'user');
+      if (last && String(last.content).trim()) {
+        const { getSession } = await import('./claude_cli_session.mjs');
+        const session = getSession(opts.sessionKey, {
+          bin, model: opts.model, cwd: opts.cwd, lean: opts.lean,
+          maxTurns: opts.maxTurns, tools: opts.tools,
+          system: opts.sessionSystem || opts.system || messages.find((m) => m.role === 'system')?.content,
+        });
+        let yielded = false;
+        try {
+          for await (const chunk of session.send(String(last.content), { signal: opts.signal, onUsage: opts.onUsage })) {
+            yielded = true;
+            yield chunk;
+          }
+          return;
+        } catch (err) {
+          if (yielded || err?.code === 'ABORT') throw err; // can't re-run mid-stream
+          // pre-yield session failure → fall through to the one-shot spawn below
+        }
+      }
+    }
+
     const prompt = buildPrompt(messages, opts.system || messages.find(m => m.role === 'system')?.content);
     if (!prompt) return;
 

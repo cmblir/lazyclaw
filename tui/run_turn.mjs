@@ -250,6 +250,13 @@ export function makeRunTurn({ ctx, writeFn }) {
         signal,
         onUsage: ctx.accumulateUsage,
         cache: true,
+        // Opt-in (cfg.chat.persistentSession): reuse one warm `claude` per
+        // conversation so the harness boots once, not every turn. claude-cli-
+        // only opts (other providers ignore them); the provider falls back to
+        // the one-shot spawn on any session failure.
+        persistent: ctx.cfg?.chat?.persistentSession === true,
+        sessionKey: (ctx.getSessionId && ctx.getSessionId()) || ctx.syntheticChatSessionId,
+        ...(sysMsg ? { sessionSystem: sysMsg.content } : {}),
         ...(maxTokens !== undefined ? { maxTokens } : {}),
         ...(sysMsg ? { systemStatic: sysMsg.content } : {}),
       })) {
