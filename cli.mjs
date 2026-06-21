@@ -249,6 +249,13 @@ async function main() {
       await (await import('./commands/chat.mjs')).cmdChat(rest.flags);
       break;
     }
+    case 'workflow': {
+      // Named declarative workflows (cfg.workflows) — add/list/show/remove/run.
+      // Distinct from the top-level `run <session-id> <file.mjs>` engine.
+      const sub = rest.positional[0];
+      await (await import('./commands/workflow_named.mjs')).cmdWorkflow(sub, rest.positional.slice(1), rest.flags);
+      break;
+    }
     case 'sessions': {
       const sub = rest.positional[0];
       await (await import('./commands/sessions.mjs')).cmdSessions(sub, rest.positional.slice(1), rest.flags);

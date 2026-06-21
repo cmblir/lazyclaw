@@ -38,6 +38,15 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **Hermes-style workflow automation — `lazyclaw workflow add/run` + cron.**
+  A declarative workflow can now be stored by name (`cfg.workflows[<name>]`) and
+  run on a schedule. `workflow add <name> <def.json> [--channel slack:#x]
+  [--cron "<spec>"] [--reply-node <id>]` persists it (and installs an OS cron
+  job `lazyclaw workflow run <name>` when `--cron` is given); `workflow run
+  <name>` executes the def and posts its reply (the named reply node, else the
+  last node's output) to the bound Slack channel; `workflow list/show/remove`
+  round it out. So a stored workflow runs on a schedule and replies in Slack —
+  no resident scheduler (the OS fires it) and no new dependency.
 - **Device tokens get a TTL, capability scope, and `nodes rotate`.** A paired
   device's bearer token never expired and carried no authorization. Now:
   `approve`/`rotate` can stamp an `expiresAt` (`--ttl <ms>`), and the gateway
