@@ -168,6 +168,12 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **Declarative workflows can run persisted + resumable.** `POST /workflows/run`
+  with a `sessionId` (or `runDeclarativeRequest({ sessionId, dir })`) runs through
+  the persistent engine: state is keyed under the workflow-state dir and a second
+  run with the same `sessionId` resumes — already-succeeded nodes are skipped.
+  The `{{ref}}` bag is pre-seeded from the prior run's success outputs, so a
+  downstream reference to a skipped node still resolves.
 - **Declarative workflows, runnable over HTTP.** Workflows were hand-written
   `.mjs` passing arbitrary node functions to the executor. You can now author a
   workflow as DATA — `{ nodes: [{ id, type, config, deps?, timeoutMs?, retry? }] }`

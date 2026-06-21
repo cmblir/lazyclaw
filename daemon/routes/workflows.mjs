@@ -237,9 +237,13 @@ export async function workflowRun(c) {
   const cfg = ctx.readConfig();
   try {
     const { runDeclarativeRequest } = await import('../../workflow/run_request.mjs');
+    // A body.sessionId opts into the persisted/resumable engine, keyed under the
+    // daemon's workflow-state dir — re-POSTing the same sessionId resumes.
+    const sessionId = (body && typeof body === 'object' && typeof body.sessionId === 'string' && body.sessionId) ? body.sessionId : undefined;
     const out = await runDeclarativeRequest(def, cfg, {
       providerLookup: (name) => PROVIDERS[name] || null,
       input: body && typeof body === 'object' ? body.input : undefined,
+      ...(sessionId ? { sessionId, dir: ctx.workflowStateDir() } : {}),
     });
     return writeJson(res, out.success ? 200 : 500, out);
   } catch (e) {
