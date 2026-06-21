@@ -26,6 +26,13 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Changed
 
+- **The orchestrator runs its worker pool in parallel by default.** A bounded
+  parallel dispatch existed for `cfg.orchestrator.concurrency >= 2`, but the
+  default when it was unset was `1` (sequential), so an unconfigured fleet ran
+  subtasks one at a time — wall-clock = sum, not max. The default is now
+  `min(3, workers.length)`. An explicit `concurrency` of `0` or `1` still
+  selects the sequential live-streaming path (each worker's tokens stream as
+  they arrive); parallel buffers per subtask and flushes in plan order.
 - **SSE streaming yields only under real backpressure.** The `/chat` and
   `/agent` token streams awaited a full event-loop turn (`setImmediate`) after
   EVERY token, even when the socket's write buffer wasn't full. `writeSse` now

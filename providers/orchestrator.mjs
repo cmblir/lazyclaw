@@ -27,7 +27,8 @@
 //         "gemini:gemini-2.5-pro"
 //       ],
 //       "maxSubtasks": 5,       // optional, default 5
-//       "concurrency": 0        // optional, 0 = sequential (visible streaming)
+//       "concurrency": 0        // optional; default = min(3, workers), parallel.
+//                               //   0 or 1 = sequential (visible live streaming)
 //     }
 //   }
 //
@@ -85,6 +86,12 @@ function _bestPlanArray(text) {
   }
   return null;
 }
+
+// Default worker-pool concurrency when cfg.orchestrator.concurrency is unset.
+// Parallel is the point of a worker pool; an unconfigured fleet should not run
+// subtasks one at a time. Clamped to the worker count at the call site, and an
+// explicit 0/1 still selects the sequential live-streaming path.
+const DEFAULT_CONCURRENCY = 3;
 
 const PLANNER_SYSTEM = `You are an orchestrator that decomposes a user request into independent subtasks for parallel worker agents.
 
@@ -262,7 +269,7 @@ export function makeOrchestratorProvider(opts = {}) {
       //                        regardless of which worker finished first.
       // The number is clamped to [1, workers.length] so a runaway value
       // can't accidentally over-subscribe a single worker.
-      const rawConcurrency = Number.isFinite(o.concurrency) ? Math.floor(o.concurrency) : 1;
+      const rawConcurrency = Number.isFinite(o.concurrency) ? Math.floor(o.concurrency) : DEFAULT_CONCURRENCY;
       const concurrency = Math.max(1, Math.min(rawConcurrency, workers.length));
       yield `### 2. Executing ${trimmed.length} subtask${trimmed.length === 1 ? '' : 's'}${concurrency > 1 ? ` (concurrency=${concurrency}, parallel)` : ''}\n\n`;
       const results = [];
