@@ -7,9 +7,10 @@
 // truthful per-turn usage), then a `result` event (cost/duration/turns; zero
 // usage, as the live CLI does under --include-partial-messages).
 //
-// One-shot mode (the `-p` path): emit one turn for the text "ok" and exit.
-// Stream mode (`--input-format stream-json`): emit one "echo" turn per stdin
-// line and stay alive — mirrors providers/claude_cli_session.mjs.
+// Modes:
+//   --hang          : emit nothing, stay alive forever (exercises the timeout)
+//   one-shot (`-p`) : emit one turn for "ok" and exit
+//   --input-format  : stream mode — one "echo" turn per stdin line, stays alive
 
 function emit(obj) { process.stdout.write(JSON.stringify(obj) + '\n'); }
 
@@ -25,20 +26,22 @@ function oneTurn(text) {
     duration_ms: 111, duration_api_ms: 99, num_turns: 1, usage: { input_tokens: 0 } });
 }
 
-if (!process.argv.includes('--input-format')) {
+if (process.argv.includes('--hang')) {
+  setInterval(() => {}, 1 << 30);                 // never exits — wedged-boot stand-in
+} else if (!process.argv.includes('--input-format')) {
   oneTurn('ok');
   process.exit(0);
+} else {
+  let buf = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (d) => {
+    buf += d;
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      if (!line.trim()) continue;
+      try { JSON.parse(line); oneTurn('echo'); } catch { /* ignore non-JSON */ }
+    }
+  });
 }
-
-let buf = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', (d) => {
-  buf += d;
-  let nl;
-  while ((nl = buf.indexOf('\n')) >= 0) {
-    const line = buf.slice(0, nl);
-    buf = buf.slice(nl + 1);
-    if (!line.trim()) continue;
-    try { JSON.parse(line); oneTurn('echo'); } catch { /* ignore non-JSON */ }
-  }
-});

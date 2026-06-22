@@ -114,6 +114,39 @@ test('runSamples: aggregates N measurements per metric and calls measureFn exact
   assert.equal(r.stats.ttftMs.median, 20);
   assert.equal(r.stats.inputTokens.median, 2);   // the deterministic token metric...
   assert.equal(r.stats.inputTokens.stdev, 0);     // ...has zero variance — defensible regardless of latency noise
+  assert.equal(r.failures.length, 0);
+});
+
+test('runSamples: timeouts and thrown errors go to failures (excluded from stats); is_error samples are kept', async () => {
+  const seq = [
+    { wallMs: 100, ttftMs: 10, inputTokens: 2, isError: false },
+    { wallMs: 9999, timedOut: true },                            // killed -> failure, excluded from stats
+    { wallMs: 300, ttftMs: 30, inputTokens: 2, isError: true },  // real (bounded hit its cap) -> kept
+    '__throw__',                                                 // spawn error -> failure
+  ];
+  let i = 0;
+  const measureFn = async () => {
+    const v = seq[i++];
+    if (v === '__throw__') throw new Error('spawn boom');
+    return v;
+  };
+  const r = await runSamples('mix', measureFn, 4);
+  assert.equal(r.samples.length, 2, 'only the two real measurements count toward stats');
+  assert.equal(r.failures.length, 2, 'one timeout + one throw');
+  assert.equal(r.stats.wallMs.max, 300, 'the 9999ms timed-out wall is NOT in the stats');
+  assert.equal(r.errors, 1, 'one kept sample carried is_error');
+});
+
+test('spawnAndMeasure: a wedged process is SIGKILLed at timeoutMs and flagged timedOut', async () => {
+  const t0 = Date.now();
+  const r = await spawnAndMeasure({
+    bin: FAKE_CLAUDE,
+    args: ['--hang', '--output-format', 'stream-json'],
+    timeoutMs: 150,
+  });
+  assert.equal(r.timedOut, true);
+  assert.ok(Date.now() - t0 < 3000, 'returns promptly after the timeout, does not hang');
+  assert.equal(r.inputTokens, null, 'nothing was emitted before the kill');
 });
 
 test('formatTable: renders a metric across conditions with median/p95/stdev', () => {

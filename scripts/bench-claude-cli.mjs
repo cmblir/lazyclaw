@@ -116,8 +116,20 @@ export function summarizeSamples(samples) {
 // measuring) and bundle the per-metric summary.
 export async function runSamples(label, measureFn, n) {
   const samples = [];
-  for (let i = 0; i < n; i++) samples.push(await measureFn(i));
-  return { label, n, samples, stats: summarizeSamples(samples) };
+  const failures = [];
+  for (let i = 0; i < n; i++) {
+    let rec;
+    try { rec = await measureFn(i); }
+    catch (e) { failures.push({ i, error: String((e && e.message) || e) }); continue; }
+    // A timed-out (killed) call is not a valid latency sample — its wall is just
+    // the timeout, which would poison the median; drop it but count it. An
+    // is_error result (e.g. bounded hit its turn cap) IS a real measurement and
+    // stays in the stats.
+    if (rec && rec.timedOut) { failures.push({ i, timedOut: true }); continue; }
+    samples.push(rec);
+  }
+  const errors = samples.filter((s) => s && s.isError).length;
+  return { label, n, samples, failures, errors, stats: summarizeSamples(samples) };
 }
 
 function fmt(v, dp = 1) {
@@ -177,7 +189,7 @@ export async function measureTextStream(run, now = () => performance.now()) {
 // stdin is IGNORED — exactly like providers/claude_cli.mjs — so we never incur
 // the CLI's ~3s "no stdin data received" wait, which a shell pipe would add and
 // which is NOT part of the real provider path.
-export async function spawnAndMeasure({ bin, args, cwd, now }) {
+export async function spawnAndMeasure({ bin, args, cwd, now, timeoutMs }) {
   const proc = spawn(bin, args, {
     cwd: cwd || process.cwd(),
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -188,12 +200,22 @@ export async function spawnAndMeasure({ bin, args, cwd, now }) {
   proc.stderr.on('data', (d) => { stderr += d; });
   let spawnErr = null;
   proc.once('error', (e) => { spawnErr = e; });
-  const rec = await measureStream(proc.stdout, now);
+  // A non-lean spawn boots the user's whole Claude Code env (incl. every MCP
+  // server) and can wedge; SIGKILL it after timeoutMs so a reproducible run can
+  // never hang. The killed sample is flagged and dropped from the stats.
+  let timedOut = false;
+  let timer = null;
+  if (timeoutMs && timeoutMs > 0) {
+    timer = setTimeout(() => { timedOut = true; try { proc.kill('SIGKILL'); } catch { /* already gone */ } }, timeoutMs);
+  }
+  const rec = await measureStream(proc.stdout, now);   // ends on EOF (incl. after a kill)
+  if (timer) clearTimeout(timer);
   await new Promise((res) => {
     if (proc.exitCode != null || spawnErr) res();
     else proc.once('close', res);
   });
-  if (spawnErr) throw spawnErr;
+  if (spawnErr && !timedOut) throw spawnErr;
+  rec.timedOut = timedOut;
   rec.stderrTail = stderr.slice(-200);
   return rec;
 }
@@ -260,6 +282,15 @@ function printReport(meta, results) {
     out.push(`${String(r.label).padEnd(26)} ${(w == null ? '—' : w.toFixed(1)).padStart(11)} `
       + `${(a == null ? '—' : a.toFixed(1)).padStart(11)} ${String(ov).padStart(11)}`);
   }
+  // Sample health: how many runs counted, how many were dropped (timeout/spawn
+  // error), how many kept samples carried is_error (a real but failed turn).
+  out.push('');
+  out.push('[sample health]');
+  out.push(`${'condition'.padEnd(26)} ${'ok'.padStart(4)} ${'dropped'.padStart(8)} ${'is_error'.padStart(9)}`);
+  for (const r of results) {
+    out.push(`${String(r.label).padEnd(26)} ${String(r.samples?.length ?? 0).padStart(4)} `
+      + `${String(r.failures?.length ?? 0).padStart(8)} ${String(r.errors ?? 0).padStart(9)}`);
+  }
   process.stdout.write(out.join('\n') + '\n');
 }
 
@@ -274,13 +305,14 @@ async function runOneShots(ctx, results) {
   for (const c of specs) {
     if (!want(c.name)) continue;
     const args = oneShotArgs(c.name, c.prompt, model);
+    const timeoutMs = c.name === 'unbounded' ? ctx.unboundedTimeoutMs : ctx.oneShotTimeoutMs;
     if (WARMUP) {
       log(`${c.name}: warmup`);
-      try { await spawnAndMeasure({ bin, args }); } catch (e) { log(`${c.name}: warmup err ${e.message}`); }
+      try { await spawnAndMeasure({ bin, args, timeoutMs }); } catch (e) { log(`${c.name}: warmup err ${e.message}`); }
     }
     const res = await runSamples(c.label, async (i) => {
       log(`${c.name}: sample ${i + 1}/${c.n}`);
-      return spawnAndMeasure({ bin, args });
+      return spawnAndMeasure({ bin, args, timeoutMs });
     }, c.n);
     results.push({ ...res, condition: c.name });
     writeOut();
@@ -321,13 +353,16 @@ async function main() {
     N: envInt('N', 10),
     N_UNBOUNDED: envInt('N_UNBOUNDED', 3),
     WARMUP: process.env.WARMUP === '0' ? 0 : 1,
+    oneShotTimeoutMs: envInt('ONESHOT_TIMEOUT_MS', 90000),
+    unboundedTimeoutMs: envInt('UNBOUNDED_TIMEOUT_MS', 240000),
     out: process.env.OUT || null,
     want: (name) => only.length === 0 || only.includes(name),
     log: (m) => process.stderr.write(`[bench] ${m}\n`),
   };
   const meta = {
     bin: ctx.bin, model: ctx.model || '(account default)', N: ctx.N, N_UNBOUNDED: ctx.N_UNBOUNDED,
-    warmup: ctx.WARMUP, node: process.version, platform: `${process.platform}-${process.arch}`,
+    warmup: ctx.WARMUP, oneShotTimeoutMs: ctx.oneShotTimeoutMs, unboundedTimeoutMs: ctx.unboundedTimeoutMs,
+    node: process.version, platform: `${process.platform}-${process.arch}`,
     prompt: ctx.prompt, toolPrompt: ctx.toolPrompt,
   };
   const results = [];
