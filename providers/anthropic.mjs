@@ -304,6 +304,21 @@ export const anthropicProvider = {
     // We collect both and emit a single opts.onUsage call right before
     // we return on message_stop.
     let usage = null;
+    let lastStop = null;
+    // Fire onUsage + (if truncated) onTruncated EXACTLY ONCE — from message_stop
+    // or, if the stream ends without it after usage was captured, the post-loop
+    // flush. stop_reason 'max_tokens' is Anthropic's hard output-cut signal.
+    let finalized = false;
+    const finalize = () => {
+      if (finalized) return;
+      finalized = true;
+      if (usage && typeof opts.onUsage === 'function') {
+        try { opts.onUsage(usage); } catch { /* never let a callback abort */ }
+      }
+      if (lastStop === 'max_tokens' && typeof opts.onTruncated === 'function') {
+        try { opts.onTruncated('max_tokens'); } catch { /* ditto */ }
+      }
+    };
     try {
     for await (const chunk of iterateWithIdleTimeout(res.body, idleMs, idleController)) {
       // A user cancel surfaces as an idle-controller abort too; map it back
@@ -329,6 +344,7 @@ export const anthropicProvider = {
         } else if (frame.event === 'message_delta' && frame.data) {
           try {
             const obj = JSON.parse(frame.data);
+            if (obj?.delta?.stop_reason) lastStop = obj.delta.stop_reason;
             const u = obj?.usage;
             if (u && usage) {
               // message_delta carries the final output_tokens — overwrite
@@ -382,9 +398,7 @@ export const anthropicProvider = {
             }
           } catch { /* skip malformed */ }
         } else if (frame.event === 'message_stop') {
-          if (usage && typeof opts.onUsage === 'function') {
-            try { opts.onUsage(usage); } catch { /* never let a callback abort */ }
-          }
+          finalize();
           return;
         } else if (frame.event === 'error' && frame.data) {
           let parsed = null;
@@ -400,6 +414,7 @@ export const anthropicProvider = {
         opts.signal.removeEventListener('abort', forwardCallerAbort);
       }
     }
+    finalize();   // flush captured usage/truncation if the stream ended without message_stop
     // Flush any pending bytes the streaming decoder was still holding.
     const tail = decoder.decode();
     if (tail) buffer += tail;
