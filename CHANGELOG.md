@@ -6,6 +6,8 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.4.0] - 2026-06-22
+
 ### Fixed
 
 - **Team (channel-bound) turns now count toward the cost cap.** A Slack channel
