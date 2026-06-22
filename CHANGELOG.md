@@ -6,6 +6,40 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.5.0] - 2026-06-22
+
+### Fixed
+
+- **Cost accounting hardened across the remaining providers.** The persistent
+  warm claude-cli session (now the default chat path) now surfaces cache tokens
+  and signals a `--max-turns` cut; `codex-cli`/`gemini`/`gemini-cli` reported
+  their prompt count as cache-inclusive while also surfacing cache-read tokens,
+  so a rate card double-billed the cached portion — those providers now report
+  `inputTokens` net of cache (matching Anthropic), so the cap prices each turn
+  once; and `gemini-cli` now reports usage on a failed (error) turn instead of
+  throwing before the tokens are counted.
+- **OpenAI tool-use surfaces malformed tool arguments.** A tool call whose
+  `arguments` is neither a string nor an object is now recorded as a tool error
+  instead of silently running the tool with `{}`.
+
+### Added
+
+- **`lazyclaw config set` writes nested dotted keys.** `config set chat.recall
+  false` now sets `chat: { recall: false }` (boolean) instead of a literal
+  `"chat.recall": "false"` string; values coerce by type (true/false → boolean,
+  clean integer/float → number, ids like `gpt-4.1` stay strings). Flat keys are
+  unchanged.
+- **Cache token metrics.** `metrics.tokensTotal` now also counts
+  `cacheReadInputTokens` / `cacheCreationInputTokens`; the Gemini tool-use
+  adapter honors `maxTokens` (output cap).
+
+### Changed
+
+- **Internal: D8 split-debt paydown.** Eight oversized modules (chat, setup,
+  agents, automation; pickers, repl, slash_dispatcher, editor) were split into
+  focused sibling modules — pure refactors, no behavior change — clearing the
+  file-size gate. No user-facing impact.
+
 ## [6.4.0] - 2026-06-22
 
 ### Fixed
