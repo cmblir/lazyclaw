@@ -6,6 +6,8 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.6.0] - 2026-06-22
+
 ### Added
 
 - **Choose an agent's Team Live avatar.** Agents gained an optional `avatar`

@@ -1,6 +1,6 @@
 {
   "name": "lazyclaw",
-  "version": "6.5.0",
+  "version": "6.6.0",
   "description": "Lazy, elegant terminal CLI for chatting with Claude / OpenAI / Gemini / Ollama, orchestrating multi-step LLM workflows, and running multi-agent Slack teams with cross-task memory. Banner-on-launch, slash-command ghost autocomplete, persistent sessions, local HTTP gateway.",
   "keywords": [
     "claude",
