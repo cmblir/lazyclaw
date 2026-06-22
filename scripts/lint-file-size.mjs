@@ -35,7 +35,6 @@ const ALLOW = {
   'commands/chat.mjs': 1253,
   'tui/pickers.mjs': 917,
   'commands/setup.mjs': 742,
-  'commands/agents.mjs': 669,
   'gateway/device_auth.mjs': 664,
   'commands/workflow.mjs': 661,
   'tui/repl.mjs': 661,
