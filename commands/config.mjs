@@ -102,11 +102,45 @@ export async function cmdConfigEdit() {
   }
 }
 
+// Coerce a CLI string value into the type it most likely represents so a
+// boolean/number setting isn't stored as a string the rest of the code then
+// mis-compares (`if (cfg.chat.recall)` is truthy for the string "false").
+//   'true' / 'false'        → boolean
+//   integer / float strings → number
+//   everything else         → the original string (provider/model/api-key/…)
+function coerceConfigValue(value) {
+  if (typeof value !== 'string') return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  // Only treat as a number when the WHOLE string is a clean numeric literal —
+  // Number('') is 0 and Number('1.2.3') is NaN, both of which we reject so
+  // ids like "gpt-4.1" or empty values stay strings.
+  if (value.trim() !== '' && /^-?(?:\d+|\d*\.\d+|\d+\.\d*)$/.test(value.trim()) && Number.isFinite(Number(value))) {
+    return Number(value);
+  }
+  return value;
+}
+
 export function cmdConfigSet(key, value) {
   const cfg = readConfig();
-  cfg[key] = value;
+  const coerced = coerceConfigValue(value);
+  if (typeof key === 'string' && key.includes('.')) {
+    // Dotted key → nested path. Walk/create each intermediate object so
+    // `chat.recall` lands as cfg.chat.recall (not a flat "chat.recall" key).
+    // A non-object value blocking the path is replaced rather than crashing.
+    const segs = key.split('.');
+    let node = cfg;
+    for (let i = 0; i < segs.length - 1; i++) {
+      const seg = segs[i];
+      if (!node[seg] || typeof node[seg] !== 'object' || Array.isArray(node[seg])) node[seg] = {};
+      node = node[seg];
+    }
+    node[segs[segs.length - 1]] = coerced;
+  } else {
+    cfg[key] = coerced;
+  }
   writeConfig(cfg);
-  console.log(JSON.stringify({ ok: true, key, value }));
+  console.log(JSON.stringify({ ok: true, key, value: coerced }));
 }
 export async function cmdDoctor() {
   await ensureRegistry();
