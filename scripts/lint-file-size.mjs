@@ -31,7 +31,7 @@ const SKIP_DIRS = new Set(['node_modules', 'tests', 'dist-lazyclaw', '.git']);
 // Pinned to the size each file had when the gate landed; tighten as files
 // are split. DO NOT raise a ceiling to make room — split the file instead.
 const ALLOW = {
-  'tui/slash_dispatcher.mjs': 1833,
+  'tui/slash_dispatcher.mjs': 1397,
   'commands/chat.mjs': 676,
   // The legacy (non-Ink) readline slash router, extracted verbatim out of
   // commands/chat.mjs to get that file back under its ceiling. It is one
