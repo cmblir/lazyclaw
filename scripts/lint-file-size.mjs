@@ -38,7 +38,7 @@ const ALLOW = {
   'gateway/device_auth.mjs': 664,
   'commands/workflow.mjs': 661,
   'tui/repl.mjs': 661,
-  'commands/automation.mjs': 582,
+  'commands/automation.mjs': 516,
 };
 
 function walk(dir, out) {
