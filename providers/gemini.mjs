@@ -171,6 +171,7 @@ function toGeminiBody(messages, opts) {
   }
   const body = { contents };
   if (systemText) body.systemInstruction = { parts: [{ text: systemText }] };
+  if (Number.isFinite(opts.maxTokens)) body.generationConfig = { maxOutputTokens: opts.maxTokens };
   return body;
 }
 
@@ -221,6 +222,8 @@ export const geminiProvider = {
 
     const decoder = new TextDecoder('utf-8', { fatal: false });
     let buffer = '';
+    let lastUsage = null;   // Gemini sends a cumulative usageMetadata; keep the last
+    let lastFinish = null;
     try {
     for await (const chunk of iterateWithIdleTimeout(res.body, idleMs, idleController)) {
       // A user cancel surfaces as an idle-controller abort too; map it back
@@ -241,6 +244,9 @@ export const geminiProvider = {
               if (typeof p?.text === 'string' && p.text) yield p.text;
             }
           }
+          if (obj?.usageMetadata) lastUsage = obj.usageMetadata;
+          const fr = obj?.candidates?.[0]?.finishReason;
+          if (fr) lastFinish = fr;
           // Some error responses surface mid-stream as {error: {...}}.
           if (obj?.error) {
             const message = obj.error.message || JSON.stringify(obj.error);
@@ -257,6 +263,21 @@ export const geminiProvider = {
       if (opts.signal && typeof AbortSignal.any !== 'function') {
         opts.signal.removeEventListener('abort', forwardCallerAbort);
       }
+    }
+    // Stream completed cleanly — surface the final usage + any truncation.
+    if (lastUsage && typeof opts.onUsage === 'function') {
+      try {
+        opts.onUsage({
+          inputTokens: lastUsage.promptTokenCount ?? null,
+          outputTokens: lastUsage.candidatesTokenCount ?? null,
+          cacheReadInputTokens: lastUsage.cachedContentTokenCount ?? 0,
+          totalCostUsd: 0,
+        });
+      } catch { /* never fail the stream on a usage callback */ }
+    }
+    if (typeof opts.onTruncated === 'function'
+        && (lastFinish === 'MAX_TOKENS' || lastFinish === 'SAFETY' || lastFinish === 'RECITATION')) {
+      try { opts.onTruncated(lastFinish); } catch { /* ditto */ }
     }
   },
 };
