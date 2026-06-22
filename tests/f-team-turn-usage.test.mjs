@@ -46,5 +46,8 @@ test('runTaskTurn fires onUsage per agent turn with provider + model + usage', a
   assert.equal(seen.length, 1, 'onUsage should fire once for the single planner turn');
   assert.equal(seen[0].provider, 'anthropic');
   assert.equal(seen[0].model, 'claude-opus-4-7');
-  assert.deepEqual(seen[0].usage, { inputTokens: 30, outputTokens: 12 });
+  assert.deepEqual(seen[0].usage, {
+    inputTokens: 30, outputTokens: 12,
+    cacheCreationInputTokens: 0, cacheReadInputTokens: 0, totalCostUsd: 0,
+  });
 });
