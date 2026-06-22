@@ -146,7 +146,10 @@ export function parseResponse(json) {
   const um = json?.usageMetadata;
   const usage = um
     ? {
-        inputTokens: um.promptTokenCount || 0,
+        // promptTokenCount is cache-INCLUSIVE; report NET (minus cached) to
+        // match Anthropic's convention so the cost cap doesn't bill the cached
+        // tokens at BOTH the input rate and the cache-read rate.
+        inputTokens: (um.promptTokenCount || 0) - (um.cachedContentTokenCount || 0),
         outputTokens: um.candidatesTokenCount || 0,
         cacheReadInputTokens: um.cachedContentTokenCount || 0,
       }

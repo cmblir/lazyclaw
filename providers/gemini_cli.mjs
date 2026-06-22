@@ -103,13 +103,17 @@ function extractUsage(stats) {
   let input = 0, output = 0, cached = 0;
   for (const m of Object.values(models)) {
     const t = m?.tokens || {};
-    input  += (t.prompt ?? t.input ?? 0);
+    // cached is a subset of prompt → report NET (prompt minus cached) so it
+    // matches Anthropic's convention and rates.mjs doesn't bill the cached
+    // tokens at BOTH the input rate and the cache-read rate. Surface cached
+    // separately so it can still bill at the cache-read rate.
+    input  += (t.prompt ?? t.input ?? 0) - (t.cached ?? 0);
     // thoughts = reasoning tokens, billed as output and reported separately from
-    // candidates (additive). cached is a subset of prompt → surface, don't sum.
+    // candidates (additive).
     output += (t.candidates ?? t.output ?? 0) + (t.thoughts ?? 0);
     cached += (t.cached ?? 0);
   }
-  if (!input && !output) return null;
+  if (!input && !output && !cached) return null;
   return { inputTokens: input, outputTokens: output, cacheReadInputTokens: cached, totalCostUsd: 0 };
 }
 

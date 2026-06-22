@@ -8,9 +8,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { extractUsage } from '../providers/gemini_cli.mjs';
 
-test('gemini-cli extractUsage: thoughts add to output, cached reported separately', () => {
+test('gemini-cli extractUsage: thoughts add to output, input is NET of cached', () => {
   const u = extractUsage({ models: { 'gemini-2.5-pro': { tokens: { prompt: 100, candidates: 50, thoughts: 200, cached: 30 } } } });
-  assert.equal(u.inputTokens, 100, 'prompt already includes cached — not summed');
+  assert.equal(u.inputTokens, 70, 'NET input = 100 prompt - 30 cached (matches Anthropic; no double-bill)');
   assert.equal(u.outputTokens, 250, 'candidates + thoughts (reasoning is billed output)');
   assert.equal(u.cacheReadInputTokens, 30);
   assert.equal(u.totalCostUsd, 0);

@@ -2,19 +2,20 @@
 // and reasoning_output_tokens is a subset of output_tokens (the OpenAI
 // Responses-API billing convention codex follows). Summing them double-counts,
 // which over-states input/output and trips the daemon cost cap early. Report
-// the totals as-is and surface cached input separately for cheaper cache-read
-// billing.
+// input NET of cached (total minus cached) to match Anthropic's convention so
+// rates.mjs doesn't bill the cached subset at BOTH the input rate and the
+// cache-read rate, and surface cached input separately for cache-read billing.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { extractUsage } from '../providers/codex_cli.mjs';
 
-test('codex extractUsage: cached_input_tokens does not double-count input; surfaced as cacheRead', () => {
+test('codex extractUsage: input is NET of cached (not double-billed); cached surfaced as cacheRead', () => {
   const u = extractUsage({
     type: 'turn.completed',
     usage: { input_tokens: 24763, cached_input_tokens: 24448, output_tokens: 122, reasoning_output_tokens: 0 },
   });
-  assert.equal(u.inputTokens, 24763, 'input_tokens already includes cached — not 49211');
+  assert.equal(u.inputTokens, 315, 'NET input = 24763 - 24448 cached (matches Anthropic; no double-bill)');
   assert.equal(u.cacheReadInputTokens, 24448, 'cached surfaced separately for cache-read billing');
   assert.equal(u.outputTokens, 122);
   assert.equal(u.totalCostUsd, 0);

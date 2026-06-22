@@ -268,7 +268,10 @@ export const geminiProvider = {
     if (lastUsage && typeof opts.onUsage === 'function') {
       try {
         opts.onUsage({
-          inputTokens: lastUsage.promptTokenCount ?? null,
+          // promptTokenCount is cache-INCLUSIVE; report NET (minus cached) to
+          // match Anthropic's convention so rates.mjs doesn't bill the cached
+          // tokens at BOTH the input rate and the cache-read rate.
+          inputTokens: (lastUsage.promptTokenCount ?? 0) - (lastUsage.cachedContentTokenCount ?? 0),
           outputTokens: lastUsage.candidatesTokenCount ?? null,
           cacheReadInputTokens: lastUsage.cachedContentTokenCount ?? 0,
           totalCostUsd: 0,

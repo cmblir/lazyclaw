@@ -37,7 +37,7 @@ test('gemini: surfaces usageMetadata via onUsage exactly once with the FINAL (no
     { candidates: [{ content: { parts: [{ text: 'i' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 11, candidatesTokenCount: 7, cachedContentTokenCount: 3 } },
   ]);
   assert.equal(seenUsage.length, 1);
-  assert.equal(seenUsage[0].inputTokens, 11, 'final cumulative count, not 5+11');
+  assert.equal(seenUsage[0].inputTokens, 8, 'NET input = 11 final cumulative - 3 cached (matches Anthropic; no double-bill)');
   assert.equal(seenUsage[0].outputTokens, 7);
   assert.equal(seenUsage[0].cacheReadInputTokens, 3);
   assert.equal(seenUsage[0].totalCostUsd, 0);

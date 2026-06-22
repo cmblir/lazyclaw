@@ -28,7 +28,7 @@ test('gemini parseResponse normalizes usage (incl. cached content tokens)', () =
   const r = geminiParse({ candidates: [{ content: { parts: [{ text: 'hi' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 9, candidatesTokenCount: 4 } });
   assert.deepEqual(r.usage, { inputTokens: 9, outputTokens: 4, cacheReadInputTokens: 0 });
   const c = geminiParse({ candidates: [{ content: { parts: [{ text: 'hi' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 9, candidatesTokenCount: 4, cachedContentTokenCount: 3 } });
-  assert.deepEqual(c.usage, { inputTokens: 9, outputTokens: 4, cacheReadInputTokens: 3 });
+  assert.deepEqual(c.usage, { inputTokens: 6, outputTokens: 4, cacheReadInputTokens: 3 });
 });
 
 test('usage is null when the response carries no token counts', () => {

@@ -140,15 +140,18 @@ function extractUsage(obj) {
   // OpenAI Responses-API convention (codex follows it): input_tokens already
   // INCLUDES cached_input_tokens, and output_tokens already INCLUDES
   // reasoning_output_tokens — they are subset breakdowns, not additive. Summing
-  // them double-counts and trips the cost cap early. Report the totals and
-  // surface cached input separately so it can bill at the cache-read rate.
-  const input = u.input_tokens ?? 0;
+  // them double-counts and trips the cost cap early. Report NET (non-cached)
+  // input — total minus the cached subset — to match Anthropic's convention so
+  // rates.mjs's single cost formula doesn't bill the cached tokens at BOTH the
+  // input rate and the cache-read rate. Surface the cached subset separately.
+  const cacheRead = u.cached_input_tokens ?? 0;
+  const input = (u.input_tokens ?? 0) - cacheRead;
   const output = u.output_tokens ?? 0;
-  if (!input && !output) return null;
+  if (!input && !output && !cacheRead) return null;
   return {
     inputTokens: input,
     outputTokens: output,
-    cacheReadInputTokens: u.cached_input_tokens ?? 0,
+    cacheReadInputTokens: cacheRead,
     totalCostUsd: 0,
   };
 }
