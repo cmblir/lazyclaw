@@ -250,6 +250,34 @@ export const claudeCliProvider = {
       });
     });
 
+    // Accumulate per-turn usage from `assistant` events. The streaming `result`
+    // event reports ZERO token usage (verified on claude 2.1.185), so reading it
+    // dropped input/output counts to 0; the truthful per-turn usage rides the
+    // `assistant` message event. Emit on the result event (which carries cost),
+    // summing across assistant events so a multi-turn run reports its total.
+    const _usage = { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, saw: false };
+    const _accumulateUsage = (obj) => {
+      if (obj?.type === 'assistant' && obj.message?.usage) {
+        const u = obj.message.usage;
+        _usage.input += u.input_tokens || 0;
+        _usage.output += u.output_tokens || 0;
+        _usage.cacheCreate += u.cache_creation_input_tokens || 0;
+        _usage.cacheRead += u.cache_read_input_tokens || 0;
+        _usage.saw = true;
+      }
+      if (obj?.type === 'result' && typeof opts.onUsage === 'function') {
+        try {
+          opts.onUsage({
+            inputTokens: _usage.saw ? _usage.input : (obj.usage?.input_tokens || 0),
+            outputTokens: _usage.saw ? _usage.output : (obj.usage?.output_tokens || 0),
+            cacheCreationInputTokens: _usage.cacheCreate,
+            cacheReadInputTokens: _usage.cacheRead,
+            totalCostUsd: obj.total_cost_usd || 0,
+          });
+        } catch (_) { /* never fail the stream on a usage callback */ }
+      }
+    };
+
     try {
       for await (const chunk of proc.stdout) {
         if (opts.signal?.aborted) throw new AbortError('aborted mid-stream');
@@ -263,26 +291,17 @@ export const claudeCliProvider = {
           try { obj = JSON.parse(line); } catch { continue; }
           const text = extractTextDelta(obj);
           if (text) yield text;
-          if (obj?.type === 'result') {
-            // Last event of a successful run carries usage + cost.
-            if (typeof opts.onUsage === 'function') {
-              try {
-                opts.onUsage({
-                  inputTokens:  obj.usage?.input_tokens || 0,
-                  outputTokens: obj.usage?.output_tokens || 0,
-                  totalCostUsd: obj.total_cost_usd || 0,
-                });
-              } catch (_) { /* never fail the stream on usage callback */ }
-            }
-          }
+          _accumulateUsage(obj);
         }
       }
-      // Drain trailing buffered line.
+      // Drain trailing buffered line — handle usage too, so a result line that
+      // isn't newline-terminated still reports tokens + cost.
       if (buffer.trim()) {
         try {
           const obj = JSON.parse(buffer.trim());
           const text = extractTextDelta(obj);
           if (text) yield text;
+          _accumulateUsage(obj);
         } catch (_) { /* incomplete tail — drop */ }
       }
       // Wait for either a clean exit or an async spawn error. On ENOENT
