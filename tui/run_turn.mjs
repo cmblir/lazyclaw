@@ -276,12 +276,18 @@ export function makeRunTurn({ ctx, writeFn }) {
       // provider prefers `systemStatic` when present; non-Anthropic
       // providers ignore the field and fall back to the legacy
       // single-block path with `cache:true`.
+      let truncated = false;
       for await (const chunk of prov.sendMessage(sendMessages, {
         apiKey: ctx.resolveAuthKey(activeProvName),
         model: activeModel,
         sandbox: ctx.sandboxSpec,
         signal,
         onUsage: ctx.accumulateUsage,
+        // Streaming providers fire this when a turn hits the model's output-token
+        // limit (finish_reason 'length' / MAX_TOKENS / stop_reason 'max_tokens' /
+        // done_reason 'length'). Warn the user instead of presenting a truncated
+        // answer as complete, mirroring the agentic path (mas/agent_turn.mjs).
+        onTruncated: () => { truncated = true; },
         cache: true,
         // Opt-in (cfg.chat.persistentSession): reuse one warm `claude` per
         // conversation so the harness boots once, not every turn. claude-cli-
@@ -300,6 +306,10 @@ export function makeRunTurn({ ctx, writeFn }) {
       _flush();
       try { writeFn('\n'); }
       catch { /* sink failure must not kill the turn */ }
+      if (truncated) {
+        try { writeFn('[truncated — the model hit its output-token limit; raise maxTokens]\n'); }
+        catch { /* sink failure must not kill the turn */ }
+      }
       messages.push({ role: 'assistant', content: acc });
       ctx.persistTurn('assistant', acc);
       _fireLearningHook(ctx, messages, activeProvName, activeModel, acc);

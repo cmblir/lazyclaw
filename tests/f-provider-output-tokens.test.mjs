@@ -164,3 +164,34 @@ test('run_turn: omits opts.maxTokens when cfg.maxTokens is not a positive finite
     assert.ok(!('maxTokens' in getCaptured()), `maxTokens must be omitted for ${String(bad)}`);
   }
 });
+
+// ── run_turn consumes the provider's onTruncated signal ───────────────────
+function makeTruncCtx(provider) {
+  const messages = [];
+  return {
+    cfg: {}, cfgDir: '/tmp/lc-run-turn-trunc', sandboxSpec: null, syntheticChatSessionId: 'syn-t',
+    getMessages: () => messages,
+    getProv: () => provider,
+    getActiveProvName: () => 'openai', getActiveModel: () => 'gpt-4.1', getSessionId: () => null,
+    persistTurn: () => {}, accumulateUsage: () => {}, resolveAuthKey: () => 'k',
+  };
+}
+
+test('run_turn: surfaces a truncation notice when the provider fires onTruncated', async () => {
+  const writes = [];
+  const ctx = makeTruncCtx({
+    name: 'openai',
+    async *sendMessage(_m, opts) { yield 'partial'; if (typeof opts.onTruncated === 'function') opts.onTruncated('length'); },
+  });
+  const runTurn = makeRunTurn({ ctx, writeFn: (s) => writes.push(s) });
+  await runTurn('hi');
+  assert.ok(/truncat/i.test(writes.join('')), 'user sees a truncation notice');
+});
+
+test('run_turn: no truncation notice on a clean turn', async () => {
+  const writes = [];
+  const ctx = makeTruncCtx({ name: 'openai', async *sendMessage() { yield 'ok'; } });
+  const runTurn = makeRunTurn({ ctx, writeFn: (s) => writes.push(s) });
+  await runTurn('hi');
+  assert.ok(!/truncat/i.test(writes.join('')), 'no notice when the turn was not truncated');
+});
