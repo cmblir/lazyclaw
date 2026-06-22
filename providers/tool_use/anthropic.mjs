@@ -144,7 +144,12 @@ export function parseResponse(json) {
   // Normalize token usage so agent_turn can accumulate spend across the loop
   // (and team turns can feed the cost cap). null when the response omits it.
   const usage = json?.usage
-    ? { inputTokens: json.usage.input_tokens || 0, outputTokens: json.usage.output_tokens || 0 }
+    ? {
+        inputTokens: json.usage.input_tokens || 0,
+        outputTokens: json.usage.output_tokens || 0,
+        cacheCreationInputTokens: json.usage.cache_creation_input_tokens || 0,
+        cacheReadInputTokens: json.usage.cache_read_input_tokens || 0,
+      }
     : null;
   if (calls.length === 0) {
     return { kind: 'final', text, truncated, usage, raw: json };

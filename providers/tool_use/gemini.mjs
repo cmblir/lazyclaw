@@ -139,12 +139,17 @@ export function parseResponse(json) {
   const text = textParts.join('');
   // finishReason MAX_TOKENS = the turn was cut at the output ceiling; the text
   // or functionCall args are partial. Flag it so the runner stops.
-  const truncated = candidate?.finishReason === 'MAX_TOKENS';
+  const fr = candidate?.finishReason;
+  const truncated = fr === 'MAX_TOKENS' || fr === 'SAFETY' || fr === 'RECITATION';
   // Normalize token usage so agent_turn can accumulate spend across the loop
   // (and team turns can feed the cost cap). null when the response omits it.
   const um = json?.usageMetadata;
   const usage = um
-    ? { inputTokens: um.promptTokenCount || 0, outputTokens: um.candidatesTokenCount || 0 }
+    ? {
+        inputTokens: um.promptTokenCount || 0,
+        outputTokens: um.candidatesTokenCount || 0,
+        cacheReadInputTokens: um.cachedContentTokenCount || 0,
+      }
     : null;
   if (calls.length === 0) {
     return { kind: 'final', text, truncated, usage, raw: json };

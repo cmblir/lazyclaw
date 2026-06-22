@@ -25,9 +25,11 @@ test('openai parseResponse flags a length (token-limit) truncation', () => {
   assert.ok(!ok.truncated, 'finish_reason stop is not truncated');
 });
 
-test('gemini parseResponse flags a MAX_TOKENS truncation', () => {
-  const cut = parseGemini({ candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: 'partial' }] } }] });
-  assert.equal(cut.truncated, true, 'finishReason MAX_TOKENS must set truncated');
+test('gemini parseResponse flags a MAX_TOKENS / SAFETY / RECITATION truncation', () => {
+  for (const fr of ['MAX_TOKENS', 'SAFETY', 'RECITATION']) {
+    const cut = parseGemini({ candidates: [{ finishReason: fr, content: { parts: [{ text: 'partial' }] } }] });
+    assert.equal(cut.truncated, true, `finishReason ${fr} must set truncated`);
+  }
   const ok = parseGemini({ candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'done' }] } }] });
   assert.ok(!ok.truncated, 'finishReason STOP is not truncated');
 });
