@@ -112,6 +112,7 @@ async function readUntilDone(proc) {
     // reports zero tokens); cost rides the result event. Accumulate so the cost
     // cap can account for this default subscription path.
     const u = { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, cost: 0, saw: false };
+    let truncated = false;   // a --max-turns cap hit (result subtype error_max_turns)
     proc.stdout.setEncoding('utf8');
     proc.stderr.setEncoding('utf8');
     proc.stdout.on('data', (chunk) => {
@@ -145,12 +146,23 @@ async function readUntilDone(proc) {
           u.saw = true;
         }
         if (obj?.type === 'result' && Number.isFinite(obj.total_cost_usd)) u.cost = obj.total_cost_usd;
+        if (obj?.type === 'result' && obj.is_error && /max_turns/.test(String(obj.subtype || ''))) truncated = true;
       }
     });
     proc.stderr.on('data', (chunk) => { stderr += chunk; });
     proc.on('error', reject);
+    const buildUsage = () => ((u.saw || u.cost)
+      ? {
+          inputTokens: u.input, outputTokens: u.output,
+          cacheCreationInputTokens: u.cacheCreate, cacheReadInputTokens: u.cacheRead,
+          totalCostUsd: u.cost,
+        }
+      : null);
     proc.on('close', (code) => {
-      if (code !== 0) {
+      // A --max-turns cap hit exits non-zero but is NOT a failure to surface as
+      // an error — return it as truncated so agent_turn stops cleanly with
+      // stoppedBy:'truncated' ("raise maxTokens") rather than a CLI exit error.
+      if (code !== 0 && !truncated) {
         // Transient upstream throttle → retriable RATE_LIMIT; otherwise keep
         // the non-retriable CLAUDE_CLI_EXIT code.
         const cls = classifyCliExit(stderr);
@@ -162,14 +174,7 @@ async function readUntilDone(proc) {
       // Prefer accumulated stream deltas; fall back to the assistant
       // record or the final result text when streaming was disabled.
       const text = acc || assistantFallback || resultText || '';
-      const usage = (u.saw || u.cost)
-        ? {
-            inputTokens: u.input, outputTokens: u.output,
-            cacheCreationInputTokens: u.cacheCreate, cacheReadInputTokens: u.cacheRead,
-            totalCostUsd: u.cost,
-          }
-        : null;
-      resolve({ text, usage });
+      resolve({ text, usage: buildUsage(), truncated });
     });
   });
 }
@@ -247,8 +252,8 @@ export async function callOnce({
   const onAbort = () => { try { proc.kill('SIGTERM'); } catch { /* gone */ } };
   if (signal) signal.addEventListener('abort', onAbort);
   try {
-    const { text, usage } = await readUntilDone(proc);
-    return { kind: 'final', text, usage, raw: null };
+    const { text, usage, truncated } = await readUntilDone(proc);
+    return { kind: 'final', text, usage, truncated, raw: null };
   } finally {
     if (signal) signal.removeEventListener('abort', onAbort);
   }

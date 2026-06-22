@@ -23,3 +23,13 @@ test('claude-cli tool-use callOnce surfaces usage from the assistant event + cos
   assert.equal(r.usage.cacheReadInputTokens, 0);
   assert.equal(r.usage.totalCostUsd, 0.0123, 'cost from the result event');
 });
+
+test('claude-cli tool-use callOnce returns truncated (not a thrown exit error) on a max-turns cut', async () => {
+  // The fake emits a result subtype error_max_turns + exits non-zero; the
+  // adapter must surface it as truncated so agent_turn stops cleanly with
+  // stoppedBy:'truncated' instead of a confusing "claude CLI exit 1" error.
+  const r = await callOnce({ messages: [{ role: 'user', content: 'please ERRMAXTURNS' }], bin: FAKE });
+  assert.equal(r.kind, 'final');
+  assert.equal(r.truncated, true);
+  assert.equal(r.text, 'partial');
+});

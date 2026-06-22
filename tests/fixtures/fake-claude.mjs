@@ -32,6 +32,15 @@ if (process.argv.includes('--hang')) {
   oneTurn('ok');                                  // emit a full turn, EOF stdout, then stay alive
   process.stdout.end();
   setInterval(() => {}, 1 << 30);
+} else if (process.argv.join(' ').includes('ERRMAXTURNS')) {
+  // A --max-turns cap hit (triggered by an ERRMAXTURNS sentinel in the prompt,
+  // since callers build their own argv): partial text, a result flagged
+  // error_max_turns, and a non-zero exit (mirrors claude 2.1.185).
+  emit({ type: 'system', subtype: 'init' });
+  emit({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } } });
+  emit({ type: 'assistant', message: { usage: { input_tokens: 2, output_tokens: 1 } } });
+  emit({ type: 'result', subtype: 'error_max_turns', is_error: true, num_turns: 2, total_cost_usd: 0.02, usage: { input_tokens: 0 } });
+  process.exit(1);
 } else if (!process.argv.includes('--input-format')) {
   oneTurn('ok');
   process.exit(0);
