@@ -137,10 +137,20 @@ function extractEventError(obj) {
 function extractUsage(obj) {
   if (!obj || typeof obj !== 'object' || obj.type !== 'turn.completed') return null;
   const u = obj.usage || {};
-  const input = (u.input_tokens ?? 0) + (u.cached_input_tokens ?? 0);
-  const output = (u.output_tokens ?? 0) + (u.reasoning_output_tokens ?? 0);
+  // OpenAI Responses-API convention (codex follows it): input_tokens already
+  // INCLUDES cached_input_tokens, and output_tokens already INCLUDES
+  // reasoning_output_tokens — they are subset breakdowns, not additive. Summing
+  // them double-counts and trips the cost cap early. Report the totals and
+  // surface cached input separately so it can bill at the cache-read rate.
+  const input = u.input_tokens ?? 0;
+  const output = u.output_tokens ?? 0;
   if (!input && !output) return null;
-  return { inputTokens: input, outputTokens: output, totalCostUsd: 0 };
+  return {
+    inputTokens: input,
+    outputTokens: output,
+    cacheReadInputTokens: u.cached_input_tokens ?? 0,
+    totalCostUsd: 0,
+  };
 }
 
 export const codexCliProvider = {
