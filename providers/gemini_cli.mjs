@@ -221,6 +221,16 @@ export const geminiCliProvider = {
       // so surface it instead of silently yielding nothing.
       const text = typeof parsed.response === 'string' ? parsed.response : '';
       if (!text && parsed.error) {
+        // A failed turn is still METERED: gemini-cli puts the partial token
+        // usage in the SAME JSON's `stats` even when the turn errored out. Bill
+        // it BEFORE throwing so a failed-but-metered turn still reaches the cost
+        // cap (the error path used to throw before extractUsage ever ran, so a
+        // failed turn leaked its tokens past accounting). Guarded so a usage
+        // callback can never mask the real error.
+        const failedUsage = extractUsage(parsed.stats);
+        if (failedUsage && typeof opts.onUsage === 'function') {
+          try { opts.onUsage(failedUsage); } catch (_) { /* never let usage hide the error */ }
+        }
         const em = parsed.error?.message
           || (typeof parsed.error === 'string' ? parsed.error : JSON.stringify(parsed.error));
         throw new CliExitError(exitInfo.code, exitInfo.signal, em);
