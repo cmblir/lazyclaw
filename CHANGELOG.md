@@ -168,8 +168,8 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
-- **Declarative workflows can be authored in YAML** ().
-  A small dependency-free parser (workflow/yaml_min.mjs) handles the subset a
+- **Declarative workflows can be authored in YAML** (`workflow add <name>
+  file.yaml`). A dependency-free parser (workflow/yaml_min.mjs) handles the subset a
   def needs — block maps, sequences of maps, scalars, inline JSON, and `|`/`>`
   block scalars — and errors clearly on anything unsupported (tabs, unclosed
   flow). JSON stays canonical; no new dependency.
