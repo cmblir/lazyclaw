@@ -35,6 +35,7 @@ export async function cmdAgentRegistry(sub, positional, flags = {}) {
           model: flags.model || '',
           tools: tools === null ? undefined : tools,
           tags: agentsMod.parseToolsFlag(flags.tags) || [],
+          avatar: flags.avatar,
           skillWrite: flags['skill-write'],
           manager: flags.manager,
         }, cfgDir);
@@ -64,12 +65,24 @@ export async function cmdAgentRegistry(sub, positional, flags = {}) {
       if (flags.tags !== undefined)         patch.tags = agentsMod.parseToolsFlag(flags.tags);
       if (flags['skill-write'] !== undefined)  patch.skillWrite = String(flags['skill-write']);
       if (flags['memory-write'] !== undefined) patch.memoryWrite = String(flags['memory-write']);
+      if (flags.avatar !== undefined)          patch.avatar = /^(none|clear|off)$/i.test(String(flags.avatar)) ? null : flags.avatar;
       if (Object.keys(patch).length === 0) {
         console.error('agent edit: no fields to update');
         process.exit(2);
       }
       try { emitJson(agentsMod.patchAgent(name, patch, cfgDir)); }
       catch (err) { console.error(`agent edit: ${err?.message || err}`); process.exit(2); }
+      return;
+    }
+    case 'set-avatar': {
+      const val = positional[1];
+      if (!name || val === undefined) {
+        console.error('Usage: lazyclaw agent set-avatar <name> <1-20|none>   (pick a built-in pixel-art sprite, or "none" to keep role inference)');
+        process.exit(2);
+      }
+      const clear = /^(none|clear|off)$/i.test(String(val));
+      try { emitJson(agentsMod.patchAgent(name, { avatar: clear ? null : val }, cfgDir)); }
+      catch (err) { console.error(`agent set-avatar: ${err?.message || err}`); process.exit(2); }
       return;
     }
     case 'remove':

@@ -90,6 +90,11 @@ function defaultShape(name) {
     tools: [...DEFAULT_TOOLS],
     tags: [],
     iconEmoji: '',
+    // Explicit Team Live sprite choice: an integer 1..20 picks one of the 20
+    // built-in pixel-art avatars (web/avatars/NN.png); null lets the dashboard
+    // keep inferring one from the agent's name/role/tags. (dashboard.js
+    // avatarIndexFor already honours rec.avatar — this is the registry side.)
+    avatar: null,
     // Optional parent agent (hierarchy). '' = top-level. A team's org tree is
     // derived from members' manager links (see teams.teamTree). Validated to
     // reference a registered agent and to never form a cycle.
@@ -124,6 +129,18 @@ function writeAtomic(filePath, obj) {
 const VALID_MEMORY_WRITE = ['auto', 'manual', 'off'];
 const VALID_SKILL_WRITE = ['auto', 'manual', 'off'];
 
+// Normalise an explicit avatar choice. null/''/undefined → null (keep the
+// dashboard's keyword inference). A value that parses to an integer 1..20 picks
+// that built-in sprite. Anything else (0, 21, fractional, non-numeric) throws.
+function validateAvatar(v) {
+  if (v === undefined || v === null || v === '') return null;
+  const n = typeof v === 'number' ? v : Number(String(v).trim());
+  if (!Number.isInteger(n) || n < 1 || n > 20) {
+    throw new AgentError('avatar must be an integer 1..20 (or null to clear)', 'AGENT_BAD_AVATAR');
+  }
+  return n;
+}
+
 // Validate a proposed `manager` (parent agent) for `name`: it must reference a
 // registered agent, may not be the agent itself, and may not close a cycle
 // (i.e. `name` must not already be an ancestor of the proposed manager).
@@ -151,7 +168,7 @@ function validateManager(name, manager, configDir) {
   return mgr;
 }
 
-export function registerAgent({ name, displayName, role = '', provider = 'claude-cli', model = '', tools, tags = [], iconEmoji = '', memoryWrite, memoryMaxChars, skillWrite, manager } = {}, configDir = defaultConfigDir()) {
+export function registerAgent({ name, displayName, role = '', provider = 'claude-cli', model = '', tools, tags = [], iconEmoji = '', avatar, memoryWrite, memoryMaxChars, skillWrite, manager } = {}, configDir = defaultConfigDir()) {
   ensureValidName(name);
   const p = agentPath(name, configDir);
   if (fs.existsSync(p)) {
@@ -175,6 +192,7 @@ export function registerAgent({ name, displayName, role = '', provider = 'claude
     tools: toolsClean,
     tags: Array.isArray(tags) ? tags : [],
     iconEmoji: String(iconEmoji || ''),
+    avatar: validateAvatar(avatar),
     memoryWrite: mw,
     memoryMaxChars: Number.isFinite(+memoryMaxChars) && +memoryMaxChars > 0 ? +memoryMaxChars : 12 * 1024,
     skillWrite: sw,
@@ -219,6 +237,9 @@ export function patchAgent(name, patch, configDir = defaultConfigDir()) {
   }
   if (patch.skillWrite !== undefined && !VALID_SKILL_WRITE.includes(patch.skillWrite)) {
     throw new AgentError(`skillWrite must be one of ${VALID_SKILL_WRITE.join(', ')}`, 'AGENT_BAD_SKILL_WRITE');
+  }
+  if (patch.avatar !== undefined) {
+    next.avatar = validateAvatar(patch.avatar);
   }
   if (patch.manager !== undefined) {
     next.manager = validateManager(name, patch.manager, configDir);
