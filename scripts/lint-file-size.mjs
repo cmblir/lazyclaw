@@ -43,7 +43,7 @@ const ALLOW = {
   'commands/setup.mjs': 706,
   'gateway/device_auth.mjs': 664,
   'commands/workflow.mjs': 661,
-  'tui/repl.mjs': 661,
+  'tui/repl.mjs': 570,
   'commands/automation.mjs': 516,
 };
 

@@ -43,171 +43,18 @@ import { ModalPicker, filterModalItems, resolveModalPick } from './modal_picker.
 import { theme } from './theme.mjs';
 import { StatusBar } from './status_bar.mjs';
 import { onConversationReset, clearTerminalScreen } from './repl_reset.mjs'; export { StatusBar };
-
-// ─── Alt-buffer mount (DEC 1049) ─────────────────────────────────────────
-//
-// Wraps the React tree with mount/unmount side-effects that enable the
-// terminal alternate screen buffer. Three-layer cleanup so the user never
-// gets stranded on the alt canvas:
-//   1. React unmount → useEffect return-fn writes \x1b[?1049l
-//   2. Rude shutdown (SIGINT/SIGTERM/SIGHUP/'exit') → same escape via
-//      process-level listeners that we install + remove on unmount.
-//   3. cursor-visible safety on unmount (\x1b[?25h) in case anything
-//      below us turned it off.
-//
-// We deliberately do NOT install an uncaughtException handler — Ink
-// already installs one and re-throws; ours would swallow the stack
-// trace (violates §1 Truthfulness / no silent catch).
-//
-// `enabled` is false for non-TTY pipelines, CI, ink-testing-library, and
-// the LAZYCLAW_NO_ALT escape hatch. When false this is a pass-through —
-// no escape sequences leak into stdout.
-export const ALT_BUFFER_ENTER = '\x1b[?1049h';
-export const ALT_BUFFER_LEAVE = '\x1b[?1049l';
-export const CURSOR_VISIBLE   = '\x1b[?25h';
-
-// Rendering-mode decision. Default = Static scrollback (no flicker; splash
-// prints once + scrolls naturally). Alt-buffer fullscreen is opt-in via
-// LAZYCLAW_ALT=1; LAZYCLAW_NO_ALT=1 forces it off. TTY-only either way.
-export function computeAltEnabled(env, hasTTY) {
-  const e = env || {};
-  return !!hasTTY && !!e.LAZYCLAW_ALT && !e.LAZYCLAW_NO_ALT;
-}
-
-export function FullScreen({ enabled, children }) {
-  useEffect(() => {
-    if (!enabled) return undefined;
-    // Mount: enter alternate screen buffer.
-    try { process.stdout.write(ALT_BUFFER_ENTER); } catch { /* swallow — stdout closed */ }
-
-    // Rude-shutdown listeners. Each writes 1049l + cursor-visible so the
-    // terminal is restored even if React never gets a chance to unmount
-    // (e.g. parent process kills us with SIGTERM).
-    const restore = () => {
-      try { process.stdout.write(ALT_BUFFER_LEAVE + CURSOR_VISIBLE); } catch {}
-    };
-    const onExit = () => { restore(); };
-    const onSignal = () => { restore(); };
-    process.once('exit', onExit);
-    process.once('SIGINT', onSignal);
-    process.once('SIGTERM', onSignal);
-    process.once('SIGHUP', onSignal);
-
-    return () => {
-      // React unmount: restore primary buffer.
-      restore();
-      process.removeListener('exit', onExit);
-      process.removeListener('SIGINT', onSignal);
-      process.removeListener('SIGTERM', onSignal);
-      process.removeListener('SIGHUP', onSignal);
-    };
-  }, [enabled]);
-  return children;
-}
-
-// ─── Pure state ──────────────────────────────────────────────────────────
-//
-// makeReplState stays callable with zero args (existing tests rely on it).
-// The new fields default to empty so legacy callers see no behavior change.
-export function makeReplState(opts) {
-  const splashItem = opts && opts.splashItem ? opts.splashItem : null;
-  return {
-    streaming: false,
-    controller: null,
-    pendingPrepend: null,
-    nextTurnFirstMessage: null,
-    history: [],
-    scrollback: splashItem ? [splashItem] : [],
-    liveAssistant: '',
-    turnCounter: 0,
-  };
-}
-
-export function onUserInput(state, { text, controller }) {
-  if (state.streaming && state.controller) {
-    // mid-stream interrupt — abort current turn, queue text for next turn.
-    try { state.controller.abort(); } catch {}
-    return { ...state, pendingPrepend: text };
-  }
-  // idle — start a new turn. Append a 'user' entry to scrollback so the
-  // sticky-layout caller sees the prompt history above the live stream.
-  const id = `u-${state.turnCounter}`;
-  return {
-    ...state,
-    streaming: true,
-    controller,
-    history: [...state.history, text],
-    scrollback: [...state.scrollback, { kind: 'user', id, text }],
-    turnCounter: state.turnCounter + 1,
-  };
-}
-
-export function onEscape(state) {
-  if (state.streaming && state.controller) {
-    try { state.controller.abort(); } catch {}
-  }
-  // Drop any partial live assistant text on explicit Esc — the user is
-  // telling us to discard, not to keep.
-  return {
-    ...state,
-    streaming: false,
-    controller: null,
-    pendingPrepend: null,
-    liveAssistant: '',
-  };
-}
-
-// Stream chunk arrives. Completed lines are committed to the <Static>
-// scrollback immediately (so they scroll up ABOVE the sticky editor), and only
-// the in-progress trailing partial stays in the live region. Without this, a
-// reply taller than the terminal grew the live frame past the viewport and
-// spilled BELOW the input box (long orchestrator replies). Chunks without a
-// newline still just accumulate (the prior behaviour), so short replies and the
-// existing reducer tests are unchanged.
-export function onStreamChunk(state, { chunk }) {
-  const buf = state.liveAssistant + chunk;
-  const nl = buf.lastIndexOf('\n');
-  if (nl < 0) return { ...state, liveAssistant: buf };
-  const complete = buf.slice(0, nl);          // one or more whole lines
-  const remainder = buf.slice(nl + 1);        // trailing partial (may be '')
-  const id = `as-${state.turnCounter}-${state.scrollback.length}`;
-  return {
-    ...state,
-    scrollback: [...state.scrollback, { kind: 'assistant', id, text: complete }],
-    liveAssistant: remainder,
-  };
-}
-
-export function onTurnComplete(state, { reason, error } = {}) {
-  const promoted = state.pendingPrepend;
-  const suffix = reason === 'aborted' ? ' [aborted]'
-              : reason === 'error'   ? (error ? ` [error: ${error}]` : ' [error]')
-              : '';
-  const text = (state.liveAssistant || '') + suffix;
-  // Commit any accumulated live text to scrollback. If the turn produced
-  // nothing AND wasn't an error/abort, skip the empty append.
-  const shouldCommit = text.length > 0 && (state.liveAssistant.length > 0 || suffix.length > 0);
-  const id = `a-${state.turnCounter}`;
-  const kind = reason === 'error' ? 'error' : 'assistant';
-  const nextScrollback = shouldCommit
-    ? [...state.scrollback, { kind, id, text }]
-    : state.scrollback;
-  return {
-    ...state,
-    streaming: false,
-    controller: null,
-    pendingPrepend: null,
-    nextTurnFirstMessage: promoted,
-    liveAssistant: '',
-    scrollback: nextScrollback,
-    turnCounter: state.turnCounter + 1,
-  };
-}
-
-export function consumeNextTurnFirstMessage(state) {
-  const msg = state.nextTurnFirstMessage;
-  return [{ ...state, nextTurnFirstMessage: null }, msg];
-}
+// Alt-buffer (DEC 1049) mount cluster moved to ./repl_altbuffer.mjs and pure
+// state reducers moved to ./repl_reducers.mjs (file-size gate). Re-exported so
+// every existing caller + test sees them on repl.mjs, and imported locally
+// because the ReplApp body binds them directly.
+import { computeAltEnabled, FullScreen } from './repl_altbuffer.mjs';
+export { ALT_BUFFER_ENTER, ALT_BUFFER_LEAVE, CURSOR_VISIBLE, computeAltEnabled, FullScreen } from './repl_altbuffer.mjs';
+import {
+  makeReplState, onUserInput, onEscape, onStreamChunk, onTurnComplete,
+} from './repl_reducers.mjs';
+export {
+  makeReplState, onUserInput, onEscape, onStreamChunk, onTurnComplete, consumeNextTurnFirstMessage,
+} from './repl_reducers.mjs';
 
 // ─── React mount ─────────────────────────────────────────────────────────
 //
