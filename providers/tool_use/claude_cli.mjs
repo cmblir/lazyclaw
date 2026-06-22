@@ -108,6 +108,10 @@ async function readUntilDone(proc) {
     let acc = '';
     let assistantFallback = '';
     let resultText = '';
+    // Per-turn usage rides the `assistant` event (the streaming `result` event
+    // reports zero tokens); cost rides the result event. Accumulate so the cost
+    // cap can account for this default subscription path.
+    const u = { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, cost: 0, saw: false };
     proc.stdout.setEncoding('utf8');
     proc.stderr.setEncoding('utf8');
     proc.stdout.on('data', (chunk) => {
@@ -132,6 +136,15 @@ async function readUntilDone(proc) {
         if (obj?.type === 'result' && typeof obj.result === 'string') {
           resultText = obj.result;
         }
+        if (obj?.type === 'assistant' && obj?.message?.usage) {
+          const mu = obj.message.usage;
+          u.input += mu.input_tokens || 0;
+          u.output += mu.output_tokens || 0;
+          u.cacheCreate += mu.cache_creation_input_tokens || 0;
+          u.cacheRead += mu.cache_read_input_tokens || 0;
+          u.saw = true;
+        }
+        if (obj?.type === 'result' && Number.isFinite(obj.total_cost_usd)) u.cost = obj.total_cost_usd;
       }
     });
     proc.stderr.on('data', (chunk) => { stderr += chunk; });
@@ -149,7 +162,14 @@ async function readUntilDone(proc) {
       // Prefer accumulated stream deltas; fall back to the assistant
       // record or the final result text when streaming was disabled.
       const text = acc || assistantFallback || resultText || '';
-      resolve(text);
+      const usage = (u.saw || u.cost)
+        ? {
+            inputTokens: u.input, outputTokens: u.output,
+            cacheCreationInputTokens: u.cacheCreate, cacheReadInputTokens: u.cacheRead,
+            totalCostUsd: u.cost,
+          }
+        : null;
+      resolve({ text, usage });
     });
   });
 }
@@ -227,8 +247,8 @@ export async function callOnce({
   const onAbort = () => { try { proc.kill('SIGTERM'); } catch { /* gone */ } };
   if (signal) signal.addEventListener('abort', onAbort);
   try {
-    const text = await readUntilDone(proc);
-    return { kind: 'final', text, raw: null };
+    const { text, usage } = await readUntilDone(proc);
+    return { kind: 'final', text, usage, raw: null };
   } finally {
     if (signal) signal.removeEventListener('abort', onAbort);
   }
