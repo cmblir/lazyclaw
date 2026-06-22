@@ -245,6 +245,7 @@ export const openaiProvider = {
     // shape that mirrors the anthropic provider's onUsage payload so
     // callers don't have to special-case per provider.
     let usage = null;
+    let lastFinish = null;
     // OpenAI streams tool_calls as deltas with an `index` we use as the
     // accumulation key. Each delta may carry a partial id, name, and/or
     // arguments string. We assemble until the stream signals
@@ -267,6 +268,21 @@ export const openaiProvider = {
         });
       } catch { /* never let a callback abort the stream */ }
     };
+    // Fire onUsage + (if truncated) onTruncated EXACTLY ONCE — from the [DONE]
+    // sentinel, or from the post-loop flush if the upstream closed after the
+    // usage frame without ever sending [DONE].
+    let finalized = false;
+    const finalize = () => {
+      if (finalized) return;
+      finalized = true;
+      for (const idx of Array.from(toolCallsByIndex.keys())) flushToolCall(idx);
+      if (usage && typeof opts.onUsage === 'function') {
+        try { opts.onUsage(usage); } catch { /* never let a callback abort */ }
+      }
+      if (lastFinish === 'length' && typeof opts.onTruncated === 'function') {
+        try { opts.onTruncated('length'); } catch { /* ditto */ }
+      }
+    };
     try {
     for await (const chunk of iterateWithIdleTimeout(res.body, idleMs, idleController)) {
       // A user cancel surfaces as an idle-controller abort too; map it back
@@ -278,11 +294,7 @@ export const openaiProvider = {
         consumed = frame.nextCursor;
         if (!frame.data) continue;
         if (frame.data === '[DONE]') {
-          // Drain any tool calls that haven't been flushed by finish_reason.
-          for (const idx of Array.from(toolCallsByIndex.keys())) flushToolCall(idx);
-          if (usage && typeof opts.onUsage === 'function') {
-            try { opts.onUsage(usage); } catch { /* never let a callback abort */ }
-          }
+          finalize();
           return;
         }
         try {
@@ -309,6 +321,7 @@ export const openaiProvider = {
               toolCallsByIndex.set(idx, cur);
             }
           }
+          if (choice?.finish_reason) lastFinish = choice.finish_reason;
           if (choice?.finish_reason === 'tool_calls') {
             for (const idx of Array.from(toolCallsByIndex.keys())) flushToolCall(idx);
           }
@@ -323,6 +336,7 @@ export const openaiProvider = {
         opts.signal.removeEventListener('abort', forwardCallerAbort);
       }
     }
+    finalize();   // flush captured usage/truncation if the stream ended without [DONE]
     const tail = decoder.decode();
     if (tail) buffer += tail;
   },
