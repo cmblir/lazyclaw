@@ -42,6 +42,42 @@ test('a truncated tool_calls turn is still flagged truncated (do not act on part
   assert.equal(cut.truncated, true);
 });
 
+test('openai parseResponse flags a tool_call whose arguments are neither string nor object', () => {
+  // arguments as a number → unexpected type. Must surface a parseError so the
+  // call is a tool failure, not a silent {} run. Mirrors the malformed-string case.
+  const numArgs = parseOpenAI({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{ id: 'c1', function: { name: 'noop', arguments: 7 } }] } }] });
+  const numCall = numArgs.calls.find((c) => c.name === 'noop');
+  assert.ok(numCall.parseError, 'a numeric arguments value must record a parseError');
+  assert.match(numCall.parseError, /unexpected tool arguments type/i);
+  assert.match(numCall.parseError, /number/);
+  // arguments as an array → typeof 'object' but not a plain object map; the
+  // adapter treats arrays as objects (typeof []==='object'), so an array is
+  // passed through as input rather than erroring — assert that contract holds.
+  const arrArgs = parseOpenAI({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{ id: 'c2', function: { name: 'noop', arguments: [1, 2] } }] } }] });
+  const arrCall = arrArgs.calls.find((c) => c.name === 'noop');
+  assert.ok(!arrCall.parseError, 'an array (typeof object) is not flagged by the type guard');
+});
+
+test('runAgentTurn surfaces an OpenAI non-string non-object args tool call as a tool failure', async () => {
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls++;
+    if (calls === 1) {
+      // arguments is a number → unexpected type, not a string and not an object.
+      return { ok: true, json: async () => ({ choices: [{ finish_reason: 'tool_calls', message: { tool_calls: [{ id: 'c1', function: { name: 'noop', arguments: 42 } }] } }] }) };
+    }
+    return { ok: true, json: async () => ({ choices: [{ finish_reason: 'stop', message: { content: 'ok done' } }] }) };
+  };
+  const r = await runAgentTurn({
+    agent: { provider: 'openai', model: 'gpt-4', tools: ['noop'] },
+    userMessage: 'hi', fetchImpl, apiKey: 'k', maxIterations: 3,
+  });
+  const failed = (r.toolCalls || []).find((t) => t.name === 'noop');
+  assert.ok(failed, 'the bad-args tool call must be recorded');
+  assert.equal(failed.ok, false, 'unexpected args type must be a tool failure, not a silent {} run');
+  assert.match(failed.result?.error || '', /unexpected tool arguments type/i);
+});
+
 test('runAgentTurn stops with stoppedBy=truncated on a length-cut response (does not return it as final)', async () => {
   const fetchImpl = async () => ({ ok: true, json: async () => ({ choices: [{ finish_reason: 'length', message: { content: 'partial answer cut off' } }] }) });
   const r = await runAgentTurn({

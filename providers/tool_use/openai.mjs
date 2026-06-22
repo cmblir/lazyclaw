@@ -131,6 +131,13 @@ export function parseResponse(json) {
       else { try { input = JSON.parse(a); } catch (e) { input = {}; parseError = `malformed tool arguments: ${e.message}`; } }
     } else if (a && typeof a === 'object') {
       input = a;
+    } else if (a !== undefined && a !== null) {
+      // arguments is present but neither a string nor an object (e.g. a number
+      // or boolean) — an unexpected wire shape. Surface it as a tool failure
+      // instead of silently running the tool with {} (mirrors the malformed
+      // JSON-string branch above).
+      input = {};
+      parseError = `unexpected tool arguments type: ${typeof a}`;
     }
     return { id: tc.id, name: tc?.function?.name, input, ...(parseError ? { parseError } : {}) };
   });
