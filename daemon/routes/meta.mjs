@@ -65,6 +65,35 @@ export async function dashboardJs(c) {
   return serveWebFile(c, 'dashboard.js', 'text/javascript; charset=utf-8');
 }
 
+// Serve a custom agent character image (web app: <img src="/agent-avatars/NN">).
+// These are user-supplied photos copied under <configDir>/agent-avatars/ by
+// `lazyclaw agent set-avatar`. Served from the config dir (NOT the package web/
+// dir) since they're per-install user data. The filename is constrained to
+// `<word>.<ext>` so no path traversal escapes the agent-avatars directory.
+const _AGENT_AVATAR_CT = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.webp': 'image/webp',
+};
+export async function agentAvatar(c) {
+  const { res } = c;
+  const m = /^\/agent-avatars\/([A-Za-z0-9_-]+\.[a-z]+)$/.exec(c.path || '');
+  const file = m && m[1];
+  const ct = file && _AGENT_AVATAR_CT[nodePath.extname(file).toLowerCase()];
+  const base = c.gwConfigDir;
+  if (!file || file.includes('..') || !ct || !base) {
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+    return res.end('not found\n');
+  }
+  try {
+    const body = _readAssetCached(nodePath.join(base, 'agent-avatars', file));
+    res.writeHead(200, { 'content-type': ct, 'cache-control': 'no-cache' });
+    return res.end(body);
+  } catch (e) {
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+    return res.end(`not found: ${file} (${e?.message || e})\n`);
+  }
+}
+
 export async function dashboard(c) {
   const { res } = c;
           // Serve the lazyclaw-only web dashboard (a single static

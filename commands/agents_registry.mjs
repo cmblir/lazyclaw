@@ -77,12 +77,21 @@ export async function cmdAgentRegistry(sub, positional, flags = {}) {
     case 'set-avatar': {
       const val = positional[1];
       if (!name || val === undefined) {
-        console.error('Usage: lazyclaw agent set-avatar <name> <1-20|none>   (pick a built-in pixel-art sprite, or "none" to keep role inference)');
+        console.error('Usage: lazyclaw agent set-avatar <name> <1-20 | none | <image-file> | http(s)://url>\n  1-20      pick a built-in pixel-art sprite\n  none      keep the role-inferred default\n  file/url  use a custom character photo');
         process.exit(2);
       }
-      const clear = /^(none|clear|off)$/i.test(String(val));
-      try { emitJson(agentsMod.patchAgent(name, { avatar: clear ? null : val }, cfgDir)); }
-      catch (err) { console.error(`agent set-avatar: ${err?.message || err}`); process.exit(2); }
+      const v = String(val).trim();
+      try {
+        if (/^(none|clear|off)$/i.test(v)) {
+          emitJson(agentsMod.patchAgent(name, { avatar: null, avatarImage: null }, cfgDir));
+        } else if (/^\d+$/.test(v)) {
+          // a built-in sprite index — clear any custom image so it shows through
+          emitJson(agentsMod.patchAgent(name, { avatar: v, avatarImage: null }, cfgDir));
+        } else {
+          // a local image file or a remote URL
+          emitJson(agentsMod.setAgentAvatarImage(name, val, cfgDir));
+        }
+      } catch (err) { console.error(`agent set-avatar: ${err?.message || err}`); process.exit(2); }
       return;
     }
     case 'remove':

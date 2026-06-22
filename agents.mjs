@@ -95,6 +95,11 @@ function defaultShape(name) {
     // keep inferring one from the agent's name/role/tags. (dashboard.js
     // avatarIndexFor already honours rec.avatar — this is the registry side.)
     avatar: null,
+    // Optional custom character image: a ready-to-use <img src> — either a
+    // remote http(s) URL or a daemon-served '/agent-avatars/<file>' path for a
+    // photo the user supplied (copied under <configDir>/agent-avatars/). null =
+    // none. Takes precedence over `avatar` and the keyword inference.
+    avatarImage: null,
     // Optional parent agent (hierarchy). '' = top-level. A team's org tree is
     // derived from members' manager links (see teams.teamTree). Validated to
     // reference a registered agent and to never form a cycle.
@@ -241,11 +246,52 @@ export function patchAgent(name, patch, configDir = defaultConfigDir()) {
   if (patch.avatar !== undefined) {
     next.avatar = validateAvatar(patch.avatar);
   }
+  if (patch.avatarImage !== undefined) {
+    next.avatarImage = (patch.avatarImage == null || patch.avatarImage === '') ? null : String(patch.avatarImage);
+  }
   if (patch.manager !== undefined) {
     next.manager = validateManager(name, patch.manager, configDir);
   }
   writeAtomic(agentPath(name, configDir), next);
   return next;
+}
+
+// Supported custom-avatar image types → their served content-type. svg is
+// deliberately excluded (inline-script XSS risk in an <img>/object context).
+export const AVATAR_IMAGE_TYPES = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif', '.webp': 'image/webp',
+};
+
+// Point an agent at a custom character image. `src` is either a remote http(s)
+// URL (stored verbatim) or a path to a local image file (copied into
+// <configDir>/agent-avatars/<name><ext> and stored as a daemon-served
+// '/agent-avatars/<name><ext>' path). Returns the patched record. The image
+// takes precedence over the numeric sprite + keyword inference in the dashboard.
+export function setAgentAvatarImage(name, src, configDir = defaultConfigDir()) {
+  if (!getAgent(name, configDir)) throw new AgentError(`no agent "${name}"`, 'AGENT_NO_AGENT');
+  const s = String(src ?? '').trim();
+  if (!s) throw new AgentError('avatar image source required (a file path or http(s) URL)', 'AGENT_BAD_AVATAR_IMAGE');
+  if (/^https?:\/\//i.test(s)) {
+    return patchAgent(name, { avatarImage: s }, configDir);
+  }
+  const ext = path.extname(s).toLowerCase();
+  if (!AVATAR_IMAGE_TYPES[ext]) {
+    throw new AgentError(`unsupported image type "${ext || '(none)'}" — use png/jpg/jpeg/gif/webp or an http(s) URL`, 'AGENT_BAD_AVATAR_IMAGE');
+  }
+  if (!fs.existsSync(s) || !fs.statSync(s).isFile()) {
+    throw new AgentError(`no such image file: ${s}`, 'AGENT_BAD_AVATAR_IMAGE');
+  }
+  const destDir = path.join(configDir, 'agent-avatars');
+  fs.mkdirSync(destDir, { recursive: true });
+  // Drop any previously stored image for this agent (it may have a different
+  // extension) so a re-point doesn't leave a stale file shadowing the new one.
+  for (const e of Object.keys(AVATAR_IMAGE_TYPES)) {
+    const old = path.join(destDir, `${name}${e}`);
+    if (fs.existsSync(old)) fs.unlinkSync(old);
+  }
+  fs.copyFileSync(s, path.join(destDir, `${name}${ext}`));
+  return patchAgent(name, { avatarImage: `/agent-avatars/${name}${ext}` }, configDir);
 }
 
 export function removeAgent(name, configDir = defaultConfigDir()) {

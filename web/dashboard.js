@@ -1409,7 +1409,13 @@
       }
       return 1; // generic PM look
     }
-    function avatarSrc(rec) { return `/avatars/${String(avatarIndexFor(rec)).padStart(2, '0')}.png`; }
+    // A user-supplied custom image (set via `lazyclaw agent set-avatar`) wins
+    // over the picked/inferred built-in sprite. rec.avatarImage is already a
+    // ready-to-use src (a remote URL or a daemon-served /agent-avatars/ path).
+    function avatarSrc(rec) {
+      if (rec && rec.avatarImage) return rec.avatarImage;
+      return `/avatars/${String(avatarIndexFor(rec)).padStart(2, '0')}.png`;
+    }
     // Build the { name, children[] } tree rooted at the lead (mirrors teamTree).
     function buildTeamTree(team, byId) {
       const lead = team.lead;
