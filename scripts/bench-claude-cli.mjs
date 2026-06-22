@@ -27,7 +27,12 @@
 //                     num_turns, is_error, usage:{ all zeros } }            <- cost/timing/turns
 
 import { performance } from 'node:perf_hooks';
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import { summarize } from './bench-stats.mjs';
+import { buildArgs } from '../providers/claude_cli.mjs';
+import { getSession, _resetSessions } from '../providers/claude_cli_session.mjs';
 
 // Pull a streamed text delta out of one parsed stream-json object ('' if none).
 function extractTextDelta(obj) {
@@ -120,16 +125,218 @@ function fmt(v, dp = 1) {
 }
 
 // Render one metric across conditions as a fixed-width median/p95/stdev table.
-export function formatTable(results, metric, unit = '') {
+// dp controls decimals (cost needs 4; ms/tokens read fine at 1).
+export function formatTable(results, metric, unit = '', dp = 1) {
   const head = `${'condition'.padEnd(26)} ${'median'.padStart(11)} ${'p95'.padStart(11)} `
     + `${'stdev'.padStart(10)} ${'n'.padStart(4)}`;
   const lines = [unit ? `[${metric} / ${unit}]` : `[${metric}]`, head];
   for (const r of results) {
     const s = (r.stats && r.stats[metric]) || {};
-    lines.push(`${String(r.label).padEnd(26)} ${fmt(s.median).padStart(11)} `
-      + `${fmt(s.p95).padStart(11)} ${fmt(s.stdev).padStart(10)} ${String(s.n ?? 0).padStart(4)}`);
+    lines.push(`${String(r.label).padEnd(26)} ${fmt(s.median, dp).padStart(11)} `
+      + `${fmt(s.p95, dp).padStart(11)} ${fmt(s.stdev, dp).padStart(10)} ${String(s.n ?? 0).padStart(4)}`);
   }
   return lines.join('\n');
 }
 
+// Measure the PERSISTENT-session path. The warm session yields plain text
+// chunks (not raw stream-json) and surfaces usage via an onUsage callback, so
+// here latency comes from chunk arrival and tokens from the callback. (The
+// session's onUsage reads result.usage, which the live CLI reports as zero
+// under streaming — so persistent token figures are not the truthful per-turn
+// usage; that win is captured on the one-shot path. Persistent is about the
+// boot-amortization LATENCY: turn 1 cold-boots the harness, turn 2 is warm.)
+export async function measureTextStream(run, now = () => performance.now()) {
+  const t0 = now();
+  let ttftMs = null;
+  let textLen = 0;
+  let usage = null;
+  for await (const chunk of run((u) => { usage = u; })) {
+    if (ttftMs === null) ttftMs = now() - t0;
+    textLen += String(chunk).length;
+  }
+  const wallMs = now() - t0;
+  const ttft = ttftMs == null ? wallMs : ttftMs;
+  return {
+    ttftMs: ttft,
+    wallMs,
+    genMs: wallMs - ttft,
+    textLen,
+    inputTokens: usage ? (usage.inputTokens ?? null) : null,
+    outputTokens: usage ? (usage.outputTokens ?? null) : null,
+    costUsd: usage ? (usage.totalCostUsd ?? null) : null,
+    cacheCreationTokens: null,
+    cacheReadTokens: null,
+    claudeApiMs: null,
+    claudeDurationMs: null,
+    numTurns: null,
+    isError: null,
+  };
+}
+
+// Spawn `claude` (or a fake) with a given argv and measure one one-shot turn.
+// stdin is IGNORED — exactly like providers/claude_cli.mjs — so we never incur
+// the CLI's ~3s "no stdin data received" wait, which a shell pipe would add and
+// which is NOT part of the real provider path.
+export async function spawnAndMeasure({ bin, args, cwd, now }) {
+  const proc = spawn(bin, args, {
+    cwd: cwd || process.cwd(),
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  proc.stdout.setEncoding('utf8');
+  let stderr = '';
+  proc.stderr.setEncoding('utf8');
+  proc.stderr.on('data', (d) => { stderr += d; });
+  let spawnErr = null;
+  proc.once('error', (e) => { spawnErr = e; });
+  const rec = await measureStream(proc.stdout, now);
+  await new Promise((res) => {
+    if (proc.exitCode != null || spawnErr) res();
+    else proc.once('close', res);
+  });
+  if (spawnErr) throw spawnErr;
+  rec.stderrTail = stderr.slice(-200);
+  return rec;
+}
+
+// The bounded/unbounded conditions share a toolset and a tool-inducing prompt;
+// only the --max-turns cap differs, so the difference in wall time / num_turns
+// is the bounded-loop fix in isolation (not a tool-vs-no-tool artifact).
+export const TOOLSET = 'Read,Grep,Glob,Bash';
+export const UNBOUNDED_TURNS = 12;
+
+// Build the one-shot argv for a named condition by delegating to the provider's
+// own buildArgs(), so we measure EXACTLY the argv lazyclaw would run.
+export function oneShotArgs(name, prompt, model) {
+  const base = { model };
+  switch (name) {
+    case 'lean':      return buildArgs(prompt, base);
+    case 'nonlean':   return buildArgs(prompt, { ...base, lean: false });
+    case 'bounded':   return buildArgs(prompt, { ...base, maxTurns: 1, tools: TOOLSET });
+    case 'unbounded': return buildArgs(prompt, { ...base, maxTurns: UNBOUNDED_TURNS, tools: TOOLSET });
+    default: throw new Error(`unknown one-shot condition: ${name}`);
+  }
+}
+
 export { extractTextDelta };
+
+// ───────────────────────────── live runner (script-guarded) ────────────────
+// Spawns the REAL `claude` and is subscription-billed; never runs on import.
+
+function envInt(name, def) {
+  const v = parseInt(process.env[name] || '', 10);
+  return Number.isFinite(v) && v > 0 ? v : def;
+}
+
+const REPORT_METRICS = [
+  ['wallMs', 'ms (external wall: spawn+boot+model+parse)', 1],
+  ['ttftMs', 'ms (time to first streamed token)', 1],
+  ['genMs', 'ms (first token -> done)', 1],
+  ['claudeApiMs', 'ms (claude self-reported API round-trip)', 1],
+  ['inputTokens', 'tokens (uncached input — deterministic)', 1],
+  ['cacheReadTokens', 'tokens (cache read)', 1],
+  ['outputTokens', 'tokens', 1],
+  ['numTurns', 'turns', 1],
+  ['costUsd', 'usd', 4],
+];
+
+function printReport(meta, results) {
+  const out = [];
+  out.push('# claude-cli benchmark — median / p95 / stdev over N samples');
+  out.push(JSON.stringify(meta));
+  for (const [metric, unit, dp] of REPORT_METRICS) {
+    out.push('');
+    out.push(formatTable(results, metric, unit, dp));
+  }
+  // Overhead isolation: external wall minus claude's own API round-trip.
+  out.push('');
+  out.push('[overhead isolation: median(wallMs) - median(claudeApiMs)]');
+  out.push(`${'condition'.padEnd(26)} ${'wall'.padStart(11)} ${'api'.padStart(11)} ${'overhead'.padStart(11)}`);
+  for (const r of results) {
+    const w = r.stats?.wallMs?.median;
+    const a = r.stats?.claudeApiMs?.median;
+    const ov = (w != null && a != null) ? (w - a).toFixed(1) : '—';
+    out.push(`${String(r.label).padEnd(26)} ${(w == null ? '—' : w.toFixed(1)).padStart(11)} `
+      + `${(a == null ? '—' : a.toFixed(1)).padStart(11)} ${String(ov).padStart(11)}`);
+  }
+  process.stdout.write(out.join('\n') + '\n');
+}
+
+async function runOneShots(ctx, results) {
+  const { bin, model, prompt, toolPrompt, N, N_UNBOUNDED, WARMUP, want, log, writeOut } = ctx;
+  const specs = [
+    { name: 'lean', label: 'lean one-shot', prompt, n: N },
+    { name: 'nonlean', label: 'non-lean one-shot', prompt, n: N },
+    { name: 'bounded', label: 'bounded(maxturns1)+tools', prompt: toolPrompt, n: N },
+    { name: 'unbounded', label: `unbounded(maxturns${UNBOUNDED_TURNS})+tools`, prompt: toolPrompt, n: N_UNBOUNDED },
+  ];
+  for (const c of specs) {
+    if (!want(c.name)) continue;
+    const args = oneShotArgs(c.name, c.prompt, model);
+    if (WARMUP) {
+      log(`${c.name}: warmup`);
+      try { await spawnAndMeasure({ bin, args }); } catch (e) { log(`${c.name}: warmup err ${e.message}`); }
+    }
+    const res = await runSamples(c.label, async (i) => {
+      log(`${c.name}: sample ${i + 1}/${c.n}`);
+      return spawnAndMeasure({ bin, args });
+    }, c.n);
+    results.push({ ...res, condition: c.name });
+    writeOut();
+  }
+}
+
+async function runPersistent(ctx, results) {
+  const { bin, model, prompt, N, WARMUP, want, log, writeOut } = ctx;
+  if (!want('persistent')) return;
+  const t1 = [];
+  const t2 = [];
+  const total = WARMUP ? N + 1 : N;
+  for (let i = 0; i < total; i++) {
+    const warm = WARMUP && i === 0;
+    log(`persistent: session ${i + 1}/${total}${warm ? ' (warmup, discarded)' : ''}`);
+    _resetSessions();
+    const session = getSession(`bench-${i}`, { bin, model, lean: true });
+    const r1 = await measureTextStream((onUsage) => session.send(prompt, { onUsage }));
+    const r2 = await measureTextStream((onUsage) => session.send(prompt, { onUsage }));
+    session.close();
+    if (warm) continue;
+    t1.push(r1);
+    t2.push(r2);
+  }
+  results.push({ label: 'persistent turn 1 (cold boot)', condition: 'persistent-turn1', n: t1.length, samples: t1, stats: summarizeSamples(t1) });
+  results.push({ label: 'persistent turn 2 (warm)', condition: 'persistent-turn2', n: t2.length, samples: t2, stats: summarizeSamples(t2) });
+  writeOut();
+}
+
+async function main() {
+  const only = (process.env.CONDITIONS || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const ctx = {
+    bin: process.env.BIN || process.env.LAZYCLAW_CLAUDE_BIN || 'claude',
+    model: process.env.MODEL || '',
+    prompt: process.env.PROMPT || 'Reply with exactly the single word: ok',
+    toolPrompt: process.env.TOOL_PROMPT || 'List the .mjs files in the current directory using your tools, then reply done.',
+    N: envInt('N', 10),
+    N_UNBOUNDED: envInt('N_UNBOUNDED', 3),
+    WARMUP: process.env.WARMUP === '0' ? 0 : 1,
+    out: process.env.OUT || null,
+    want: (name) => only.length === 0 || only.includes(name),
+    log: (m) => process.stderr.write(`[bench] ${m}\n`),
+  };
+  const meta = {
+    bin: ctx.bin, model: ctx.model || '(account default)', N: ctx.N, N_UNBOUNDED: ctx.N_UNBOUNDED,
+    warmup: ctx.WARMUP, node: process.version, platform: `${process.platform}-${process.arch}`,
+    prompt: ctx.prompt, toolPrompt: ctx.toolPrompt,
+  };
+  const results = [];
+  ctx.writeOut = () => { if (ctx.out) fs.writeFileSync(ctx.out, JSON.stringify({ meta, results }, null, 2)); };
+
+  await runOneShots(ctx, results);
+  await runPersistent(ctx, results);
+  printReport(meta, results);
+  ctx.writeOut();
+}
+
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
+  main().catch((e) => { process.stderr.write(`${e && e.stack ? e.stack : e}\n`); process.exit(1); });
+}

@@ -35,6 +35,7 @@
     "lint:size": "node scripts/lint-file-size.mjs",
     "lint:pack": "node scripts/check-pack.mjs",
     "test:bench": "node scripts/bench-providers.mjs",
+    "test:bench:cli": "node scripts/bench-claude-cli.mjs",
     "test:bench:index": "node --test tests/index_store.bench.mjs",
     "test:perf": "node --test tests/phaseH-perf.test.mjs tests/index_store.bench.mjs",
     "migrate:v5": "node scripts/migrate-v5.mjs"

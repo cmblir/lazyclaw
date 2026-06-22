@@ -17,7 +17,14 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { measureStream, runSamples, formatTable } from '../scripts/bench-claude-cli.mjs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  measureStream, measureTextStream, spawnAndMeasure,
+  runSamples, formatTable, oneShotArgs,
+} from '../scripts/bench-claude-cli.mjs';
+
+const FAKE_CLAUDE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-claude.mjs');
 
 const approx = (a, b, eps = 1e-9) =>
   assert.ok(Math.abs(a - b) < eps, `expected ${a} ≈ ${b}`);
@@ -121,3 +128,72 @@ test('formatTable: renders a metric across conditions with median/p95/stdev', ()
   assert.ok(out.includes('median'), 'has a median column header');
   assert.ok(out.includes('p95'), 'has a p95 column header');
 });
+
+// ── measureTextStream: the persistent-session path (text chunks + onUsage) ──
+// The warm session yields plain text chunks (not raw stream-json) and surfaces
+// usage via an onUsage callback, so latency is measured from chunk arrival.
+test('measureTextStream: TTFT/wall from text chunks, usage from the onUsage callback', async () => {
+  let t = 200;
+  const now = () => t;
+  const run = (onUsage) => {
+    async function* gen() {
+      t = 230; yield 'Hel';
+      t = 260; yield 'lo';
+      t = 300; onUsage({ inputTokens: 7, outputTokens: 2, totalCostUsd: 0.004 });
+    }
+    return gen();
+  };
+  const r = await measureTextStream(run, now);
+  approx(r.ttftMs, 30);    // first chunk at 230, t0 200
+  approx(r.wallMs, 100);   // 300 - 200
+  approx(r.genMs, 70);
+  assert.equal(r.textLen, 5);
+  assert.equal(r.inputTokens, 7);
+  assert.equal(r.outputTokens, 2);
+  approx(r.costUsd, 0.004);
+});
+
+// ── spawnAndMeasure: a REAL spawn of the fake claude (quota-free) ───────────
+test('spawnAndMeasure: real spawn parses usage from assistant + cost/turns from result', async () => {
+  const r = await spawnAndMeasure({
+    bin: FAKE_CLAUDE,
+    args: ['-p', 'hi', '--output-format', 'stream-json', '--include-partial-messages', '--verbose'],
+  });
+  assert.equal(r.inputTokens, 2);          // from the assistant event
+  assert.equal(r.outputTokens, 2);         // "ok"
+  assert.equal(r.cacheCreationTokens, 3189);
+  assert.equal(r.numTurns, 1);
+  assert.equal(r.isError, false);
+  assert.equal(r.costUsd, 0.0123);
+  assert.ok(r.wallMs >= 0, 'wall is measured');
+  assert.ok(r.ttftMs <= r.wallMs + 1, 'TTFT precedes (or equals) wall');
+});
+
+// ── oneShotArgs: the condition matrix is wired to buildArgs correctly ───────
+test('oneShotArgs: lean keeps --setting-sources "", non-lean drops it', () => {
+  const lean = oneShotArgs('lean', 'hi', '');
+  assert.ok(lean.includes('--setting-sources'));
+  assert.equal(lean[lean.indexOf('--setting-sources') + 1], '');
+  assert.ok(lean.includes('--strict-mcp-config'));
+
+  const nonlean = oneShotArgs('nonlean', 'hi', '');
+  assert.ok(!nonlean.includes('--setting-sources'), 'non-lean loads the full Claude Code env');
+  assert.ok(!nonlean.includes('--strict-mcp-config'));
+});
+
+test('oneShotArgs: bounded caps at --max-turns 1 WITH tools; unbounded raises the cap', () => {
+  const bounded = oneShotArgs('bounded', 'list the files', '');
+  assert.equal(bounded[bounded.indexOf('--max-turns') + 1], '1');
+  assert.ok(bounded[bounded.indexOf('--tools') + 1].length > 0, 'tools enabled so a tool CAN be called');
+
+  const unbounded = oneShotArgs('unbounded', 'list the files', '');
+  assert.ok(Number(unbounded[unbounded.indexOf('--max-turns') + 1]) > 1, 'cap raised to allow the loop');
+  assert.equal(unbounded[unbounded.indexOf('--tools') + 1], bounded[bounded.indexOf('--tools') + 1],
+    'same toolset — only the turn cap differs, isolating the bounded-loop effect');
+});
+
+test('oneShotArgs: model alias is appended when given', () => {
+  const args = oneShotArgs('lean', 'hi', 'opus');
+  assert.deepEqual(args.slice(-2), ['--model', 'opus']);
+});
+
