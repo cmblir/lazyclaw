@@ -18,7 +18,10 @@ test('runAgentTurn accumulates token usage from the adapter', async () => {
     userMessage: 'hi', apiKey: 'sk', fetchImpl: fakeFinalFetch(body),
   });
   assert.equal(res.stoppedBy, 'final');
-  assert.deepEqual(res.usage, { inputTokens: 21, outputTokens: 9 });
+  assert.deepEqual(res.usage, {
+    inputTokens: 21, outputTokens: 9,
+    cacheCreationInputTokens: 0, cacheReadInputTokens: 0, totalCostUsd: 0,
+  });
 });
 
 test('runAgentTurn returns null usage when the adapter reports none', async () => {

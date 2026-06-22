@@ -163,7 +163,10 @@ export async function runAgentTurn({
   // Accumulate token usage across every callOnce in this turn's tool loop so
   // the caller (e.g. the team router → cost cap) can account for what the turn
   // spent. Stays null until an adapter actually reports usage.
-  const usageTotal = { inputTokens: 0, outputTokens: 0 };
+  const usageTotal = {
+    inputTokens: 0, outputTokens: 0,
+    cacheCreationInputTokens: 0, cacheReadInputTokens: 0, totalCostUsd: 0,
+  };
   let usageSeen = false;
   const _usage = () => (usageSeen ? { ...usageTotal } : null);
   if (trajectoryRef && typeof trajectoryRef === 'object' && !trajectoryRef.startedAt) trajectoryRef.startedAt = Date.now();
@@ -207,6 +210,9 @@ export async function runAgentTurn({
     if (resp.usage) {
       usageTotal.inputTokens += resp.usage.inputTokens || 0;
       usageTotal.outputTokens += resp.usage.outputTokens || 0;
+      usageTotal.cacheCreationInputTokens += resp.usage.cacheCreationInputTokens || 0;
+      usageTotal.cacheReadInputTokens += resp.usage.cacheReadInputTokens || 0;
+      usageTotal.totalCostUsd += resp.usage.totalCostUsd || 0;
       usageSeen = true;
     }
 
