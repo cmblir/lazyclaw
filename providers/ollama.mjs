@@ -119,6 +119,28 @@ async function* iterateBody(body) {
   throw new Error('ollama: response body is not iterable');
 }
 
+// The final `done:true` frame carries prompt_eval_count (input) / eval_count
+// (output) and a done_reason. Report tokens via onUsage (cost 0 for a local
+// model) and signal a num_predict/context cut (done_reason 'length') so the
+// caller can warn rather than treat a truncated answer as complete.
+function _emitOllamaDone(obj, opts) {
+  const inT = obj.prompt_eval_count;
+  const outT = obj.eval_count;
+  if ((inT != null || outT != null) && typeof opts.onUsage === 'function') {
+    try {
+      opts.onUsage({
+        inputTokens: inT ?? null,
+        outputTokens: outT ?? null,
+        totalTokens: (inT ?? 0) + (outT ?? 0),
+        totalCostUsd: 0,
+      });
+    } catch { /* never fail the stream on a usage callback */ }
+  }
+  if (obj.done_reason === 'length' && typeof opts.onTruncated === 'function') {
+    try { opts.onTruncated('length'); } catch { /* never fail the stream on a callback */ }
+  }
+}
+
 export const ollamaProvider = {
   name: 'ollama',
   /**
@@ -198,7 +220,7 @@ export const ollamaProvider = {
         try {
           const obj = JSON.parse(line);
           if (obj?.message?.content) yield obj.message.content;
-          if (obj?.done) return;
+          if (obj?.done) { _emitOllamaDone(obj, opts); return; }
           if (obj?.error) throw new ApiError(500, obj.error);
         } catch (err) {
           if (err instanceof ApiError) throw err;
@@ -218,6 +240,7 @@ export const ollamaProvider = {
       try {
         const obj = JSON.parse(tail);
         if (obj?.message?.content) yield obj.message.content;
+        if (obj?.done) _emitOllamaDone(obj, opts);
       } catch { /* malformed tail — drop */ }
     }
   },
