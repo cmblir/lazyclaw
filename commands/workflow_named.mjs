@@ -78,8 +78,12 @@ export async function cmdWorkflow(sub, positional = [], flags = {}) {
       }
       if (!validWorkflowName(name)) { console.error(`workflow add: invalid name "${name}" (letters/digits/.-_ only)`); process.exit(2); }
       let def;
-      try { def = parseWorkflow(fs.readFileSync(file, 'utf8')); }
-      catch (e) { console.error(`workflow add: ${e.message}`); process.exit(2); }
+      try {
+        const text = fs.readFileSync(file, 'utf8');
+        def = /\.ya?ml$/i.test(file)
+          ? await (await import('../workflow/declarative.mjs')).parseWorkflowYaml(text)
+          : parseWorkflow(text);
+      } catch (e) { console.error(`workflow add: ${e.message}`); process.exit(2); }
       const entry = { def };
       if (flags.channel && flags.channel !== true) entry.channel = String(flags.channel);
       if (flags.cron && flags.cron !== true) entry.schedule = String(flags.cron);

@@ -168,6 +168,11 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **Declarative workflows can be authored in YAML** ().
+  A small dependency-free parser (workflow/yaml_min.mjs) handles the subset a
+  def needs — block maps, sequences of maps, scalars, inline JSON, and `|`/`>`
+  block scalars — and errors clearly on anything unsupported (tabs, unclosed
+  flow). JSON stays canonical; no new dependency.
 - **Declarative workflows can run persisted + resumable.** `POST /workflows/run`
   with a `sessionId` (or `runDeclarativeRequest({ sessionId, dir })`) runs through
   the persistent engine: state is keyed under the workflow-state dir and a second

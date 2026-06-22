@@ -50,6 +50,17 @@ export function parseWorkflow(text) {
   return validateWorkflow(def);
 }
 
+// Parse a workflow def from a minimal YAML subset (no new dependency — see
+// workflow/yaml_min.mjs for the supported grammar), then validate it the same
+// way as JSON. For authoring ergonomics; JSON remains the canonical format.
+export async function parseWorkflowYaml(text) {
+  const { parseYamlMin } = await import('./yaml_min.mjs');
+  let def;
+  try { def = parseYamlMin(text); }
+  catch (e) { throw new WorkflowError(`invalid workflow YAML: ${e.message}`, 'WF_PARSE'); }
+  return validateWorkflow(def);
+}
+
 // Compile a (validated) definition into executor nodes. caps.nodeTypes adds
 // side-effecting node types (http/shell/llm/channel) the caller chose to grant;
 // the built-in safe types are always present. Returns { nodes, bag } where bag
