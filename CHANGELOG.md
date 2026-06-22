@@ -20,6 +20,24 @@ Versioning: [SemVer](https://semver.org/).
   right rate card), and the daemon accumulates it into metrics and aborts the
   loop mid-run once the cap trips. claude-cli agents bill a flat $0 so they
   don't move the cap.
+- **Streaming, CLI, and tool-use providers now report token usage to the cost
+  cap.** A provider audit found several paths dropping usage so their spend was
+  invisible: Gemini and Ollama streaming never read usage at all; the claude-cli
+  one-shot, persistent-session, and tool-use paths read the zero-usage `result`
+  event instead of the per-turn `assistant` event (so the default subscription
+  agentic path reported nothing); codex-cli double-counted cached/reasoning
+  tokens (they are subset breakdowns, not additive); gemini-cli dropped
+  reasoning (`thoughts`) tokens; OpenAI/openai-compat/Anthropic stranded usage
+  when a stream closed without its terminal frame; and the tool-use adapters
+  dropped cache tokens. All now surface input/output/cache tokens (plus cost on
+  the subscription path), and `runAgentTurn` carries cache + total cost through
+  so the cap can price them.
+- **A truncated streaming turn is no longer shown as a complete answer.** When a
+  turn hits the model's output-token limit (OpenAI/openai-compat
+  `finish_reason: length`, Gemini `MAX_TOKENS`/`SAFETY`/`RECITATION`, Anthropic
+  `stop_reason: max_tokens`, Ollama `done_reason: length`) the provider fires
+  `onTruncated` and interactive chat appends a `[truncated … raise maxTokens]`
+  notice, mirroring the agentic path. Gemini streaming also honors `maxTokens`.
 - **`config validate` stops false-flagging valid keys.** `KNOWN_KEYS` listed
   only 9 top-level keys, so a dozen keys the rest of the codebase actually reads
   (`sandbox`, `channels`, `cron`, `pairing`, `authProfiles`,
@@ -35,6 +53,17 @@ Versioning: [SemVer](https://semver.org/).
   and be served another call's cached reply. The key now folds in all three
   system sources; identical inputs still hash identically so real hits are
   unaffected.
+
+### Changed
+
+- **The persistent warm claude-cli session is ON by default for interactive
+  chat** (set `cfg.chat.persistentSession=false` to disable). Reusing one warm
+  process per conversation amortizes the Claude Code harness boot — measured
+  ~1.2s/turn (~42%) faster after the cold first turn (a model-independent win;
+  latency is otherwise model-dominated). Scoped to the interactive path (the
+  daemon is unaffected, so it stays one warm child per conversation); the
+  session respawns if the system prompt changes (e.g. plan-mode toggle) so it
+  can never answer with a stale system, and recall already rides the user turn.
 
 ### Added
 
