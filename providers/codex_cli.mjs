@@ -232,6 +232,14 @@ export const codexCliProvider = {
           const obj = JSON.parse(buffer.trim());
           const text = extractEventText(obj);
           if (text) yield text;
+          // Drain usage + error too, so a final turn.completed/turn.failed that
+          // isn't newline-terminated still reports tokens and surfaces the error.
+          const errMsg = extractEventError(obj);
+          if (errMsg) apiError = errMsg;
+          const usage = extractUsage(obj);
+          if (usage && typeof opts.onUsage === 'function') {
+            try { opts.onUsage(usage); } catch (_) { /* never break stream on usage */ }
+          }
         } catch (_) { /* incomplete tail — drop */ }
       }
       // Wait for either a clean exit or an async spawn error. On ENOENT the
