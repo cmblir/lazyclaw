@@ -22,11 +22,12 @@ even showed lean *slower* than non-lean — pure noise).
   win.** A single tool-using prompt left unbounded turns into a multi-turn,
   tens-of-seconds, multi-cent autonomous run; bounding it keeps a plain chat
   completion fast and cheap. (See the bounded-vs-unbounded numbers.)
-- **The persistent warm session amortizes boot:** turn 2 (warm) is materially
-  faster than turn 1 (cold boot).
+- **The persistent warm session amortizes boot LATENCY (not cost):** turn 2
+  (warm) is materially faster than turn 1, but it costs slightly *more* per turn
+  as the conversation accumulates — the win is speed, not spend.
 - **Lean mode's win is real but environment-dependent and modest on this
   machine** — it skips the user's global `CLAUDE.md` + MCP boot, which here is
-  ~10k cached tokens + one MCP server, not the "~180k tokens" an older note
+  ~13.5k cached tokens + one MCP server, not the "~180k tokens" an older note
   assumed. It scales with how heavy the operator's config is.
 - The deterministic, model-independent facts (token *structure*, turn counts)
   are the defensible evidence; the absolute ms/$ are **haiku-only**.
@@ -88,7 +89,8 @@ actually runs.
   from the `assistant` event(s), **summed across turns** (the live `result`
   event reports zero usage under `--include-partial-messages`, so reading it
   would under-report; verified on claude 2.1.185). For a fixed prompt+config,
-  uncached `inputTokens` is deterministic (stdev 0); cache and output columns
+  uncached `inputTokens` is deterministic for a fixed cache state (stdev 0
+  here); cache and output columns
   vary run-to-run.
 - **numTurns / costUsd** — from the `result` event, cumulative over the loop.
 
@@ -113,8 +115,11 @@ Captured 2026-06-22 (`~/.claude.json`, `~/.claude/`):
 
 So on this machine non-lean inherits ~17.6 KB of `CLAUDE.md` + one MCP server +
 the full Claude-Code agent system prompt — **not** the "~180k tokens / many MCP
-servers" worst case an older code comment/memory assumed. The lean/non-lean gap
-**scales with the operator's config** and is larger on heavily-configured
+servers" worst case an older code comment/memory assumed. The measured per-turn
+cache-read delta is ~19.9k tokens (non-lean 33.4k − lean 13.5k); the 17.6 KB
+`CLAUDE.md` is only ~4–5k of that, so the MCP server's injected tool schemas +
+system-prompt expansion are the larger share, not `CLAUDE.md`. The lean/non-lean
+gap **scales with the operator's config** and is larger on heavily-configured
 machines; the numbers below are specific to this one.
 
 ## Results
@@ -142,7 +147,7 @@ finding.
   tokens. It is (a) ~2.5× less *cached* context re-sent per turn (13.5k vs
   33.4k) and (b) ~1.2 s less non-API overhead per turn (residual 259 ms vs
   1475 ms — the skipped `CLAUDE.md` + MCP boot), plus far steadier cost
-  (non-lean p95 cost is ~12× its median, from cache re-creation churn).
+  (non-lean p95 cost is ~7× its median, from cache re-creation churn).
 - The residual is a *paired* per-sample median, deliberately **not**
   `median(wall) − median(api)` (which here is 3715 − 3692 = 23 ms, misleadingly
   tiny because the two medians come from different sample orderings).
@@ -154,10 +159,15 @@ finding.
 | wall median / p95 (ms) | 2856 / 4202 | 1662 / 1953 |
 | ttft median (ms) | 2820 | 1603 |
 | wall stdev (ms) | 727 | 182 |
+| cost median ($) | 0.0015 | 0.0025 |
 
-- Reusing the warm session saves **~1194 ms/turn (~42%)** after the first turn,
-  and turn 2 is far steadier (stdev 182 vs 727). (claude-API / cache / turns are
-  `—`: the session path surfaces text + input/output/cost, not those fields.)
+- Reusing the warm session saves **~1194 ms/turn (~42%)** of latency after the
+  first turn, and turn 2 is far steadier (stdev 182 vs 727). **The win is
+  latency, not cost:** turn 2 actually costs *more* ($0.0025 vs $0.0015) because
+  the warm session re-sends the accumulating conversation each turn — persistent
+  trades a little per-turn spend for a large, steady latency drop. (claude-API /
+  cache / turns are `—`: the session path surfaces text + input/output/cost, not
+  those fields.)
 
 ### bounded (`--max-turns 1`) vs unbounded (`--max-turns 12`) — same tools + prompt
 
