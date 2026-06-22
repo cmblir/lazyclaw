@@ -10,7 +10,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseResponse as anthropicParse } from '../providers/tool_use/anthropic.mjs';
 import { parseResponse as openaiParse } from '../providers/tool_use/openai.mjs';
-import { parseResponse as geminiParse } from '../providers/tool_use/gemini.mjs';
+import { parseResponse as geminiParse, callOnce as geminiCallOnce } from '../providers/tool_use/gemini.mjs';
 
 test('anthropic parseResponse normalizes usage (incl. cache tokens)', () => {
   const r = anthropicParse({ content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn', usage: { input_tokens: 11, output_tokens: 7 } });
@@ -29,6 +29,32 @@ test('gemini parseResponse normalizes usage (incl. cached content tokens)', () =
   assert.deepEqual(r.usage, { inputTokens: 9, outputTokens: 4, cacheReadInputTokens: 0 });
   const c = geminiParse({ candidates: [{ content: { parts: [{ text: 'hi' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 9, candidatesTokenCount: 4, cachedContentTokenCount: 3 } });
   assert.deepEqual(c.usage, { inputTokens: 6, outputTokens: 4, cacheReadInputTokens: 3 });
+});
+
+test('gemini callOnce sets generationConfig.maxOutputTokens when maxTokens is given', async () => {
+  let captured = null;
+  const fetchImpl = async (_url, init) => {
+    captured = JSON.parse(init.body);
+    return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'hi' }] }, finishReason: 'STOP' }] }) };
+  };
+  await geminiCallOnce({
+    messages: [{ role: 'user', parts: [{ text: 'q' }] }],
+    model: 'gemini-2.5-pro', apiKey: 'k', maxTokens: 256, fetchImpl,
+  });
+  assert.equal(captured.generationConfig.maxOutputTokens, 256, 'a finite maxTokens must set the output cap');
+});
+
+test('gemini callOnce leaves generationConfig unset when maxTokens is omitted', async () => {
+  let captured = null;
+  const fetchImpl = async (_url, init) => {
+    captured = JSON.parse(init.body);
+    return { ok: true, json: async () => ({ candidates: [{ content: { parts: [{ text: 'hi' }] }, finishReason: 'STOP' }] }) };
+  };
+  await geminiCallOnce({
+    messages: [{ role: 'user', parts: [{ text: 'q' }] }],
+    model: 'gemini-2.5-pro', apiKey: 'k', fetchImpl,
+  });
+  assert.equal('generationConfig' in captured, false, 'omitting maxTokens must leave generationConfig unset');
 });
 
 test('usage is null when the response carries no token counts', () => {

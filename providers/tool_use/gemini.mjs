@@ -78,6 +78,7 @@ export async function callOnce({
   model,
   apiKey,
   system,
+  maxTokens,
   baseUrl,
   fetchImpl,
   signal,
@@ -96,6 +97,13 @@ export async function callOnce({
   if (tools && tools.length) body.tools = tools;
   if (system && String(system).trim()) {
     body.system_instruction = { parts: [{ text: String(system) }] };
+  }
+  // Cap the output like the anthropic/openai adapters do. Gemini carries the
+  // ceiling on generationConfig.maxOutputTokens; merge so a caller that already
+  // populated generationConfig keeps their other fields. Only a finite,
+  // positive maxTokens applies — omitting it leaves generationConfig untouched.
+  if (Number.isFinite(maxTokens) && maxTokens > 0) {
+    body.generationConfig = { ...(body.generationConfig || {}), maxOutputTokens: maxTokens };
   }
 
   const res = await fetchFn(url, {

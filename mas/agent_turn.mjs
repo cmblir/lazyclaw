@@ -204,6 +204,13 @@ export async function runAgentTurn({
     iterations++;
     const resp = await adapter.callOnce({
       messages, tools, model: agent.model, apiKey, system: systemPrompt,
+      // Forward-compat: thread an explicit per-agent output cap when the agent
+      // record carries one. No current config/setup path populates
+      // agent.maxTokens / agent.maxOutputTokens, so this is `undefined` today —
+      // each adapter then falls back to its own DEFAULT (anthropic/openai) or
+      // leaves the cap unset (gemini), keeping existing turns byte-stable. When
+      // a future config does set it, the cap reaches gemini (FIX D) too.
+      maxTokens: agent.maxTokens ?? agent.maxOutputTokens,
       fetchImpl, baseUrl, signal, cache,
     });
     if (resp.text) lastText = resp.text;
