@@ -100,14 +100,17 @@ function buildPrompt(messages, system) {
 function extractUsage(stats) {
   if (!stats || typeof stats !== 'object') return null;
   const models = stats.models || {};
-  let input = 0, output = 0;
+  let input = 0, output = 0, cached = 0;
   for (const m of Object.values(models)) {
     const t = m?.tokens || {};
     input  += (t.prompt ?? t.input ?? 0);
-    output += (t.candidates ?? t.output ?? 0);
+    // thoughts = reasoning tokens, billed as output and reported separately from
+    // candidates (additive). cached is a subset of prompt → surface, don't sum.
+    output += (t.candidates ?? t.output ?? 0) + (t.thoughts ?? 0);
+    cached += (t.cached ?? 0);
   }
   if (!input && !output) return null;
-  return { inputTokens: input, outputTokens: output, totalCostUsd: 0 };
+  return { inputTokens: input, outputTokens: output, cacheReadInputTokens: cached, totalCostUsd: 0 };
 }
 
 // The gemini trusted-folder bypass — needed because lazyclaw runs gemini from
