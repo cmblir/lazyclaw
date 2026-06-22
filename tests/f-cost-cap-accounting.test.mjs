@@ -7,9 +7,9 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { accountTurnCost, checkCostCap } from '../daemon/lib/cost.mjs';
+import { accountTurnCost, checkCostCap, accumulateMetricsFromCost } from '../daemon/lib/cost.mjs';
 
-const freshMetrics = () => ({ costsByCurrency: {}, tokensTotal: { inputTokens: 0, outputTokens: 0 } });
+const freshMetrics = () => ({ costsByCurrency: {}, tokensTotal: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 } });
 const stubCost = () => ({ cost: 0.5, currency: 'USD' });
 
 test('accountTurnCost accumulates cost into metrics even when the caller did not ask for it', () => {
@@ -36,6 +36,31 @@ test('accountTurnCost is a no-op with no usage or no rate card', () => {
   assert.equal(accountTurnCost({ metrics: m2, usage: { inputTokens: 1 }, rates: null, wantCost: true, costFromUsage: stubCost }), null);
   assert.deepEqual(m1.costsByCurrency, {});
   assert.deepEqual(m2.costsByCurrency, {});
+});
+
+test('accumulateMetricsFromCost counts cache-read and cache-creation token buckets', () => {
+  const metrics = freshMetrics();
+  // inputTokens is already NET of cache (providers report it that way); the
+  // cache buckets are tracked separately so total token throughput is complete.
+  accumulateMetricsFromCost(metrics, {
+    inputTokens: 100, outputTokens: 50,
+    cacheReadInputTokens: 500, cacheCreationInputTokens: 3000,
+  }, { cost: 0.1, currency: 'USD' });
+  assert.equal(metrics.tokensTotal.inputTokens, 100);
+  assert.equal(metrics.tokensTotal.outputTokens, 50);
+  assert.equal(metrics.tokensTotal.cacheReadInputTokens, 500, 'cache-read tokens must accumulate');
+  assert.equal(metrics.tokensTotal.cacheCreationInputTokens, 3000, 'cache-creation tokens must accumulate');
+  // A second turn adds on top.
+  accumulateMetricsFromCost(metrics, { cacheReadInputTokens: 10, cacheCreationInputTokens: 20 }, null);
+  assert.equal(metrics.tokensTotal.cacheReadInputTokens, 510);
+  assert.equal(metrics.tokensTotal.cacheCreationInputTokens, 3020);
+});
+
+test('accumulateMetricsFromCost ignores missing/non-finite cache fields', () => {
+  const metrics = freshMetrics();
+  accumulateMetricsFromCost(metrics, { inputTokens: 5, outputTokens: 2 }, null);
+  assert.equal(metrics.tokensTotal.cacheReadInputTokens, 0, 'absent cache fields leave the bucket at 0');
+  assert.equal(metrics.tokensTotal.cacheCreationInputTokens, 0);
 });
 
 test('accumulated spend trips checkCostCap on the next request', () => {

@@ -26,6 +26,11 @@ export function accumulateMetricsFromCost(metrics, usage, cost) {
   if (usage) {
     if (Number.isFinite(usage.inputTokens)) metrics.tokensTotal.inputTokens += usage.inputTokens;
     if (Number.isFinite(usage.outputTokens)) metrics.tokensTotal.outputTokens += usage.outputTokens;
+    // inputTokens is reported NET of cache by the providers, so the cache
+    // buckets would otherwise go uncounted. Track them separately to keep the
+    // token totals complete (this is metrics-only — cost math is unchanged).
+    if (Number.isFinite(usage.cacheReadInputTokens)) metrics.tokensTotal.cacheReadInputTokens += usage.cacheReadInputTokens;
+    if (Number.isFinite(usage.cacheCreationInputTokens)) metrics.tokensTotal.cacheCreationInputTokens += usage.cacheCreationInputTokens;
   }
 }
 

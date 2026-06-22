@@ -3667,8 +3667,9 @@ test.describe('Phase 6 — OpenClaw parity', () => {
       }
       const r = await fetch(`${url}/metrics`);
       const m = await r.json();
-      // 3 × (1000 in + 500 out) = (3000, 1500)
-      expect(m.tokensTotal).toEqual({ inputTokens: 3000, outputTokens: 1500 });
+      // 3 × (1000 in + 500 out) = (3000, 1500). Cache buckets stay zero (the
+      // mock usage carries no cache fields) but are present in the schema.
+      expect(m.tokensTotal).toEqual({ inputTokens: 3000, outputTokens: 1500, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 });
       // 3 × $0.0525 = $0.1575
       expect(m.costsByCurrency.USD).toBe(0.1575);
     } finally {
@@ -3689,7 +3690,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
       });
       const r = await fetch(`${d.url}/metrics`);
       const m = await r.json();
-      expect(m.tokensTotal).toEqual({ inputTokens: 0, outputTokens: 0 });
+      expect(m.tokensTotal).toEqual({ inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 });
       expect(m.costsByCurrency).toEqual({});
     } finally { await d.kill(); }
   });

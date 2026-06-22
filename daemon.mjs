@@ -102,7 +102,7 @@ export function makeHandler(ctx) {
     // EUR-priced regional contract) doesn't silently sum mismatched
     // numbers. Tokens are unit-free so we keep them in a single counter.
     costsByCurrency: /** @type {Record<string, number>} */({}),
-    tokensTotal: { inputTokens: 0, outputTokens: 0 },
+    tokensTotal: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
   };
   // Device gateway (Phase 27). The ChallengeRegistry is a per-process
   // singleton: a challenge minted by one request is consumed by a later
