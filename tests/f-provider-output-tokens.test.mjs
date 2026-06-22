@@ -177,6 +177,20 @@ function makeTruncCtx(provider) {
   };
 }
 
+test('run_turn: persistent warm session is ON by default (claude-cli boot amortization)', async () => {
+  const { ctx, getCaptured } = makeRunTurnCtx({});   // no chat.persistentSession set
+  const runTurn = makeRunTurn({ ctx, writeFn: () => {} });
+  await runTurn('hi');
+  assert.equal(getCaptured().persistent, true, 'default-on so warm-session boot is amortized');
+});
+
+test('run_turn: persistent session can be turned off explicitly', async () => {
+  const { ctx, getCaptured } = makeRunTurnCtx({ chat: { persistentSession: false } });
+  const runTurn = makeRunTurn({ ctx, writeFn: () => {} });
+  await runTurn('hi');
+  assert.equal(getCaptured().persistent, false, 'explicit false disables it');
+});
+
 test('run_turn: surfaces a truncation notice when the provider fires onTruncated', async () => {
   const writes = [];
   const ctx = makeTruncCtx({

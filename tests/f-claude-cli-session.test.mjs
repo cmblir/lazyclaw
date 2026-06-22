@@ -78,3 +78,17 @@ test('a crashed child is evicted so the next getSession respawns', async () => {
   assert.equal(spawnCount, 2);
   s2.close();
 });
+
+test('getSession respawns when the system prompt changes (no stale warm session)', async () => {
+  _resetSessions();
+  let n = 0;
+  const _spawn = () => { n++; return fakeClaude(); };
+  const a = getSession('k', { _spawn, system: 'A' });
+  const b = getSession('k', { _spawn, system: 'A' });
+  assert.equal(a, b, 'same system reuses the warm session');
+  assert.equal(n, 1);
+  const c = getSession('k', { _spawn, system: 'B' });   // e.g. plan-mode toggled the system
+  assert.notEqual(c, a, 'a changed system evicts the stale session and respawns');
+  assert.equal(n, 2);
+  c.close();
+});

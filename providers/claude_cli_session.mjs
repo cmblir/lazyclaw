@@ -147,10 +147,16 @@ class ClaudeSession {
   }
 }
 
-// Return the live session for `key`, spawning one if none is alive.
+// Return the live session for `key`, spawning one if none is alive. A warm
+// session fixes its system prompt at spawn (--append-system-prompt), so if the
+// caller's system changes mid-conversation (e.g. plan-mode toggled), the warm
+// session is stale — evict and respawn rather than answer with the old system.
 export function getSession(key, opts = {}) {
   const existing = SESSIONS.get(key);
-  if (existing && existing.alive) return existing;
+  if (existing && existing.alive) {
+    if ((existing.opts.system || '') === (opts.system || '')) return existing;
+    existing.close();
+  }
   const s = new ClaudeSession(key, opts);
   SESSIONS.set(key, s);
   return s;

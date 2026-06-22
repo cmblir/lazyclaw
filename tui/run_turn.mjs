@@ -289,11 +289,13 @@ export function makeRunTurn({ ctx, writeFn }) {
         // answer as complete, mirroring the agentic path (mas/agent_turn.mjs).
         onTruncated: () => { truncated = true; },
         cache: true,
-        // Opt-in (cfg.chat.persistentSession): reuse one warm `claude` per
-        // conversation so the harness boots once, not every turn. claude-cli-
-        // only opts (other providers ignore them); the provider falls back to
-        // the one-shot spawn on any session failure.
-        persistent: ctx.cfg?.chat?.persistentSession === true,
+        // Default-ON (set cfg.chat.persistentSession=false to disable): reuse one
+        // warm `claude` per conversation so the harness boots once, not every
+        // turn (measured ~1.2s/turn / ~42% faster after the cold first turn).
+        // claude-cli-only (other providers ignore it); the provider falls back to
+        // a one-shot spawn on any session failure, and the session respawns if
+        // the system prompt changes (plan-mode toggle) so it can't go stale.
+        persistent: ctx.cfg?.chat?.persistentSession !== false,
         sessionKey: (ctx.getSessionId && ctx.getSessionId()) || ctx.syntheticChatSessionId,
         ...(sysMsg ? { sessionSystem: sysMsg.content } : {}),
         ...(maxTokens !== undefined ? { maxTokens } : {}),
