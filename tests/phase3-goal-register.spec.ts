@@ -18,6 +18,16 @@ function runCli(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}) {
   });
 }
 
+// Turn off per-turn recall (cfg.chat.recall=false). `config set` can't write a
+// nested key, so set it directly. Recall prepends "## Relevant recalled context"
+// to the user turn, which the mock provider echoes — irrelevant to these tests.
+function disableRecall(cfgDir: string) {
+  const p = path.join(cfgDir, 'config.json');
+  const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+  c.chat = { ...(c.chat || {}), recall: false };
+  fs.writeFileSync(p, JSON.stringify(c, null, 2));
+}
+
 function spawnChat(cfgDir: string, sessionId: string | null, env: NodeJS.ProcessEnv = {}): ChildProcessWithoutNullStreams {
   const args = ['chat'];
   if (sessionId) { args.push('--session', sessionId); }
@@ -87,6 +97,7 @@ test.describe('Phase 3 — /goal registration', () => {
   test('single-arg /goal <name> switches chat session context', async () => {
     const cfg = tmpDir('p3-switch');
     expect(runCli(['config', 'set', 'provider', 'mock'], cfg).status).toBe(0);
+    disableRecall(cfg);   // per-turn recall (roadmap #7) pollutes the mock echo; not under test here
     expect(runCli(['goal', 'add', 'demo', '--desc', 'demo goal'], cfg).status).toBe(0);
 
     // Start chat WITHOUT --session, so default has no session id. After

@@ -6270,6 +6270,9 @@ test.describe('Phase 6 — OpenClaw parity', () => {
   test('chat --session persists turns to <configDir>/sessions/<id>.jsonl', async () => {
     const dir = tmpConfigDir();
     runCli(['config', 'set', 'provider', 'mock'], dir);
+    // per-turn recall (roadmap #7) prepends recalled context to the user turn,
+    // which the mock echoes; this test asserts the bare reply, so disable it.
+    { const p = path.join(dir, 'config.json'); const c = JSON.parse(fs.readFileSync(p, 'utf8')); c.chat = { ...(c.chat || {}), recall: false }; fs.writeFileSync(p, JSON.stringify(c)); }
     const child = spawn(process.execPath, [CLI, 'chat', '--session', 'feat-x'], {
       env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
