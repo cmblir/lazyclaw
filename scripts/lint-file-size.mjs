@@ -34,7 +34,7 @@ const ALLOW = {
   'tui/slash_dispatcher.mjs': 1833,
   'commands/chat.mjs': 1253,
   'tui/pickers.mjs': 917,
-  'commands/setup.mjs': 742,
+  'commands/setup.mjs': 706,
   'gateway/device_auth.mjs': 664,
   'commands/workflow.mjs': 661,
   'tui/repl.mjs': 661,
