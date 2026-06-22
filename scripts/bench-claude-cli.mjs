@@ -201,7 +201,9 @@ export async function spawnAndMeasure({ bin, args, cwd, now }) {
 // The bounded/unbounded conditions share a toolset and a tool-inducing prompt;
 // only the --max-turns cap differs, so the difference in wall time / num_turns
 // is the bounded-loop fix in isolation (not a tool-vs-no-tool artifact).
-export const TOOLSET = 'Read,Grep,Glob,Bash';
+// Read-only tools only: the unbounded condition runs an autonomous loop of up
+// to UNBOUNDED_TURNS turns in the user's repo, so least-privilege says no Bash.
+export const TOOLSET = 'Read,Grep,Glob';
 export const UNBOUNDED_TURNS = 12;
 
 // Build the one-shot argv for a named condition by delegating to the provider's
@@ -314,7 +316,8 @@ async function main() {
     bin: process.env.BIN || process.env.LAZYCLAW_CLAUDE_BIN || 'claude',
     model: process.env.MODEL || '',
     prompt: process.env.PROMPT || 'Reply with exactly the single word: ok',
-    toolPrompt: process.env.TOOL_PROMPT || 'List the .mjs files in the current directory using your tools, then reply done.',
+    toolPrompt: process.env.TOOL_PROMPT
+      || 'Using only your read-only tools, find the three largest .mjs files under the providers/ directory and briefly summarize what each one does.',
     N: envInt('N', 10),
     N_UNBOUNDED: envInt('N_UNBOUNDED', 3),
     WARMUP: process.env.WARMUP === '0' ? 0 : 1,
