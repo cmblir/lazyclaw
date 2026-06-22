@@ -6,6 +6,20 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Choose an agent's Team Live avatar.** Agents gained an optional `avatar`
+  field: `lazyclaw agent set-avatar <name> <1-20>` picks one of the 20 built-in
+  pixel-art sprites instead of the keyword-inferred default (`none` restores
+  inference; `agent add/edit --avatar` work too). The dashboard already rendered
+  `rec.avatar` — this supplies the writer it never had.
+- **Custom character photo per agent.** The same command also accepts a real
+  image: `lazyclaw agent set-avatar <name> <file|url>`. A local image
+  (png/jpg/jpeg/gif/webp) is copied under `<configDir>/agent-avatars/` and a
+  remote URL is stored verbatim; the daemon serves copied files at
+  `GET /agent-avatars/<file>` (filename constrained — no path traversal). The
+  Team Live tab renders the custom photo ahead of the sprite + inference.
+
 ## [6.5.0] - 2026-06-22
 
 ### Fixed
