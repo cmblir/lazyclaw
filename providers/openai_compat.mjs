@@ -262,6 +262,7 @@ export function makeOpenAICompatProvider(cfg) {
       const decoder = new TextDecoder('utf-8', { fatal: false });
       let buffer = '';
       let usage = null;
+      let lastFinish = null;
       const toolCallsByIndex = new Map();
       const flushToolCall = (idx) => {
         const tc = toolCallsByIndex.get(idx);
@@ -280,6 +281,20 @@ export function makeOpenAICompatProvider(cfg) {
           });
         } catch { /* never let a callback abort the stream */ }
       };
+      // Fire onUsage + (if truncated) onTruncated EXACTLY ONCE — from [DONE] or
+      // the post-loop flush if the upstream closes without the sentinel.
+      let finalized = false;
+      const finalize = () => {
+        if (finalized) return;
+        finalized = true;
+        for (const idx of Array.from(toolCallsByIndex.keys())) flushToolCall(idx);
+        if (usage && typeof opts.onUsage === 'function') {
+          try { opts.onUsage(usage); } catch { /* swallow */ }
+        }
+        if (lastFinish === 'length' && typeof opts.onTruncated === 'function') {
+          try { opts.onTruncated('length'); } catch { /* swallow */ }
+        }
+      };
       try {
       for await (const chunk of iterateWithIdleTimeout(res.body, idleMs, idleController)) {
         // A user cancel surfaces as an idle-controller abort too; map it back
@@ -291,10 +306,7 @@ export function makeOpenAICompatProvider(cfg) {
           consumed = frame.nextCursor;
           if (!frame.data) continue;
           if (frame.data === '[DONE]') {
-            for (const idx of Array.from(toolCallsByIndex.keys())) flushToolCall(idx);
-            if (usage && typeof opts.onUsage === 'function') {
-              try { opts.onUsage(usage); } catch { /* swallow */ }
-            }
+            finalize();
             return;
           }
           try {
@@ -319,6 +331,7 @@ export function makeOpenAICompatProvider(cfg) {
                 toolCallsByIndex.set(idx, cur);
               }
             }
+            if (choice?.finish_reason) lastFinish = choice.finish_reason;
             if (choice?.finish_reason === 'tool_calls') {
               for (const idx of Array.from(toolCallsByIndex.keys())) flushToolCall(idx);
             }
@@ -333,6 +346,7 @@ export function makeOpenAICompatProvider(cfg) {
           opts.signal.removeEventListener('abort', forwardCallerAbort);
         }
       }
+      finalize();   // flush captured usage/truncation if the stream ended without [DONE]
       const tail = decoder.decode();
       if (tail) buffer += tail;
     },
