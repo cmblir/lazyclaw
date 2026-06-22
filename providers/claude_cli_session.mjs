@@ -78,12 +78,15 @@ class ClaudeSession {
   }
 
   // Stream one turn. Yields text deltas until the matching `result` event.
-  async *send(userText, { signal, onUsage } = {}) {
+  async *send(userText, { signal, onUsage, onTruncated } = {}) {
     if (this.busy) throw new Error('claude session busy — sends must be serialised per session');
     if (!this.alive) throw new Error('claude session is not alive');
     this.busy = true;
     this._touch();
 
+    // Per-turn usage accumulated from `assistant` events (incl. cache fields);
+    // falls back to the result event's usage if no assistant event was seen.
+    const u = { input: 0, output: 0, cacheCreate: 0, cacheRead: 0, saw: false };
     const queue = [];
     let done = false;
     let error = null;
@@ -100,15 +103,29 @@ class ClaudeSession {
         try { obj = JSON.parse(line); } catch { continue; }
         const t = extractTextDelta(obj);
         if (t) { queue.push(t); if (wake) wake(); }
+        if (obj.type === 'assistant' && obj.message && obj.message.usage) {
+          const mu = obj.message.usage;
+          u.input += mu.input_tokens || 0;
+          u.output += mu.output_tokens || 0;
+          u.cacheCreate += mu.cache_creation_input_tokens || 0;
+          u.cacheRead += mu.cache_read_input_tokens || 0;
+          u.saw = true;
+        }
         if (obj.type === 'result') {
-          if (typeof onUsage === 'function' && obj.usage) {
+          if (typeof onUsage === 'function') {
+            const ru = obj.usage || {};
             try {
               onUsage({
-                inputTokens: obj.usage.input_tokens || 0,
-                outputTokens: obj.usage.output_tokens || 0,
+                inputTokens: u.saw ? u.input : (ru.input_tokens || 0),
+                outputTokens: u.saw ? u.output : (ru.output_tokens || 0),
+                cacheCreationInputTokens: u.saw ? u.cacheCreate : (ru.cache_creation_input_tokens || 0),
+                cacheReadInputTokens: u.saw ? u.cacheRead : (ru.cache_read_input_tokens || 0),
                 totalCostUsd: obj.total_cost_usd || 0,
               });
             } catch { /* never fail a turn on a usage callback */ }
+          }
+          if (typeof onTruncated === 'function' && obj.is_error && /max_turns/.test(String(obj.subtype || ''))) {
+            try { onTruncated('max_turns'); } catch { /* ditto */ }
           }
           done = true; if (wake) wake();
         }

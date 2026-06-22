@@ -27,6 +27,50 @@ function fakeClaude(state) {
   return child;
 }
 
+// A fake that emits an arbitrary list of stream-json frames per stdin write.
+function fakeEmitting(frames) {
+  const child = new EventEmitter();
+  child.killed = false;
+  child.stdout = new EventEmitter(); child.stdout.setEncoding = () => {};
+  child.stderr = new EventEmitter(); child.stderr.setEncoding = () => {};
+  child.stdin = {
+    write: () => { setImmediate(() => { for (const f of frames) child.stdout.emit('data', JSON.stringify(f) + '\n'); }); return true; },
+    end: () => {},
+  };
+  child.kill = () => { child.killed = true; setImmediate(() => child.emit('exit', null, 'SIGTERM')); };
+  return child;
+}
+
+test('session: onUsage accumulates cache tokens from the assistant event', async () => {
+  _resetSessions();
+  const usage = [];
+  const frames = [
+    { type: 'assistant', message: { usage: { input_tokens: 2, output_tokens: 4, cache_read_input_tokens: 100, cache_creation_input_tokens: 50 } } },
+    { type: 'result', result: 'ok', total_cost_usd: 0.01, usage: { input_tokens: 0 } },
+  ];
+  const s = getSession('cache', { _spawn: () => fakeEmitting(frames) });
+  for await (const _ of s.send('hi', { onUsage: (u) => usage.push(u) })) { /* drain */ }
+  assert.equal(usage.length, 1);
+  assert.equal(usage[0].inputTokens, 2);
+  assert.equal(usage[0].cacheReadInputTokens, 100);
+  assert.equal(usage[0].cacheCreationInputTokens, 50);
+  assert.equal(usage[0].totalCostUsd, 0.01);
+  s.close();
+});
+
+test('session: a --max-turns cut (error_max_turns) fires onTruncated', async () => {
+  _resetSessions();
+  const trunc = [];
+  const frames = [
+    { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'partial' } } },
+    { type: 'result', subtype: 'error_max_turns', is_error: true, result: 'partial', usage: { input_tokens: 1 } },
+  ];
+  const s = getSession('trunc', { _spawn: () => fakeEmitting(frames) });
+  for await (const _ of s.send('hi', { onTruncated: (r) => trunc.push(r) })) { /* drain */ }
+  assert.deepEqual(trunc, ['max_turns']);
+  s.close();
+});
+
 test('persistent session: ONE warm child reused across turns (boot amortized)', async () => {
   _resetSessions();
   let spawnCount = 0;

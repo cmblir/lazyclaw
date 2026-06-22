@@ -179,7 +179,7 @@ export const claudeCliProvider = {
         });
         let yielded = false;
         try {
-          for await (const chunk of session.send(String(last.content), { signal: opts.signal, onUsage: opts.onUsage })) {
+          for await (const chunk of session.send(String(last.content), { signal: opts.signal, onUsage: opts.onUsage, onTruncated: opts.onTruncated })) {
             yielded = true;
             yield chunk;
           }
