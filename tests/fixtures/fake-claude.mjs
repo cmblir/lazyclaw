@@ -28,6 +28,10 @@ function oneTurn(text) {
 
 if (process.argv.includes('--hang')) {
   setInterval(() => {}, 1 << 30);                 // never exits — wedged-boot stand-in
+} else if (process.argv.includes('--eof-hang')) {
+  oneTurn('ok');                                  // emit a full turn, EOF stdout, then stay alive
+  process.stdout.end();
+  setInterval(() => {}, 1 << 30);
 } else if (!process.argv.includes('--input-format')) {
   oneTurn('ok');
   process.exit(0);

@@ -21,7 +21,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   measureStream, measureTextStream, spawnAndMeasure,
-  runSamples, formatTable, oneShotArgs,
+  runSamples, formatTable, oneShotArgs, pairedResidual,
 } from '../scripts/bench-claude-cli.mjs';
 
 const FAKE_CLAUDE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-claude.mjs');
@@ -68,6 +68,39 @@ test('measureStream: usage from assistant, cost/duration/turns from result, TTFT
   assert.equal(r.claudeApiMs, 1500);
   assert.equal(r.numTurns, 1);
   assert.equal(r.isError, false);
+});
+
+test('measureStream: drains a final result line that lacks a trailing newline (matches the provider)', async () => {
+  let t = 0;
+  const now = () => t;
+  async function* chunks() {
+    t = 10; yield L.text('x') + '\n';
+    t = 20; yield L.assistant + '\n';
+    t = 30; yield L.result;            // NO trailing newline — must be drained after the loop
+    t = 40;
+  }
+  const r = await measureStream(chunks(), now);
+  assert.equal(r.costUsd, 0.0326, 'result drained from the un-terminated tail');
+  assert.equal(r.claudeApiMs, 1500);
+  assert.equal(r.numTurns, 1);
+  assert.equal(r.inputTokens, 2);
+});
+
+test('measureStream: accumulates usage across MULTIPLE assistant events (cumulative loop cost, not last-turn)', async () => {
+  let t = 0;
+  const now = () => t;
+  const a1 = JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 2, output_tokens: 4, cache_read_input_tokens: 100, cache_creation_input_tokens: 0 } } });
+  const a2 = JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 3, output_tokens: 5, cache_read_input_tokens: 200, cache_creation_input_tokens: 50 } } });
+  async function* chunks() {
+    t = 10; yield L.text('hi') + '\n' + a1 + '\n';
+    t = 20; yield a2 + '\n' + L.result + '\n';
+    t = 30;
+  }
+  const r = await measureStream(chunks(), now);
+  assert.equal(r.inputTokens, 5, 'input summed across turns (2+3)');
+  assert.equal(r.outputTokens, 9, 'output summed (4+5)');
+  assert.equal(r.cacheReadTokens, 300, 'cache_read summed (100+200)');
+  assert.equal(r.cacheCreationTokens, 50, 'cache_creation summed (0+50)');
 });
 
 test('measureStream: no text deltas -> TTFT falls back to wall, gen 0, usage null', async () => {
@@ -119,10 +152,11 @@ test('runSamples: aggregates N measurements per metric and calls measureFn exact
 
 test('runSamples: timeouts and thrown errors go to failures (excluded from stats); is_error samples are kept', async () => {
   const seq = [
-    { wallMs: 100, ttftMs: 10, inputTokens: 2, isError: false },
-    { wallMs: 9999, timedOut: true },                            // killed -> failure, excluded from stats
-    { wallMs: 300, ttftMs: 30, inputTokens: 2, isError: true },  // real (bounded hit its cap) -> kept
-    '__throw__',                                                 // spawn error -> failure
+    { wallMs: 100, ttftMs: 10, inputTokens: 2, isError: false, numTurns: 1 },
+    { wallMs: 9999, timedOut: true },                                        // killed, NO result -> dropped
+    { wallMs: 300, ttftMs: 30, inputTokens: 2, isError: true, numTurns: 1 }, // bounded hit its cap -> kept
+    { wallMs: 850, ttftMs: 40, numTurns: 5, timedOut: true },                // raced: timer fired but result present -> kept
+    '__throw__',                                                             // spawn error -> dropped
   ];
   let i = 0;
   const measureFn = async () => {
@@ -130,10 +164,10 @@ test('runSamples: timeouts and thrown errors go to failures (excluded from stats
     if (v === '__throw__') throw new Error('spawn boom');
     return v;
   };
-  const r = await runSamples('mix', measureFn, 4);
-  assert.equal(r.samples.length, 2, 'only the two real measurements count toward stats');
-  assert.equal(r.failures.length, 2, 'one timeout + one throw');
-  assert.equal(r.stats.wallMs.max, 300, 'the 9999ms timed-out wall is NOT in the stats');
+  const r = await runSamples('mix', measureFn, 5);
+  assert.equal(r.samples.length, 3, 'two clean + one raced-complete-but-flagged sample count');
+  assert.equal(r.failures.length, 2, 'incomplete timeout + throw');
+  assert.equal(r.stats.wallMs.max, 850, 'raced-complete (850) kept; incomplete 9999 timeout dropped');
   assert.equal(r.errors, 1, 'one kept sample carried is_error');
 });
 
@@ -149,6 +183,18 @@ test('spawnAndMeasure: a wedged process is SIGKILLed at timeoutMs and flagged ti
   assert.equal(r.inputTokens, null, 'nothing was emitted before the kill');
 });
 
+test('spawnAndMeasure: returns even if the process stays alive after stdout EOF (no timeout set, no hang)', async () => {
+  const t0 = Date.now();
+  const r = await spawnAndMeasure({
+    bin: FAKE_CLAUDE,
+    args: ['--eof-hang', '--output-format', 'stream-json'],
+  });
+  assert.equal(r.numTurns, 1, 'the emitted turn was measured');
+  assert.equal(r.inputTokens, 2);
+  assert.ok(!r.timedOut, 'not a timeout — the stream completed cleanly');
+  assert.ok(Date.now() - t0 < 6000, 'did not hang waiting for a close that never comes');
+});
+
 test('formatTable: renders a metric across conditions with median/p95/stdev', () => {
   const results = [
     { label: 'lean one-shot', stats: { wallMs: { n: 10, median: 3200, p95: 4800, stdev: 520, min: 2800, max: 5000, mean: 3300 } } },
@@ -160,6 +206,45 @@ test('formatTable: renders a metric across conditions with median/p95/stdev', ()
   assert.ok(out.includes('3200'), 'shows the lean median');
   assert.ok(out.includes('median'), 'has a median column header');
   assert.ok(out.includes('p95'), 'has a p95 column header');
+});
+
+test('formatTable: renders a non-finite stat as — (never the literal "NaN")', () => {
+  const results = [{ label: 'x', stats: { wallMs: { n: 1, median: NaN, p95: NaN, stdev: 0, min: NaN, max: NaN } } }];
+  const out = formatTable(results, 'wallMs', 'ms');
+  assert.ok(!out.includes('NaN'), 'no literal NaN leaks into the table');
+  assert.ok(out.includes('—'), 'non-finite renders as em-dash');
+});
+
+test('formatTable: suppresses type-7 p95 for n<10 and stdev for n<2', () => {
+  const results = [
+    { label: 'big', stats: { wallMs: { n: 10, median: 100, p95: 180.5, stdev: 20.5 } } },
+    { label: 'tiny', stats: { wallMs: { n: 3, median: 100, p95: 178.5, stdev: 22.5 } } },
+    { label: 'single', stats: { wallMs: { n: 1, median: 100, p95: 100, stdev: 0 } } },
+  ];
+  const lines = formatTable(results, 'wallMs', 'ms').split('\n');
+  const row = (name) => lines.find((l) => l.startsWith(name));
+  const dashes = (l) => (l.match(/—/g) || []).length;
+  assert.ok(row('big').includes('180.5'), 'n>=10 shows the real p95');
+  assert.equal(dashes(row('big')), 0, 'n>=10: no suppression');
+  assert.ok(!row('tiny').includes('178.5'), 'n<10 suppresses the (meaningless) p95');
+  assert.equal(dashes(row('tiny')), 1, 'tiny (n=3) suppresses only p95, keeps stdev');
+  assert.equal(dashes(row('single')), 2, 'single (n=1) suppresses both p95 and stdev');
+});
+
+test('pairedResidual: per-sample (wall - api) over paired-finite samples only', () => {
+  const samples = [
+    { wallMs: 200, claudeApiMs: 150 },   // delta 50
+    { wallMs: 300, claudeApiMs: 240 },   // delta 60
+    { wallMs: 100, claudeApiMs: null },  // unpaired -> excluded
+  ];
+  const r = pairedResidual(samples);
+  assert.equal(r.n, 2, 'only paired-finite samples count');
+  assert.equal(r.median, 55, 'median of per-sample deltas (50,60), not a difference of medians');
+});
+
+test('pairedResidual: surfaces a negative residual honestly (api > wall is possible)', () => {
+  const r = pairedResidual([{ wallMs: 100, claudeApiMs: 150 }, { wallMs: 120, claudeApiMs: 150 }]);
+  assert.ok(r.median < 0, 'duration_api_ms can exceed external wall — reported, not hidden');
 });
 
 // ── measureTextStream: the persistent-session path (text chunks + onUsage) ──

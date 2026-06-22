@@ -30,7 +30,7 @@ import { performance } from 'node:perf_hooks';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { summarize } from './bench-stats.mjs';
+import { summarize, median, stdev } from './bench-stats.mjs';
 import { buildArgs } from '../providers/claude_cli.mjs';
 import { getSession, _resetSessions } from '../providers/claude_cli_session.mjs';
 
@@ -49,47 +49,64 @@ function extractTextDelta(obj) {
 // timing + usage record one benchmark sample needs. `chunks` is any async
 // iterable of string chunks (real proc.stdout, or a fake in tests); `now` is an
 // injectable monotonic clock so tests are deterministic.
+// Fold one stream-json line into the running measurement state. Shared by the
+// per-chunk loop AND the post-EOF trailing-buffer drain so a final result line
+// without a newline is not lost (the production provider drains too). Token
+// usage is ACCUMULATED across every `assistant` event, so a multi-turn agentic
+// loop reports the loop's cumulative token cost, not just its last turn.
+function _foldLine(line, s, t0, now) {
+  let obj;
+  try { obj = JSON.parse(line); } catch { return; }
+  const text = extractTextDelta(obj);
+  if (text) {
+    if (s.ttftMs === null) s.ttftMs = now() - t0;
+    s.textLen += text.length;
+  }
+  if (obj.type === 'assistant' && obj.message && obj.message.usage) {
+    const u = obj.message.usage;
+    s.inputTokens += (u.input_tokens || 0);
+    s.cacheCreationTokens += (u.cache_creation_input_tokens || 0);
+    s.cacheReadTokens += (u.cache_read_input_tokens || 0);
+    s.outputTokens += (u.output_tokens || 0);
+    s.sawAssistant = true;
+  }
+  if (obj.type === 'result') s.result = obj;
+}
+
 export async function measureStream(chunks, now = () => performance.now()) {
   const t0 = now();
+  const s = {
+    ttftMs: null, textLen: 0, sawAssistant: false, result: null,
+    inputTokens: 0, cacheCreationTokens: 0, cacheReadTokens: 0, outputTokens: 0,
+  };
   let buffer = '';
-  let ttftMs = null;
-  let textLen = 0;
-  let usage = null;     // from the `assistant` event — the truthful per-turn usage
-  let result = null;    // from the `result` event — cost / duration / turns
   for await (const chunk of chunks) {
     buffer += chunk;
     let nl;
     while ((nl = buffer.indexOf('\n')) >= 0) {
       const line = buffer.slice(0, nl).trim();
       buffer = buffer.slice(nl + 1);
-      if (!line) continue;
-      let obj;
-      try { obj = JSON.parse(line); } catch { continue; }
-      const text = extractTextDelta(obj);
-      if (text) {
-        if (ttftMs === null) ttftMs = now() - t0;
-        textLen += text.length;
-      }
-      if (obj.type === 'assistant' && obj.message && obj.message.usage) usage = obj.message.usage;
-      if (obj.type === 'result') result = obj;
+      if (line) _foldLine(line, s, t0, now);
     }
   }
+  if (buffer.trim()) _foldLine(buffer.trim(), s, t0, now);   // drain the un-terminated tail
   const wallMs = now() - t0;
-  const ttft = ttftMs == null ? wallMs : ttftMs;   // nothing streamed -> TTFT == wall
+  const ttft = s.ttftMs == null ? wallMs : s.ttftMs;   // nothing streamed -> TTFT == wall
+  const r = s.result;
   return {
     ttftMs: ttft,
     wallMs,
     genMs: wallMs - ttft,
-    textLen,
-    inputTokens: usage ? (usage.input_tokens || 0) : null,
-    cacheCreationTokens: usage ? (usage.cache_creation_input_tokens || 0) : null,
-    cacheReadTokens: usage ? (usage.cache_read_input_tokens || 0) : null,
-    outputTokens: usage ? (usage.output_tokens || 0) : null,
-    costUsd: result ? (result.total_cost_usd || 0) : null,
-    claudeDurationMs: result && result.duration_ms != null ? result.duration_ms : null,
-    claudeApiMs: result && result.duration_api_ms != null ? result.duration_api_ms : null,
-    numTurns: result && result.num_turns != null ? result.num_turns : null,
-    isError: result ? !!result.is_error : null,
+    textLen: s.textLen,
+    inputTokens: s.sawAssistant ? s.inputTokens : null,
+    cacheCreationTokens: s.sawAssistant ? s.cacheCreationTokens : null,
+    cacheReadTokens: s.sawAssistant ? s.cacheReadTokens : null,
+    outputTokens: s.sawAssistant ? s.outputTokens : null,
+    costUsd: r ? (r.total_cost_usd || 0) : null,
+    claudeDurationMs: r && r.duration_ms != null ? r.duration_ms : null,
+    claudeApiMs: r && r.duration_api_ms != null ? r.duration_api_ms : null,
+    numTurns: r && r.num_turns != null ? r.num_turns : null,
+    isError: r ? !!r.is_error : null,
   };
 }
 
@@ -125,7 +142,10 @@ export async function runSamples(label, measureFn, n) {
     // the timeout, which would poison the median; drop it but count it. An
     // is_error result (e.g. bounded hit its turn cap) IS a real measurement and
     // stays in the stats.
-    if (rec && rec.timedOut) { failures.push({ i, timedOut: true }); continue; }
+    // Drop a timed-out call ONLY if it was killed before completing (no result
+    // captured). If the timer merely raced a clean finish, keep the sample so
+    // the kept set is not biased toward fast runs (survivorship at the tail).
+    if (rec && rec.timedOut && rec.numTurns == null) { failures.push({ i, timedOut: true }); continue; }
     samples.push(rec);
   }
   const errors = samples.filter((s) => s && s.isError).length;
@@ -133,7 +153,7 @@ export async function runSamples(label, measureFn, n) {
 }
 
 function fmt(v, dp = 1) {
-  return v == null ? '—' : Number(v).toFixed(dp);
+  return (v == null || !Number.isFinite(Number(v))) ? '—' : Number(v).toFixed(dp);
 }
 
 // Render one metric across conditions as a fixed-width median/p95/stdev table.
@@ -144,10 +164,26 @@ export function formatTable(results, metric, unit = '', dp = 1) {
   const lines = [unit ? `[${metric} / ${unit}]` : `[${metric}]`, head];
   for (const r of results) {
     const s = (r.stats && r.stats[metric]) || {};
+    const n = s.n ?? 0;
+    const p95 = n >= 10 ? s.p95 : null;   // type-7 p95 collapses toward max for small n
+    const sd = n >= 2 ? s.stdev : null;   // sample stdev is undefined for n<2
     lines.push(`${String(r.label).padEnd(26)} ${fmt(s.median, dp).padStart(11)} `
-      + `${fmt(s.p95, dp).padStart(11)} ${fmt(s.stdev, dp).padStart(10)} ${String(s.n ?? 0).padStart(4)}`);
+      + `${fmt(p95, dp).padStart(11)} ${fmt(sd, dp).padStart(10)} ${String(n).padStart(4)}`);
   }
   return lines.join('\n');
+}
+
+// Per-sample (external wall − claude's self-reported API round-trip) over the
+// samples where BOTH are finite: the non-API residual (process spawn + Claude
+// Code boot + MCP + stream parse + teardown). A median of PAIRED deltas, not a
+// difference of two independently-computed medians, and it can be negative
+// (duration_api_ms can exceed external wall in multi-turn runs) — reported with
+// its sign, not hidden. Meaningful only for single-turn conditions.
+export function pairedResidual(samples) {
+  const deltas = (samples || [])
+    .filter((s) => Number.isFinite(s.wallMs) && Number.isFinite(s.claudeApiMs))
+    .map((s) => s.wallMs - s.claudeApiMs);
+  return { n: deltas.length, median: deltas.length ? median(deltas) : null, stdev: stdev(deltas) };
 }
 
 // Measure the PERSISTENT-session path. The warm session yields plain text
@@ -210,9 +246,17 @@ export async function spawnAndMeasure({ bin, args, cwd, now, timeoutMs }) {
   }
   const rec = await measureStream(proc.stdout, now);   // ends on EOF (incl. after a kill)
   if (timer) clearTimeout(timer);
+  // stdout EOF'd. Wait briefly for a clean exit; if the child wedged (closed
+  // stdout but kept running), SIGTERM then SIGKILL rather than await 'close'
+  // forever — the production provider keeps the same finally-kill safety net.
   await new Promise((res) => {
-    if (proc.exitCode != null || spawnErr) res();
-    else proc.once('close', res);
+    if (proc.exitCode != null || spawnErr) return res();
+    let term;
+    let kill;
+    const done = () => { clearTimeout(term); clearTimeout(kill); res(); };
+    term = setTimeout(() => { try { proc.kill('SIGTERM'); } catch { /* gone */ } }, 800);
+    kill = setTimeout(() => { try { proc.kill('SIGKILL'); } catch { /* gone */ } done(); }, 2500);
+    proc.once('close', done);
   });
   if (spawnErr && !timedOut) throw spawnErr;
   rec.timedOut = timedOut;
@@ -255,42 +299,46 @@ const REPORT_METRICS = [
   ['wallMs', 'ms (external wall: spawn+boot+model+parse)', 1],
   ['ttftMs', 'ms (time to first streamed token)', 1],
   ['genMs', 'ms (first token -> done)', 1],
-  ['claudeApiMs', 'ms (claude self-reported API round-trip)', 1],
-  ['inputTokens', 'tokens (uncached input — deterministic)', 1],
-  ['cacheReadTokens', 'tokens (cache read)', 1],
+  ['claudeApiMs', 'ms (claude self-reported API round-trip; single-turn = one trip)', 1],
+  ['inputTokens', 'tokens (uncached input, summed over turns)', 1],
+  ['cacheCreationTokens', 'tokens (cache creation — first-turn context write)', 1],
+  ['cacheReadTokens', 'tokens (cache read — context re-sent each turn)', 1],
   ['outputTokens', 'tokens', 1],
-  ['numTurns', 'turns', 1],
-  ['costUsd', 'usd', 4],
+  ['numTurns', 'turns (cumulative; the bounded-loop signal)', 1],
+  ['costUsd', 'usd (cumulative over the turn/loop)', 4],
 ];
 
-function printReport(meta, results) {
-  const out = [];
-  out.push('# claude-cli benchmark — median / p95 / stdev over N samples');
-  out.push(JSON.stringify(meta));
-  for (const [metric, unit, dp] of REPORT_METRICS) {
-    out.push('');
-    out.push(formatTable(results, metric, unit, dp));
-  }
-  // Overhead isolation: external wall minus claude's own API round-trip.
-  out.push('');
-  out.push('[overhead isolation: median(wallMs) - median(claudeApiMs)]');
-  out.push(`${'condition'.padEnd(26)} ${'wall'.padStart(11)} ${'api'.padStart(11)} ${'overhead'.padStart(11)}`);
+function residualTable(results) {
+  const lines = [
+    '[non-API residual: per-sample median(wall - claudeApiMs) = spawn+boot+MCP+parse+teardown]',
+    '(meaningful for SINGLE-turn rows; for multi-turn, api aggregates across turns and may exceed wall)',
+    `${'condition'.padEnd(26)} ${'residual'.padStart(11)} ${'stdev'.padStart(10)} ${'paired n'.padStart(9)}`,
+  ];
   for (const r of results) {
-    const w = r.stats?.wallMs?.median;
-    const a = r.stats?.claudeApiMs?.median;
-    const ov = (w != null && a != null) ? (w - a).toFixed(1) : '—';
-    out.push(`${String(r.label).padEnd(26)} ${(w == null ? '—' : w.toFixed(1)).padStart(11)} `
-      + `${(a == null ? '—' : a.toFixed(1)).padStart(11)} ${String(ov).padStart(11)}`);
+    const pr = pairedResidual(r.samples || []);
+    const note = (pr.median != null && pr.median < 0) ? '  (api>wall: not a clean residual)' : '';
+    lines.push(`${String(r.label).padEnd(26)} ${fmt(pr.median).padStart(11)} `
+      + `${fmt(pr.stdev).padStart(10)} ${String(pr.n).padStart(9)}${note}`);
   }
-  // Sample health: how many runs counted, how many were dropped (timeout/spawn
-  // error), how many kept samples carried is_error (a real but failed turn).
-  out.push('');
-  out.push('[sample health]');
-  out.push(`${'condition'.padEnd(26)} ${'ok'.padStart(4)} ${'dropped'.padStart(8)} ${'is_error'.padStart(9)}`);
+  return lines.join('\n');
+}
+
+function healthTable(results) {
+  const lines = [
+    '[sample health]   (dropped = timed-out-before-completion or spawn error; is_error = a real but failed turn, e.g. bounded hitting its cap)',
+    `${'condition'.padEnd(26)} ${'ok'.padStart(4)} ${'dropped'.padStart(8)} ${'is_error'.padStart(9)}`,
+  ];
   for (const r of results) {
-    out.push(`${String(r.label).padEnd(26)} ${String(r.samples?.length ?? 0).padStart(4)} `
+    lines.push(`${String(r.label).padEnd(26)} ${String(r.samples?.length ?? 0).padStart(4)} `
       + `${String(r.failures?.length ?? 0).padStart(8)} ${String(r.errors ?? 0).padStart(9)}`);
   }
+  return lines.join('\n');
+}
+
+function printReport(meta, results) {
+  const out = ['# claude-cli benchmark — median / p95 / stdev over N samples', JSON.stringify(meta)];
+  for (const [metric, unit, dp] of REPORT_METRICS) out.push('', formatTable(results, metric, unit, dp));
+  out.push('', residualTable(results), '', healthTable(results));
   process.stdout.write(out.join('\n') + '\n');
 }
 

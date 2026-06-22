@@ -22,6 +22,8 @@ export function percentile(xs, p) {
   if (!xs || xs.length === 0) return NaN;
   const s = [...xs].sort((a, b) => a - b);
   if (s.length === 1) return s[0];
+  if (p <= 0) return s[0];                 // clamp out-of-range p to the bounds
+  if (p >= 1) return s[s.length - 1];
   const rank = p * (s.length - 1);
   const lo = Math.floor(rank);
   const hi = Math.ceil(rank);
@@ -43,7 +45,9 @@ export function stdev(xs) {
 }
 
 export function summarize(xs) {
-  const arr = xs || [];
+  // Filter non-finite up front so n matches the values actually summarized and
+  // min/max can't survive while mean/median collapse to NaN.
+  const arr = (xs || []).filter((v) => typeof v === 'number' && Number.isFinite(v));
   if (arr.length === 0) {
     return { n: 0, min: null, max: null, mean: null, median: null, p95: null, stdev: null };
   }

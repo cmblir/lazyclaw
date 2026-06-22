@@ -74,3 +74,18 @@ test('summarize: empty sample set yields n:0 and null stats', () => {
   assert.equal(s.min, null);
   assert.equal(s.max, null);
 });
+
+test('percentile: clamps p outside [0,1] instead of returning NaN', () => {
+  const xs = [10, 20, 30, 40];
+  assert.equal(percentile(xs, 1.5), 40);   // p>=1 -> max
+  assert.equal(percentile(xs, -0.5), 10);  // p<=0 -> min
+});
+
+test('summarize: filters non-finite input so n matches the values actually summarized', () => {
+  const s = summarize([1, NaN, 3, Infinity]);
+  assert.equal(s.n, 2);   // NaN + Infinity dropped
+  assert.equal(s.min, 1);
+  assert.equal(s.max, 3);
+  assert.equal(s.mean, 2);
+  assert.equal(s.median, 2);
+});
