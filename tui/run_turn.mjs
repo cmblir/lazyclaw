@@ -29,7 +29,7 @@ import { Chalk } from 'chalk';
 import { chatAgenticGet, chatPlanModeGet, effectiveChatTools } from '../config_features.mjs';
 import { defaultSandboxSpec } from '../sandbox/index.mjs';
 import { resolvePermissionMode } from '../lib/permission_mode.mjs';
-import { detectConfigCommand, applyConfigCommand } from '../lib/nl_config_command.mjs';
+import { detectConfigCommand, applyConfigCommand, refreshLiveProvider } from '../lib/nl_config_command.mjs';
 import { readConfig as _readCfg, writeConfig as _writeCfg } from '../lib/config.mjs';
 
 // Force ANSI on these turn-status markers regardless of stdout TTY detection:
@@ -220,8 +220,12 @@ export function makeRunTurn({ ctx, writeFn }) {
       _msgs.push({ role: 'user', content: text });
       ctx.persistTurn('user', text);
       let reply;
-      try { reply = applyConfigCommand(_cmd, { readConfig: _readCfg, writeConfig: _writeCfg, ctxCfg: ctx.cfg }); }
-      catch (e) { reply = `⚠ couldn't apply that change: ${e?.message || e}`; }
+      try {
+        reply = applyConfigCommand(_cmd, { readConfig: _readCfg, writeConfig: _writeCfg, ctxCfg: ctx.cfg });
+        // orchestrator on/off flips the active provider — re-point the live REPL
+        // provider so it stops replying as orchestrator + the HUD refreshes.
+        if (_cmd.kind === 'orchestrator') refreshLiveProvider(ctx);
+      } catch (e) { reply = `⚠ couldn't apply that change: ${e?.message || e}`; }
       try { writeFn(reply + '\n'); } catch { /* sink best-effort */ }
       _msgs.push({ role: 'assistant', content: reply });
       ctx.persistTurn('assistant', reply);

@@ -220,6 +220,7 @@ export async function cmdChat(flags = {}) {
         setMessages: (next) => { _inkMessages = Array.isArray(next) ? next : []; },
         getProv: () => prov,
         setProv: (next) => { prov = wrapInteractiveProv(next); },
+        lookupProv,
         getActiveProvName: () => activeProvName,
         // Persist provider/model picks so they survive a restart (was
         // in-memory only — a model chosen via /model reverted to cfg.model on

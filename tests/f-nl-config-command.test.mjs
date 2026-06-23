@@ -1,6 +1,27 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { detectConfigCommand, applyConfigCommand, LAZYCLAW_META_GUARD } from '../lib/nl_config_command.mjs';
+import { detectConfigCommand, applyConfigCommand, LAZYCLAW_META_GUARD, refreshLiveProvider } from '../lib/nl_config_command.mjs';
+
+test('refreshLiveProvider re-points the REPL live provider + status from cfg.provider', () => {
+  const PROV = { name: 'claude-cli', sendMessage: () => {} };
+  const calls = {};
+  const ctx = {
+    cfg: { provider: 'claude-cli', model: 'opus' },
+    registryMod: { PROVIDERS: { 'claude-cli': PROV } },
+    setActiveProvName: (n) => { calls.prov = n; },
+    setProv: (p) => { calls.provObj = p; },
+    setActiveModel: (m) => { calls.model = m; },
+  };
+  refreshLiveProvider(ctx);
+  assert.equal(calls.prov, 'claude-cli', 'status bar provider updated');
+  assert.equal(calls.provObj, PROV, 'live provider object re-resolved (so the next turn is NOT orchestrator)');
+  assert.equal(calls.model, 'opus');
+});
+
+test('refreshLiveProvider is a no-op without cfg/setters (best-effort)', () => {
+  assert.doesNotThrow(() => refreshLiveProvider(undefined));
+  assert.doesNotThrow(() => refreshLiveProvider({ cfg: {} }));
+});
 
 test('LAZYCLAW_META_GUARD names the real commands and forbids faking success', () => {
   assert.match(LAZYCLAW_META_GUARD, /CANNOT change/);
