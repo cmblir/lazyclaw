@@ -42,6 +42,33 @@ function _logIndexFailure(configDir, scope, err) {
   } catch { /* swallow — surface only via console.warn below */ }
 }
 
+// The native better-sqlite3 addon fails to load when node_modules was built
+// against a different Node.js ABI than the one running lazyclaw (a Node switch
+// via nvm/brew, or copied node_modules). Every index op then throws the same
+// thing — so instead of dumping the raw stack on each write, recognise it and
+// print ONE actionable hint, then stay quiet. Chat is unaffected; only recall /
+// skill search degrade until the addon is rebuilt.
+let _nativeHintShown = false;
+export function _resetNativeHint() { _nativeHintShown = false; } // test seam
+export function _isNativeAbiError(e) {
+  return /NODE_MODULE_VERSION|was compiled against a different Node|better_sqlite3\.node|invalid ELF header|dlopen\(/i
+    .test(String(e?.message || e || ''));
+}
+export function _warnIndexFailure(label, e) {
+  if (_isNativeAbiError(e)) {
+    if (_nativeHintShown) return;
+    _nativeHintShown = true;
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[index_db] recall index disabled — better-sqlite3 was built for a different Node.js version.\n' +
+      '           Re-enable it once with:  npm rebuild better-sqlite3   (in the lazyclaw install dir),\n' +
+      '           or reinstall deps with the Node you run lazyclaw with. Chat is unaffected.');
+    return;
+  }
+  // eslint-disable-next-line no-console
+  console.warn(`[index_db] ${label}:`, e.message);
+}
+
 function dbPath(configDir) {
   return path.join(configDir, 'index.db');
 }
@@ -180,8 +207,7 @@ export function indexSessionTurn(row, configDir = defaultConfigDir()) {
     );
   } catch (e) {
     _logIndexFailure(configDir, 'sessions', e);
-    // eslint-disable-next-line no-console
-    console.warn('[index_db] indexSessionTurn failed:', e.message);
+    _warnIndexFailure('indexSessionTurn failed', e);
   }
 }
 
@@ -196,8 +222,7 @@ export function indexSkill(row, configDir = defaultConfigDir()) {
     );
   } catch (e) {
     _logIndexFailure(configDir, 'skills', e);
-    // eslint-disable-next-line no-console
-    console.warn('[index_db] indexSkill failed:', e.message);
+    _warnIndexFailure('indexSkill failed', e);
   }
 }
 
@@ -212,8 +237,7 @@ export function deleteSkill(skillName, configDir = defaultConfigDir()) {
     s.deleteSkill.run(String(skillName || ''));
   } catch (e) {
     _logIndexFailure(configDir, 'skills', e);
-    // eslint-disable-next-line no-console
-    console.warn('[index_db] deleteSkill failed:', e.message);
+    _warnIndexFailure('deleteSkill failed', e);
   }
 }
 
@@ -228,8 +252,7 @@ export function indexTrajectory(row, configDir = defaultConfigDir()) {
     );
   } catch (e) {
     _logIndexFailure(configDir, 'trajectories', e);
-    // eslint-disable-next-line no-console
-    console.warn('[index_db] indexTrajectory failed:', e.message);
+    _warnIndexFailure('indexTrajectory failed', e);
   }
 }
 
@@ -243,8 +266,7 @@ export function indexMemory(row, configDir = defaultConfigDir()) {
     );
   } catch (e) {
     _logIndexFailure(configDir, 'memories', e);
-    // eslint-disable-next-line no-console
-    console.warn('[index_db] indexMemory failed:', e.message);
+    _warnIndexFailure('indexMemory failed', e);
   }
 }
 
