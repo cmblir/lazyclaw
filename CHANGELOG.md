@@ -6,6 +6,19 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.9.2] - 2026-06-23
+
+### Fixed
+
+- **The chat agent no longer shows raw bash commands or pretends to run them.**
+  The honesty guard was only attached when a workspace/skill system prompt
+  already existed, so a fresh install sent no system prompt at all and the model
+  printed ```bash blocks + "Running it now." and faked running `lazyclaw …`
+  commands (the default chat has no shell tool). lazyclaw now always sends a base
+  guard system prompt that forbids fabricating command execution — no fenced
+  shell blocks pretending to run, no fake output / exit codes / JSON — and is
+  phrased to stay accurate whether or not agentic bash is enabled.
+
 ## [6.9.1] - 2026-06-23
 
 ### Fixed
