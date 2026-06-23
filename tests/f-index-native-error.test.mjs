@@ -15,27 +15,43 @@ test('_isNativeAbiError matches the ABI / native-binding messages, not ordinary 
   assert.equal(_isNativeAbiError(new Error('SQLITE_CORRUPT: database disk image is malformed')), false);
 });
 
-test('_warnIndexFailure prints the rebuild hint ONCE for repeated ABI errors (no per-op spam)', () => {
+// Capture console.warn while running fn, with LAZYCLAW_DEBUG forced to `dbg`.
+function capWarn(dbg, fn) {
   _resetNativeHint();
+  const prevDbg = process.env.LAZYCLAW_DEBUG;
+  if (dbg) process.env.LAZYCLAW_DEBUG = '1'; else delete process.env.LAZYCLAW_DEBUG;
   const seen = [];
   const orig = console.warn; console.warn = (...a) => seen.push(a.join(' '));
-  try {
+  try { fn(); } finally {
+    console.warn = orig;
+    if (prevDbg === undefined) delete process.env.LAZYCLAW_DEBUG; else process.env.LAZYCLAW_DEBUG = prevDbg;
+  }
+  return seen;
+}
+
+test('_warnIndexFailure stays SILENT for the user (no LAZYCLAW_DEBUG) — internals never hit the screen', () => {
+  const seen = capWarn(false, () => {
+    _warnIndexFailure('indexTrajectory failed', abiErr);
+    _warnIndexFailure('indexSkill failed', new Error('database is locked'));
+  });
+  assert.equal(seen.length, 0, 'index errors are logged to disk + doctor, not printed to users');
+});
+
+test('_warnIndexFailure prints the rebuild hint ONCE under LAZYCLAW_DEBUG (no per-op spam)', () => {
+  const seen = capWarn(true, () => {
     _warnIndexFailure('indexTrajectory failed', abiErr);
     _warnIndexFailure('indexSkill failed', abiErr);
     _warnIndexFailure('indexMemory failed', abiErr);
-  } finally { console.warn = orig; }
+  });
   assert.equal(seen.length, 1, 'the ABI error warns exactly once, not on every index op');
   assert.match(seen[0], /npm rebuild better-sqlite3/);
 });
 
-test('_warnIndexFailure still warns per-op for ordinary (non-native) errors', () => {
-  _resetNativeHint();
-  const seen = [];
-  const orig = console.warn; console.warn = (...a) => seen.push(a.join(' '));
-  try {
+test('_warnIndexFailure warns per-op for ordinary errors under LAZYCLAW_DEBUG', () => {
+  const seen = capWarn(true, () => {
     _warnIndexFailure('indexSkill failed', new Error('database is locked'));
     _warnIndexFailure('indexSkill failed', new Error('database is locked'));
-  } finally { console.warn = orig; }
-  assert.equal(seen.length, 2, 'ordinary errors keep their per-op warning');
+  });
+  assert.equal(seen.length, 2, 'ordinary errors keep their per-op warning under debug');
   assert.match(seen[0], /indexSkill failed/);
 });

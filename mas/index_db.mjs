@@ -55,14 +55,15 @@ export function _isNativeAbiError(e) {
     .test(String(e?.message || e || ''));
 }
 export function _warnIndexFailure(label, e) {
+  // Index internals stay off the user's screen: recorded in index-failures.jsonl
+  // (+ surfaced by `lazyclaw doctor`); echoed to the console only when an
+  // operator sets LAZYCLAW_DEBUG. End users never see DB error codes.
+  if (!process.env.LAZYCLAW_DEBUG) return;
   if (_isNativeAbiError(e)) {
     if (_nativeHintShown) return;
     _nativeHintShown = true;
     // eslint-disable-next-line no-console
-    console.warn(
-      '[index_db] recall index disabled — better-sqlite3 was built for a different Node.js version.\n' +
-      '           Re-enable it once with:  npm rebuild better-sqlite3   (in the lazyclaw install dir),\n' +
-      '           or reinstall deps with the Node you run lazyclaw with. Chat is unaffected.');
+    console.warn('[index_db] recall index disabled — better-sqlite3 ABI mismatch; run `npm rebuild better-sqlite3`.');
     return;
   }
   // eslint-disable-next-line no-console
