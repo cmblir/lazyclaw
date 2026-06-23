@@ -11,6 +11,7 @@ import {
 } from '../lib/config.mjs';
 import { ensureRegistry, requireRegistry, getRegistry } from '../lib/registry_boot.mjs';
 import { SUBCOMMANDS, parseArgs, AGENT_REG_SUBS } from '../lib/args.mjs';
+import { LAZYCLAW_META_GUARD } from '../lib/nl_config_command.mjs';
 import {
   _attachGhostAutocomplete, _fetchModelsForProvider,
   _pickProviderInteractive, _printChatBanner,
@@ -176,7 +177,7 @@ export async function cmdChat(flags = {}) {
         } catch (err) { console.error(`skill error: ${err.message}`); process.exit(2); }
       }
       if (_inkSysParts.length && !_inkMessages.some((m) => m.role === 'system')) {
-        const merged = _inkSysParts.join('\n\n---\n\n');
+        const merged = [..._inkSysParts, LAZYCLAW_META_GUARD].join('\n\n---\n\n');
         _inkMessages.unshift({ role: 'system', content: merged });
         if (_inkSessionId) sessionsMod.appendTurn(_inkSessionId, 'system', merged, _inkCfgDir);
       }
@@ -455,7 +456,7 @@ export async function cmdChat(flags = {}) {
     }
   }
   if (sysParts.length && !messages.some(m => m.role === 'system')) {
-    const merged = sysParts.join('\n\n---\n\n');
+    const merged = [...sysParts, LAZYCLAW_META_GUARD].join('\n\n---\n\n');
     messages.unshift({ role: 'system', content: merged });
     if (sessionId) sessionsMod.appendTurn(sessionId, 'system', merged, cfgDir);
   }
@@ -651,10 +652,7 @@ export async function cmdChat(flags = {}) {
 // listener from a previous run doesn't crash the launch with EADDRINUSE.
 // Mirrors the Python server's auto-kill behaviour described in CLAUDE.md.
 
-
-
 // sandbox subcommands — list/test/add/use (Phase D).
-
 
 // Interactive launcher — fired when the user types `lazyclaw` with
 // no subcommand AND we're attached to a TTY. OpenClaw's launcher

@@ -29,6 +29,8 @@ import { Chalk } from 'chalk';
 import { chatAgenticGet, chatPlanModeGet, effectiveChatTools } from '../config_features.mjs';
 import { defaultSandboxSpec } from '../sandbox/index.mjs';
 import { resolvePermissionMode } from '../lib/permission_mode.mjs';
+import { detectConfigCommand, applyConfigCommand } from '../lib/nl_config_command.mjs';
+import { readConfig as _readCfg, writeConfig as _writeCfg } from '../lib/config.mjs';
 
 // Force ANSI on these turn-status markers regardless of stdout TTY detection:
 // the Ink path routes them through React state (Ink preserves embedded SGR
@@ -207,6 +209,25 @@ async function _runAgenticTurn({ ctx, messages, sysMsg, activeProvName, activeMo
 export function makeRunTurn({ ctx, writeFn }) {
   return async function runTurn(text, signal) {
     if (signal?.aborted) return;
+
+    // Natural-language config commands (orchestrator on/off, planner/worker
+    // model) are applied for REAL here — otherwise the model just replies
+    // "done" while nothing changes (the reported bug). Conservative matcher;
+    // anything it doesn't catch falls through to the model below.
+    const _cmd = detectConfigCommand(text);
+    if (_cmd) {
+      const _msgs = ctx.getMessages();
+      _msgs.push({ role: 'user', content: text });
+      ctx.persistTurn('user', text);
+      let reply;
+      try { reply = applyConfigCommand(_cmd, { readConfig: _readCfg, writeConfig: _writeCfg, ctxCfg: ctx.cfg }); }
+      catch (e) { reply = `⚠ couldn't apply that change: ${e?.message || e}`; }
+      try { writeFn(reply + '\n'); } catch { /* sink best-effort */ }
+      _msgs.push({ role: 'assistant', content: reply });
+      ctx.persistTurn('assistant', reply);
+      return;
+    }
+
     const messages = ctx.getMessages();
     messages.push({ role: 'user', content: text });
     try { ctx.onCharsSent && ctx.onCharsSent(text.length); }
