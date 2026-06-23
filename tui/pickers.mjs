@@ -499,84 +499,82 @@ export async function _pickProviderInteractive() {
   }
 
   // ── Step 2 — provider in that family ──────────────────────────
-  let provider = null;
-  while (!provider) {
-    const memberNames = families[family.id].members;
-    const provItems = memberNames.map((name) => {
-      const meta = info[name] || {};
-      const isCustom = !!meta.custom;
-      const isBuiltinCompat = !!meta.builtinOpenAICompat;
-      // Step-2 desc used to preview four suggested model ids per provider.
-      // That made the row read like "gemini · models: gemini-2.5-pro ·
-      // gemini-2.5-flash · gemini-2.0-flash · gemini-2.0-flash-thinking-exp",
-      // which is too dense and partly redundant — step 3 already shows the
-      // full curated list. Keep the row to a vendor label + endpoint hint.
-      let desc = '';
-      if (isCustom) desc = `custom · ${meta.baseUrl || ''}`;
-      else if (isBuiltinCompat) desc = meta.label || meta.baseUrl || '';
-      else if (meta.label && meta.label !== name) desc = meta.label;
-      return {
-        id: name,
-        label: name,
-        desc,
-        tag: isCustom
-          ? paint('38;5;213', '[custom]')
-          : (meta.requiresApiKey ? paint('38;5;245', '[api key]') : paint('38;5;208', '[no key]')),
-      };
-    });
-    // Surface a "+ Add a new custom endpoint…" entry inside the API-key
-    // family. NIM, OpenRouter, vLLM, LM Studio, Together, Groq, etc. all
-    // speak the OpenAI Chat-Completions wire format — this single hook
-    // covers every one of them without shipping a per-vendor provider.
-    if (family.id === 'api') {
-      provItems.push({
-        id: '__add_custom__',
-        label: '+ Add a custom OpenAI-compatible endpoint…',
-        desc: 'NVIDIA NIM · OpenRouter · Together · Groq · vLLM · LM Studio · …',
-        tag: paint('38;5;213', '[new]'),
+  for (;;) {  // loop Steps 2+3: Esc in Step 3 returns to Step 2, not Step 1
+    let provider = null;
+    while (!provider) {
+      const memberNames = families[family.id].members;
+      const provItems = memberNames.map((name) => {
+        const meta = info[name] || {};
+        const isCustom = !!meta.custom;
+        const isBuiltinCompat = !!meta.builtinOpenAICompat;
+        // Step-2 row: vendor label + endpoint hint only (Step 3 shows models).
+        let desc = '';
+        if (isCustom) desc = `custom · ${meta.baseUrl || ''}`;
+        else if (isBuiltinCompat) desc = meta.label || meta.baseUrl || '';
+        else if (meta.label && meta.label !== name) desc = meta.label;
+        return {
+          id: name,
+          label: name,
+          desc,
+          tag: isCustom
+            ? paint('38;5;213', '[custom]')
+            : (meta.requiresApiKey ? paint('38;5;245', '[api key]') : paint('38;5;208', '[no key]')),
+        };
       });
+      // Surface a "+ Add a new custom endpoint…" entry inside the API-key
+      // family. NIM, OpenRouter, vLLM, LM Studio, Together, Groq, etc. all
+      // speak the OpenAI Chat-Completions wire format — this single hook
+      // covers every one of them without shipping a per-vendor provider.
+      if (family.id === 'api') {
+        provItems.push({
+          id: '__add_custom__',
+          label: '+ Add a custom OpenAI-compatible endpoint…',
+          desc: 'NVIDIA NIM · OpenRouter · Together · Groq · vLLM · LM Studio · …',
+          tag: paint('38;5;213', '[new]'),
+        });
+      }
+      if (memberNames.length === 1 && family.id !== 'api') {
+        // Auto-advance — no point making the user pick from a single row,
+        // unless we just appended the "+ Add custom" entry above.
+        provider = { id: memberNames[0] };
+        break;
+      }
+      const picked = await _arrowMenu({
+        title: `LazyClaw setup — Step 2 of 3:  pick a ${family.label} provider`,
+        subtitle: `Showing ${provItems.length} ${family.label.toLowerCase()} option(s). Type to filter.`,
+        items: provItems,
+        searchable: true,
+      });
+      if (picked === 'CANCEL') return null;
+      if (picked === 'BACK')   { family = null; return _pickProviderInteractive(); }
+      if (picked && picked.id === '__add_custom__') {
+        const added = await _addCustomProviderInteractive();
+        if (!added) continue; // back to provider list
+        // Force the registry to pick up the new entry and recompute the
+        // family bucket for the next loop iteration.
+        await ensureRegistry();
+        Object.assign(families, _providerFamilies());
+        provider = { id: added.name };
+        break;
+      }
+      provider = picked;
     }
-    if (memberNames.length === 1 && family.id !== 'api') {
-      // Auto-advance — no point making the user pick from a single row,
-      // unless we just appended the "+ Add custom" entry above.
-      provider = { id: memberNames[0] };
-      break;
-    }
-    const picked = await _arrowMenu({
-      title: `LazyClaw setup — Step 2 of 3:  pick a ${family.label} provider`,
-      subtitle: `Showing ${provItems.length} ${family.label.toLowerCase()} option(s). Type to filter.`,
-      items: provItems,
-      searchable: true,
+
+    // ── Step 3 — model picker ────────────────────────────────────────
+    // v5.3.2 — the setup wizard no longer surfaces composite providers
+    // (orchestrator is filtered out of _providerFamilies above), so this
+    // step is just the regular model picker. The orchestrator wizard
+    // (_setupOrchestratorInteractive) stays reachable via the dedicated
+    // `lazyclaw orchestrator …` subcommand and an explicit
+    // `--provider orchestrator` invocation.
+    const picked = await _pickModelInteractive(provider.id, {
+      titlePrefix: 'LazyClaw setup — Step 3 of 3:',
+      onBack: 'restart',
     });
     if (picked === 'CANCEL') return null;
-    if (picked === 'BACK')   { family = null; return _pickProviderInteractive(); }
-    if (picked && picked.id === '__add_custom__') {
-      const added = await _addCustomProviderInteractive();
-      if (!added) continue; // back to provider list
-      // Force the registry to pick up the new entry and recompute the
-      // family bucket for the next loop iteration.
-      await ensureRegistry();
-      Object.assign(families, _providerFamilies());
-      provider = { id: added.name };
-      break;
-    }
-    provider = picked;
+    if (picked === 'BACK')   continue; // Esc in Step 3 -> back to Step 2 (one step)
+    return { provider: provider.id, model: picked };
   }
-
-  // ── Step 3 — model picker ────────────────────────────────────────
-  // v5.3.2 — the setup wizard no longer surfaces composite providers
-  // (orchestrator is filtered out of _providerFamilies above), so this
-  // step is just the regular model picker. The orchestrator wizard
-  // (_setupOrchestratorInteractive) stays reachable via the dedicated
-  // `lazyclaw orchestrator …` subcommand and an explicit
-  // `--provider orchestrator` invocation.
-  const picked = await _pickModelInteractive(provider.id, {
-    titlePrefix: 'LazyClaw setup — Step 3 of 3:',
-    onBack: 'restart',
-  });
-  if (picked === 'CANCEL') return null;
-  if (picked === 'BACK')   return _pickProviderInteractive();
-  return { provider: provider.id, model: picked };
 }
 
 // _setupOrchestratorInteractive moved to tui/orchestrator_setup.mjs (it imports
