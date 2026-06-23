@@ -6,6 +6,18 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.9.3] - 2026-06-23
+
+### Fixed
+
+- **The chat agent no longer invents configuration or prints `Run:` command
+  lines.** After 6.9.2 stopped it faking execution, it started suggesting a
+  `test`/`main` channel that was never set up and printing
+  `Run: lazyclaw message send …` lines. The guard now tells the model it cannot
+  see the configuration, must never invent or assume config names (channels,
+  providers, …), and — when something isn't set up — to say so briefly in plain
+  language and stop, without raw commands, `Run:` lines, or guessed values.
+
 ## [6.9.2] - 2026-06-23
 
 ### Fixed
