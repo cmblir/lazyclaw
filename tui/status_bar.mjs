@@ -4,16 +4,36 @@
 // Extracted from repl.mjs so the HUD can grow without pushing repl.mjs over the
 // file-size ratchet.
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
 import { theme } from './theme.mjs';
 import { formatHudRow, formatGauge } from './hud.mjs';
 
+// How fast the streaming dot pulses, in ms. Exported so it's not a magic number.
+export const BLINK_MS = 450;
+
+// The leading status glyph. While streaming, the dot pulses (bright ↔ dim) so
+// there's a live "something is happening" signal; idle is a steady hollow dot.
+// Pure (takes the current blink phase) so it's unit-testable without a timer.
+export function streamingIndicator(streaming, blinkOn, t = theme) {
+  if (!streaming) return t.dim('○ idle');
+  return blinkOn ? t.accent('● streaming') : t.dim('● streaming');
+}
+
 export function StatusBar({ provider, model, streaming, ctxUsed, ctxTotal, hud }) {
+  // Pulse the streaming dot. The interval only runs while streaming and is torn
+  // down as soon as the turn ends (or the bar unmounts).
+  const [blinkOn, setBlinkOn] = useState(true);
+  useEffect(() => {
+    if (!streaming) { setBlinkOn(true); return undefined; }
+    const id = setInterval(() => setBlinkOn((b) => !b), BLINK_MS);
+    return () => clearInterval(id);
+  }, [streaming]);
+
   // Numbers are computed upstream (chat-history budget, not provider self-report);
   // formatGauge only changes the RENDERING — adds percent + bar + warn marker.
   const ctx = (ctxUsed != null && ctxTotal != null) ? formatGauge(ctxUsed, ctxTotal) : '--';
-  const indicator = streaming ? theme.accent('● streaming') : theme.dim('○ idle');
+  const indicator = streamingIndicator(streaming, blinkOn);
   const prov = provider || '?';
   const mdl = model || '?';
   const hudRow = hud ? formatHudRow(hud) : '';
