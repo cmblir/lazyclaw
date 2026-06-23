@@ -17,7 +17,8 @@ export const BLINK_MS = 450;
 // Pure (takes the current blink phase) so it's unit-testable without a timer.
 export function streamingIndicator(streaming, blinkOn, t = theme) {
   if (!streaming) return t.dim('○ idle');
-  return blinkOn ? t.accent('● streaming') : t.dim('● streaming');
+  // Pulse a GREEN dot while streaming (live/working), not the amber accent.
+  return blinkOn ? t.success('● streaming') : t.dim('● streaming');
 }
 
 export function StatusBar({ provider, model, streaming, ctxUsed, ctxTotal, hud }) {

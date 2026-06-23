@@ -9,6 +9,7 @@ import chalk from 'chalk';
 
 const AMBER_HEX = '#FFB347';
 const BORDER_HEX = '#5A5A5A';
+const GREEN_HEX = '#34D399'; // emerald — "live/working" (matches the dashboard ring)
 
 // Central color gate. Color is OFF when the NO_COLOR standard applies
 // (https://no-color.org — any non-empty NO_COLOR), the terminal is `dumb`,
@@ -50,6 +51,10 @@ function accent(text) {
   return chalk.bold.hex(AMBER_HEX)(text);
 }
 
+function success(text) {
+  return chalk.bold.hex(GREEN_HEX)(text);
+}
+
 function muted(text) {
   return chalk.gray(text);
 }
@@ -65,6 +70,7 @@ export const theme = {
   colorize: amber,
   dim,
   accent,
+  success,
   muted,
   plain,
 };
