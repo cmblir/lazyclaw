@@ -6,6 +6,29 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`lazyclaw login`** — verify or establish the claude-cli credential. It
+  resolves the bearer across `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` /
+  the `~/.claude` credential file / the macOS Keychain and reports the source;
+  when none is found it runs `claude setup-token` to mint a long-lived token and
+  stores it (via `--token`) in `<config>/.env` (0600). `login --check` is a
+  non-interactive status probe.
+
+### Fixed
+
+- **claude-cli model listing now works keyless on macOS.** `claude login` stores
+  its OAuth token in the macOS Keychain (no `~/.claude/.credentials.json`), so
+  listing models previously failed with "set ANTHROPIC_API_KEY or
+  CLAUDE_CODE_OAUTH_TOKEN". lazyclaw now reads the `Claude Code-credentials`
+  Keychain item (read-only; the token only goes to api.anthropic.com) and uses
+  the existing login automatically.
+- **better-sqlite3 ABI mismatch no longer spams the REPL.** When the native
+  addon was built against a different Node.js version (`NODE_MODULE_VERSION`
+  mismatch), every recall/skill index write dumped a stack trace. lazyclaw now
+  prints one actionable hint (`npm rebuild better-sqlite3`) and stays quiet;
+  chat is unaffected.
+
 ## [6.6.0] - 2026-06-22
 
 ### Added
