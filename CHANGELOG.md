@@ -6,6 +6,21 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.9.1] - 2026-06-23
+
+### Fixed
+
+- **Streaming indicator is green, not amber.** The pulsing stream dot now uses
+  a green "live" color instead of the amber brand accent.
+- **DB error internals no longer leak to the user.** The better-sqlite3
+  ABI-mismatch hint (and other `[index_db]` messages) printed into the chat;
+  they're now recorded in the failures log + `lazyclaw doctor` and only echoed
+  to the console under `LAZYCLAW_DEBUG`.
+- **`lazyclaw message send` is honest + readable.** On a machine with no Slack
+  configured it now says so in plain text with the exact setup command, instead
+  of a terse error; success prints `✓ sent to "<name>"` rather than raw JSON.
+  add/remove are human-friendly too.
+
 ## [6.9.0] - 2026-06-23
 
 ### Fixed
