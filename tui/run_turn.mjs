@@ -28,6 +28,7 @@
 import { Chalk } from 'chalk';
 import { chatAgenticGet, chatPlanModeGet, effectiveChatTools } from '../config_features.mjs';
 import { defaultSandboxSpec } from '../sandbox/index.mjs';
+import { resolvePermissionMode } from '../lib/permission_mode.mjs';
 
 // Force ANSI on these turn-status markers regardless of stdout TTY detection:
 // the Ink path routes them through React state (Ink preserves embedded SGR
@@ -296,6 +297,9 @@ export function makeRunTurn({ ctx, writeFn }) {
         // a one-shot spawn on any session failure, and the session respawns if
         // the system prompt changes (plan-mode toggle) so it can't go stale.
         persistent: ctx.cfg?.chat?.persistentSession !== false,
+        // claude-cli permission mode (cfg.chat.permissionMode, asked at setup;
+        // defaults to bypassPermissions). claude-cli reads it; others ignore it.
+        permissionMode: resolvePermissionMode(ctx.cfg),
         sessionKey: (ctx.getSessionId && ctx.getSessionId()) || ctx.syntheticChatSessionId,
         ...(sysMsg ? { sessionSystem: sysMsg.content } : {}),
         ...(maxTokens !== undefined ? { maxTokens } : {}),

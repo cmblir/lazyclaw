@@ -142,6 +142,10 @@ export function buildArgs(prompt, opts = {}) {
   const maxTurns = opts.maxTurns == null ? 1 : opts.maxTurns;
   if (maxTurns > 0) args.push('--max-turns', String(maxTurns));
   args.push('--tools', opts.tools == null ? '' : String(opts.tools));
+  // Permission mode (e.g. bypassPermissions) so the agent doesn't stop to ask
+  // before every tool. Only emitted when set — the caller centralises the
+  // default via lib/permission_mode.resolvePermissionMode.
+  if (opts.permissionMode) args.push('--permission-mode', String(opts.permissionMode));
   const modelAlias = resolveModelAlias(opts.model);
   if (modelAlias) args.push('--model', modelAlias);
   return args;
@@ -174,7 +178,7 @@ export const claudeCliProvider = {
         const { getSession } = await import('./claude_cli_session.mjs');
         const session = getSession(opts.sessionKey, {
           bin, model: opts.model, cwd: opts.cwd, lean: opts.lean,
-          maxTurns: opts.maxTurns, tools: opts.tools,
+          maxTurns: opts.maxTurns, tools: opts.tools, permissionMode: opts.permissionMode,
           system: opts.sessionSystem || opts.system || messages.find((m) => m.role === 'system')?.content,
         });
         let yielded = false;

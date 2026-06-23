@@ -12,6 +12,7 @@ import {
 } from '../lib/config.mjs';
 import { ensureRegistry, requireRegistry, getRegistry } from '../lib/registry_boot.mjs';
 import { SUBCOMMANDS, parseArgs, AGENT_REG_SUBS } from '../lib/args.mjs';
+import { runPermissionStep } from './setup_permission.mjs';
 import {
   _attachGhostAutocomplete, _fetchModelsForProvider, _pauseChatForSubMenu,
   _pickModelInteractive, _pickProviderInteractive, _printChatBanner,
@@ -94,10 +95,6 @@ export async function cmdOnboard(flags) {
   console.log(JSON.stringify({ ok: true, written: configPath(), provider: next.provider, model: next.model || null, hasApiKey: !!next['api-key'] }));
 }
 
-
-
-
-
 export function cmdHelp(name) {
   if (!name) {
     process.stdout.write('lazyclaw — terminal AI assistant + workflow engine\n\n');
@@ -117,8 +114,6 @@ export function cmdHelp(name) {
   }
   process.stdout.write(detail + '\n');
 }
-
-
 
 export async function cmdSetup(_sub, _positional, flags = {}) {
   await ensureRegistry();
@@ -178,6 +173,10 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
   // Context window — asked right after the model pick (optional; Enter keeps
   // defaults). Not a numbered step: it's part of the core model setup.
   await runContextStep({ prompt: _quickPrompt, colors });
+
+  // Tool-permission mode (cfg.chat.permissionMode) — part of the core chat
+  // setup. Extracted to ./setup_permission.mjs (file-size gate).
+  await runPermissionStep({ prompt: _quickPrompt, colors, cfg: cfgAfterOnboard });
   }
 
   // ── Step 2/7: Verify one clean chat works ───────────────────
@@ -702,5 +701,4 @@ export async function cmdLauncher() {
   // /exit and Quit should feel the same.
   process.exit(0);
 }
-
 

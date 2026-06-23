@@ -52,6 +52,7 @@ class ClaudeSession {
     const mt = o.maxTurns == null ? 1 : o.maxTurns;
     if (mt > 0) args.push('--max-turns', String(mt));
     args.push('--tools', o.tools == null ? '' : String(o.tools));
+    if (o.permissionMode) args.push('--permission-mode', String(o.permissionMode));
     const model = resolveModelAlias(o.model);
     if (model) args.push('--model', model);
     if (o.system && String(o.system).trim()) args.push('--append-system-prompt', String(o.system));
