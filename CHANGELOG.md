@@ -6,6 +6,29 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.8.0] - 2026-06-23
+
+### Added
+
+- **Configurable tool-permission mode for claude-cli.** `cfg.chat.permissionMode`
+  (asked at `lazyclaw setup`; `config set chat.permissionMode <mode>` too) is
+  threaded into every claude spawn — interactive chat, the persistent session,
+  and the agentic path. Unset defaults to `bypassPermissions` so the agent
+  doesn't stop to ask before each tool; pick `default`/`acceptEdits`/`plan` to
+  re-enable prompting.
+- **Plain-language orchestrator control in chat.** Typing "orchestrator off",
+  "플래너를 소넷으로", "워커를 하이쿠로", etc. now actually writes
+  `cfg.orchestrator` (and confirms) instead of being sent to the model. The
+  matcher is conservative — questions and unrelated chat pass through untouched.
+
+### Fixed
+
+- **Chat no longer fakes settings changes.** Config changes it can't apply are
+  no longer answered with a hallucinated "done": a system-prompt guard tells the
+  model to give the real command (`/orchestrator`, `lazyclaw agent add`, …). The
+  per-turn orchestrator banner already reflected real config, so the stale
+  display was the unpersisted change — now fixed end-to-end.
+
 ## [6.7.0] - 2026-06-23
 
 ### Added
