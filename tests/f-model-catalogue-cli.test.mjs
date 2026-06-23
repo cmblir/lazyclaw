@@ -93,8 +93,14 @@ test('_claudeCodeOAuthToken: reads the Linux credential store shapes', () => {
   // flat accessToken shape also accepted
   files['/h/.claude/.credentials.json'] = JSON.stringify({ accessToken: 'tok-b' });
   assert.equal(_claudeCodeOAuthToken({ home: '/h', readFileSync: read }), 'tok-b');
-  // nothing on disk (macOS keychain) → null, never a throw
-  assert.equal(_claudeCodeOAuthToken({ home: '/nope', readFileSync: read }), null);
+  // no file and no keychain hit → null, never a throw (keychain isolated here
+  // so the assertion is deterministic on a macOS dev box that IS logged in).
+  assert.equal(_claudeCodeOAuthToken({ home: '/nope', readFileSync: read, keychainReader: () => null }), null);
+});
+
+test('_claudeCodeOAuthToken: falls back to the macOS keychain when no credential file', () => {
+  const read = (_p) => { const e = new Error('ENOENT'); e.code = 'ENOENT'; throw e; };
+  assert.equal(_claudeCodeOAuthToken({ home: '/nope', readFileSync: read, keychainReader: () => 'kc-token' }), 'kc-token');
 });
 
 test('_codexStoredApiKey: plain-string key accepted, OAuth-only auth.json ignored', () => {

@@ -14,6 +14,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { readClaudeKeychainToken } from './claude_keychain.mjs';
 
 /**
  * Whether a provider exposes a model catalogue we can live-fetch. True for
@@ -146,7 +147,7 @@ export function modelCatalogueFor({ cfg, registryMod, resolveAuthKey, providerId
 // (no file), so this returns null there — the caller falls through to its
 // honest "set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN" error. Read-only;
 // the token is only ever sent to api.anthropic.com, never logged.
-export function _claudeCodeOAuthToken({ home, readFileSync } = {}) {
+export function _claudeCodeOAuthToken({ home, readFileSync, keychainReader } = {}) {
   const h = home || os.homedir();
   const read = readFileSync || fs.readFileSync;
   for (const rel of ['.claude/.credentials.json', '.config/claude/.credentials.json']) {
@@ -156,7 +157,9 @@ export function _claudeCodeOAuthToken({ home, readFileSync } = {}) {
       if (typeof tok === 'string' && tok) return tok;
     } catch { /* missing / unreadable / not JSON — try the next location */ }
   }
-  return null;
+  // macOS keeps the login in the Keychain (no file) — read it there.
+  const fromKeychain = (keychainReader || readClaudeKeychainToken)();
+  return fromKeychain || null;
 }
 
 // A plain API key stored by `codex login --api-key` in ~/.codex/auth.json.
