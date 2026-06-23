@@ -243,8 +243,8 @@ export async function cmdMessage(sub, positional, flags = {}) {
         process.exit(2);
       }
       try { m.messageAdd(cfg, name, url, flags.kind); writeConfig(cfg); }
-      catch (e) { console.error(`error: ${e.message}`); process.exit(1); }
-      console.log(JSON.stringify({ ok: true, name }));
+      catch (e) { console.error(`✗ ${e.message}`); process.exit(1); }
+      console.log(`✓ added "${name}" webhook.`);
       return;
     }
     case 'remove': {
@@ -254,8 +254,8 @@ export async function cmdMessage(sub, positional, flags = {}) {
         process.exit(2);
       }
       try { m.messageRemove(cfg, name); writeConfig(cfg); }
-      catch (e) { console.error(`error: ${e.message}`); process.exit(1); }
-      console.log(JSON.stringify({ ok: true, removed: name }));
+      catch (e) { console.error(`✗ ${e.message}`); process.exit(1); }
+      console.log(`✓ removed "${name}".`);
       return;
     }
     case 'send': {
@@ -280,9 +280,9 @@ export async function cmdMessage(sub, positional, flags = {}) {
       }
       try {
         const r = await m.messageSend(cfg, name, text);
-        console.log(JSON.stringify(r));
+        console.log(`✓ sent to "${name}" (${r.kind}).`);
       } catch (e) {
-        console.error(`error: ${e.message}`); process.exit(1);
+        console.error(`✗ ${e.message}`); process.exit(1);
       }
       return;
     }

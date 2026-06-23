@@ -216,7 +216,7 @@ export function messageRemove(cfg, name) {
 export async function messageSend(cfg, name, text, opts = {}) {
   const map = (cfg.messaging || {}).webhooks || {};
   const hook = map[name];
-  if (!hook) throw new Error(`webhook "${name}" not configured — add via \`lazyclaw message add\``);
+  if (!hook) throw new Error(`no "${name}" channel is configured. Set up Slack with \`lazyclaw setup\` (channel step), or add a webhook: \`lazyclaw message add ${name} <webhook-url>\``);
   const fetchFn = opts.fetch || globalThis.fetch;
   if (!fetchFn) throw new Error('no fetch implementation');
 
