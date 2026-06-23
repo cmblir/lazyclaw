@@ -6,6 +6,28 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.9.0] - 2026-06-23
+
+### Fixed
+
+- **Orchestrator on/off in chat now switches the LIVE provider.** "orchestrator
+  off" wrote `cfg.provider` but the REPL kept its in-memory provider, so the HUD
+  still showed `orchestrator` and the next turn still answered as orchestrator.
+  The turn-runner now re-points the live provider + status from cfg after an
+  on/off, matching `/provider`.
+- **Setup provider picker — Esc steps back one level.** Esc on the model step
+  (Step 3) restarted the picker at the auth-family step (Step 1) instead of
+  returning to the provider step (Step 2).
+
+### Added
+
+- **Blinking streaming indicator.** While a turn streams, the status-bar dot now
+  pulses (bright ↔ dim) so there's a live "working" signal; idle is steady.
+- **Esc-to-go-back in the setup wizard's typed questions.** The context-window
+  and tool-permission prompts read keys in raw mode (`tui/prompt_back`), so Esc
+  now steps back (permission → context); arrow keys are ignored, Backspace and
+  Enter work as expected.
+
 ## [6.8.0] - 2026-06-23
 
 ### Added
