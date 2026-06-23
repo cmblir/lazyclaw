@@ -403,6 +403,11 @@ async function main() {
       await (await import('./commands/config.mjs')).cmdDoctor();
       break;
     }
+    case 'login': {
+      const code = await (await import('./commands/login.mjs')).cmdLogin(rest.positional, rest.flags);
+      if (code) process.exitCode = code;
+      break;
+    }
     case 'status': {
       await (await import('./commands/config.mjs')).cmdStatus();
       break;
