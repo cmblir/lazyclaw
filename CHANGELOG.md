@@ -6,6 +6,8 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.7.0] - 2026-06-23
+
 ### Added
 
 - **`lazyclaw login`** — verify or establish the claude-cli credential. It
