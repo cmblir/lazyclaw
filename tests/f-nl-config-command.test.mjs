@@ -23,9 +23,11 @@ test('refreshLiveProvider is a no-op without cfg/setters (best-effort)', () => {
   assert.doesNotThrow(() => refreshLiveProvider({ cfg: {} }));
 });
 
-test('LAZYCLAW_META_GUARD names the real commands and forbids faking success', () => {
-  assert.match(LAZYCLAW_META_GUARD, /CANNOT change/);
-  assert.match(LAZYCLAW_META_GUARD, /orchestrator/);
+test('LAZYCLAW_META_GUARD forbids faking shell runs + config changes', () => {
+  assert.match(LAZYCLAW_META_GUARD, /fabricate command execution/i);
+  assert.match(LAZYCLAW_META_GUARD, /Running it now/);          // bans the exact fake-execution phrase
+  assert.match(LAZYCLAW_META_GUARD, /```bash/);                 // bans fenced command blocks
+  assert.match(LAZYCLAW_META_GUARD, /CANNOT change/);           // still covers config
   assert.match(LAZYCLAW_META_GUARD, /lazyclaw agent add/);
 });
 

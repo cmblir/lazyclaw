@@ -47,12 +47,13 @@ export const mockProvider = {
   async *sendMessage(messages, opts = {}) {
     const last = messages[messages.length - 1];
     const sys = messages.find((m) => m.role === 'system')?.content || '';
-    // When a system message is present, prefix the echo with [sys:...]
-    // so callers (and especially tests) can verify what the provider
-    // saw in the system slot. No system → byte-identical to the prior
-    // shape so existing assertions stay green.
+    // When a system message is present, prefix the echo with [sys:…] so tests
+    // can verify the provider saw a system slot. Keep it SHORT (tests only check
+    // the prefix) — the always-on guard prompt is ~1k chars and echoing it all
+    // made every reply huge, timing out the 5ms/char stream (phase5-memory).
+    // No system → byte-identical to the prior shape so existing assertions stay green.
     const reply = sys
-      ? `[sys:${String(sys).slice(0, 8000)}]\nmock-reply: ${last?.content ?? ''}`
+      ? `[sys:${String(sys).slice(0, 80)}]\nmock-reply: ${last?.content ?? ''}`
       : `mock-reply: ${last?.content ?? ''}`;
     // Honor opts.signal so the chat REPL's Ctrl+C handler (and any
     // other caller) can stop the stream mid-flight. The other concrete

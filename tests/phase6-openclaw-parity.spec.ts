@@ -6288,7 +6288,9 @@ test.describe('Phase 6 — OpenClaw parity', () => {
 
     const file = path.join(dir, 'sessions', 'feat-x.jsonl');
     expect(fs.existsSync(file)).toBe(true);
-    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l));
+    // Filter the always-on guard system turn (persisted as turn 0 on a fresh
+    // install) so the user/assistant pairing assertions are stable.
+    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)).filter(l => l.role !== 'system');
     expect(lines.length).toBeGreaterThanOrEqual(2);
     expect(lines[0]).toMatchObject({ role: 'user', content: 'first message' });
     expect(lines[1]).toMatchObject({ role: 'assistant', content: expect.stringContaining('mock-reply: first message') });

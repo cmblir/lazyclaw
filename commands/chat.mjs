@@ -176,7 +176,8 @@ export async function cmdChat(flags = {}) {
           if (sys) _inkSysParts.push(sys);
         } catch (err) { console.error(`skill error: ${err.message}`); process.exit(2); }
       }
-      if (_inkSysParts.length && !_inkMessages.some((m) => m.role === 'system')) {
+      // Always send the base guard system prompt (even on a fresh install).
+      if (!_inkMessages.some((m) => m.role === 'system')) {
         const merged = [..._inkSysParts, LAZYCLAW_META_GUARD].join('\n\n---\n\n');
         _inkMessages.unshift({ role: 'system', content: merged });
         if (_inkSessionId) sessionsMod.appendTurn(_inkSessionId, 'system', merged, _inkCfgDir);
@@ -456,7 +457,7 @@ export async function cmdChat(flags = {}) {
       process.exit(2);
     }
   }
-  if (sysParts.length && !messages.some(m => m.role === 'system')) {
+  if (!messages.some(m => m.role === 'system')) {
     const merged = [...sysParts, LAZYCLAW_META_GUARD].join('\n\n---\n\n');
     messages.unshift({ role: 'system', content: merged });
     if (sessionId) sessionsMod.appendTurn(sessionId, 'system', merged, cfgDir);

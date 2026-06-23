@@ -76,13 +76,16 @@ test.describe('Phase 1 — /loop REPL', () => {
 
     await endChat(child);
 
-    const turns = loadSessionTurns(dir, sessionId);
-    // 2 iterations × (user + assistant) = 4 turns
+    const turns = loadSessionTurns(dir, sessionId).filter(t => t.role !== 'system');
+    // 2 iterations × (user + assistant) = 4 turns (the always-on guard system
+    // turn is filtered out above; the mock now prefixes the reply with [sys:…]).
     expect(turns.length).toBe(4);
     expect(turns[0]).toMatchObject({ role: 'user', content: 'say hi' });
-    expect(turns[1]).toMatchObject({ role: 'assistant', content: 'mock-reply: say hi' });
+    expect(turns[1].role).toBe('assistant');
+    expect(turns[1].content).toContain('mock-reply: say hi');
     expect(turns[2]).toMatchObject({ role: 'user', content: 'say hi' });
-    expect(turns[3]).toMatchObject({ role: 'assistant', content: 'mock-reply: say hi' });
+    expect(turns[3].role).toBe('assistant');
+    expect(turns[3].content).toContain('mock-reply: say hi');
   });
 
   test('no args prints usage and consumes no provider call', async () => {
@@ -103,7 +106,7 @@ test.describe('Phase 1 — /loop REPL', () => {
 
     await endChat(child);
 
-    const turns = loadSessionTurns(dir, sessionId);
+    const turns = loadSessionTurns(dir, sessionId).filter(t => t.role !== 'system');
     expect(turns.length).toBe(0);
   });
 
@@ -124,7 +127,7 @@ test.describe('Phase 1 — /loop REPL', () => {
 
     await endChat(child);
 
-    expect(loadSessionTurns(dir, sessionId).length).toBe(0);
+    expect(loadSessionTurns(dir, sessionId).filter(t => t.role !== 'system').length).toBe(0);
   });
 
   test('--until short-circuits when assistant matches', async () => {
@@ -147,7 +150,7 @@ test.describe('Phase 1 — /loop REPL', () => {
 
     await endChat(child);
 
-    const turns = loadSessionTurns(dir, sessionId);
+    const turns = loadSessionTurns(dir, sessionId).filter(t => t.role !== 'system');
     // Exactly one user + one assistant pair
     expect(turns.length).toBe(2);
     expect(turns[0].role).toBe('user');
@@ -175,7 +178,7 @@ test.describe('Phase 1 — /loop REPL', () => {
 
     await endChat(child);
 
-    const turns = loadSessionTurns(dir, sessionId);
+    const turns = loadSessionTurns(dir, sessionId).filter(t => t.role !== 'system');
     // Every entry must come in a user/assistant pair — no orphan.
     expect(turns.length).toBeGreaterThanOrEqual(2);
     expect(turns.length % 2).toBe(0);
