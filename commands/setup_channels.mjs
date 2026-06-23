@@ -303,10 +303,12 @@ export async function runWebhookStep({ prompt, colors, write = (s) => process.st
 // Context-window step (asked right after the model pick): how much past
 // conversation to keep each turn — a sliding history budget, NOT the model's
 // hard limit. Enter on both prompts keeps the defaults.
-export async function runContextStep({ prompt, colors, write = (s) => process.stdout.write(s) }) {
+// Returns 'BACK' (Esc) / 'NEXT' for the wizard back-loop. backPrompt
+// (promptWithBack) makes Esc reachable on the custom number entry.
+export async function runContextStep({ prompt, backPrompt, colors, write = (s) => process.stdout.write(s) }) {
   const { dim, ok } = colors;
   const cf = await import('../config_features.mjs');
-  const { _pickChoice } = await import('../tui/pickers.mjs');
+  const { _arrowMenu } = await import('../tui/pickers.mjs');
   const cur = cf.chatWindowGet(readConfig());
   write(`  ${dim(`Context window — how much past conversation to send each turn (sliding budget, not the model's hard limit). Now: ${cur.turns} turns · ${cur.tokens} tokens.`)}\n\n`);
   // Pick a preset (or "custom" → type the two numbers). Presets cover the
@@ -318,12 +320,23 @@ export async function runContextStep({ prompt, colors, write = (s) => process.st
     { id: 'large', label: 'Large — 80 turns · 32k tokens', desc: 'more context, costs more', turns: 80, tokens: 32000 },
     { id: 'custom', label: 'Custom…', desc: 'type your own turns + token budget' },
   ];
-  const choice = await _pickChoice('Context window', PRESETS, { subtitle: 'how much past conversation to send each turn', fallback: 'keep' });
-  if (choice === 'keep') { write(`  ${dim('— kept defaults —')}\n\n`); return { skipped: true }; }
+  // _arrowMenu (not _pickChoice) so Esc is distinguishable as BACK, not folded
+  // into the "keep" fallback.
+  const picked = await _arrowMenu({ title: 'Context window', subtitle: 'Esc to go back · how much past conversation to send each turn', items: PRESETS });
+  if (picked === 'BACK') return 'BACK';
+  const choice = (picked === 'CANCEL' || picked == null) ? 'keep' : (typeof picked === 'object' ? picked.id : picked);
+  if (choice === 'keep') { write(`  ${dim('— kept defaults —')}\n\n`); return 'NEXT'; }
   let turns, tokens;
   if (choice === 'custom') {
-    turns = parseInt((await prompt(`  turns to keep (Enter = ${cur.turns}): `)).trim(), 10);
-    tokens = parseInt((await prompt(`  token budget (Enter = ${cur.tokens}): `)).trim(), 10);
+    if (typeof backPrompt === 'function') {
+      const t = await backPrompt(`  turns to keep (Esc = back · Enter = ${cur.turns}): `); if (t && t.back) return 'BACK';
+      const k = await backPrompt(`  token budget (Esc = back · Enter = ${cur.tokens}): `); if (k && k.back) return 'BACK';
+      turns = parseInt(String((t && t.value) || '').trim(), 10);
+      tokens = parseInt(String((k && k.value) || '').trim(), 10);
+    } else {
+      turns = parseInt((await prompt(`  turns to keep (Enter = ${cur.turns}): `)).trim(), 10);
+      tokens = parseInt((await prompt(`  token budget (Enter = ${cur.tokens}): `)).trim(), 10);
+    }
   } else {
     const p = PRESETS.find((x) => x.id === choice);
     turns = p ? p.turns : NaN;
@@ -338,7 +351,7 @@ export async function runContextStep({ prompt, colors, write = (s) => process.st
   const w = cf.chatWindowGet(cfg);
   write(`  ${ok('✓ context window:')} ${w.turns} turns · ${w.tokens} tokens\n`);
   write(`  ${dim('change later: /context turns <N> | tokens <N>')}\n\n`);
-  return { skipped: false, ...w };
+  return 'NEXT';
 }
 
 // Optional orchestration step: enable the multi-agent planner+workers pipeline.

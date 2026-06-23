@@ -13,6 +13,8 @@ import {
 import { ensureRegistry, requireRegistry, getRegistry } from '../lib/registry_boot.mjs';
 import { SUBCOMMANDS, parseArgs, AGENT_REG_SUBS } from '../lib/args.mjs';
 import { runPermissionStep } from './setup_permission.mjs';
+import { runWizardSteps } from '../tui/wizard_back.mjs';
+import { promptWithBack } from '../tui/prompt_back.mjs';
 import {
   _attachGhostAutocomplete, _fetchModelsForProvider, _pauseChatForSubMenu,
   _pickModelInteractive, _pickProviderInteractive, _printChatBanner,
@@ -170,13 +172,13 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
   }
   process.stdout.write(`\n  ${ok('✓ provider:')} ${cfgAfterOnboard.provider}  ${dim('model:')} ${cfgAfterOnboard.model || '(default)'}\n\n`);
 
-  // Context window — asked right after the model pick (optional; Enter keeps
-  // defaults). Not a numbered step: it's part of the core model setup.
-  await runContextStep({ prompt: _quickPrompt, colors });
-
-  // Tool-permission mode (cfg.chat.permissionMode) — part of the core chat
-  // setup. Extracted to ./setup_permission.mjs (file-size gate).
-  await runPermissionStep({ prompt: _quickPrompt, colors, cfg: cfgAfterOnboard });
+  // Context window + tool-permission mode — core chat setup, looped so Esc on
+  // permission goes back one step to the context window (and Esc on the custom
+  // entries goes back too). Part of the model setup, not numbered steps.
+  const _backPrompt = (label) => promptWithBack(label);
+  await runWizardSteps(['context', 'permission'], (id) => (id === 'context'
+    ? runContextStep({ prompt: _quickPrompt, backPrompt: _backPrompt, colors })
+    : runPermissionStep({ prompt: _quickPrompt, backPrompt: _backPrompt, colors, cfg: cfgAfterOnboard })));
   }
 
   // ── Step 2/7: Verify one clean chat works ───────────────────
