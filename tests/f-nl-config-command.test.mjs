@@ -23,12 +23,12 @@ test('refreshLiveProvider is a no-op without cfg/setters (best-effort)', () => {
   assert.doesNotThrow(() => refreshLiveProvider({ cfg: {} }));
 });
 
-test('LAZYCLAW_META_GUARD forbids faking shell runs + config changes', () => {
-  assert.match(LAZYCLAW_META_GUARD, /fabricate command execution/i);
-  assert.match(LAZYCLAW_META_GUARD, /Running it now/);          // bans the exact fake-execution phrase
-  assert.match(LAZYCLAW_META_GUARD, /```bash/);                 // bans fenced command blocks
-  assert.match(LAZYCLAW_META_GUARD, /CANNOT change/);           // still covers config
-  assert.match(LAZYCLAW_META_GUARD, /lazyclaw agent add/);
+test('LAZYCLAW_META_GUARD forbids faking runs, inventing config, and raw command output', () => {
+  assert.match(LAZYCLAW_META_GUARD, /fabricate command execution/i);  // no faked runs
+  assert.match(LAZYCLAW_META_GUARD, /Running it now/);                 // bans the exact fake-execution phrase
+  assert.match(LAZYCLAW_META_GUARD, /```bash/);                        // bans fenced command blocks
+  assert.match(LAZYCLAW_META_GUARD, /NEVER invent or assume config names/); // no invented channels (test/main)
+  assert.match(LAZYCLAW_META_GUARD, /do NOT print raw .*commands, "Run:" lines/); // no Run: lines
 });
 
 // ── detection ─────────────────────────────────────────────────────────────
