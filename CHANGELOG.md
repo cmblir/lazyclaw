@@ -6,6 +6,15 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **Dashboard "Scheduling" tab.** Surfaces the three scheduling surfaces the CLI
+  owns — cron jobs, durable goals, and loop runs — in one place (`GET /scheduling`).
+  Cron jobs can be deleted from the tab (`DELETE /cron/<name>`, guarded so a
+  read-only daemon refuses it); goals and loops are read-only here. Creating
+  schedules stays in the CLI, since the dashboard daemon is loopback but
+  unauthenticated and scheduling runs a command.
+
 ### Fixed
 
 - **Scheduled goals, workflows, and cron jobs silently never ran on Homebrew /

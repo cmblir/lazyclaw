@@ -13,15 +13,16 @@ reversible/maintainer-owned). English commits, user identity, no AI attribution.
 - UI 변경 포함: yes (dashboard.js — verified 375/768/1280).
 - 위험도: low (verified).
 
-## [Q1] Dashboard "Scheduling" tab (cron · goals · loops)
-- 목표: surface scheduling in the dashboard — daemon read/list/create/delete routes
-  for cron jobs, goals, and loops + a new SPA tab. Closes the "no dashboard routes
-  for scheduling" gap; complements the now-fixed CLI scheduling.
-- 영향 범위: daemon/route_table.mjs, daemon/routes/* (new), web/dashboard.{html,js,css}, cron.mjs/goals.mjs/loops.mjs (read helpers only).
-- 완료 기준: tab lists existing cron/goals/loops; create + delete work end-to-end
-  against the daemon; tests for the new routes; 3-viewport Playwright pass.
-- UI 변경 포함: yes (3-viewport required).
-- 위험도: medium.
+## [Q1] Dashboard "Scheduling" tab (cron · goals · loops) — DONE
+- 목표: surface scheduling in the dashboard; close the "no dashboard routes for
+  scheduling" gap; complement the now-fixed CLI scheduling.
+- 결과: GET /scheduling (list cron+goals+loops) + DELETE /cron/<name> (guarded);
+  new SPA tab. Create deferred for security (unauthenticated loopback daemon);
+  goals/loops read-only. 4 route tests; full suite 1445/1445; 3-viewport PASS
+  (qa/2026-06-29-scheduling-tab.md). Live delete verified + demo data reverted.
+- 영향 범위: daemon/routes/scheduling.mjs (new), daemon/route_table.mjs, web/dashboard.{html,js}, tests/f-dashboard-scheduling.test.mjs.
+- UI 변경 포함: yes (3-viewport done).
+- 위험도: medium → shipped low-risk (read + safe delete only).
 
 ## [Q2] Accessible tab nav (WAI-ARIA Tabs + keyboard + deep-link)
 - 목표: the 18-tab nav gets role=tablist/tab/tabpanel, roving tabindex, arrow-key
