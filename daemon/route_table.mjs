@@ -28,7 +28,7 @@ export const ROUTES = [
   { m: (c) => c.route === 'GET /dashboard.css', h: meta.dashboardCss },
   { m: (c) => c.route === 'GET /dashboard.js', h: meta.dashboardJs },
   { m: (c) => c.req.method === 'GET' && /^\/avatars\/\d{2}\.png$/.test(c.path || ''), h: meta.avatar },
-  { m: (c) => c.req.method === 'GET' && /^\/agent-avatars\/[A-Za-z0-9_-]+\.[a-z]+$/.test(c.path || ''), h: meta.agentAvatar },
+  { m: (c) => c.req.method === 'GET' && /^\/agent-avatars\/[A-Za-z0-9_.-]+\.(?:png|jpe?g|gif|webp)$/i.test(c.path || ''), h: meta.agentAvatar },
   { m: (c) => c.route === 'GET /version', h: meta.version },
   { m: (c) => c.route === 'POST /exec/request', h: conversation.execRequest },
   { m: (c) => c.route === 'GET /health' || c.route === 'GET /healthz', h: meta.health },

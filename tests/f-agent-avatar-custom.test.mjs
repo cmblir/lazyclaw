@@ -91,5 +91,14 @@ test('daemon agentAvatar serves a stored custom image (200 + content-type) and 4
   assert.deepEqual(ok.body, PNG_1x1);
   assert.equal((await call('/agent-avatars/ghost.png')).code, 404);
   assert.equal((await call('/agent-avatars/..%2fconfig.json')).code, 404);
+  // Regression: an agent whose NAME contains a dot ("data.eng") stores its
+  // image as agent-avatars/data.eng.png — the route/handler regex used to stop
+  // at the first dot and 404 every dotted-name agent's avatar.
+  registerAgent({ name: 'data.eng', provider: 'claude-cli' }, d);
+  setAgentAvatarImage('data.eng', writePng(d), d);
+  meta._clearAssetCache?.();
+  const dotted = await call('/agent-avatars/data.eng.png');
+  assert.equal(dotted.code, 200, 'dotted agent name avatar must serve, not 404');
+  assert.equal(dotted.headers['content-type'], 'image/png');
   fs.rmSync(d, { recursive: true, force: true });
 });

@@ -76,7 +76,7 @@ const _AGENT_AVATAR_CT = {
 };
 export async function agentAvatar(c) {
   const { res } = c;
-  const m = /^\/agent-avatars\/([A-Za-z0-9_-]+\.[a-z]+)$/.exec(c.path || '');
+  const m = /^\/agent-avatars\/([A-Za-z0-9_.-]+\.(?:png|jpe?g|gif|webp))$/i.exec(c.path || '');
   const file = m && m[1];
   const ct = file && _AGENT_AVATAR_CT[nodePath.extname(file).toLowerCase()];
   const base = c.gwConfigDir;
