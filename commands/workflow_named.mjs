@@ -88,16 +88,36 @@ export async function cmdWorkflow(sub, positional = [], flags = {}) {
       if (flags.channel && flags.channel !== true) entry.channel = String(flags.channel);
       if (flags.cron && flags.cron !== true) entry.schedule = String(flags.cron);
       if (flags['reply-node'] && flags['reply-node'] !== true) entry.replyNode = String(flags['reply-node']);
-      const cfg = readConfig();
-      cfg.workflows = cfg.workflows || {};
-      cfg.workflows[name] = entry;
-      writeConfig(cfg);
-      // Install a cron job when a schedule was given (C-3).
+      // Validate the cron spec BEFORE persisting. Otherwise a bad --cron is
+      // stored and reported as `ok:true` while no job is ever installed — a
+      // schedule that silently never fires. Fail loudly instead.
       if (entry.schedule) {
         try {
-          const { attachWorkflowCron } = await import('../workflow/named_cron.mjs');
-          attachWorkflowCron(name, entry.schedule);
-        } catch (e) { console.error(`workflow add: stored, but cron install failed: ${e.message}`); }
+          const cronMod = await import('../cron.mjs');
+          cronMod.parseCronSpec(entry.schedule);
+        } catch (e) {
+          console.error(`workflow add: invalid --cron spec "${entry.schedule}": ${e.message}`);
+          process.exit(2);
+        }
+      }
+      const cfg = readConfig();
+      cfg.workflows = cfg.workflows || {};
+      const priorSchedule = cfg.workflows[name] && cfg.workflows[name].schedule;
+      cfg.workflows[name] = entry;
+      writeConfig(cfg);
+      // Reconcile the installed cron job with the stored schedule so the OS
+      // scheduler always matches what `workflow show` reports:
+      //   - schedule present → (re)install
+      //   - schedule absent but one was installed before → remove the stale job
+      //     (re-adding without --cron must stop the old cadence, not leave it
+      //     firing).
+      const { attachWorkflowCron, detachWorkflowCron } = await import('../workflow/named_cron.mjs');
+      if (entry.schedule) {
+        try { attachWorkflowCron(name, entry.schedule); }
+        catch (e) { console.error(`workflow add: stored, but cron install failed: ${e.message}`); }
+      } else if (priorSchedule) {
+        try { detachWorkflowCron(name); }
+        catch (e) { console.error(`workflow add: stored, but stale cron removal failed: ${e.message}`); }
       }
       emitJson({ ok: true, added: name, channel: entry.channel || null, schedule: entry.schedule || null });
       return;
@@ -112,6 +132,14 @@ export async function cmdWorkflow(sub, positional = [], flags = {}) {
       if (!getNamedWorkflow(cfg, name)) { console.error(`workflow remove: no workflow "${name}"`); process.exit(2); }
       delete cfg.workflows[name];
       writeConfig(cfg);
+      // Tear down any cron job installed for this workflow so the OS scheduler
+      // stops firing `workflow run <name>` for a workflow that no longer exists
+      // (which would fail forever). detachWorkflowCron is a no-op when nothing
+      // was installed, so this is safe whether or not it had a schedule.
+      try {
+        const { detachWorkflowCron } = await import('../workflow/named_cron.mjs');
+        detachWorkflowCron(name);
+      } catch (e) { console.error(`workflow remove: removed, but cron cleanup failed: ${e.message}`); }
       emitJson({ ok: true, removed: name });
       return;
     }
