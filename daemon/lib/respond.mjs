@@ -75,6 +75,15 @@ export function writeSseHead(res) {
     'cache-control': 'no-cache, no-transform',
     'connection': 'close',
   });
+  // Push the header bytes onto the socket NOW. Without this, Node holds the
+  // headers until the first body write — so an SSE stream whose initial payload
+  // is empty (e.g. GET /events on an idle daemon, where recent() is empty and
+  // the first heartbeat is HEARTBEAT_MS away) leaves the client's
+  // `await fetch('/events')` pending until that first write. Consumers that
+  // only flip to "connected" once the response headers arrive (the Team Live
+  // status dot) then sit on "connecting…" for up to the heartbeat interval,
+  // making a working stream look hung. flushHeaders delivers them immediately.
+  if (typeof res.flushHeaders === 'function') res.flushHeaders();
 }
 
 // Returns the data-frame res.write() result: false when the socket's write
