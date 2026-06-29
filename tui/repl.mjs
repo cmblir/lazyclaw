@@ -86,25 +86,23 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
       : null;
   }
   const [state, setState] = useState(() => makeReplState({ splashItem: splashItemRef.current }));
+  // Latest streaming flag in a ref so the stable handleSubmit can read it
+  // (Ink setState is async; a sync read of onUserInput's result is unreliable).
+  const streamingRef = useRef(false);
+  streamingRef.current = state.streaming;
   const { exit } = useApp();
 
-  // Rendering mode. Default is the Static scrollback (no full-frame redraw,
-  // so no typing flicker; the splash prints once to the primary buffer and
-  // scrolls naturally — it never hits the alt-canvas vanish/blank bugs). The
-  // alt-buffer fullscreen (sticky-bottom Editor) is opt-in via LAZYCLAW_ALT=1,
-  // and LAZYCLAW_NO_ALT=1 still forces it off. TTY-only either way.
-  // Captured in a ref so the value is stable across renders (isTTY + env are
-  // read once on mount; they cannot change at runtime).
+  // Rendering mode: default Static scrollback (no flicker / alt-canvas bugs);
+  // alt-buffer fullscreen opt-in via LAZYCLAW_ALT=1 (LAZYCLAW_NO_ALT=1 forces
+  // off). TTY-only; read once on mount into a ref (env can't change at runtime).
   const altEnabledRef = useRef(null);
   if (altEnabledRef.current === null) {
     altEnabledRef.current = computeAltEnabled(process.env, process.stdout && process.stdout.isTTY);
   }
   const altEnabled = altEnabledRef.current;
 
-  // Pin the outer column height to rows-1 in alt-buffer mode so Ink's
-  // sticky-bottom Editor actually pins. Non-alt mode keeps the legacy
-  // content-sized layout so existing tests + non-TTY fallbacks behave
-  // identically. Listen for SIGWINCH-driven resize events.
+  // Pin the outer column to rows-1 in alt-buffer mode so the sticky Editor
+  // pins; non-alt keeps the legacy content-sized layout. Track SIGWINCH resize.
   const { stdout, write: writeStdout } = useStdout();
   const [rows, setRows] = useState(() => (stdout && stdout.rows) || 24);
   useEffect(() => {
@@ -114,15 +112,12 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
     return () => { stdout.off('resize', onResize); };
   }, [stdout]);
 
-  // writeFn for run_turn: route chunks into React state instead of stdout.
-  // Only used when runTurnFactory is provided; the legacy `runTurn` prop
-  // keeps writing wherever its caller wired it.
+  // writeFn: route run_turn chunks into React state (factory mode only).
   const writeFn = useCallback((chunk) => {
     setState((s) => onStreamChunk(s, { chunk }));
   }, []);
 
-  // Build the actual runTurn once. Prefer factory (new); fall back to
-  // the legacy `runTurn` prop (existing cli.mjs callsite).
+  // Build runTurn once: factory (new) or the legacy `runTurn` prop.
   const runTurnRef = useRef(null);
   if (runTurnRef.current === null) {
     if (typeof runTurnFactory === 'function') {
@@ -142,6 +137,13 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
     // /exit + /quit unmount the Ink app. Done inline so the popup path
     // and the no-popup path both terminate cleanly.
     if (trimmed === '/exit' || trimmed === '/quit') { exit(); return; }
+    // Mid-stream input (spec §5.8): abort + queue for the next turn via the
+    // reducer; do NOT also start a second dispatch (this double-sent 2–3×).
+    if (streamingRef.current) {
+      const controller = new AbortController();
+      setState((s) => onUserInput(s, { text: trimmed, controller }));
+      return;
+    }
     // Other slash commands: hand off to the host's slash dispatcher
     // (cli.mjs handleSlash) when one is provided. The host returns a
     // string (or void) which we append to scrollback as an assistant
@@ -183,8 +185,7 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
     }
   }, [exit, onSlashCommand, refreshStatus, writeStdout]);
 
-  // Auto-submit queued mid-stream-interrupt message (spec §5.8). Read
-  // state.nextTurnFirstMessage so the effect re-fires when promoted.
+  // Auto-submit the queued mid-stream message when promoted (spec §5.8).
   useEffect(() => {
     if (state.nextTurnFirstMessage) {
       const msg = state.nextTurnFirstMessage;
@@ -198,9 +199,8 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
     setState((s) => onEscape(s));
   }, []);
 
-  // v6.4 — 2-stage Ctrl+C exit handler. First Ctrl+C reuses onEscapeKey
-  // (cancel in-flight turn + clear, same reducer as Esc); a second press
-  // within the Editor's window calls onExit. Active when exitOnCtrlC:false.
+  // v6.4 — 2-stage Ctrl+C: first reuses onEscapeKey (cancel + clear), a second
+  // press in the Editor's window calls onExit. Active when exitOnCtrlC:false.
   const onExitKey = useCallback(() => { exit(); }, [exit]);
 
   // ─── Slash popup state (v5.4) ──────────────────────────────────────
