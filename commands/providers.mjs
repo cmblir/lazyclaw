@@ -1,6 +1,6 @@
 // Provider, rate-card, and orchestrator-config commands, extracted from
 // cli.mjs (Phase D3, picker-dependent batch — uses _fetchModelsForProvider).
-import { readConfig, writeConfig } from '../lib/config.mjs';
+import { readConfig, writeConfig, _resolveAuthKey } from '../lib/config.mjs';
 import { ensureRegistry, getRegistry } from '../lib/registry_boot.mjs';
 import { _fetchModelsForProvider } from '../tui/pickers.mjs';
 import { probeProvider } from '../providers/probe.mjs';
@@ -192,12 +192,16 @@ export async function cmdProviders(sub, positional, flags = {}) {
       const promptIdx = positional.indexOf('--prompt');
       const sharedPrompt = flags.prompt || (promptIdx >= 0 ? positional[promptIdx + 1] : null) || 'ping';
       if (!name || flags.all) {
-        const apiKey = cfg['api-key'] || '';
         const t0all = Date.now();
         const results = await Promise.all(
           Object.entries(getRegistry().PROVIDERS).map(async ([pid, provider]) => {
             const meta = getRegistry().PROVIDER_INFO[pid] || {};
             const model = flags.model || cfg.model || meta.defaultModel || 'unknown';
+            // Resolve each provider's OWN key (env var / authProfiles / custom
+            // entry), falling back to the legacy cfg['api-key']. A single shared
+            // cfg['api-key'] falsely failed every provider whose key lives in an
+            // env var or auth profile.
+            const apiKey = _resolveAuthKey(cfg, pid) || cfg['api-key'] || '';
             const t0 = Date.now();
             try {
               let reply = '';
@@ -238,7 +242,10 @@ export async function cmdProviders(sub, positional, flags = {}) {
       // --model wins over config.model wins over PROVIDER_INFO.defaultModel.
       const model = flags.model || cfg.model || meta.defaultModel || 'unknown';
       const prompt = flags.prompt || 'ping';
-      const apiKey = cfg['api-key'] || '';
+      // Resolve this provider's OWN key (env var / authProfiles / custom entry),
+      // falling back to the legacy cfg['api-key'] — otherwise a key stored
+      // anywhere but cfg['api-key'] reports a false auth failure.
+      const apiKey = _resolveAuthKey(cfg, name) || cfg['api-key'] || '';
       // Shared, no-exit probe (providers/probe.mjs). The CLI prints JSON and
       // exits; the setup wizard renders one line and keeps going.
       const result = await probeProvider({ name, model, prompt, apiKey });

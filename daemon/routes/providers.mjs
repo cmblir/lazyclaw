@@ -2,6 +2,7 @@
 // Each handler takes the per-request dispatch context `c` and returns the
 // HTTP response. Bodies are unchanged; only the dispatch wrapper is new.
 import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, checkCostCap, accumulateMetricsFromCost, resolveProvider } from './_deps.mjs';
+import { _resolveAuthKey } from '../../lib/config.mjs';
 
 export async function providersList(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
@@ -72,7 +73,6 @@ export async function providersTest(c) {
           // 503 is the right code because a dashboard observing it
           // can render a yellow status without parsing the body.
           const cfg = ctx.readConfig();
-          const apiKey = cfg['api-key'] || '';
           const sharedPrompt = url.searchParams.get('prompt') || 'ping';
           // Per-provider timeout so one unreachable provider (a keyless
           // claude-cli subprocess that never logs in, a dead network endpoint)
@@ -86,6 +86,10 @@ export async function providersTest(c) {
             Object.entries(PROVIDERS).map(async ([pid, provider]) => {
               const meta = PROVIDER_INFO[pid] || {};
               const model = url.searchParams.get('model') || cfg.model || meta.defaultModel || 'unknown';
+              // Each provider resolves its OWN key (env / authProfiles / custom),
+              // falling back to legacy cfg['api-key']; a shared key falsely
+              // failed every provider not stored there.
+              const apiKey = _resolveAuthKey(cfg, pid) || cfg['api-key'] || '';
               const t0 = Date.now();
               const ac = new AbortController();
               let timer = null;
@@ -139,7 +143,7 @@ export async function providerTest(c) {
           const provider = PROVIDERS[name];
           if (!provider) return writeJson(res, 404, { error: `unknown provider: ${name}` });
           const cfg = ctx.readConfig();
-          const apiKey = cfg['api-key'] || '';
+          const apiKey = _resolveAuthKey(cfg, name) || cfg['api-key'] || '';
           const meta = PROVIDER_INFO[name] || {};
           const model = url.searchParams.get('model') || cfg.model || meta.defaultModel || 'unknown';
           const prompt = url.searchParams.get('prompt') || 'ping';

@@ -1,7 +1,7 @@
 // Google Gemini (Generative Language API) streaming provider.
 //
 // Wire format:
-//   POST https://generativelanguage.googleapis.com/v1/models/{model}:streamGenerateContent?alt=sse&key={apiKey}
+//   POST https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse&key={apiKey}
 //   { "contents": [...], "systemInstruction"?: {...} }
 //
 // Auth quirk: Gemini takes `?key=...` in the query string rather than a
@@ -16,7 +16,12 @@
 //
 // Test seam: opts.fetch overrides globalThis.fetch.
 
-const DEFAULT_BASE = 'https://generativelanguage.googleapis.com/v1';
+// Use the v1beta surface to match the model-listing path (model_catalogue.mjs
+// queries GET /v1beta/models) and because the current default models
+// (gemini-2.5-*, 2.0-*) are served on v1beta — they 404 on /v1. Keeping both
+// the streaming and listing endpoints on v1beta means a model that shows up in
+// the picker actually answers when selected.
+const DEFAULT_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 class InvalidApiKeyError extends Error {
   constructor(message = 'invalid api key') {
