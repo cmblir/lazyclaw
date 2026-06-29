@@ -59,9 +59,11 @@
     async function api(path, opts = {}) {
       const r = await apiRaw(path, opts);
       if (!r.ok && r.status !== 200) {
-        let body = '';
-        try { body = JSON.stringify(await r.json()); } catch {}
-        throw new Error(`${r.status} ${r.statusText}${body ? ' — ' + body : ''}`);
+        // Surface the server's human-readable `error` string only — never the
+        // raw JSON envelope or an internal error code (e.g. TEAM_BAD_AGENT).
+        let msg = '';
+        try { const b = await r.json(); if (b && typeof b.error === 'string') msg = b.error; } catch {}
+        throw new Error(msg || `${r.status} ${r.statusText}`);
       }
       return r.json();
     }
@@ -1159,13 +1161,23 @@
     };
 
     async function openTeamModal() {
+      // A team can only reference agents that are already registered (the
+      // server rejects unknown names), so guide the flow instead of letting the
+      // user guess: bail early with a clear hint when there are none, and
+      // pre-fill the picker with the registered names otherwise.
+      let registered = [];
+      try { registered = (await api('/agents')).map((a) => a.name); } catch { /* fall through with empty list */ }
+      if (registered.length === 0) {
+        alert('Create an agent first (Agents tab → + New agent). A team is built from agents you have already registered.');
+        return;
+      }
       const name = (prompt('Team name (e.g. shop, growth):') || '').trim();
       if (!name) return;
-      const agentsRaw = (prompt('Agents (comma-separated names):') || '').trim();
+      const agentsRaw = (prompt(`Agents (comma-separated) — registered: ${registered.join(', ')}`, registered.join(', ')) || '').trim();
       if (!agentsRaw) return;
       const agents = agentsRaw.split(',').map((s) => s.trim()).filter(Boolean);
       const lead = (prompt(`Lead (one of ${agents.join(', ')}):`, agents[0]) || agents[0]).trim();
-      const slackChannel = (prompt('Slack channel (C… id or #name, optional):') || '').trim();
+      const slackChannel = (prompt('Slack channel id (C…, optional):') || '').trim();
       try {
         await api('/teams', { method: 'POST', body: JSON.stringify({ name, agents, lead, slackChannel }) });
         LOADERS.teams();
