@@ -8,6 +8,11 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **Accessible, deep-linkable dashboard tabs.** The tab bar now implements the
+  WAI-ARIA Tabs pattern (`role=tablist/tab/tabpanel`, `aria-selected`, roving
+  `tabindex`) with full keyboard navigation (←/→/↑/↓, Home, End), and the active
+  tab is reflected in the URL hash (`#<tab>`) so it survives a reload and can be
+  linked to directly.
 - **Dashboard "Scheduling" tab.** Surfaces the three scheduling surfaces the CLI
   owns — cron jobs, durable goals, and loop runs — in one place (`GET /scheduling`).
   Cron jobs can be deleted from the tab (`DELETE /cron/<name>`, guarded so a

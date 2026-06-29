@@ -24,21 +24,20 @@ reversible/maintainer-owned). English commits, user identity, no AI attribution.
 - UI 변경 포함: yes (3-viewport done).
 - 위험도: medium → shipped low-risk (read + safe delete only).
 
-## [Q2] Accessible tab nav (WAI-ARIA Tabs + keyboard + deep-link)
-- 목표: the 18-tab nav gets role=tablist/tab/tabpanel, roving tabindex, arrow-key
-  navigation, aria-controls, and History-API deep-linking (#tab).
-- 영향 범위: web/dashboard.{html,js,css}.
-- 완료 기준: keyboard arrow nav works; refresh/deep-link restores the tab; 3-viewport pass.
-- UI 변경 포함: yes.
-- 위험도: low-medium.
+## [Q2] Accessible tab nav (WAI-ARIA Tabs + keyboard + deep-link) — DONE
+- 결과: role=tablist/tab/tabpanel + aria-selected + roving tabindex; ←/→/↑/↓/Home/End
+  keyboard nav; #hash deep-linking (load + click + keyboard). 19 tabs all switch,
+  0 broken, 0 console errors, focus ring present. 3-viewport PASS
+  (qa/2026-06-29-aria-tabs.md). data-tab preserved → phase15 spec still holds.
+- 영향 범위: web/dashboard.js.
+- 위험도: low-medium → shipped, fully verified.
 
-## [Q3] Status token map (color + icon + label) + tri-state freshness
-- 목표: never convey status by color alone (WCAG) — one state→{color,icon,label}
-  map reused across rings/badges; extend the live dot to per-stream Live/Stale.
-- 영향 범위: web/dashboard.{js,css}.
-- 완료 기준: every status has a non-color cue; 3-viewport pass.
-- UI 변경 포함: yes.
-- 위험도: low.
+## [Q3] Status token map (color + icon + label) — DEFERRED to backlog
+- Reassessment: the dashboard already conveys status with text + symbol, not color
+  alone (pills read "enabled"/"disabled"; dots are "○ idle" / "● live" / "● working"),
+  so the WCAG color-only concern is largely already satisfied. Low marginal value;
+  a formal token-map refactor isn't worth an autonomous change. Left for a deliberate
+  design pass if desired.
 
 ## Deferred to backlog (NOT autonomous — risk/ambiguity)
 - 3-tier approval scope (once/session/always) — touches the security gate; needs a design decision.
