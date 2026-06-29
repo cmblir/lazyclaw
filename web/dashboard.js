@@ -1,12 +1,64 @@
-    // Tab switching ────────────────────────────────────────────────
-    const tabs = document.querySelectorAll('nav.tabs button');
-    const sections = document.querySelectorAll('main section');
-    tabs.forEach((b) => b.addEventListener('click', () => {
-      tabs.forEach((x) => x.classList.toggle('active', x === b));
-      sections.forEach((s) => s.classList.toggle('active', s.id === 'tab-' + b.dataset.tab));
-      const loader = LOADERS[b.dataset.tab];
+    // Tab switching — WAI-ARIA Tabs pattern: a role=tablist of role=tab buttons
+    // with roving tabindex + arrow-key navigation, each controlling a
+    // role=tabpanel. The URL hash (#<tab>) is the source of truth, so the active
+    // tab survives a reload and is deep-linkable.
+    const tabs = [...document.querySelectorAll('nav.tabs button')];
+    const sections = [...document.querySelectorAll('main section')];
+    const tablist = document.querySelector('nav.tabs');
+    if (tablist) tablist.setAttribute('role', 'tablist');
+    tabs.forEach((b) => {
+      const name = b.dataset.tab;
+      b.setAttribute('role', 'tab');
+      b.id = 'tabbtn-' + name;
+      b.setAttribute('aria-controls', 'tab-' + name);
+    });
+    sections.forEach((s) => {
+      s.setAttribute('role', 'tabpanel');
+      s.setAttribute('tabindex', '0');
+      s.setAttribute('aria-labelledby', 'tabbtn-' + s.id.replace(/^tab-/, ''));
+    });
+    // Apply the active state for `name`: classes, ARIA, roving tabindex, panel,
+    // and the tab's data loader. Does not touch focus or the hash.
+    function setActiveTab(name) {
+      let found = false;
+      tabs.forEach((b) => {
+        const on = b.dataset.tab === name;
+        if (on) found = true;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+        b.tabIndex = on ? 0 : -1;
+      });
+      if (!found) return false;
+      sections.forEach((s) => s.classList.toggle('active', s.id === 'tab-' + name));
+      const loader = LOADERS[name];
       if (loader) loader();
-    }));
+      return true;
+    }
+    // The hash drives activation. Setting it to a new value fires hashchange
+    // (the single activation path); setting it to the current value does not, so
+    // we activate directly in that case.
+    function gotoTab(name, focus) {
+      if (location.hash.slice(1) === name) setActiveTab(name);
+      else { try { location.hash = name; } catch (_) { setActiveTab(name); } }
+      if (focus) { const b = tabs.find((x) => x.dataset.tab === name); if (b) b.focus(); }
+    }
+    window.addEventListener('hashchange', () => {
+      const n = location.hash.slice(1);
+      if (n && tabs.some((b) => b.dataset.tab === n)) setActiveTab(n);
+    });
+    tabs.forEach((b) => b.addEventListener('click', () => gotoTab(b.dataset.tab, false)));
+    if (tablist) tablist.addEventListener('keydown', (e) => {
+      const i = tabs.indexOf(document.activeElement);
+      if (i < 0) return;
+      let j = null;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') j = (i + 1) % tabs.length;
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') j = (i - 1 + tabs.length) % tabs.length;
+      else if (e.key === 'Home') j = 0;
+      else if (e.key === 'End') j = tabs.length - 1;
+      if (j === null) return;
+      e.preventDefault();
+      gotoTab(tabs[j].dataset.tab, true);
+    });
 
     document.getElementById('footer-url').textContent = location.href;
 
@@ -1655,8 +1707,12 @@
       }
     };
 
-    // First load = chat tab.
-    LOADERS.chat();
+    // First load: honor a deep-link hash (#<tab>) if it names a real tab, else
+    // default to chat. setActiveTab runs the matching data loader.
+    {
+      const initial = location.hash.slice(1);
+      setActiveTab(initial && tabs.some((b) => b.dataset.tab === initial) ? initial : 'chat');
+    }
 
     // ── Chat send ─────────────────────────────────────────────────
     let chatHistory = []; // [{role, text}]
