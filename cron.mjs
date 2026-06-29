@@ -24,12 +24,44 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 
 const MARKER_PREFIX = '# lazyclaw-cron:';
 
 class CronError extends Error {
   constructor(message, code) { super(message); this.name = 'CronError'; this.code = code || 'CRON_ERR'; }
+}
+
+// Absolute path to this package's CLI entrypoint. A scheduled job stores the
+// logical `['lazyclaw', …]` command, but the OS scheduler can't rely on a
+// `lazyclaw` shim being on its PATH: launchd runs with PATH=/usr/bin:/bin:
+// /usr/sbin:/sbin and cron with PATH=/usr/bin:/bin — neither includes the
+// Homebrew / npm-global / nvm bin dir where the shim lives. So at the moment we
+// hand the command to launchd / crontab / exec we rewrite a leading `lazyclaw`
+// into an absolute `<node> <abs cli.mjs>` launcher that resolves regardless of
+// PATH. A non-lazyclaw command (the user's own binary) is passed through as-is.
+const CLI_PATH = fileURLToPath(new URL('./cli.mjs', import.meta.url));
+
+export function resolveCommand(command) {
+  const argv = Array.isArray(command) ? command.slice() : [String(command)];
+  if (argv.length && (argv[0] === 'lazyclaw' || path.basename(String(argv[0])) === 'lazyclaw')) {
+    return [process.execPath, CLI_PATH, ...argv.slice(1)];
+  }
+  return argv;
+}
+
+// PATH for the scheduled job's environment. Even with an absolute launcher, the
+// job itself shells out (e.g. lazyclaw spawning the `claude` CLI), so it needs a
+// usable PATH that launchd/cron would not otherwise provide. Lead with the dir
+// of the node binary that built the job, then the usual install locations.
+function schedulerPath() {
+  const dirs = [
+    path.dirname(process.execPath),
+    '/opt/homebrew/bin', '/usr/local/bin',
+    '/usr/bin', '/bin', '/usr/sbin', '/sbin',
+  ];
+  return [...new Set(dirs)].join(':');
 }
 
 // 5-field cron spec parser — minimal but strict enough that
@@ -43,8 +75,45 @@ const FIELD_RANGES = [
   { name: 'dow',    min: 0, max: 6  },
 ];
 
+// Day-of-week and month accept 3-letter names alongside numbers, and POSIX cron
+// also lets 7 mean Sunday (an alias for 0). These are applied wherever a
+// dow/month token is turned into a number, so a user pasting a normal crontab
+// line (`0 9 * * MON-FRI`, `0 0 * * 7`, `0 0 1 JAN *`) is accepted rather than
+// rejected with an out-of-range error.
+const DOW_NAMES = { SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6 };
+const MONTH_NAMES = { JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6, JUL: 7, AUG: 8, SEP: 9, OCT: 10, NOV: 11, DEC: 12 };
+
+// Common @-macros expand to a 5-field spec. @reboot has no calendar-time
+// meaning for the StartCalendarInterval / crontab-time model, so it is
+// intentionally unsupported (rejected with a clear message).
+const CRON_MACROS = {
+  '@yearly': '0 0 1 1 *', '@annually': '0 0 1 1 *',
+  '@monthly': '0 0 1 * *', '@weekly': '0 0 * * 0',
+  '@daily': '0 0 * * *', '@midnight': '0 0 * * *', '@hourly': '0 * * * *',
+};
+
+function fieldNum(tok, name) {
+  const t = String(tok).trim().toUpperCase();
+  if (name === 'dow') {
+    if (Object.prototype.hasOwnProperty.call(DOW_NAMES, t)) return DOW_NAMES[t];
+    const n = Number(t);
+    if (n === 7) return 0; // POSIX: 0 and 7 both mean Sunday
+    return n;
+  }
+  if (name === 'month' && Object.prototype.hasOwnProperty.call(MONTH_NAMES, t)) return MONTH_NAMES[t];
+  return Number(tok);
+}
+
 export function parseCronSpec(spec) {
-  const tokens = String(spec || '').trim().split(/\s+/);
+  let raw = String(spec || '').trim();
+  if (raw.startsWith('@')) {
+    const expanded = CRON_MACROS[raw.toLowerCase()];
+    if (!expanded) {
+      throw new CronError(`unsupported cron macro "${raw}" — use 5-field syntax or one of: ${Object.keys(CRON_MACROS).join(', ')}`, 'CRON_BAD_MACRO');
+    }
+    raw = expanded;
+  }
+  const tokens = raw.split(/\s+/);
   if (tokens.length !== 5) {
     throw new CronError(`bad cron spec "${spec}" — need 5 fields, got ${tokens.length}`, 'CRON_BAD_SPEC');
   }
@@ -70,7 +139,7 @@ function parseField(field, { name, min, max }) {
     if (head === '' || head === '*') return { kind: 'step', from: min, to: max, step };
     const dash = head.indexOf('-');
     if (dash < 0) throw new CronError(`bad step base "${head}" in ${name}`, 'CRON_BAD_STEP');
-    const a = Number(head.slice(0, dash)), b = Number(head.slice(dash + 1));
+    const a = fieldNum(head.slice(0, dash), name), b = fieldNum(head.slice(dash + 1), name);
     expectInRange(a, min, max, name); expectInRange(b, min, max, name);
     return { kind: 'step', from: a, to: b, step };
   }
@@ -82,12 +151,12 @@ function parseField(field, { name, min, max }) {
   // Range a-b.
   const dash = field.indexOf('-');
   if (dash >= 0) {
-    const a = Number(field.slice(0, dash)), b = Number(field.slice(dash + 1));
+    const a = fieldNum(field.slice(0, dash), name), b = fieldNum(field.slice(dash + 1), name);
     expectInRange(a, min, max, name); expectInRange(b, min, max, name);
     return { kind: 'range', from: a, to: b };
   }
-  // Plain number.
-  const n = Number(field);
+  // Plain number (or a 3-letter dow/month name, or dow 7 == Sunday).
+  const n = fieldNum(field, name);
   expectInRange(n, min, max, name);
   return { kind: 'value', value: n };
 }
@@ -201,14 +270,20 @@ export function buildPlist(name, schedule, command) {
   // cartesian product ANDs them (only when the 13th IS a Friday) — diverging
   // from crontab on Linux. So when both are restricted, emit the UNION of two
   // sets: one keyed on Day (Weekday=every) and one on Weekday (Day=every).
+  // A wildcard minute must be enumerated to 0..59 rather than left as "every".
+  // launchd has no "every minute" token: an interval dict with no keys is
+  // treated as invalid and never fires, so `* * * * *` (all-wildcard) would
+  // otherwise emit a single empty <dict/> that silently never runs. Enumerating
+  // the minute guarantees every emitted dict carries at least a Minute key.
+  const minuteSlot = min === null ? inclusive(0, 59) : min;
   let entries;
   if (dom !== null && dow !== null) {
-    const byDom = cartesian([minOrNull(min), minOrNull(hour), dom, minOrNull(month), [null]]);
-    const byDow = cartesian([minOrNull(min), minOrNull(hour), [null], minOrNull(month), dow]);
+    const byDom = cartesian([minuteSlot, minOrNull(hour), dom, minOrNull(month), [null]]);
+    const byDow = cartesian([minuteSlot, minOrNull(hour), [null], minOrNull(month), dow]);
     entries = [...byDom, ...byDow];
   } else {
     entries = cartesian([
-      minOrNull(min), minOrNull(hour), minOrNull(dom), minOrNull(month), minOrNull(dow),
+      minuteSlot, minOrNull(hour), minOrNull(dom), minOrNull(month), minOrNull(dow),
     ]);
   }
   const intervals = entries.map(([Minute, Hour, Day, Month, Weekday]) => {
@@ -220,7 +295,7 @@ export function buildPlist(name, schedule, command) {
     if (Weekday !== null) dict.Weekday = Weekday;
     return dict;
   });
-  const programArguments = command;
+  const programArguments = resolveCommand(command);
   const stdoutPath = path.join(os.homedir(), '.lazyclaw', 'logs', `cron-${name}.out.log`);
   const stderrPath = path.join(os.homedir(), '.lazyclaw', 'logs', `cron-${name}.err.log`);
   return renderPlist({
@@ -229,6 +304,7 @@ export function buildPlist(name, schedule, command) {
     intervals,
     stdoutPath,
     stderrPath,
+    envPath: schedulerPath(),
   });
 }
 
@@ -240,13 +316,19 @@ function cartesian(arrs) {
   return arrs.reduce((acc, arr) => acc.flatMap((row) => arr.map((v) => row.concat([v]))), [[]]);
 }
 
-function renderPlist({ label, programArguments, intervals, stdoutPath, stderrPath }) {
+function renderPlist({ label, programArguments, intervals, stdoutPath, stderrPath, envPath }) {
   const argLines = programArguments.map((a) => `      <string>${escapeXml(a)}</string>`).join('\n');
   const intervalDicts = intervals.map((i) => {
     const inner = Object.entries(i)
       .map(([k, v]) => `      <key>${k}</key>\n      <integer>${v}</integer>`).join('\n');
     return `    <dict>\n${inner}\n    </dict>`;
   }).join('\n');
+  // launchd does not inherit the interactive shell PATH; without this the
+  // scheduled job (and anything it shells out to) runs with a bare default
+  // PATH. envPath is optional so older callers / tests still render.
+  const envBlock = envPath
+    ? `  <key>EnvironmentVariables</key>\n  <dict>\n    <key>PATH</key>\n    <string>${escapeXml(envPath)}</string>\n  </dict>\n`
+    : '';
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -257,7 +339,7 @@ function renderPlist({ label, programArguments, intervals, stdoutPath, stderrPat
   <array>
 ${argLines}
   </array>
-  <key>StartCalendarInterval</key>
+${envBlock}  <key>StartCalendarInterval</key>
   <array>
 ${intervalDicts}
   </array>
@@ -284,8 +366,11 @@ function escapeXml(s) {
 // ── crontab backend (Linux / WSL) ───────────────────────────────
 
 export function buildCrontabLine(name, schedule, command) {
-  const cmdStr = command.map(shellQuote).join(' ');
-  return `${schedule} ${cmdStr} ${MARKER_PREFIX}${name}`;
+  // Resolve a bare `lazyclaw` to an absolute launcher (cron runs with
+  // PATH=/usr/bin:/bin, which excludes Homebrew/npm-global/nvm bin dirs), then
+  // prefix an explicit PATH= so anything the job shells out to is also found.
+  const cmdStr = resolveCommand(command).map(shellQuote).join(' ');
+  return `${schedule} PATH=${schedulerPath()} ${cmdStr} ${MARKER_PREFIX}${name}`;
 }
 
 function shellQuote(arg) {
@@ -362,7 +447,7 @@ export function uninstallLaunchdJob(name) {
 export function runJob(cfg, name) {
   const job = getJob(cfg, name);
   if (!job) throw new CronError(`no job "${name}"`, 'CRON_NO_JOB');
-  const [bin, ...args] = job.command;
+  const [bin, ...args] = resolveCommand(job.command);
   const r = spawnSync(bin, args, { stdio: 'inherit' });
   return r.status ?? 0;
 }
