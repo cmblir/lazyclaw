@@ -223,10 +223,8 @@ export async function cmdChat(flags = {}) {
         setProv: (next) => { prov = wrapInteractiveProv(next); },
         lookupProv,
         getActiveProvName: () => activeProvName,
-        // Persist provider/model picks so they survive a restart (was
-        // in-memory only — a model chosen via /model reverted to cfg.model on
-        // the next launch). persistActiveProvider leaves orchestrator routing
-        // to /orchestrator on|off.
+        // Persist provider/model picks so they survive a restart (orchestrator
+        // routing stays owned by /orchestrator on|off).
         setActiveProvName: (name) => { activeProvName = name; persistActiveProvider(cfg, name); },
         getActiveModel: () => activeModel,
         setActiveModel: (name) => { activeModel = name; persistActiveModel(cfg, name); },
@@ -506,11 +504,8 @@ export async function cmdChat(flags = {}) {
     } catch { /* swallow */ }
   };
 
-  // C7 — shared runTurn closure for the legacy path. The same factory
-  // backs the ink path above; both call sites get one set of bugs.
-  // Getters close over the *current* binding of sessionId, prov,
-  // activeProvName, activeModel — so a mid-session /provider switch
-  // takes effect on the very next turn.
+  // C7 — shared runTurn closure for the legacy path (same factory as ink).
+  // Getters/setters close over current state so a mid-session switch applies next turn.
   const _legacyCtx = {
     cfg,
     cfgDir,
@@ -521,6 +516,11 @@ export async function cmdChat(flags = {}) {
     getActiveProvName: () => activeProvName,
     getActiveModel: () => activeModel,
     getSessionId: () => sessionId,
+    // Live-provider setters so refreshLiveProvider re-points the provider mid-session on the legacy path too (mirrors _inkCtx; fixes `/orchestrator on` reporting success but never taking effect).
+    registryMod: getRegistry(), lookupProv,
+    setProv: (next) => { prov = wrapInteractiveProv(next); },
+    setActiveProvName: (name) => { activeProvName = name; persistActiveProvider(cfg, name); },
+    setActiveModel: (name) => { activeModel = name; persistActiveModel(cfg, name); },
     persistTurn,
     accumulateUsage,
     resolveAuthKey: (providerName) => _resolveAuthKey(cfg, providerName), onCharsSent: (n) => { charsSent += n; }, approve: makeLegacyApprove(),

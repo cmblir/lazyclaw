@@ -404,9 +404,13 @@ export function makeOrchestratorProvider(opts = {}) {
         ...results.map(r => `\n#### Subtask ${r.id} — ${r.task}\nWorker: ${r.worker}\n${r.error ? `Error: ${r.error}` : r.result.trim()}`),
         `\nNow write the final answer for the user.`,
       ].join('\n');
+      // Carry the no-fabrication honesty guard into the user-facing synthesis
+      // (lazy import avoids a static cycle) — ON-orchestrator must not drop it.
+      let synthSystem = SYNTHESIS_SYSTEM;
+      try { const g = (await import('../lib/nl_config_command.mjs')).LAZYCLAW_META_GUARD; if (g) synthSystem = `${g}\n\n---\n\n${SYNTHESIS_SYSTEM}`; } catch { /* guard unavailable */ }
       try {
         for await (const chunk of planner.prov.sendMessage([
-          { role: 'system', content: SYNTHESIS_SYSTEM },
+          { role: 'system', content: synthSystem },
           { role: 'user', content: synthUser },
         ], {
           apiKey: keyResolver(cfg, planner.name),
