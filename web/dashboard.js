@@ -1370,6 +1370,59 @@
       }
     };
 
+    // ── Scheduling tab ────────────────────────────────────────────
+    // Read-mostly view of the three CLI-owned scheduling surfaces (cron jobs,
+    // durable goals, loop runs). Only cron exposes a delete here (safe: it just
+    // unschedules); creating schedules stays in the CLI since this loopback
+    // daemon is unauthenticated.
+    LOADERS.scheduling = async function loadScheduling() {
+      const root = document.getElementById('scheduling-list');
+      const meta = document.getElementById('scheduling-meta');
+      root.innerHTML = '<div class="empty">Loading…</div>';
+      try {
+        const r = await api('/scheduling');
+        const cron = r.cron || [], goals = r.goals || [], loops = r.loops || [];
+        meta.textContent = `${cron.length} cron · ${goals.length} goal${goals.length === 1 ? '' : 's'} · ${loops.length} loop${loops.length === 1 ? '' : 's'}`;
+        const sections = [];
+        sections.push('<h3 class="dim" style="margin:8px 0 4px;">Cron jobs</h3>' + (cron.length
+          ? '<table><thead><tr><th>name</th><th>schedule</th><th>command</th><th></th></tr></thead><tbody>'
+            + cron.map((j) => `<tr>
+                <td><strong>${escHtml(j.name)}</strong></td>
+                <td><code>${escHtml(j.schedule || '')}</code></td>
+                <td class="dim">${escHtml((j.command || []).join(' '))}</td>
+                <td><button class="btn btn-secondary" onclick="deleteCron('${encodeURIComponent(j.name)}')">Delete</button></td>
+              </tr>`).join('')
+            + '</tbody></table>'
+          : '<div class="empty">No cron jobs. Add one with <code>lazyclaw cron add</code>.</div>'));
+        sections.push('<h3 class="dim" style="margin:14px 0 4px;">Goals</h3>' + (goals.length
+          ? goals.map((g) => `<div class="card"><div class="row" style="border:0;padding:0;">
+                <div class="name">${escHtml(g.name)}</div>
+                <span class="pill ${g.status === 'active' ? 'ok' : 'warn'}">${escHtml(g.status || 'active')}</span>
+                <div class="dim row-actions">${g.schedule ? 'schedule: <code>' + escHtml(g.schedule) + '</code>' : '<span class="dim">no schedule</span>'}</div>
+              </div>${g.description ? `<div class="dim" style="margin-top:6px;font-size:12px;">${escHtml(g.description)}</div>` : ''}</div>`).join('')
+          : '<div class="empty">No goals. Add one with <code>lazyclaw goal add</code>.</div>'));
+        sections.push('<h3 class="dim" style="margin:14px 0 4px;">Loops</h3>' + (loops.length
+          ? loops.map((l) => `<div class="card"><div class="row" style="border:0;padding:0;">
+                <div class="name">${escHtml(l.id || '')}</div>
+                <span class="pill ${l.status === 'running' || l.status === 'completed' ? 'ok' : 'warn'}">${escHtml(l.status || '')}</span>
+                <div class="dim row-actions">${l.provider ? escHtml(l.provider) : ''}${l.model ? ' · ' + escHtml(l.model) : ''}</div>
+              </div>${l.prompt ? `<div class="dim" style="margin-top:6px;font-size:12px;">${escHtml(String(l.prompt).slice(0, 160))}</div>` : ''}</div>`).join('')
+          : '<div class="empty">No loop runs. Start one with <code>lazyclaw loop</code>.</div>'));
+        root.innerHTML = sections.join('');
+      } catch (e) {
+        root.innerHTML = `<div class="empty">⚠ ${escHtml(e.message)}</div>`;
+      }
+    };
+    document.getElementById('sched-refresh').addEventListener('click', () => LOADERS.scheduling());
+
+    // Global (inline-onclick) cron delete — mirrors deleteTeam/deleteAgent.
+    async function deleteCron(encName) {
+      const name = decodeURIComponent(encName);
+      if (!confirm(`Delete cron job "${name}"? This unschedules it; re-add via the CLI.`)) return;
+      try { await api('/cron/' + encName, { method: 'DELETE' }); LOADERS.scheduling(); }
+      catch (e) { alert('Delete failed: ' + e.message); }
+    }
+
     // ── Team Live tab ─────────────────────────────────────────────
     // Real-time view of an agent team: avatar tiles with status rings +
     // harness badges, click-to-drill-down, and live A→B delegation pulses,

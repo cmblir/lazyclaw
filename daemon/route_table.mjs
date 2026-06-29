@@ -22,6 +22,7 @@ import * as conversation from './routes/conversation.mjs';
 import * as registry from './routes/registry.mjs';
 import * as ops from './routes/ops.mjs';
 import * as events from './routes/events.mjs';
+import * as scheduling from './routes/scheduling.mjs';
 
 export const ROUTES = [
   { m: (c) => c.route === 'GET /' || c.route === 'GET /dashboard' || c.route === 'GET /dashboard/', h: meta.dashboard },
@@ -97,5 +98,7 @@ export const ROUTES = [
   { m: (c) => c.req.method === 'POST' && /^\/sandbox\/([^/]+)\/test$/.test(c.url.pathname), h: ops.sandboxTest },
   { m: (c) => c.route === 'POST /sandbox/use', h: ops.sandboxUse },
   { m: (c) => c.route === 'GET /channels', h: ops.channels },
+  { m: (c) => c.route === 'GET /scheduling', h: scheduling.schedulingList },
+  { m: (c) => c.req.method === 'DELETE' && /^\/cron\/([^/]+)$/.test(c.url.pathname), h: scheduling.cronDelete },
   { m: (c) => c.route === 'POST /index/rebuild', h: ops.indexRebuild },
 ];
