@@ -14,61 +14,27 @@ import path from 'node:path';
 import os from 'node:os';
 import { redactSecrets } from './redact.mjs';
 import { f32ToBlob, blobToF32, blendHybrid } from './recall_blend.mjs';
-import { crossCliDampen } from './confidence.mjs';
+import {
+  SKILL_CONFIDENCE_FLOOR,
+  _skillRankWeight,
+  _miniFrontmatter,
+} from './index_rank.mjs';
+import {
+  _logIndexFailure,
+  _resetNativeHint,
+  _isNativeAbiError,
+  _warnIndexFailure,
+} from './index_failures.mjs';
+
+// Re-exported so callers/tests keep importing these from index_db.mjs
+// (their historical location) even though the impls now live in index_failures.
+export { _resetNativeHint, _isNativeAbiError, _warnIndexFailure };
 
 const SCHEMA_VERSION = 1;
 const _handles = new Map();   // configDir → { db, stmts }
 
 function defaultConfigDir() {
   return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
-}
-
-// m11 — when a write-through hook fails, append a structured entry to
-// <configDir>/index-failures.jsonl so `lazyclaw doctor` can surface
-// recent failures (last 24h) and the operator can rebuild before the
-// silent stale-index problem compounds. Best-effort: any error during
-// the append itself is swallowed (we don't want to spam stderr from a
-// background hook).
-function _logIndexFailure(configDir, scope, err) {
-  try {
-    fs.mkdirSync(configDir, { recursive: true });
-    const file = path.join(configDir, 'index-failures.jsonl');
-    const entry = {
-      ts: new Date().toISOString(),
-      event: 'index.write.failed',
-      scope,
-      error: String(err?.message || err || 'unknown'),
-    };
-    fs.appendFileSync(file, JSON.stringify(entry) + '\n');
-  } catch { /* swallow — surface only via console.warn below */ }
-}
-
-// The native better-sqlite3 addon fails to load when node_modules was built
-// against a different Node.js ABI than the one running lazyclaw (a Node switch
-// via nvm/brew, or copied node_modules). Every index op then throws the same
-// thing — so instead of dumping the raw stack on each write, recognise it and
-// print ONE actionable hint, then stay quiet. Chat is unaffected; only recall /
-// skill search degrade until the addon is rebuilt.
-let _nativeHintShown = false;
-export function _resetNativeHint() { _nativeHintShown = false; } // test seam
-export function _isNativeAbiError(e) {
-  return /NODE_MODULE_VERSION|was compiled against a different Node|better_sqlite3\.node|invalid ELF header|dlopen\(/i
-    .test(String(e?.message || e || ''));
-}
-export function _warnIndexFailure(label, e) {
-  // Index internals stay off the user's screen: recorded in index-failures.jsonl
-  // (+ surfaced by `lazyclaw doctor`); echoed to the console only when an
-  // operator sets LAZYCLAW_DEBUG. End users never see DB error codes.
-  if (!process.env.LAZYCLAW_DEBUG) return;
-  if (_isNativeAbiError(e)) {
-    if (_nativeHintShown) return;
-    _nativeHintShown = true;
-    // eslint-disable-next-line no-console
-    console.warn('[index_db] recall index disabled — better-sqlite3 ABI mismatch; run `npm rebuild better-sqlite3`.');
-    return;
-  }
-  // eslint-disable-next-line no-console
-  console.warn(`[index_db] ${label}:`, e.message);
 }
 
 function dbPath(configDir) {
@@ -285,53 +251,6 @@ function sanitizeFtsQuery(q) {
   return s.replace(/[-:+]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-// Floor for a valid-but-low-confidence skill's ranking weight. A skill that
-// scored e.g. 0.05 should be demoted hard but NOT erased from recall (the fix
-// is a re-rank, not a filter). Clamping the multiplier at this floor keeps the
-// worst legitimate skill just behind an unconfident 0.5 default rather than
-// collapsing its relevance to ~0. Absent confidence defaults to 0.5.
-const SKILL_CONFIDENCE_FLOOR = 0.1;
-const SKILL_CONFIDENCE_DEFAULT = 0.5;
-
-// Read the ranking-relevant frontmatter (confidence + trained_by) for a skill
-// straight off disk. Best-effort: a missing file / unparseable frontmatter
-// yields the default confidence and no trainer, so the skill still ranks (at
-// the unconfident default) instead of being dropped. Not a strict loader —
-// only the two keys the ranker weights are extracted.
-function _readSkillRankMeta(skillName, configDir) {
-  const fallback = { confidence: SKILL_CONFIDENCE_DEFAULT, trainedBy: null };
-  if (!skillName) return fallback;
-  try {
-    const filePath = path.join(configDir, 'skills', `${skillName}.md`);
-    if (!fs.existsSync(filePath)) return fallback;
-    const raw = fs.readFileSync(filePath, 'utf8');
-    const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-    if (!m) return fallback;
-    const fm = m[1];
-    const cm = fm.match(/^\s*confidence:\s*([0-9.]+)\s*$/m);
-    const tm = fm.match(/^\s*trained_by:\s*['"]?([\w.-]+)['"]?\s*$/m);
-    const conf = cm ? Number(cm[1]) : NaN;
-    return {
-      confidence: Number.isFinite(conf) ? conf : SKILL_CONFIDENCE_DEFAULT,
-      trainedBy: tm ? tm[1] : null,
-    };
-  } catch { return fallback; }
-}
-
-// Confidence-aware ranking weight for a skills-scope hit (Phase 0). Multiplies
-// a base relevance by the skill's frontmatter confidence (floored so a valid
-// low-confidence skill is demoted, not erased) AND by confidence.crossCliDampen
-// when the trainer provider family differs from the worker provider family.
-// The confidence multiply always applies to skills; the cross-CLI dampen is a
-// no-op (crossCliDampen returns the score unchanged) when workerProvider is
-// unset or in the same family. The math lives in mas/confidence.mjs.
-function _skillRankWeight(skillName, configDir, workerProvider) {
-  const { confidence, trainedBy } = _readSkillRankMeta(skillName, configDir);
-  const conf = Number.isFinite(confidence) ? confidence : SKILL_CONFIDENCE_DEFAULT;
-  const floored = Math.max(SKILL_CONFIDENCE_FLOOR, Math.min(1, conf));
-  return crossCliDampen(floored, trainedBy, workerProvider);
-}
-
 /**
  * Cross-scope FTS5 recall. Content-only semantics — all UNINDEXED
  * metadata columns (session_id, skill_name, agent, outcome, topic, …)
@@ -497,19 +416,6 @@ export function rebuild(configDir = defaultConfigDir()) {
     }
   }
   openIndex(configDir);
-}
-
-// Minimal frontmatter splitter (trained_by / group are the only keys reindex
-// needs); avoids importing skills.mjs and risking an import cycle.
-function _miniFrontmatter(raw) {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(String(raw || ''));
-  if (!m) return { meta: {}, body: String(raw || '') };
-  const meta = {};
-  for (const line of m[1].split('\n')) {
-    const i = line.indexOf(':');
-    if (i > 0) meta[line.slice(0, i).trim()] = line.slice(i + 1).trim();
-  }
-  return { meta, body: m[2] };
 }
 
 // Rebuild AND repopulate the FTS index from the on-disk source of truth

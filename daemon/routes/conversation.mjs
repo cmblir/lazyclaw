@@ -1,7 +1,7 @@
 // Daemon route handlers (conversation), extracted verbatim from makeHandler (D5).
 // Each handler takes the per-request dispatch context `c` and returns the
 // HTTP response. Bodies are unchanged; only the dispatch wrapper is new.
-import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, armStreamDeadline, checkCostCap, accumulateMetricsFromCost, accountTurnCost, makeTeamUsageAccountant, resolveProvider, openThreads, handoffWithRollback, openDedup, enqueueLearning } from './_deps.mjs';
+import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, armStreamDeadline, checkCostCap, accumulateMetricsFromCost, accountTurnCost, makeTeamUsageAccountant, resolveProvider, openThreads, openDedup, enqueueLearning } from './_deps.mjs';
 import { randomBytes } from 'node:crypto';
 import { routeInboundToTeam } from '../lib/team_inbound.mjs';
 
@@ -12,27 +12,11 @@ function newInboundSessionId() {
   return 'ib_' + randomBytes(8).toString('hex');
 }
 
-export async function execRequest(c) {
-  const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
-          // Remote exec-approval bridge. This route is AUTH-TOKEN-GATED
-          // (above), so only the trusted local operator/CLI can REQUEST an
-          // approval; a paired mobile device RESOLVES it over the gateway
-          // (POST /gateway/exec/resolve). The route long-polls: it awaits
-          // the device's decision (or the approval's timeout) and returns
-          // { approved, by, reason }.
-          let body;
-          try { body = await readJson(req); }
-          catch (e) { return writeJson(res, 400, { error: `invalid JSON body: ${e.message}` }); }
-          if (!body || typeof body.tool !== 'string' || !body.tool) {
-            return writeJson(res, 400, { error: 'tool is required' });
-          }
-          const { promise } = gateway.requestApproval(
-            { tool: body.tool, args: body.args, agentId: body.agentId, summary: body.summary },
-            { timeoutMs: Number.isFinite(+body.timeoutMs) ? +body.timeoutMs : undefined },
-          );
-          const result = await promise;
-          return writeJson(res, 200, result);
-}
+// execRequest and handoff are the non-streaming bridge routes; they live in
+// conversation_bridge.mjs (verbatim) to keep this file under the size gate.
+// Re-exported here so the route table's `import * as conversation` namespace
+// still exposes conversation.execRequest / conversation.handoff unchanged.
+export { execRequest, handoff } from './conversation_bridge.mjs';
 
 export async function chat(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
@@ -327,46 +311,6 @@ export async function inbound(c) {
           return writeJson(res, 200, out);
           } finally {
             if (dedup && !dedupRecorded) dedup.release(dedupKey);
-          }
-}
-
-export async function handoff(c) {
-  const { ctx, res, req } = c;
-          // F6 — re-point a thread to a new channel/externalId so a later
-          // inbound on the target resumes the SAME session (context follows).
-          // When the in-process gateway registered a live sender for the
-          // target channel (ctx.channelSenders), the target gets a resume
-          // marker and a FAILED notify rolls the binding back (502). Without
-          // a sender (bare daemon) the migration persists silently — the
-          // session still follows on the next inbound.
-          let body;
-          try { body = await readJson(req); }
-          catch (e) { return writeJson(res, 400, { error: `invalid JSON body: ${e.message}` }); }
-          const threadId = typeof body.threadId === 'string' ? body.threadId.trim() : '';
-          const target = typeof body.target === 'string' ? body.target.trim() : '';
-          const externalId = body.externalId != null ? String(body.externalId).trim() : '';
-          if (!threadId || !target || !externalId) {
-            return writeJson(res, 400, { error: 'threadId, target, and externalId are required' });
-          }
-          const cfgDir = ctx.sessionsDirGetter();
-          const threads = openThreads(cfgDir);
-          const liveSend = (ctx.channelSenders && typeof ctx.channelSenders.get === 'function')
-            ? ctx.channelSenders.get(target)
-            : undefined;
-          try {
-            const next = await handoffWithRollback({
-              threads, threadId, target, externalId,
-              note: typeof body.note === 'string' ? body.note : '',
-              send: liveSend,
-            });
-            return writeJson(res, 200, {
-              threadId: next.threadId, channel: next.channel,
-              externalId: next.externalId, sessionId: next.sessionId,
-            });
-          } catch (err) {
-            if (err?.code === 'THREAD_NOT_FOUND') return writeJson(res, 404, { error: err.message, code: 'THREAD_NOT_FOUND' });
-            if (err?.code === 'HANDOFF_SEND_FAILED') return writeJson(res, 502, { error: err.message, code: 'HANDOFF_SEND_FAILED' });
-            return writeJson(res, 400, { error: err?.message || String(err) });
           }
 }
 
