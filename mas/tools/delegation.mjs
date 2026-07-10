@@ -49,6 +49,92 @@ async function dispatchSpawn(job) {
   return { ok: true, text: result?.text || '', stoppedBy: result?.stoppedBy, iterations: result?.iterations };
 }
 
+// Phase 1b — subagent context isolation. Runs a FRESH runAgentTurn with an
+// EMPTY history (the parent transcript is NOT threaded in) under a per-subagent
+// tool ALLOWLIST, then returns ONLY the distilled final text plus a tiny usage
+// summary — never the subagent's intermediate tool calls/transcript. This keeps
+// the parent loop's context clean for exploration-heavy side work (repo search,
+// scanning logs) that would otherwise flood the main context.
+//
+// Safe default allowlist when `tools` is omitted: a read-only subset. Note this
+// intentionally EXCLUDES write/edit/patch/bash from agents.DEFAULT_TOOLS — a
+// subagent should not mutate state unless the caller explicitly allows it.
+const SUBAGENT_DEFAULT_TOOLS = ['read', 'grep', 'recall'];
+// Cap a runaway subagent's tool loop. The caller can still tighten further via
+// an opt-in { budget } forwarded to runAgentTurn.
+const SUBAGENT_MAX_ITERATIONS = 8;
+
+async function dispatchSubagent(job) {
+  const at = await import('../agent_turn.mjs').catch(() => null);
+  const runner = _turnRunner || (at && typeof at.runAgentTurn === 'function' ? at.runAgentTurn : null);
+  if (!runner) {
+    return { ok: false, error: 'spawn_subagent: agent_turn.runAgentTurn unavailable' };
+  }
+  // Synthetic agent record: inherit the parent's provider/model unless the
+  // caller overrides, and set .tools to the per-subagent allowlist so BOTH
+  // listToolSchemas (advertised schemas) and runTool (deny check) restrict the
+  // subagent to exactly these tools — nothing else is reachable.
+  const record = {
+    name: `${job.parentName || 'agent'}:subagent`,
+    provider: job.provider,
+    model: job.model,
+    role: '',
+    tools: job.tools,
+  };
+  // Isolated context: NO history is passed — the subagent starts empty.
+  const result = await runner({
+    agent: record,
+    userMessage: job.objective,
+    configDir: job.configDir,
+    sandbox: job.sandbox,
+    maxIterations: SUBAGENT_MAX_ITERATIONS,
+    budget: job.budget,
+  });
+  // Distilled conclusion only. The intermediate toolCalls/transcript are
+  // deliberately dropped so they never re-enter the parent context.
+  const usage = result?.usage
+    ? { inputTokens: result.usage.inputTokens || 0, outputTokens: result.usage.outputTokens || 0 }
+    : undefined;
+  return { ok: true, text: result?.text || '', stoppedBy: result?.stoppedBy, iterations: result?.iterations, usage };
+}
+
+const spawn_subagent = {
+  name: 'spawn_subagent', category: 'agents', sensitive: true,
+  description: 'Run an isolated sub-context (fresh, empty history) with a restricted read-only tool allowlist to do exploration-heavy work (search, read many files, scan logs) and return only a distilled conclusion — keeps the main context clean.',
+  parameters: {
+    type: 'object',
+    properties: {
+      objective: { type: 'string', description: 'What the subagent should investigate and conclude.' },
+      tools: { type: 'array', items: { type: 'string' }, description: 'Per-subagent tool allowlist. The subagent sees ONLY these tools. Defaults to a safe read-only subset (read/grep/recall).' },
+      provider: { type: 'string', description: 'Override the provider (defaults to the parent agent).' },
+      model: { type: 'string', description: 'Override the model (defaults to the parent agent).' },
+      budget: { type: 'object', description: 'Optional per-run cap { maxTokens?, maxCostUsd? } to stop a runaway subagent.' },
+    },
+    required: ['objective'],
+  },
+  async exec(args, ctx = {}) {
+    if (!args?.objective || !String(args.objective).trim()) {
+      return { ok: false, error: 'spawn_subagent: objective required' };
+    }
+    const tools = Array.isArray(args.tools) && args.tools.length > 0
+      ? [...args.tools]
+      : [...SUBAGENT_DEFAULT_TOOLS];
+    // Inherit provider/model from the parent agent unless overridden.
+    const provider = args.provider || ctx.agent?.provider;
+    const model = args.model || ctx.agent?.model;
+    // Live delegation event (parent → isolated subagent) for the dashboard.
+    emitEvent('delegate', { taskId: ctx.taskId, from: ctx.agent?.name, to: `${ctx.agent?.name || 'agent'}:subagent` });
+    return dispatchSubagent({
+      objective: String(args.objective),
+      tools, provider, model,
+      budget: args.budget,
+      parentName: ctx.agent?.name,
+      configDir: ctx.configDir,
+      sandbox: ctx.sandbox,
+    });
+  },
+};
+
 const task_spawn = {
   name: 'task_spawn', category: 'agents', sensitive: true,
   description: 'Spawn an agent by name with a prompt; returns the final answer.',
@@ -80,4 +166,4 @@ const delegate = {
   },
 };
 
-export const TOOLS = [task_spawn, delegate];
+export const TOOLS = [task_spawn, delegate, spawn_subagent];

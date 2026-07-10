@@ -2,9 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as del from '../mas/tools/delegation.mjs';
 
-test('exports 2 delegation tools', () => {
+test('exports 3 delegation tools', () => {
   const names = del.TOOLS.map(t => t.name).sort();
-  assert.deepEqual(names, ['delegate', 'task_spawn']);
+  assert.deepEqual(names, ['delegate', 'spawn_subagent', 'task_spawn']);
 });
 
 test('task_spawn requires agent + prompt', async () => {
