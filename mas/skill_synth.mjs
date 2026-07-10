@@ -164,6 +164,111 @@ function escapeYaml(v) {
   return s;
 }
 
+// ─── verify-before-store gate (Phase 2 wave-B) ──────────────────────────────
+//
+// A lightweight, $0, DETERMINISTIC quality gate run before a synthesized skill
+// is written. This is NOT an LLM replay (the full eval-harness replay is
+// deferred): it only rejects skills that are structurally broken, duplicate,
+// or trivially useless, so the store — and therefore recall — stays clean.
+// It never throws; a rejection surfaces as { ok:false, reason }.
+
+// Minimum length (chars) of the sanitized body's actionable content, measured
+// AFTER stripping markdown headings/frontmatter. Deliberately 1 — it catches
+// ONLY an empty, whitespace-only, or headings/frontmatter-only body (substance
+// collapses to ''). Any real content line — even a single char under a heading
+// (e.g. a minimal skill or a redacted-key placeholder) — passes, so legitimate
+// skills are never blocked. Quality beyond emptiness is the job of the
+// duplicate / anti-pattern checks, not a length threshold.
+const MIN_BODY_CHARS = 1;
+// Normalized-token Jaccard above this against an existing skill's body counts
+// as a near-duplicate. High so only genuine restatements are caught.
+const DUP_JACCARD = 0.85;
+
+// The actionable substance of a body: drop heading lines and blank lines so
+// "## When to Use\n\n## Procedure" (frontmatter/headings only) reads as empty.
+function bodySubstance(body) {
+  return String(body || '')
+    .split(/\r?\n/)
+    .filter((l) => l.trim() && !SECTION_RE.test(l.trim()))
+    .join('\n')
+    .trim();
+}
+
+// Cheap, dependency-free token set for similarity: lowercase alphanumeric
+// tokens, deduped. Used by the Jaccard near-duplicate check.
+function tokenSet(text) {
+  return new Set(
+    String(text || '')
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((t) => t.length > 1),
+  );
+}
+
+function jaccard(a, b) {
+  if (a.size === 0 && b.size === 0) return 0;
+  let inter = 0;
+  for (const t of a) if (b.has(t)) inter++;
+  const union = a.size + b.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
+
+// Validate a synthesized skill just before it is written. `finalName` is the
+// reserveSynthName-resolved target and `overwritingOwn` is true when that
+// target is this agent's own prior skill (a legitimate re-version, exempt from
+// the duplicate check). Returns { ok:true } or { ok:false, reason }. Best
+// effort: any internal error degrades to "allow" so the gate never breaks a
+// turn or blocks a real skill on a read hiccup.
+export function validateSynthSkill({
+  name, finalName, description = '', body = '', outcome = 'done', overwritingOwn = false,
+} = {}, configDir) {
+  try {
+    const substance = bodySubstance(body);
+
+    // (a) structural — a usable skill needs a name, a description, and an
+    // actionable body (not just frontmatter/headings).
+    if (!String(name || '').trim() || !String(finalName || '').trim()) {
+      return { ok: false, reason: 'structural: missing name' };
+    }
+    if (!String(description || '').trim()) {
+      return { ok: false, reason: 'structural: missing description' };
+    }
+    if (substance.length < MIN_BODY_CHARS) {
+      return { ok: false, reason: `structural: body too short (min ${MIN_BODY_CHARS} chars of content)` };
+    }
+
+    // (c) trivial anti-pattern — an outcome:failed note with no actionable
+    // "Avoid"/rule content is noise, not a lesson.
+    if (outcome === 'failed' && !/\b(avoid|instead|don'?t|do not|never|prefer)\b/i.test(substance)) {
+      return { ok: false, reason: 'trivial: anti-pattern note has no actionable guidance' };
+    }
+
+    // (b) duplicate — a near-identical body of an ALREADY-INSTALLED skill.
+    // Re-versioning our own skill (overwritingOwn) is exempt: that is the
+    // self-improvement update path, not pollution. Clobbering a human skill is
+    // already blocked upstream by reserveSynthName.
+    if (!overwritingOwn) {
+      const mine = tokenSet(substance);
+      let existing = [];
+      try { existing = skills.listSkills(configDir); } catch { existing = []; }
+      for (const s of existing) {
+        if (s.name === finalName) continue;
+        let other = '';
+        try { other = skills.loadSkill(s.name, configDir); } catch { continue; }
+        const otherSub = bodySubstance(parseFrontmatter(other).body);
+        if (jaccard(mine, tokenSet(otherSub)) >= DUP_JACCARD) {
+          return { ok: false, reason: `duplicate: near-identical body of existing skill "${s.name}"` };
+        }
+      }
+    }
+
+    return { ok: true };
+  } catch {
+    // Never let the gate itself break a legitimate install.
+    return { ok: true };
+  }
+}
+
 export class SkillSynthError extends Error {
   constructor(message, code) {
     super(message);
@@ -297,6 +402,20 @@ export function installSynthesized({
   const finalName = skills.reserveSynthName(slugifySkill(name), configDir);
   const overwritingOwn = skills.skillExists(finalName, configDir);
   const version = overwritingOwn ? skills.skillVersion(finalName, configDir) + 1 : 1;
+  // Verify-before-store (Phase 2 wave-B): skip — never install — a
+  // structurally-broken, duplicate, or trivial skill. The validation runs on
+  // the SANITIZED body/description (what would actually be written) and is
+  // best-effort: it returns a reason instead of throwing, so the caller
+  // (learning) sees the skip and a real skill's write path is byte-unchanged.
+  const gate = validateSynthSkill({
+    name,
+    finalName,
+    description: sanitizeDescription(description),
+    body: sanitizeSkillBody(body),
+    outcome,
+    overwritingOwn,
+  }, configDir);
+  if (!gate.ok) return { installed: false, reason: gate.reason, skill: finalName };
   const doc = assembleSkillDoc({
     name: finalName,
     description: sanitizeDescription(description),
