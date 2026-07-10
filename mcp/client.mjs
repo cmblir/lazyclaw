@@ -9,6 +9,16 @@
 // without the binary.
 
 import * as registry from '../mas/tools/registry.mjs';
+import { neutralizeRoleLabels } from '../mas/redact.mjs';
+
+// Defang untrusted tool-result text before it re-enters agent context: reuse
+// neutralizeRoleLabels (forged [System]/[User]/… authority lines) and neutralise
+// the router termination marker [[TASK_DONE]] so a compromised MCP server cannot
+// end the router loop by echoing it. Kept local + minimal; mirrors the marker
+// defang already used by redact.sanitizeSkillBody.
+function sanitizeMcpText(text) {
+  return neutralizeRoleLabels(String(text ?? '')).replace(/\[\[TASK_DONE\]\]/g, '[[task-done]]');
+}
 
 let _transport = null;
 export function __setTransport(t) { _transport = t; }
@@ -55,10 +65,10 @@ export async function startServer({ name, command, args = [], env = {}, allowGlo
       async exec(callArgs) {
         try {
           const res = await client.callTool({ name: t.name, arguments: callArgs || {} });
-          const text = (res?.content || [])
+          const text = sanitizeMcpText((res?.content || [])
             .filter(c => c.type === 'text')
             .map(c => c.text)
-            .join('\n');
+            .join('\n'));
           // MCP reports TOOL-level failures as { isError: true } WITHOUT
           // throwing (only protocol/transport faults throw). Surface it as a
           // failure so the agent doesn't reason forward on a failed call.

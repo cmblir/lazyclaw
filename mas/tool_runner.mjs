@@ -6,6 +6,24 @@
 import * as registry from './tools/registry.mjs';
 import * as audit from './audit.mjs';
 import { DEFAULT_TOOLS } from '../agents.mjs';
+import { neutralizeRoleLabels } from './redact.mjs';
+
+// Generic PostToolUse sanitize seam: ALL tool results (not only MCP) pass
+// through this before being handed back into agent context. A tool can echo
+// untrusted bytes (an MCP server's output, a fetched page, a file's contents),
+// so we reuse neutralizeRoleLabels (forged [System]/[User]/… authority lines)
+// and neutralise the router termination marker [[TASK_DONE]] so no tool can end
+// the router loop by echoing it. Applied to the user-facing text/error fields;
+// structured/raw are left intact for programmatic callers.
+function defangResultText(text) {
+  return neutralizeRoleLabels(String(text ?? '')).replace(/\[\[TASK_DONE\]\]/g, '[[task-done]]');
+}
+function sanitizeToolResult(result) {
+  if (!result || typeof result !== 'object') return result;
+  if (typeof result.text === 'string')  result.text = defangResultText(result.text);
+  if (typeof result.error === 'string') result.error = defangResultText(result.error);
+  return result;
+}
 
 export class ToolError extends Error {
   constructor(message, code) {
@@ -78,5 +96,5 @@ export async function runTool({ agent, tool, args, taskId, configDir, cwd, appro
     result = { ok: false, error: `${tool} threw: ${err?.message || err}` };
   }
   audit.append({ taskId, agent: agent.name, tool, args, result, ok: !!result?.ok, configDir });
-  return result;
+  return sanitizeToolResult(result);
 }
