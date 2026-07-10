@@ -441,9 +441,32 @@ export async function agent(c) {
             // streams steadily past the per-chunk idle timeout.
             const maxStreamMs = Number(cfg.chat?.maxStreamMs) || 0;
             const _deadline = armStreamDeadline(ac, maxStreamMs);
+            // Typed streaming (Phase 1 wave-B): in ADDITION to the plain `token`
+            // text frames, surface the provider's existing onToolUse/onThinking
+            // callbacks as distinct SSE event types so a client can render tool
+            // calls / thinking separately (parity with the Agent SDK typed
+            // streams). Purely additive — the token/usage/cost/done/truncated
+            // frames below are byte-unchanged, so token-only clients are
+            // unaffected. Guard against writes after abort/end so a late
+            // callback can't write to a torn-down socket.
+            const emitTyped = (event, data) => {
+              if (ac.signal.aborted || res.writableEnded) return;
+              writeSse(res, event, data);
+            };
+            const typedSendOpts = {
+              ...agentSendOpts,
+              signal: ac.signal,
+              // onUsage is left as agentSendOpts.onUsage (cap accounting): the
+              // single end-of-stream `usage` frame below is unchanged, so the
+              // usage-frame contract stays byte-stable (one frame, opt-in via
+              // body.usage). Only the NEW tool_use/thinking events are wired
+              // here — neither had a prior emission, so this is purely additive.
+              onToolUse: (t) => emitTyped('tool_use', { type: 'tool_use', id: t?.id, name: t?.name, input: t?.input ?? {} }),
+              onThinking: (text) => emitTyped('thinking', { type: 'thinking', text: String(text ?? '') }),
+            };
             let acc = '';
             try {
-              for await (const chunk of prov.sendMessage(messages, { ...agentSendOpts, signal: ac.signal })) {
+              for await (const chunk of prov.sendMessage(messages, typedSendOpts)) {
                 if (ac.signal.aborted) break;
                 acc += chunk;
                 // Backpressure: yield the event loop only when the socket

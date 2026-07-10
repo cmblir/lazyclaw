@@ -309,6 +309,20 @@ export function makeRunTurn({ ctx, writeFn }) {
         sandbox: ctx.sandboxSpec,
         signal,
         onUsage: ctx.accumulateUsage,
+        // Typed streaming (Phase 1 wave-B): render tool calls / thinking
+        // distinctly from plain assistant text. The streaming providers
+        // already fire these callbacks (see providers/anthropic.mjs); the
+        // non-agentic REPL path just never surfaced them. Compact dim status
+        // lines, matching the agentic path's tool-activity style. Providers
+        // that don't surface these callbacks simply never fire them, so the
+        // plain-text path stays byte-stable.
+        onToolUse: (t) => {
+          const name = (t && t.name) ? String(t.name) : 'tool';
+          try { _writeChunk(`${_statusChalk.dim(`· → tool: ${name}`)}\n`); } catch { /* sink */ }
+        },
+        onThinking: () => {
+          try { _writeChunk(`${_statusChalk.dim('· thinking…')}\n`); } catch { /* sink */ }
+        },
         // Streaming providers fire this when a turn hits the model's output-token
         // limit (finish_reason 'length' / MAX_TOKENS / stop_reason 'max_tokens' /
         // done_reason 'length'). Warn the user instead of presenting a truncated
