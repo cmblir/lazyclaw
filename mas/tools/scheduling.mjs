@@ -6,12 +6,42 @@ export function __setCronBackend(b) { _backend = b; }
 
 async function getBackend() {
   if (_backend) return _backend;
+  // cron.mjs is config-object-shaped (upsertJob/listJobs/removeJob mutate a cfg),
+  // not the add/list/remove the old code assumed — so every tool call used to hit
+  // the "cron.add missing" fallback. Wire the tools to the real API plus the
+  // shared config IO, and install/uninstall the OS-level job (skippable in tests
+  // via LAZYCLAW_SKIP_CRON_INSTALL, mirroring goals_cron.mjs).
   const cron = await import('../../cron.mjs').catch(() => null);
   if (!cron) throw new Error('scheduling: cron.mjs not available');
+  const { readConfig, writeConfig } = await import('../../lib/config.mjs');
+  const skipInstall = () => !!process.env.LAZYCLAW_SKIP_CRON_INSTALL;
+  const install = (name, schedule, command) => {
+    if (skipInstall()) return;
+    if (cron.pickBackend() === 'launchd') cron.installLaunchdJob(name, schedule, command);
+    else cron.installCrontabJob(name, schedule, command);
+  };
+  const uninstall = (name) => {
+    if (skipInstall()) return;
+    if (cron.pickBackend() === 'launchd') cron.uninstallLaunchdJob(name);
+    else cron.uninstallCrontabJob(name);
+  };
   return {
-    add:    async (j) => cron.add ? cron.add(j) : { ok: false, error: 'cron.add missing' },
-    list:   async ()  => cron.list ? cron.list() : [],
-    remove: async (n) => cron.remove ? cron.remove(n) : { ok: false, error: 'cron.remove missing' },
+    add: async ({ name, spec, command }) => {
+      const cmd = cron.resolveCronCommand(Array.isArray(command) ? command : [String(command)]);
+      const cfg = readConfig();
+      const status = cron.upsertJob(cfg, name, spec, cmd);
+      writeConfig(cfg);
+      install(name, spec, cmd);
+      return { ok: true, name, status };
+    },
+    list: async () => cron.listJobs(readConfig()),
+    remove: async (name) => {
+      const cfg = readConfig();
+      cron.removeJob(cfg, name);
+      writeConfig(cfg);
+      uninstall(name);
+      return { ok: true, removed: name };
+    },
   };
 }
 

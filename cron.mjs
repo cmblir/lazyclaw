@@ -40,7 +40,10 @@ const FIELD_RANGES = [
   { name: 'hour',   min: 0, max: 23 },
   { name: 'dom',    min: 1, max: 31 },
   { name: 'month',  min: 1, max: 12 },
-  { name: 'dow',    min: 0, max: 6  },
+  // dow accepts 0-7: real crontab treats BOTH 0 and 7 as Sunday. We validate
+  // against 0-7 here and normalize 7 -> 0 (see parseField) so downstream
+  // launchd Weekday only ever sees 0-6.
+  { name: 'dow',    min: 0, max: 7  },
 ];
 
 export function parseCronSpec(spec) {
@@ -89,6 +92,9 @@ function parseField(field, { name, min, max }) {
   // Plain number.
   const n = Number(field);
   expectInRange(n, min, max, name);
+  // day-of-week: crontab accepts 7 as Sunday; normalize to 0 so launchd Weekday
+  // (which only knows 0-6) fires on the right day.
+  if (name === 'dow' && n === 7) return { kind: 'value', value: 0 };
   return { kind: 'value', value: n };
 }
 
@@ -172,6 +178,23 @@ export function upsertJob(cfg, name, schedule, command) {
 export function removeJob(cfg, name) {
   if (!cfg.cron || !cfg.cron[name]) throw new CronError(`no job "${name}"`, 'CRON_NO_JOB');
   delete cfg.cron[name];
+}
+
+// ── command resolution (PATH-safe) ──────────────────────────────
+
+// launchd plists and crontab entries run with a minimal PATH and no shell, so a
+// bare "lazyclaw" argv[0] never resolves. Rewrite it to an absolute node binary
+// + the resolved CLI entry script (mirroring how the --detach path spawns
+// process.execPath + the worker). Any command already using an absolute/explicit
+// binary is left untouched.
+export function resolveCronCommand(command) {
+  const argv = Array.isArray(command) ? command : [String(command)];
+  if (argv[0] !== 'lazyclaw') return argv;
+  // cron.mjs sits next to cli.mjs at the repo root — resolve the entry relative
+  // to this module so it holds regardless of the process cwd.
+  const here = path.dirname(new URL(import.meta.url).pathname);
+  const cliEntry = path.join(here, 'cli.mjs');
+  return [process.execPath, cliEntry, ...argv.slice(1)];
 }
 
 // ── installer (system scheduler) ────────────────────────────────
@@ -309,7 +332,7 @@ function writeCrontab(text) {
 }
 
 export function installCrontabJob(name, schedule, command) {
-  const line = buildCrontabLine(name, schedule, command);
+  const line = buildCrontabLine(name, schedule, resolveCronCommand(command));
   const cur = readCrontab();
   // Drop any prior line for the same name so update == replace.
   const filtered = cur.split('\n').filter((ln) => !ln.endsWith(`${MARKER_PREFIX}${name}`));
@@ -329,7 +352,7 @@ export function uninstallCrontabJob(name) {
 // ── launchd backend (macOS) ─────────────────────────────────────
 
 export function installLaunchdJob(name, schedule, command) {
-  const text = buildPlist(name, schedule, command);
+  const text = buildPlist(name, schedule, resolveCronCommand(command));
   const dst = plistPath(name);
   fs.mkdirSync(path.dirname(dst), { recursive: true });
   fs.mkdirSync(path.join(os.homedir(), '.lazyclaw', 'logs'), { recursive: true });
