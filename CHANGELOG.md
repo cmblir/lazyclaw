@@ -6,6 +6,24 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **Unattended team runs are now fail-closed.** The default `claude-cli`
+  provider previously spawned `claude` with `--permission-mode
+  bypassPermissions` on every path, so the daemon/gateway answering an inbound
+  channel message from a possibly-untrusted sender ran the child's entire tool
+  loop (bash, file writes) ungated — a message-to-RCE path with no human in the
+  loop. The unattended inbound→team path now resolves a read-only `plan`
+  permission mode (inspect only; no bash/write) unless the operator explicitly
+  opts in with `security.unattendedExec=true`. Interactive `lazyclaw chat`
+  (a human is present) keeps its configured `chat.permissionMode` unchanged.
+  A new `lib/permission_mode.resolvePermissionModeForSurface(cfg, surface)`
+  centralises the interactive-vs-unattended choice; `runAgentTurn` and the
+  mention router accept an opt-in `permissionMode` / `attended` flag,
+  defaulting to today's behavior everywhere except the deliberate unattended
+  flip. The daemon logs the effective unattended posture (and how to enable
+  execution) once per inbound team run.
+
 ## [6.9.2] - 2026-06-23
 
 ### Fixed

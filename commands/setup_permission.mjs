@@ -21,8 +21,10 @@ export async function runPermissionStep({ prompt, backPrompt, colors, cfg } = {}
   // Only relevant to the claude-cli agent path (the one that spawns `claude`).
   if (!/claude/.test(provider)) return 'NEXT';
 
-  process.stdout.write(`  ${dim('Tool permissions — when the agent edits files or runs commands:')}\n`);
+  process.stdout.write(`  ${dim('Tool permissions — when the agent edits files or runs commands (interactive use):')}\n`);
   process.stdout.write(`  ${dim('    bypass = never ask (fast) · ask = prompt each time · acceptEdits = auto-accept edits only · plan = read-only')}\n`);
+  process.stdout.write(`  ${dim('    Unattended surfaces (daemon/gateway answering inbound messages) are fail-closed to read-only')}\n`);
+  process.stdout.write(`  ${dim('    regardless of this choice, unless you set security.unattendedExec=true.')}\n`);
   const label = `  ${accent('permission')} [bypass/ask/acceptEdits/plan] ${dim('(Esc = back · Enter = bypass)')}: `;
   let answer;
   if (typeof backPrompt === 'function') {

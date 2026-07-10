@@ -13,6 +13,7 @@ import { teamForChannelCached } from '../../teams.mjs';
 import { getAgent } from '../../agents.mjs';
 import { registerTask } from '../../tasks.mjs';
 import { defaultSandboxSpec } from '../../sandbox/index.mjs';
+import { resolvePermissionModeForSurface } from '../../lib/permission_mode.mjs';
 
 export async function routeInboundToTeam({
   cfg, channel, text, configDir, apiKey, baseUrl, logger, slackSender, onUsage, signal, _runTaskTurn,
@@ -44,6 +45,20 @@ export async function routeInboundToTeam({
   // never throws "logger is not a function".
   const safeLogger = typeof logger === 'function' ? logger : () => {};
 
+  // Phase 1c — this is an UNATTENDED surface: no human is watching an inbound
+  // channel message from a possibly-untrusted sender. Fail closed on the
+  // claude-cli permission mode (read-only "plan") unless the operator explicitly
+  // set cfg.security.unattendedExec=true. Log the effective posture once so the
+  // operator can see WHY the agent is read-only and how to enable execution.
+  // No secrets in the message — only the mode name and the opt-in key.
+  const unattendedMode = resolvePermissionModeForSurface(cfg, 'unattended');
+  const execEnabled = !!(cfg && cfg.security && cfg.security.unattendedExec === true);
+  const posture = execEnabled
+    ? `unattended team run: host execution ENABLED (security.unattendedExec=true) — claude permission-mode "${unattendedMode}"`
+    : `unattended team run: fail-closed to read-only claude permission-mode "${unattendedMode}" — set cfg.security.unattendedExec=true to allow host execution`;
+  if (logger && typeof logger.info === 'function') logger.info('inbound_team_permission_posture', { attended: false, permissionMode: unattendedMode, execEnabled });
+  else safeLogger(`[router] ${posture}\n`);
+
   const result = await runTaskTurn({
     task, team, agentsById, userMessage: text,
     configDir, apiKey, baseUrl, logger: safeLogger, slackSender,
@@ -54,6 +69,11 @@ export async function routeInboundToTeam({
     signal,
     // Default-on confinement for every tool the team runs (opt out via cfg).
     sandbox: defaultSandboxSpec(cfg, { cwd: process.cwd(), configDir }),
+    // Phase 1c — this inbound→team path is UNATTENDED. Mark it so the router
+    // resolves the fail-closed permission mode (above) and threads it into every
+    // claude-cli agent turn instead of the ungated bypass default.
+    attended: false,
+    cfg,
   });
 
   const turns = (result && result.task && result.task.turns) || [];

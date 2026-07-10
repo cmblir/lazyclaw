@@ -122,6 +122,13 @@ export async function runAgentTurn({
   // has been crossed, stops early with stoppedBy:'budget_exceeded' and the
   // partial text (mirrors the existing stoppedBy taxonomy).
   budget = undefined,
+  // Phase 1c (default-provider security) — OPT-IN claude-cli permission mode,
+  // default undefined = today's behavior. When set, it is forwarded into
+  // adapter.callOnce so the surface-aware caller (e.g. the unattended team path)
+  // can fail-close the spawned claude's --permission-mode. Unset leaves the
+  // claude-cli adapter's own bypassPermissions fallback in place (byte-stable
+  // for interactive/CLI callers); other adapters ignore the unknown opt.
+  permissionMode = undefined,
 } = {}) {
   if (!agent) throw new AgentTurnError('agent is required', 'NO_AGENT');
   // The shared resolver throws PROVIDER_ADAPTER_UNKNOWN (with a
@@ -252,6 +259,9 @@ export async function runAgentTurn({
       // a future config does set it, the cap reaches gemini (FIX D) too.
       maxTokens: agent.maxTokens ?? agent.maxOutputTokens,
       fetchImpl, baseUrl, signal, cache,
+      // Phase 1c — forward only when the caller set it, so the claude-cli
+      // adapter keeps its bypassPermissions default for every existing caller.
+      ...(permissionMode !== undefined ? { permissionMode } : {}),
     });
     if (resp.text) lastText = resp.text;
     if (resp.usage) {

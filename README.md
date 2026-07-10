@@ -110,6 +110,8 @@ Inbound channel messages are **idempotent**: each message's native id (Slack `ch
 
 > [!NOTE]
 > A channel listener or the daemon refuses to start while `security.allowUnattendedSensitive=true` — that flag bypasses the fail-closed tool-approval gate for *every* inbound message, so an always-on surface plus that flag is a remote-code-execution path. Keep sensitive-tool approval interactive.
+>
+> **Unattended team runs are fail-closed.** When the daemon/gateway answers an inbound channel message with a `claude-cli` team, the spawned `claude` runs in read-only `plan` mode (it can inspect but cannot run bash or write files), regardless of your interactive `chat.permissionMode`. This closes the message-to-RCE path where an untrusted sender drives host commands with no human watching. Interactive `lazyclaw chat` is unchanged. To let unattended surfaces execute host commands, opt in explicitly with `security.unattendedExec=true`.
 
 ## Multi-agent orchestration
 

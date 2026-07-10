@@ -26,6 +26,7 @@ import * as agentMemory from './agent_memory.mjs';
 import * as skillSynth from './skill_synth.mjs';
 import * as skills from '../skills.mjs';
 import { composePromptStack } from './prompt_stack.mjs';
+import { resolvePermissionModeForSurface } from '../lib/permission_mode.mjs';
 import { detectControl } from './tools/control.mjs';
 import { finalizeTerminalStop } from './router_termination.mjs';
 import { postToThread, postTypingPlaceholder, clearTypingPlaceholder } from './router_posting.mjs';
@@ -329,8 +330,25 @@ export async function runTaskTurn({
   // Test seam — inject a fake turn runner. Defaults to the real
   // agentTurn.runAgentTurn so production callers are byte-identical.
   runAgentTurnImpl,
+  // Phase 1c (default-provider security) — the surface running this task.
+  // Default TRUE = the interactive/CLI behavior (no permission-mode override,
+  // claude-cli keeps its bypass default). When FALSE (an unattended surface such
+  // as the daemon answering an inbound channel message), the claude-cli
+  // permission mode is resolved via resolvePermissionModeForSurface(cfg,
+  // 'unattended') — fail-closed to read-only "plan" unless the operator opted in
+  // with cfg.security.unattendedExec=true — and threaded into every agent turn.
+  attended = true,
+  // The loaded config, needed only to resolve the unattended permission posture
+  // above. Optional; when omitted the fail-closed resolver still returns "plan".
+  cfg,
 } = {}) {
   const runAgentTurn = typeof runAgentTurnImpl === 'function' ? runAgentTurnImpl : agentTurn.runAgentTurn;
+  // Resolve the claude-cli permission mode for this surface ONCE. undefined for
+  // an attended run means "don't override" — the claude-cli adapter keeps its
+  // bypassPermissions default and every existing caller is byte-stable.
+  const permissionMode = attended === false
+    ? resolvePermissionModeForSurface(cfg, 'unattended')
+    : undefined;
   if (!task || !team || !agentsById) {
     throw new MentionRouterError('task, team, agentsById are required', 'ROUTER_BAD_INPUT');
   }
@@ -423,6 +441,10 @@ export async function runTaskTurn({
         // prefix + tool definitions. Non-anthropic adapters ignore
         // the flag (it's a no-op for OpenAI/Gemini/claude-cli).
         cache: true,
+        // Phase 1c — forward the surface-resolved permission mode ONLY on an
+        // unattended run; attended runs omit the key so runAgentTurn / the
+        // claude-cli adapter keep today's bypass default (byte-stable).
+        ...(permissionMode !== undefined ? { permissionMode } : {}),
       });
     } catch (err) {
       await clearTypingPlaceholder(typing, logger);
