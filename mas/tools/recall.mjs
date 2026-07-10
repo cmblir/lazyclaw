@@ -36,6 +36,13 @@ export const PARAMETERS = {
     // skills whose frontmatter cross_cli_tested[] includes that
     // provider's family are boosted ahead of untested duplicates.
     workerProvider: { type: 'string', description: 'Boost skills whose cross_cli_tested[] includes this provider family (e.g. "anthropic").' },
+    // Phase 2 scoped recall. `docScope` (owner key or array, e.g.
+    // 'agent:reviewer', 'workspace:web') restricts results to those owner
+    // scope(s) + always-allowed 'global'. Omitted => recall everything (current
+    // behavior). `global:true` is an explicit opt-out that widens back to a
+    // full, unscoped search even if the caller was handed a docScope.
+    docScope: { type: ['string', 'array'], items: { type: 'string' }, description: 'Restrict recall to these owner scope(s) + global.' },
+    global: { type: 'boolean', description: 'Search ALL scopes (ignore docScope).' },
   },
   required: ['query'],
 };
@@ -88,12 +95,16 @@ export async function exec(args, { configDir } = {}) {
   // Passed into index_db so a cross-family skill is dampened at rank time;
   // reused below for the cross_cli_tested tie-break.
   const workerProvider = args.workerProvider ? String(args.workerProvider).trim() : '';
+  // Phase 2 scoped recall: pass docScope through to index_db so a hit outside
+  // the requested owner scope (+ global) is filtered out. `global:true` is an
+  // explicit opt-out — widen back to an unscoped, everything search.
+  const docScope = args.global ? undefined : args.docScope;
   const t0 = Date.now();
 
   let out;
   if (_stubRecall) {
     try {
-      out = await _stubRecall(query, { scope: scopes, k });
+      out = await _stubRecall(query, { scope: scopes, k, ...(docScope !== undefined ? { docScope } : {}) });
     } catch (err) {
       return { ok: false, error: `recall: stub threw — ${err?.message || err}` };
     }
@@ -121,7 +132,7 @@ export async function exec(args, { configDir } = {}) {
       }
     } catch { /* fall back to pure FTS */ }
     try {
-      out = indexRecall(query, { configDir, scope: scopes, k, ...(workerProvider ? { workerProvider } : {}), ...(queryVector ? { queryVector, weights } : {}) });
+      out = indexRecall(query, { configDir, scope: scopes, k, ...(docScope !== undefined ? { docScope } : {}), ...(workerProvider ? { workerProvider } : {}), ...(queryVector ? { queryVector, weights } : {}) });
     } catch (err) {
       return { ok: false, error: `recall: query failed — ${err?.message || err}` };
     }

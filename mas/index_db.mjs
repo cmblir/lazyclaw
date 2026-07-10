@@ -25,12 +25,18 @@ import {
   _isNativeAbiError,
   _warnIndexFailure,
 } from './index_failures.mjs';
+import {
+  normScope, scopeMatchClause, readStoredVersion,
+  buildRecallSQL, RECALL_SCOPES, scopedStmt,
+} from './index_scope.mjs';
 
 // Re-exported so callers/tests keep importing these from index_db.mjs
 // (their historical location) even though the impls now live in index_failures.
 export { _resetNativeHint, _isNativeAbiError, _warnIndexFailure };
 
-const SCHEMA_VERSION = 1;
+// v2 adds a `doc_scope` UNINDEXED column to every FTS5 table (Phase 2 scoped
+// recall). Bumping the version rebuilds an old (column-less) index from source.
+const SCHEMA_VERSION = 2;
 const _handles = new Map();   // configDir → { db, stmts }
 
 function defaultConfigDir() {
@@ -45,19 +51,23 @@ function ensureSchema(db) {
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS fts_sessions USING fts5(
       content,
-      session_id UNINDEXED, turn_idx UNINDEXED, role UNINDEXED, ts UNINDEXED
+      session_id UNINDEXED, turn_idx UNINDEXED, role UNINDEXED, ts UNINDEXED,
+      doc_scope UNINDEXED
     );
     CREATE VIRTUAL TABLE IF NOT EXISTS fts_skills USING fts5(
       content,
-      skill_name UNINDEXED, trained_by UNINDEXED, group_name UNINDEXED
+      skill_name UNINDEXED, trained_by UNINDEXED, group_name UNINDEXED,
+      doc_scope UNINDEXED
     );
     CREATE VIRTUAL TABLE IF NOT EXISTS fts_trajectories USING fts5(
       content,
-      trajectory_id UNINDEXED, agent UNINDEXED, outcome UNINDEXED
+      trajectory_id UNINDEXED, agent UNINDEXED, outcome UNINDEXED,
+      doc_scope UNINDEXED
     );
     CREATE VIRTUAL TABLE IF NOT EXISTS fts_memories USING fts5(
       content,
-      topic UNINDEXED, kind UNINDEXED
+      topic UNINDEXED, kind UNINDEXED,
+      doc_scope UNINDEXED
     );
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
     -- Opt-in hybrid recall (roadmap #4): doc embeddings keyed to the FTS row's
@@ -75,19 +85,19 @@ function ensureSchema(db) {
 }
 
 function prepareStatements(db) {
-  return {
+  const out = {
     insertSession: db.prepare(
-      `INSERT INTO fts_sessions(content, session_id, turn_idx, role, ts)
-       VALUES (?, ?, ?, ?, ?)`),
+      `INSERT INTO fts_sessions(content, session_id, turn_idx, role, ts, doc_scope)
+       VALUES (?, ?, ?, ?, ?, ?)`),
     insertSkill: db.prepare(
-      `INSERT INTO fts_skills(content, skill_name, trained_by, group_name)
-       VALUES (?, ?, ?, ?)`),
+      `INSERT INTO fts_skills(content, skill_name, trained_by, group_name, doc_scope)
+       VALUES (?, ?, ?, ?, ?)`),
     insertTrajectory: db.prepare(
-      `INSERT INTO fts_trajectories(content, trajectory_id, agent, outcome)
-       VALUES (?, ?, ?, ?)`),
+      `INSERT INTO fts_trajectories(content, trajectory_id, agent, outcome, doc_scope)
+       VALUES (?, ?, ?, ?, ?)`),
     insertMemory: db.prepare(
-      `INSERT INTO fts_memories(content, topic, kind)
-       VALUES (?, ?, ?)`),
+      `INSERT INTO fts_memories(content, topic, kind, doc_scope)
+       VALUES (?, ?, ?, ?)`),
     // Upsert-by-natural-key deletes (skills/trajectories/memories only —
     // these get re-indexed for the same key on every save/put, so a bare
     // INSERT would accumulate duplicate FTS rows that skew bm25 and eat the
@@ -101,37 +111,45 @@ function prepareStatements(db) {
     // Hybrid recall: query/insert doc embeddings by (scope, FTS rowid).
     getEmbedding: db.prepare(`SELECT vec FROM embeddings WHERE scope = ? AND rowid_ref = ?`),
     putEmbedding: db.prepare(`INSERT OR REPLACE INTO embeddings(scope, rowid_ref, vec) VALUES (?, ?, ?)`),
-    queries: {
-      // `rowid` (FTS5 implicit) is selected so a stored embedding can be joined
-      // back to its row for the cosine blend; recall() strips it from metadata.
-      sessions: db.prepare(
-        `SELECT 'sessions' AS scope, bm25(fts_sessions) AS bm25,
-                snippet(fts_sessions, 0, '<mark>', '</mark>', '...', 16) AS snippet,
-                rowid AS rowid, session_id, turn_idx, role, ts
-           FROM fts_sessions WHERE content MATCH ? ORDER BY bm25 LIMIT ?`),
-      skills: db.prepare(
-        `SELECT 'skills' AS scope, bm25(fts_skills) AS bm25,
-                snippet(fts_skills, 0, '<mark>', '</mark>', '...', 16) AS snippet,
-                rowid AS rowid, skill_name, trained_by, group_name
-           FROM fts_skills WHERE content MATCH ? ORDER BY bm25 LIMIT ?`),
-      trajectories: db.prepare(
-        `SELECT 'trajectories' AS scope, bm25(fts_trajectories) AS bm25,
-                snippet(fts_trajectories, 0, '<mark>', '</mark>', '...', 16) AS snippet,
-                rowid AS rowid, trajectory_id, agent, outcome
-           FROM fts_trajectories WHERE content MATCH ? ORDER BY bm25 LIMIT ?`),
-      memories: db.prepare(
-        `SELECT 'memories' AS scope, bm25(fts_memories) AS bm25,
-                snippet(fts_memories, 0, '<mark>', '</mark>', '...', 16) AS snippet,
-                rowid AS rowid, topic, kind
-           FROM fts_memories WHERE content MATCH ? ORDER BY bm25 LIMIT ?`),
-    },
   };
+  // Recall SQL templates live in index_scope.buildRecallSQL; the OPT-IN
+  // doc_scope filter is spliced between MATCH and ORDER BY. `doc_scope` is NOT
+  // selected (the filter runs in SQL) so it never leaks into a hit's metadata.
+  // No-scope prepared statements are the byte-stable default recall path; scoped
+  // variants are prepared per distinct clause and cached (see scopedStmt).
+  out.queries = {};
+  for (const sc of RECALL_SCOPES) out.queries[sc] = db.prepare(buildRecallSQL(sc));
+  out._scopedCache = new Map();  // scopeClause → { [sc]: Statement }
+  out._db = db;
+  return out;
 }
+
+// Guards re-entry while a stale-schema rebuild is in flight (reindexAll re-calls
+// openIndex, which would otherwise re-fire the version check).
+let _migrating = false;
 
 export function openIndex(configDir = defaultConfigDir(), opts = {}) {
   const dir = configDir;
   if (_handles.has(dir)) return _handles.get(dir).db;
   fs.mkdirSync(dir, { recursive: true });
+  // Schema-version drift: an on-disk index predating the current DDL (e.g. v1
+  // FTS tables with no doc_scope column) is rebuilt from the on-disk sources via
+  // reindexAll — CREATE ... IF NOT EXISTS can't add a column to an existing FTS5
+  // table, so a clean rebuild IS the migration. Best-effort (never blocks open).
+  if (!_migrating) {
+    const stored = readStoredVersion(dbPath(dir));
+    if (stored !== null && stored !== SCHEMA_VERSION) {
+      _migrating = true;
+      try {
+        reindexAll(dir);
+        if (_handles.has(dir)) return _handles.get(dir).db;
+      } catch (e) {
+        _warnIndexFailure('schema migration rebuild failed', e);
+      } finally {
+        _migrating = false;
+      }
+    }
+  }
   const db = new Database(dbPath(dir));
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
@@ -165,13 +183,14 @@ function _stmts(configDir) {
   return _handles.get(configDir).stmts;
 }
 
-export function indexSessionTurn(row, configDir = defaultConfigDir()) {
+export function indexSessionTurn(row, configDir = defaultConfigDir(), opts = {}) {
   try {
     const s = _stmts(configDir);
     s.insertSession.run(
       redactSecrets(String(row.content || '')),
       String(row.session_id || ''), Number(row.turn_idx || 0),
       String(row.role || ''), Number(row.ts || Date.now()),
+      normScope(opts.docScope ?? opts.scope ?? row.docScope ?? row.scope),
     );
   } catch (e) {
     _logIndexFailure(configDir, 'sessions', e);
@@ -179,7 +198,7 @@ export function indexSessionTurn(row, configDir = defaultConfigDir()) {
   }
 }
 
-export function indexSkill(row, configDir = defaultConfigDir()) {
+export function indexSkill(row, configDir = defaultConfigDir(), opts = {}) {
   try {
     const s = _stmts(configDir);
     s.deleteSkill.run(String(row.skill_name || ''));   // upsert by skill_name
@@ -187,6 +206,7 @@ export function indexSkill(row, configDir = defaultConfigDir()) {
       redactSecrets(String(row.content || '')),
       String(row.skill_name || ''), String(row.trained_by || ''),
       String(row.group_name || ''),
+      normScope(opts.docScope ?? opts.scope ?? row.docScope ?? row.scope),
     );
   } catch (e) {
     _logIndexFailure(configDir, 'skills', e);
@@ -209,7 +229,7 @@ export function deleteSkill(skillName, configDir = defaultConfigDir()) {
   }
 }
 
-export function indexTrajectory(row, configDir = defaultConfigDir()) {
+export function indexTrajectory(row, configDir = defaultConfigDir(), opts = {}) {
   try {
     const s = _stmts(configDir);
     s.deleteTrajectory.run(String(row.trajectory_id || ''));   // upsert by trajectory_id
@@ -217,6 +237,7 @@ export function indexTrajectory(row, configDir = defaultConfigDir()) {
       redactSecrets(String(row.content || '')),
       String(row.trajectory_id || ''), String(row.agent || ''),
       String(row.outcome || ''),
+      normScope(opts.docScope ?? opts.scope ?? row.docScope ?? row.scope),
     );
   } catch (e) {
     _logIndexFailure(configDir, 'trajectories', e);
@@ -224,13 +245,14 @@ export function indexTrajectory(row, configDir = defaultConfigDir()) {
   }
 }
 
-export function indexMemory(row, configDir = defaultConfigDir()) {
+export function indexMemory(row, configDir = defaultConfigDir(), opts = {}) {
   try {
     const s = _stmts(configDir);
     s.deleteMemory.run(String(row.topic || ''), String(row.kind || ''));   // upsert by (topic,kind)
     s.insertMemory.run(
       redactSecrets(String(row.content || '')),
       String(row.topic || ''), String(row.kind || ''),
+      normScope(opts.docScope ?? opts.scope ?? row.docScope ?? row.scope),
     );
   } catch (e) {
     _logIndexFailure(configDir, 'memories', e);
@@ -252,37 +274,30 @@ function sanitizeFtsQuery(q) {
 }
 
 /**
- * Cross-scope FTS5 recall. Content-only semantics — all UNINDEXED
- * metadata columns (session_id, skill_name, agent, outcome, topic, …)
- * are returned as `metadata` but NOT searchable via MATCH (m9). Use
- * `opts.where` to post-filter on metadata equality.
+ * Cross-scope FTS5 recall. Content-only semantics — all UNINDEXED metadata
+ * columns (session_id, skill_name, agent, outcome, topic, …) are returned as
+ * `metadata` but NOT searchable via MATCH (m9). Use `opts.where` to post-filter.
  *
- * @param {string} query  FTS5 MATCH query. By default the query is
- *                        sanitised: `-`, `:`, `+` rewritten to spaces
- *                        so a bareword like "write-through" doesn't
- *                        get parsed as NOT-through. Pass `opts.raw=true`
- *                        to bypass sanitisation when you need real
- *                        FTS5 operators (NOT, OR, near).
+ * @param {string} query  FTS5 MATCH query. Sanitised by default (`-`, `:`, `+`
+ *                        → spaces, so "write-through" isn't parsed as NOT). Pass
+ *                        `opts.raw=true` for real FTS5 operators (NOT, OR, near).
  * @param {Object} [opts]
  * @param {string} [opts.configDir]
- * @param {string[]} [opts.scope]  default: all four scopes
+ * @param {string[]} [opts.scope]  table categories to search; default all four
+ * @param {string|string[]} [opts.docScope]  OPT-IN owner-scope filter: restricts
+ *                        hits to these scope(s) + always-allowed 'global'.
+ *                        Omitted => no filter (byte-stable global recall).
  * @param {number} [opts.k]        default 10, capped at 50
  * @param {boolean} [opts.raw]     bypass sanitiseFtsQuery (power users)
  * @param {Object} [opts.where]    metadata equality post-filter, e.g.
- *                                 { trained_by: 'human', agent: 'reviewer' }
- *                                 Applied after FTS5 returns hits; values
- *                                 are coerced to string before compare.
- * @param {string} [opts.workerProvider]
- *                                 caller's provider (e.g. 'anthropic'); when
- *                                 set, a skill whose trainer family differs is
- *                                 dampened via confidence.crossCliDampen. The
- *                                 per-skill confidence weighting is applied
- *                                 regardless.
+ *                        { trained_by: 'human' }; values coerced to string.
+ * @param {string} [opts.workerProvider]  caller's provider (e.g. 'anthropic');
+ *                        a cross-family skill is dampened via crossCliDampen.
  */
 export function recall(query, opts = {}) {
   const t0 = process.hrtime.bigint();
   const configDir = opts.configDir || defaultConfigDir();
-  const scope = opts.scope || ['sessions', 'skills', 'trajectories', 'memories'];
+  const scope = opts.scope || RECALL_SCOPES;
   const k = Math.min(Math.max(Number(opts.k) || 10, 1), 50);
   const s = _stmts(configDir);
   const safeQuery = opts.raw ? String(query ?? '').trim() : sanitizeFtsQuery(query);
@@ -294,13 +309,18 @@ export function recall(query, opts = {}) {
   const blend = !!(opts.queryVector && opts.queryVector.length);
   const fetchK = blend ? Math.min(200, Math.max(k * 4, 40))
     : (whereKeys.length ? Math.min(200, k * 2) : k);
+  // OPT-IN doc-scope filter (Phase 2). `opts.docScope` (owner key or array)
+  // restricts hits to those scope(s) + always-allowed 'global'; omitted => empty
+  // clause => byte-stable no-filter path. Named docScope so it can't collide
+  // with `opts.scope` (the table-category selector above).
+  const { clause: scopeClause, params: scopeParams } = scopeMatchClause(opts.docScope);
   const hits = [];
   const rowmeta = [];  // parallel to hits: { scope, rowid } for the cosine join
   for (const sc of scope) {
-    const stmt = s.queries[sc];
+    const stmt = scopedStmt(s, sc, scopeClause);
     if (!stmt) continue;
     try {
-      const rows = stmt.all(safeQuery, fetchK);
+      const rows = stmt.all(safeQuery, ...scopeParams, fetchK);
       for (const r of rows) {
         // `rowid` is destructured OUT so it never leaks into the returned
         // metadata (keeps the hit shape byte-stable for non-blend callers).

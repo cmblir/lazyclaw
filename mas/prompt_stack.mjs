@@ -69,7 +69,11 @@ function lastRecentLine(cfgDir) {
 // when no `query` is passed. Scoped to prior sessions / trajectories /
 // memories — the skill index already has its own layer above. Best-effort:
 // any index/FTS hiccup yields no layer rather than breaking prompt composition.
-export function recalledLayer(dir, query, k) {
+//
+// `docScope` (Phase 2, optional) restricts recall to the turn's OWN owner
+// scope(s) + always-allowed 'global'. Omitted => the byte-stable global recall
+// (every prior doc in the configDir), matching pre-Phase-2 behavior.
+export function recalledLayer(dir, query, k, docScope) {
   if (!query || !String(query).trim()) return '';
   // FTS5 ANDs space-separated terms, so a natural-language message rarely
   // matches a prior doc. Build an OR query over the significant terms (bm25
@@ -78,7 +82,7 @@ export function recalledLayer(dir, query, k) {
   const terms = [...new Set((String(query).toLowerCase().match(/[a-z0-9]{3,}/g) || []))].slice(0, 12);
   if (!terms.length) return '';
   try {
-    const r = _recall(terms.join(' OR '), { configDir: dir, scope: ['sessions', 'trajectories', 'memories'], k, raw: true });
+    const r = _recall(terms.join(' OR '), { configDir: dir, scope: ['sessions', 'trajectories', 'memories'], k, raw: true, ...(docScope !== undefined ? { docScope } : {}) });
     const hits = (r && Array.isArray(r.hits)) ? r.hits : [];
     const lines = hits
       .map((h) => `- [${h.scope}] ${String(h.snippet || '').replace(/\s+/g, ' ').trim()}`)
@@ -89,7 +93,7 @@ export function recalledLayer(dir, query, k) {
   }
 }
 
-export function composePromptStack({ cfgDir, agent, workspace, sessionId, query, recallK = 5 } = {}) {
+export function composePromptStack({ cfgDir, agent, workspace, sessionId, query, recallK = 5, recallScope } = {}) {
   const dir = cfgDir || defaultConfigDir();
   const a = agent || {};
   const parts = [];
@@ -130,7 +134,11 @@ export function composePromptStack({ cfgDir, agent, workspace, sessionId, query,
   if (tail) parts.push(`## Most-recent turn\n${tail}`);
 
   // 8. recalled context for the current message (opt-in via `query`).
-  const recalled = recalledLayer(dir, query, recallK);
+  // `recallScope` (Phase 2, optional) scopes the recall to the turn's own owner
+  // scope(s) + global; omitted => byte-stable global recall as before. Explicit
+  // only — deriving it from workspace/agent/session automatically would silently
+  // narrow recall for every existing caller, so it stays opt-in.
+  const recalled = recalledLayer(dir, query, recallK, recallScope);
   if (recalled) parts.push(recalled);
 
   return parts.join('\n\n');
