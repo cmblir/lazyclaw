@@ -26,6 +26,7 @@ import * as agentMemory from './agent_memory.mjs';
 import * as skillSynth from './skill_synth.mjs';
 import * as skills from '../skills.mjs';
 import { composePromptStack } from './prompt_stack.mjs';
+import { detectControl } from './tools/control.mjs';
 import { finalizeTerminalStop } from './router_termination.mjs';
 import { postToThread, postTypingPlaceholder, clearTypingPlaceholder } from './router_posting.mjs';
 import { emit as emitEvent } from './events.mjs';
@@ -325,7 +326,11 @@ export async function runTaskTurn({
   // SlackChannel to reuse across many task turns; run() then neither
   // creates nor stops it. When omitted, run() opens + closes its own.
   slackSender: providedSender,
+  // Test seam — inject a fake turn runner. Defaults to the real
+  // agentTurn.runAgentTurn so production callers are byte-identical.
+  runAgentTurnImpl,
 } = {}) {
+  const runAgentTurn = typeof runAgentTurnImpl === 'function' ? runAgentTurnImpl : agentTurn.runAgentTurn;
   if (!task || !team || !agentsById) {
     throw new MentionRouterError('task, team, agentsById are required', 'ROUTER_BAD_INPUT');
   }
@@ -404,7 +409,7 @@ export async function runTaskTurn({
 
     let result;
     try {
-      result = await agentTurn.runAgentTurn({
+      result = await runAgentTurn({
         agent: { ...agentRecord, role: ctx.system },
         // Group B / C10 — feed the transcript as a proper messages
         // history. The kickoff + prior turns + "your turn" marker
@@ -446,7 +451,10 @@ export async function runTaskTurn({
     // prefixed so a human reader can follow who said what.
     if (replyText) await postToThread({ task: current, agentRecord, text: replyText, logger, sender: slackSender });
 
-    if (replyText.includes(DONE_MARKER)) {
+    // Terminate the task: flip status, post the close note, fire the
+    // post-task learning hooks. Shared by the structured `finish` control
+    // path and the legacy DONE_MARKER path below so both end identically.
+    const terminateDone = async () => {
       current = tasksMod.patchTask(current.id, { status: 'done' }, configDir);
       emitEvent('task.done', { taskId: current.id, status: 'done' });
       await postToThread({ task: current, agentRecord: null, text: `:white_check_mark: ${DONE_MARKER} — task closed by *${agentRecord.displayName || speaker}*.`, logger, sender: slackSender });
@@ -468,6 +476,38 @@ export async function runTaskTurn({
         apiKey, baseUrl, fetchImpl,
         configDir, logger,
       });
+    };
+
+    // Structured control protocol (primary): if the agent ran the `finish`
+    // or `handoff` control tool this turn, that first-class signal drives
+    // termination / delegation — it can't be defeated by a paraphrase, a
+    // code-fenced marker, or a user pasting the marker. Only when NO
+    // structured control call is present do we fall back to the legacy
+    // [[TASK_DONE]] substring + @mention regex behaviour (below), which
+    // existing tests pin — so the string protocol stays a working fallback.
+    const control = detectControl(result);
+    if (control && control.control === 'finish') {
+      await terminateDone();
+      break;
+    }
+    if (control && control.control === 'handoff') {
+      // Validate the target against team.agents (mirrors extractMentions):
+      // an unknown or self target is ignored, so a hallucinated name can't
+      // enqueue a phantom speaker.
+      const canonical = team.agents.find((a) => a.toLowerCase() === String(control.to).toLowerCase());
+      if (canonical && canonical.toLowerCase() !== String(speaker).toLowerCase()) {
+        emitEvent('delegate', { taskId: current.id, from: speaker, to: canonical });
+        queue.push(canonical);
+      } else if (speaker !== team.lead) {
+        // No valid handoff target from a non-lead — hand back to the lead so
+        // the task doesn't strand (same guard as the mention path below).
+        queue.push(team.lead);
+      }
+      continue;
+    }
+
+    if (replyText.includes(DONE_MARKER)) {
+      await terminateDone();
       break;
     }
 

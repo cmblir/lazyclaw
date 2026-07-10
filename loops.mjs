@@ -131,3 +131,22 @@ export function reconcileStatus(meta) {
   }
   return meta;
 }
+
+// Structured stop signal for a loop iteration. When an agentic loop turn
+// runs the `finish` control tool (mas/tools/control.mjs), that is a
+// first-class "we're done" signal — more robust than the `--until` regex on
+// the reply text, which a paraphrase or code-fenced marker can defeat.
+//
+// Returns { control:'finish', summary } | null. Additive + opt-in: callers
+// that don't pass a tool-call-bearing turn result get null and fall back to
+// the existing --until / --max stop conditions unchanged (byte-stable).
+export function detectControlStop(turnResult) {
+  const calls = turnResult && Array.isArray(turnResult.toolCalls) ? turnResult.toolCalls : [];
+  for (const c of calls) {
+    const r = c && c.result;
+    if (r && r.ok === true && r.control === 'finish') {
+      return { control: 'finish', summary: r.summary || '' };
+    }
+  }
+  return null;
+}

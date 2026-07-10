@@ -11,7 +11,7 @@ const BUILTIN = {
   'devops':      { tools: ['bash', 'git_status', 'git_diff', 'git_log', 'git_commit', 'cron_add', 'cron_list', 'http_request'] },
   'learning':    { tools: ['recall', 'skill_view', 'skill_create', 'skill_edit', 'memory_read', 'memory_write', 'user_view', 'user_update'] },
   'media':       { tools: ['image_describe', 'image_generate', 'transcribe'] },
-  'agentic':     { tools: ['task_spawn', 'delegate', 'clarify', 'recall', 'skill_view'] },
+  'agentic':     { tools: ['task_spawn', 'delegate', 'clarify', 'recall', 'skill_view', 'finish', 'handoff'] },
 };
 
 function configFile(opts) {

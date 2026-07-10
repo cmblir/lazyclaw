@@ -304,7 +304,18 @@ export function makeOrchestratorProvider(opts = {}) {
           signal: callerOpts.signal,
           maxIterations: Number.isFinite(o.workerMaxIterations) ? o.workerMaxIterations : DEFAULT_WORKER_MAX_ITERATIONS,
         });
-        return r.text || '';
+        // Structured control (additive): when a worker ends its subtask by
+        // calling the `finish` tool and left no free-text answer, surface
+        // the finish summary so the subtask isn't reported as empty. A
+        // worker that both wrote text AND finished keeps its text (byte-
+        // stable for the common case). Only reached on the opt-in agentic
+        // worker path; the text-streaming default is untouched.
+        const text = r.text || '';
+        if (text) return text;
+        const { detectControl } = await import('../mas/tools/control.mjs');
+        const ctl = detectControl(r);
+        if (ctl && ctl.control === 'finish' && ctl.summary) return ctl.summary;
+        return '';
       };
       // Worker output as a chunk stream. agenticWorkers OFF (default) → the
       // provider's live token stream, byte-stable. ON → one buffered chunk with

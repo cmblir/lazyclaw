@@ -47,6 +47,7 @@ import { TOOLS as mediaTools } from './media.mjs';
 import { TOOLS as haTools } from './ha.mjs';
 import { TOOL  as clarifyTool } from './clarify.mjs';
 import { TOOLS as browserTools } from './browser.mjs';
+import { TOOLS as controlTools } from './control.mjs';
 
 BUILTINS.push(editTool, patchTool);
 BUILTINS.push(recallTool);
@@ -61,6 +62,7 @@ for (const t of mediaTools) BUILTINS.push(t);
 for (const t of haTools) BUILTINS.push(t);
 BUILTINS.push(clarifyTool);
 for (const t of browserTools) BUILTINS.push(t);
+for (const t of controlTools) BUILTINS.push(t);
 
 // Mutable; new groups (Tasks 2-14) push here; MCP client (Task 15) also pushes.
 const TOOLS = new Map();
