@@ -24,6 +24,74 @@ Versioning: [SemVer](https://semver.org/).
   flip. The daemon logs the effective unattended posture (and how to enable
   execution) once per inbound team run.
 
+### Added
+
+- **Accessible, deep-linkable dashboard tabs.** The tab bar now implements the
+  WAI-ARIA Tabs pattern (`role=tablist/tab/tabpanel`, `aria-selected`, roving
+  `tabindex`) with full keyboard navigation (←/→/↑/↓, Home, End), and the active
+  tab is reflected in the URL hash (`#<tab>`) so it survives a reload and can be
+  linked to directly.
+- **Dashboard "Scheduling" tab.** Surfaces the three scheduling surfaces the CLI
+  owns — cron jobs, durable goals, and loop runs — in one place (`GET /scheduling`).
+  Cron jobs can be deleted from the tab (`DELETE /cron/<name>`, guarded so a
+  read-only daemon refuses it); goals and loops are read-only here. Creating
+  schedules stays in the CLI, since the dashboard daemon is loopback but
+  unauthenticated and scheduling runs a command.
+
+### Fixed
+
+- **Scheduled goals, workflows, and cron jobs silently never ran on Homebrew /
+  nvm / npm-global installs.** Every scheduled job stored a bare `lazyclaw` and
+  the launchd plist / crontab line carried no absolute path and no PATH, so the
+  OS scheduler (PATH `/usr/bin:/bin:/usr/sbin:/sbin`) could not find the binary.
+  The command is now resolved to an absolute `<node> <cli.mjs>` launcher at emit
+  time, and the plist sets `EnvironmentVariables.PATH` (crontab gets a `PATH=`
+  prefix). Also: `cron add` no longer drops the `lazyclaw` binary when invoked as
+  `-- agent "…"`; an all-wildcard `* * * * *` schedule no longer emits an empty
+  `StartCalendarInterval` that launchd never fires (the minute is enumerated);
+  and the cron parser now accepts day-of-week `7`, three-letter day/month names
+  (`SUN`, `MON-FRI`, `JAN`), and `@daily`-style macros.
+- **Scheduled workflow lifecycle.** `workflow remove` now tears down its cron
+  job (the OS used to keep firing a removed workflow); re-adding a workflow
+  without `--cron` removes the stale schedule; and an invalid `--cron` spec now
+  fails loudly instead of reporting success while installing nothing.
+- **Team Live dashboard tab showed "connecting…" for up to 25 s.** The `/events`
+  SSE stream did not flush its response headers until the first heartbeat when
+  the event buffer was empty; `writeSseHead` now flushes immediately, so the
+  status dot reaches "live" in milliseconds.
+- **Typing during a streaming chat turn sent the message 2–3 times.** The REPL
+  now guards mid-stream input: it aborts the current turn and queues the text for
+  the next one instead of starting a second concurrent dispatch.
+- **The orchestrator dropped the no-fabrication honesty guard** from its
+  user-facing synthesis reply; the guard is now applied there too. The legacy
+  (non-Ink) chat path's `/orchestrator on` reported success but never took effect
+  — its live-provider setters were missing.
+- **`providers test`** (CLI and dashboard) read only the legacy `cfg['api-key']`,
+  so it falsely failed any provider whose key lives in an env var, auth profile,
+  or custom entry; it now resolves each provider's own key.
+- **Gemini** streamed against `/v1` while the model listing used `/v1beta`, so
+  the default `gemini-2.5-*` models 404'd; the streaming endpoint is aligned to
+  `/v1beta`.
+- **Custom agent avatars 404'd for any agent whose name contained a dot.** The
+  route and handler now allow dots in the filename (extension allow-listed,
+  traversal still blocked).
+- **The dashboard surfaced raw JSON envelopes and internal error codes** (e.g.
+  `TEAM_BAD_AGENT`) in native alerts. Errors now show only the server's
+  human-readable message, and creating a team guides you to register an agent
+  first instead of failing with a 400.
+
+## [6.9.3] - 2026-06-23
+
+### Fixed
+
+- **The chat agent no longer invents configuration or prints `Run:` command
+  lines.** After 6.9.2 stopped it faking execution, it started suggesting a
+  `test`/`main` channel that was never set up and printing
+  `Run: lazyclaw message send …` lines. The guard now tells the model it cannot
+  see the configuration, must never invent or assume config names (channels,
+  providers, …), and — when something isn't set up — to say so briefly in plain
+  language and stop, without raw commands, `Run:` lines, or guessed values.
+
 ## [6.9.2] - 2026-06-23
 
 ### Fixed

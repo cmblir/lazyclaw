@@ -46,18 +46,16 @@ export async function cmdCron(sub, positional, flags = {}) {
       return;
     }
     case 'add': {
-      // Shape: lazyclaw cron add <name> "<cron-spec>" -- <cmd> [args...]
-      // The `--` separator was already consumed by parseArgs, but
-      // the spec is the second positional and the command is
-      // everything after it. parseArgs preserves order, so:
-      //   positional[0] = name
-      //   positional[1] = "0 9 * * *"
-      //   positional[2..] = cmd argv
-      const [name, schedule, ...cmd] = positional;
-      if (!name || !schedule || !cmd.length) {
+      // Shape: cron add <name> "<spec>" -- <cmd...>  (positional[0]=name,
+      // [1]=spec, [2..]=cmd; the `--` was already consumed by parseArgs).
+      const [name, schedule, ...rawCmd] = positional;
+      if (!name || !schedule || !rawCmd.length) {
         console.error('Usage: lazyclaw cron add <name> "<cron-spec>" -- <cmd> ...');
         process.exit(2);
       }
+      // Stored command must start with `lazyclaw` (resolveCommand then makes it
+      // absolute); prepend it when the user wrote the shorter `-- agent "…"`.
+      const cmd = rawCmd[0] === 'lazyclaw' ? rawCmd : ['lazyclaw', ...rawCmd];
       try {
         cron.upsertJob(cfg, name, schedule, cmd);
       } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }

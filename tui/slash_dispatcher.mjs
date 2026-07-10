@@ -955,7 +955,7 @@ async function _handoff(args, ctx) {
       ? threads.findByExternal(replState.channel, replState.externalId)
       : null;
     if (!cur) {
-      return `handoff: no thread bound to ${replState.channel || '(none)'}:${replState.externalId || '(none)'}`;
+      return `handoff: no thread bound to this conversation — /handoff moves a channel-bound thread (e.g. a Slack conversation on the daemon), not the local chat REPL (channel ${replState.channel || 'none'}).`;
     }
     const next = await runHandoff({
       threads, channels: replState.channels || {},

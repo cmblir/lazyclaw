@@ -1,12 +1,64 @@
-    // Tab switching ────────────────────────────────────────────────
-    const tabs = document.querySelectorAll('nav.tabs button');
-    const sections = document.querySelectorAll('main section');
-    tabs.forEach((b) => b.addEventListener('click', () => {
-      tabs.forEach((x) => x.classList.toggle('active', x === b));
-      sections.forEach((s) => s.classList.toggle('active', s.id === 'tab-' + b.dataset.tab));
-      const loader = LOADERS[b.dataset.tab];
+    // Tab switching — WAI-ARIA Tabs pattern: a role=tablist of role=tab buttons
+    // with roving tabindex + arrow-key navigation, each controlling a
+    // role=tabpanel. The URL hash (#<tab>) is the source of truth, so the active
+    // tab survives a reload and is deep-linkable.
+    const tabs = [...document.querySelectorAll('nav.tabs button')];
+    const sections = [...document.querySelectorAll('main section')];
+    const tablist = document.querySelector('nav.tabs');
+    if (tablist) tablist.setAttribute('role', 'tablist');
+    tabs.forEach((b) => {
+      const name = b.dataset.tab;
+      b.setAttribute('role', 'tab');
+      b.id = 'tabbtn-' + name;
+      b.setAttribute('aria-controls', 'tab-' + name);
+    });
+    sections.forEach((s) => {
+      s.setAttribute('role', 'tabpanel');
+      s.setAttribute('tabindex', '0');
+      s.setAttribute('aria-labelledby', 'tabbtn-' + s.id.replace(/^tab-/, ''));
+    });
+    // Apply the active state for `name`: classes, ARIA, roving tabindex, panel,
+    // and the tab's data loader. Does not touch focus or the hash.
+    function setActiveTab(name) {
+      let found = false;
+      tabs.forEach((b) => {
+        const on = b.dataset.tab === name;
+        if (on) found = true;
+        b.classList.toggle('active', on);
+        b.setAttribute('aria-selected', on ? 'true' : 'false');
+        b.tabIndex = on ? 0 : -1;
+      });
+      if (!found) return false;
+      sections.forEach((s) => s.classList.toggle('active', s.id === 'tab-' + name));
+      const loader = LOADERS[name];
       if (loader) loader();
-    }));
+      return true;
+    }
+    // The hash drives activation. Setting it to a new value fires hashchange
+    // (the single activation path); setting it to the current value does not, so
+    // we activate directly in that case.
+    function gotoTab(name, focus) {
+      if (location.hash.slice(1) === name) setActiveTab(name);
+      else { try { location.hash = name; } catch (_) { setActiveTab(name); } }
+      if (focus) { const b = tabs.find((x) => x.dataset.tab === name); if (b) b.focus(); }
+    }
+    window.addEventListener('hashchange', () => {
+      const n = location.hash.slice(1);
+      if (n && tabs.some((b) => b.dataset.tab === n)) setActiveTab(n);
+    });
+    tabs.forEach((b) => b.addEventListener('click', () => gotoTab(b.dataset.tab, false)));
+    if (tablist) tablist.addEventListener('keydown', (e) => {
+      const i = tabs.indexOf(document.activeElement);
+      if (i < 0) return;
+      let j = null;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') j = (i + 1) % tabs.length;
+      else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') j = (i - 1 + tabs.length) % tabs.length;
+      else if (e.key === 'Home') j = 0;
+      else if (e.key === 'End') j = tabs.length - 1;
+      if (j === null) return;
+      e.preventDefault();
+      gotoTab(tabs[j].dataset.tab, true);
+    });
 
     document.getElementById('footer-url').textContent = location.href;
 
@@ -59,9 +111,11 @@
     async function api(path, opts = {}) {
       const r = await apiRaw(path, opts);
       if (!r.ok && r.status !== 200) {
-        let body = '';
-        try { body = JSON.stringify(await r.json()); } catch {}
-        throw new Error(`${r.status} ${r.statusText}${body ? ' — ' + body : ''}`);
+        // Surface the server's human-readable `error` string only — never the
+        // raw JSON envelope or an internal error code (e.g. TEAM_BAD_AGENT).
+        let msg = '';
+        try { const b = await r.json(); if (b && typeof b.error === 'string') msg = b.error; } catch {}
+        throw new Error(msg || `${r.status} ${r.statusText}`);
       }
       return r.json();
     }
@@ -1159,13 +1213,23 @@
     };
 
     async function openTeamModal() {
+      // A team can only reference agents that are already registered (the
+      // server rejects unknown names), so guide the flow instead of letting the
+      // user guess: bail early with a clear hint when there are none, and
+      // pre-fill the picker with the registered names otherwise.
+      let registered = [];
+      try { registered = (await api('/agents')).map((a) => a.name); } catch { /* fall through with empty list */ }
+      if (registered.length === 0) {
+        alert('Create an agent first (Agents tab → + New agent). A team is built from agents you have already registered.');
+        return;
+      }
       const name = (prompt('Team name (e.g. shop, growth):') || '').trim();
       if (!name) return;
-      const agentsRaw = (prompt('Agents (comma-separated names):') || '').trim();
+      const agentsRaw = (prompt(`Agents (comma-separated) — registered: ${registered.join(', ')}`, registered.join(', ')) || '').trim();
       if (!agentsRaw) return;
       const agents = agentsRaw.split(',').map((s) => s.trim()).filter(Boolean);
       const lead = (prompt(`Lead (one of ${agents.join(', ')}):`, agents[0]) || agents[0]).trim();
-      const slackChannel = (prompt('Slack channel (C… id or #name, optional):') || '').trim();
+      const slackChannel = (prompt('Slack channel id (C…, optional):') || '').trim();
       try {
         await api('/teams', { method: 'POST', body: JSON.stringify({ name, agents, lead, slackChannel }) });
         LOADERS.teams();
@@ -1357,6 +1421,59 @@
         root.innerHTML = `<div class="empty">⚠ ${escHtml(e.message)}</div>`;
       }
     };
+
+    // ── Scheduling tab ────────────────────────────────────────────
+    // Read-mostly view of the three CLI-owned scheduling surfaces (cron jobs,
+    // durable goals, loop runs). Only cron exposes a delete here (safe: it just
+    // unschedules); creating schedules stays in the CLI since this loopback
+    // daemon is unauthenticated.
+    LOADERS.scheduling = async function loadScheduling() {
+      const root = document.getElementById('scheduling-list');
+      const meta = document.getElementById('scheduling-meta');
+      root.innerHTML = '<div class="empty">Loading…</div>';
+      try {
+        const r = await api('/scheduling');
+        const cron = r.cron || [], goals = r.goals || [], loops = r.loops || [];
+        meta.textContent = `${cron.length} cron · ${goals.length} goal${goals.length === 1 ? '' : 's'} · ${loops.length} loop${loops.length === 1 ? '' : 's'}`;
+        const sections = [];
+        sections.push('<h3 class="dim" style="margin:8px 0 4px;">Cron jobs</h3>' + (cron.length
+          ? '<table><thead><tr><th>name</th><th>schedule</th><th>command</th><th></th></tr></thead><tbody>'
+            + cron.map((j) => `<tr>
+                <td><strong>${escHtml(j.name)}</strong></td>
+                <td><code>${escHtml(j.schedule || '')}</code></td>
+                <td class="dim">${escHtml((j.command || []).join(' '))}</td>
+                <td><button class="btn btn-secondary" onclick="deleteCron('${encodeURIComponent(j.name)}')">Delete</button></td>
+              </tr>`).join('')
+            + '</tbody></table>'
+          : '<div class="empty">No cron jobs. Add one with <code>lazyclaw cron add</code>.</div>'));
+        sections.push('<h3 class="dim" style="margin:14px 0 4px;">Goals</h3>' + (goals.length
+          ? goals.map((g) => `<div class="card"><div class="row" style="border:0;padding:0;">
+                <div class="name">${escHtml(g.name)}</div>
+                <span class="pill ${g.status === 'active' ? 'ok' : 'warn'}">${escHtml(g.status || 'active')}</span>
+                <div class="dim row-actions">${g.schedule ? 'schedule: <code>' + escHtml(g.schedule) + '</code>' : '<span class="dim">no schedule</span>'}</div>
+              </div>${g.description ? `<div class="dim" style="margin-top:6px;font-size:12px;">${escHtml(g.description)}</div>` : ''}</div>`).join('')
+          : '<div class="empty">No goals. Add one with <code>lazyclaw goal add</code>.</div>'));
+        sections.push('<h3 class="dim" style="margin:14px 0 4px;">Loops</h3>' + (loops.length
+          ? loops.map((l) => `<div class="card"><div class="row" style="border:0;padding:0;">
+                <div class="name">${escHtml(l.id || '')}</div>
+                <span class="pill ${l.status === 'running' || l.status === 'completed' ? 'ok' : 'warn'}">${escHtml(l.status || '')}</span>
+                <div class="dim row-actions">${l.provider ? escHtml(l.provider) : ''}${l.model ? ' · ' + escHtml(l.model) : ''}</div>
+              </div>${l.prompt ? `<div class="dim" style="margin-top:6px;font-size:12px;">${escHtml(String(l.prompt).slice(0, 160))}</div>` : ''}</div>`).join('')
+          : '<div class="empty">No loop runs. Start one with <code>lazyclaw loop</code>.</div>'));
+        root.innerHTML = sections.join('');
+      } catch (e) {
+        root.innerHTML = `<div class="empty">⚠ ${escHtml(e.message)}</div>`;
+      }
+    };
+    document.getElementById('sched-refresh').addEventListener('click', () => LOADERS.scheduling());
+
+    // Global (inline-onclick) cron delete — mirrors deleteTeam/deleteAgent.
+    async function deleteCron(encName) {
+      const name = decodeURIComponent(encName);
+      if (!confirm(`Delete cron job "${name}"? This unschedules it; re-add via the CLI.`)) return;
+      try { await api('/cron/' + encName, { method: 'DELETE' }); LOADERS.scheduling(); }
+      catch (e) { alert('Delete failed: ' + e.message); }
+    }
 
     // ── Team Live tab ─────────────────────────────────────────────
     // Real-time view of an agent team: avatar tiles with status rings +
@@ -1590,8 +1707,12 @@
       }
     };
 
-    // First load = chat tab.
-    LOADERS.chat();
+    // First load: honor a deep-link hash (#<tab>) if it names a real tab, else
+    // default to chat. setActiveTab runs the matching data loader.
+    {
+      const initial = location.hash.slice(1);
+      setActiveTab(initial && tabs.some((b) => b.dataset.tab === initial) ? initial : 'chat');
+    }
 
     // ── Chat send ─────────────────────────────────────────────────
     let chatHistory = []; // [{role, text}]

@@ -27,7 +27,11 @@ async function getBackend() {
   };
   return {
     add: async ({ name, spec, command }) => {
-      const cmd = cron.resolveCronCommand(Array.isArray(command) ? command : [String(command)]);
+      // Persist the LOGICAL command; cron.mjs resolves a bare "lazyclaw" to an
+      // absolute node + CLI launcher at install/run time (buildPlist /
+      // buildCrontabLine / runJob call resolveCommand), so config.json stays
+      // portable and machine-independent.
+      const cmd = Array.isArray(command) ? command : [String(command)];
       const cfg = readConfig();
       const status = cron.upsertJob(cfg, name, spec, cmd);
       writeConfig(cfg);

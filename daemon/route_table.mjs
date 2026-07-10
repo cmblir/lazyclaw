@@ -22,13 +22,14 @@ import * as conversation from './routes/conversation.mjs';
 import * as registry from './routes/registry.mjs';
 import * as ops from './routes/ops.mjs';
 import * as events from './routes/events.mjs';
+import * as scheduling from './routes/scheduling.mjs';
 
 export const ROUTES = [
   { m: (c) => c.route === 'GET /' || c.route === 'GET /dashboard' || c.route === 'GET /dashboard/', h: meta.dashboard },
   { m: (c) => c.route === 'GET /dashboard.css', h: meta.dashboardCss },
   { m: (c) => c.route === 'GET /dashboard.js', h: meta.dashboardJs },
   { m: (c) => c.req.method === 'GET' && /^\/avatars\/\d{2}\.png$/.test(c.path || ''), h: meta.avatar },
-  { m: (c) => c.req.method === 'GET' && /^\/agent-avatars\/[A-Za-z0-9_-]+\.[a-z]+$/.test(c.path || ''), h: meta.agentAvatar },
+  { m: (c) => c.req.method === 'GET' && /^\/agent-avatars\/[A-Za-z0-9_.-]+\.(?:png|jpe?g|gif|webp)$/i.test(c.path || ''), h: meta.agentAvatar },
   { m: (c) => c.route === 'GET /version', h: meta.version },
   { m: (c) => c.route === 'POST /exec/request', h: conversation.execRequest },
   { m: (c) => c.route === 'GET /health' || c.route === 'GET /healthz', h: meta.health },
@@ -97,5 +98,7 @@ export const ROUTES = [
   { m: (c) => c.req.method === 'POST' && /^\/sandbox\/([^/]+)\/test$/.test(c.url.pathname), h: ops.sandboxTest },
   { m: (c) => c.route === 'POST /sandbox/use', h: ops.sandboxUse },
   { m: (c) => c.route === 'GET /channels', h: ops.channels },
+  { m: (c) => c.route === 'GET /scheduling', h: scheduling.schedulingList },
+  { m: (c) => c.req.method === 'DELETE' && /^\/cron\/([^/]+)$/.test(c.url.pathname), h: scheduling.cronDelete },
   { m: (c) => c.route === 'POST /index/rebuild', h: ops.indexRebuild },
 ];

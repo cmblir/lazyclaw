@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { parseCronSpec, buildPlist, resolveCronCommand } from '../cron.mjs';
+import { parseCronSpec, buildPlist, resolveCommand } from '../cron.mjs';
 import { attachGoalCron } from '../goals_cron.mjs';
 
 function intervalsOf(xml) {
@@ -74,17 +74,17 @@ test('cron tools round-trip against the REAL cron.mjs backend (add -> list -> re
 
 // ── BUG 2: absolute node + CLI entry baked into the scheduled command ────────
 
-test('resolveCronCommand rewrites a bare "lazyclaw" token to absolute node + CLI entry', () => {
-  const out = resolveCronCommand(['lazyclaw', 'goal', 'tick', 'sweep']);
+test('resolveCommand rewrites a bare "lazyclaw" token to absolute node + CLI entry', () => {
+  const out = resolveCommand(['lazyclaw', 'goal', 'tick', 'sweep']);
   assert.equal(out[0], process.execPath, 'argv[0] must be the absolute node binary');
   assert.ok(path.isAbsolute(out[1]), 'argv[1] must be an absolute CLI entry path');
   assert.ok(out[1].endsWith('cli.mjs'), `CLI entry should be cli.mjs, got ${out[1]}`);
   assert.deepEqual(out.slice(2), ['goal', 'tick', 'sweep'], 'trailing args preserved');
 });
 
-test('resolveCronCommand leaves an already-absolute command untouched', () => {
+test('resolveCommand leaves an already-absolute command untouched', () => {
   const cmd = ['/usr/bin/env', 'echo', 'hi'];
-  assert.deepEqual(resolveCronCommand(cmd), cmd);
+  assert.deepEqual(resolveCommand(cmd), cmd);
 });
 
 test('attachGoalCron persists the LOGICAL command; resolution to absolute happens at install time', async () => {
@@ -101,9 +101,9 @@ test('attachGoalCron persists the LOGICAL command; resolution to absolute happen
     // a host-specific absolute path.
     assert.deepEqual(cmd, ['lazyclaw', 'goal', 'tick', 'sweep']);
     // The absolute node + CLI entry is applied only where the OS scheduler
-    // consumes it — resolveCronCommand, called inside installLaunchdJob/
-    // installCrontabJob — so BUG 2 is still fixed at the consumption boundary.
-    const resolved = cronReal.resolveCronCommand(cmd);
+    // consumes it — resolveCommand, called inside buildPlist / buildCrontabLine
+    // / runJob — so the bare-token PATH bug is fixed at the consumption boundary.
+    const resolved = cronReal.resolveCommand(cmd);
     assert.equal(resolved[0], process.execPath, 'resolved command must start with the node binary');
     assert.ok(resolved[1].endsWith('cli.mjs'), 'resolved command must carry the CLI entry');
     assert.ok(!resolved.includes('lazyclaw'), 'bare "lazyclaw" token gone after resolution');

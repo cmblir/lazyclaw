@@ -14,8 +14,8 @@ export async function attachGoalCron({ readConfig, writeConfig, cron, name, sche
   // Persist the LOGICAL command so config.json stays portable/readable and
   // machine-independent. The bare "lazyclaw" token is resolved to an absolute
   // node + CLI entry only where the OS scheduler actually consumes it — inside
-  // cron.mjs installLaunchdJob/installCrontabJob (resolveCronCommand) — which
-  // is where the minimal, shell-less PATH would otherwise break it (BUG 2).
+  // cron.mjs buildPlist / buildCrontabLine / runJob (resolveCommand) — which
+  // is where the minimal, shell-less PATH would otherwise break it.
   const cmd = ['lazyclaw', 'goal', 'tick', name];
   cron.upsertJob(cfg, jobName, schedule, cmd);
   writeConfig(cfg);

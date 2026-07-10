@@ -268,7 +268,7 @@ export const PROVIDER_INFO = {
     name: 'gemini',
     requiresApiKey: true,
     docs: 'Google Generative Language API (Gemini). SSE streaming via :streamGenerateContent?alt=sse. Auth via ?key= query param.',
-    endpoint: 'https://generativelanguage.googleapis.com/v1/models/{model}:streamGenerateContent',
+    endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent',
     defaultModel: 'gemini-2.5-pro',
     suggestedModels: [
       'gemini-2.5-pro',
