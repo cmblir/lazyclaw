@@ -28,15 +28,30 @@ export class ProviderAdapterError extends Error {
 // surface (see providers/tool_use/*.mjs). Throws on an unknown provider
 // so callers surface a clear "this provider can't do text completion"
 // error rather than a missing-module stack trace.
+//
+// Every returned adapter also carries a `toolSchemas` mapper: the agentic
+// turn loop (mas/agent_turn.mjs) feeds it the provider-neutral tool
+// schemas and gets back the provider's native tool shape. Each module
+// exposes its mapper under a provider-specific name (toAnthropicTools /
+// toOpenAITools / toGeminiTools); claude-cli runs the tool-use loop inside
+// the binary and takes the schemas verbatim, so its mapper is identity.
 export async function resolveToolUseAdapter(provider) {
   switch (provider) {
-    case 'anthropic':  return await import('../providers/tool_use/anthropic.mjs');
-    case 'openai':     return await import('../providers/tool_use/openai.mjs');
-    case 'gemini':     return await import('../providers/tool_use/gemini.mjs');
-    case 'claude-cli': return await import('../providers/tool_use/claude_cli.mjs');
+    case 'anthropic':  return _withToolSchemas(await import('../providers/tool_use/anthropic.mjs'), (m) => m.toAnthropicTools);
+    case 'openai':     return _withToolSchemas(await import('../providers/tool_use/openai.mjs'), (m) => m.toOpenAITools);
+    case 'gemini':     return _withToolSchemas(await import('../providers/tool_use/gemini.mjs'), (m) => m.toGeminiTools);
+    case 'claude-cli': return _withToolSchemas(await import('../providers/tool_use/claude_cli.mjs'), () => (s) => s);
     default:
       return await _openAICompatAdapter(provider);
   }
+}
+
+// Copy a tool-use module namespace into a plain object and attach the
+// `toolSchemas` mapper the agentic loop needs. Module namespaces are
+// read-only, so we spread into a new object rather than mutate. `pick`
+// selects the module's native mapper (or returns identity for claude-cli).
+function _withToolSchemas(mod, pick) {
+  return { ...mod, toolSchemas: pick(mod) };
 }
 
 // Any OpenAI-wire-compatible provider — the built-in compat vendors
@@ -59,9 +74,12 @@ async function _openAICompatAdapter(provider) {
     );
   }
   const base = await import('../providers/tool_use/openai.mjs');
-  if (!info.baseUrl) return base; // custom without a stored baseUrl — caller supplies it
+  // custom without a stored baseUrl — caller supplies it; still needs the
+  // OpenAI tool-schema mapper so the agentic loop can run.
+  if (!info.baseUrl) return _withToolSchemas(base, (m) => m.toOpenAITools);
   return {
     ...base,
+    toolSchemas: base.toOpenAITools,
     callOnce: (opts = {}) => base.callOnce({ baseUrl: info.baseUrl, ...opts }),
   };
 }

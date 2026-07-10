@@ -3,13 +3,19 @@
 // the model emits a final text reply (or the iteration budget runs
 // out).
 //
-// Provider routing (all wired — see adapterFor below):
+// Provider routing goes through mas/provider_adapters.mjs::resolveToolUseAdapter
+// — a single resolver shared with the trainer/reflection text-completion path.
+// It maps the four first-class providers to their tool_use module and falls
+// through to the OpenAI-compat adapter for every builtin compat vendor
+// (groq/nim/openrouter/…) and custom provider, so agentic turns work for the
+// same providers text completion already did:
 //   anthropic  → providers/tool_use/anthropic.mjs
 //   openai     → providers/tool_use/openai.mjs
 //   gemini     → providers/tool_use/gemini.mjs
-//   claude-cli → providers/claude_cli.mjs; the tool-use loop runs INSIDE
-//                the binary, so the adapter normalises every reply to
+//   claude-cli → providers/tool_use/claude_cli.mjs; the tool-use loop runs
+//                INSIDE the binary, so the adapter normalises every reply to
 //                kind:'final' (no tool_calls envelope is ever observed).
+//   compat/custom → providers/tool_use/openai.mjs at the vendor's base URL.
 //
 // The loop:
 //   1. Build messages = [...history, {role:user, content:input}]
@@ -21,10 +27,7 @@
 //      partial text and `stoppedBy: 'budget'`.
 
 import { listToolSchemas, runTool, ToolError } from './tool_runner.mjs';
-import * as anthropic from '../providers/tool_use/anthropic.mjs';
-import * as openai from '../providers/tool_use/openai.mjs';
-import * as gemini from '../providers/tool_use/gemini.mjs';
-import * as claudeCli from '../providers/tool_use/claude_cli.mjs';
+import { resolveToolUseAdapter } from './provider_adapters.mjs';
 import { put as _trajPut } from './trajectory_store.mjs';
 import { composePromptStack } from './prompt_stack.mjs';
 import { emit as emitEvent } from './events.mjs';
@@ -57,21 +60,6 @@ function _markLastContentCacheable(msgs) {
     }
   } else if (typeof last.content === 'string') {
     last.content = [{ type: 'text', text: last.content, cache_control: { type: 'ephemeral' } }];
-  }
-}
-
-function adapterFor(provider) {
-  switch (provider) {
-    case 'anthropic':  return { ...anthropic,  toolSchemas: anthropic.toAnthropicTools };
-    case 'openai':     return { ...openai,     toolSchemas: openai.toOpenAITools };
-    case 'gemini':     return { ...gemini,     toolSchemas: gemini.toGeminiTools };
-    // claude-cli runs the tool-use loop INSIDE the binary. Our adapter
-    // resolves every call to kind:'final' so the mention router still
-    // gets a normalised reply, even though no tool_calls envelope is
-    // ever observed.
-    case 'claude-cli': return { ...claudeCli, toolSchemas: (s) => s };
-    default:
-      throw new AgentTurnError(`provider "${provider}" does not support tool-use yet`, 'PROVIDER_UNSUPPORTED');
   }
 }
 
@@ -123,7 +111,19 @@ export async function runAgentTurn({
   cache = false,
 } = {}) {
   if (!agent) throw new AgentTurnError('agent is required', 'NO_AGENT');
-  const adapter = adapterFor(agent.provider);
+  // The shared resolver throws PROVIDER_ADAPTER_UNKNOWN (with a
+  // text-completion-flavoured message) for a provider that has no tool-use
+  // adapter. Preserve runAgentTurn's stable contract — callers/tests expect
+  // PROVIDER_UNSUPPORTED for that condition — while still sharing one resolver.
+  let adapter;
+  try {
+    adapter = await resolveToolUseAdapter(agent.provider);
+  } catch (e) {
+    if (e && e.code === 'PROVIDER_ADAPTER_UNKNOWN') {
+      throw new AgentTurnError(`provider "${agent.provider}" does not support tool-use yet`, 'PROVIDER_UNSUPPORTED');
+    }
+    throw e;
+  }
 
   const tools = adapter.toolSchemas(listToolSchemas(agent.tools));
 
@@ -189,7 +189,7 @@ export async function runAgentTurn({
         userMessages: userMessage ? [String(userMessage)] : [],
         turns: toolCalls.map((c, i) => ({
           turnIdx: i, role: 'tool', content: '',
-          toolCalls: [{ name: c.name, args: c.input, result: JSON.stringify(c.result), success: c.ok, durationMs: 0 }],
+          toolCalls: [{ name: c.name, args: c.input, result: JSON.stringify(c.result), success: c.ok, durationMs: c.durationMs || 0 }],
         })).concat(lastText ? [{
           turnIdx: toolCalls.length, role: 'assistant', content: lastText, toolCalls: [],
         }] : []),
@@ -255,22 +255,24 @@ export async function runAgentTurn({
     const _newAssistant = adapter.assistantTurnMessages(resp);
     if (cache && agent.provider === 'anthropic') _markLastContentCacheable(_newAssistant);
     messages.push(..._newAssistant);
-    const results = [];
-    let toolErrored = false;
-    for (const call of resp.calls) {
-      let result;
-      let ok = true;
+    // Run every tool call in THIS turn concurrently — one turn's calls are
+    // independent of each other, so a slow bash/read no longer blocks the
+    // rest. Each resolves to its own record with a REAL per-call durationMs
+    // (was hardcoded 0 in the trajectory). We await them all, then fold the
+    // results back in resp.calls order so toolCalls / results / the
+    // adapter-shaped tool_result messages keep the exact ordering the
+    // adapters expect.
+    const settled = await Promise.all(resp.calls.map(async (call) => {
       // The adapter could not parse this tool call's arguments (e.g. OpenAI
       // emitted malformed JSON). Surface a tool error so the model can retry
       // instead of silently running the tool with empty input.
       if (call.parseError) {
-        result = { ok: false, error: call.parseError };
-        toolCalls.push({ id: call.id, name: call.name, input: call.input, result, ok: false });
-        emitEvent('tool.call', { taskId, agent: agent.name, tool: call.name, ok: false });
-        results.push({ id: call.id, content: result, isError: true });
-        toolErrored = true;
-        continue;
+        const result = { ok: false, error: call.parseError };
+        return { call, result, ok: false, durationMs: 0 };
       }
+      let result;
+      let ok = true;
+      const startedAt = Date.now();
       try {
         result = await runTool({
           agent, tool: call.name, args: call.input,
@@ -285,7 +287,13 @@ export async function runAgentTurn({
           result = { ok: false, error: `runTool threw: ${err?.message || err}` };
         }
       }
-      toolCalls.push({ id: call.id, name: call.name, input: call.input, result, ok });
+      return { call, result, ok, durationMs: Date.now() - startedAt };
+    }));
+
+    const results = [];
+    let toolErrored = false;
+    for (const { call, result, ok, durationMs } of settled) {
+      toolCalls.push({ id: call.id, name: call.name, input: call.input, result, ok, durationMs });
       emitEvent('tool.call', { taskId, agent: agent.name, tool: call.name, ok });
       results.push({ id: call.id, content: result, isError: !ok });
       if (!ok) toolErrored = true;
