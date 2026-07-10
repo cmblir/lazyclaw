@@ -34,6 +34,7 @@ import * as userModeler from './user_modeler.mjs';
 import * as confidence from './confidence.mjs';
 import * as skills from '../skills.mjs';
 import * as skillsCurator from '../skills_curator.mjs';
+import * as skillStats from './skill_stats.mjs';
 import { resolveTrainer } from '../providers/registry.mjs';
 import { hasClaudeCliSession } from '../providers/claude_cli_detect.mjs';
 
@@ -194,6 +195,26 @@ export async function _runPostTask(ctx, logger) {
     })(),
   ]);
 
+  // 5. Efficacy loop (compounding confidence). Aggregate real per-skill
+  //    success/trial counts for the skills RELEVANT to this task and
+  //    re-stamp their confidence from the real Wilson lower bound. The
+  //    brand-new skill just installed is seeded 1/1 so a fresh success
+  //    still starts sensibly. Best-effort: a broken stat update must
+  //    never poison the trajectory/synth writes above.
+  try {
+    const seedName = results.installed?.skill;
+    results.efficacy = skillStats.runEfficacyLoop(ctx, {
+      success: true,
+      trainer,
+      seedName,
+      logger,
+      onArchive: _runActiveRecallMiss,
+    });
+  } catch (e) {
+    errors.push({ step: 'efficacy', error: String(e?.message || e) });
+    logger(`[learning] efficacy loop failed: ${e?.message || e}\n`);
+  }
+
   return { trigger: 'post-task', results, errors };
 }
 
@@ -232,6 +253,24 @@ export async function _runPostFailure(ctx, logger) {
       errors.push({ step: 'skill', error: String(e?.message || e) });
       logger(`[learning] anti-pattern synth failed: ${e?.message || e}\n`);
     }
+  }
+
+  // Efficacy loop (negative half): the recalled skills did NOT help this
+  // task. Increment each relevant skill's trials WITHOUT a success and
+  // re-stamp its (now lower) confidence; any skill that drops below the
+  // archive threshold is archived via the existing active-recall-miss
+  // path. Best-effort — never poisons the anti-pattern synth above.
+  try {
+    results.efficacy = skillStats.runEfficacyLoop(ctx, {
+      success: false,
+      trainer,
+      logger,
+      archiveMisses: true,
+      onArchive: _runActiveRecallMiss,
+    });
+  } catch (e) {
+    errors.push({ step: 'efficacy', error: String(e?.message || e) });
+    logger(`[learning] efficacy loop failed: ${e?.message || e}\n`);
   }
 
   return { trigger: 'post-failure', results, errors };
