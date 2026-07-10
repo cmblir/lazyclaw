@@ -21,12 +21,27 @@
 const DEFAULT_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
 export class GeminiToolUseError extends Error {
-  constructor(message, code, body) {
+  constructor(message, code, body, status) {
     super(message);
     this.name = 'GeminiToolUseError';
     this.code = code || 'GEMINI_ERR';
     if (body) this.body = body;
+    // Numeric HTTP status when this error originated from a non-ok response.
+    // Attaching it lets providers/retry.mjs::isRetriableError recognise the
+    // tool-use error shape (parity with the streaming providers' ApiError).
+    if (Number.isFinite(status)) this.status = status;
   }
+}
+
+// Classify an HTTP status into the SAME retry codes the streaming providers
+// use, so the agentic/team path retries transient failures. Order matters:
+// 529 (overloaded) is inside the 5xx band, so match it first. 4xx other than
+// 429 stay HTTP_FAIL (caller-fault, never retried).
+function classifyHttpStatus(status) {
+  if (status === 429) return 'RATE_LIMIT';
+  if (status === 529) return 'OVERLOADED';
+  if (status >= 500 && status < 600) return 'SERVER_ERROR';
+  return 'HTTP_FAIL';
 }
 
 // Gemini's function_declarations.parameters schema is a strict subset of
@@ -118,7 +133,7 @@ export async function callOnce({
   if (!res.ok) {
     let raw = '';
     try { raw = await res.text(); } catch { /* ignore */ }
-    throw new GeminiToolUseError(`HTTP ${res.status}: ${raw.slice(0, 300)}`, 'HTTP_FAIL', raw);
+    throw new GeminiToolUseError(`HTTP ${res.status}: ${raw.slice(0, 300)}`, classifyHttpStatus(res.status), raw, res.status);
   }
   const json = await res.json();
   return parseResponse(json);
