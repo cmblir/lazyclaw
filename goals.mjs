@@ -12,8 +12,10 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { ensureValidName as cronEnsureValidName } from './cron.mjs';
+import { defaultConfigDir, withKeyedLockSync } from './lib/config_dir.mjs';
+
+export { defaultConfigDir };
 
 const GOALS_DIRNAME = 'goals';
 
@@ -23,10 +25,6 @@ export class GoalError extends Error {
     this.name = 'GoalError';
     this.code = code || 'GOAL_ERR';
   }
-}
-
-export function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
 }
 
 export function goalsDir(configDir = defaultConfigDir()) {
@@ -105,11 +103,15 @@ export function listGoals(configDir = defaultConfigDir()) {
 }
 
 export function patchGoal(name, patch, configDir = defaultConfigDir()) {
-  const g = getGoal(name, configDir);
-  if (!g) throw new GoalError(`no goal "${name}"`, 'GOAL_NO_GOAL');
-  const next = { ...g, ...patch };
-  writeAtomic(goalPath(name, configDir), next);
-  return next;
+  // Serialize the read-modify-write per goal so two same-process writers don't
+  // lost-update. Keyed by the on-disk path. See lib/config_dir.mjs.
+  return withKeyedLockSync(goalPath(name, configDir), () => {
+    const g = getGoal(name, configDir);
+    if (!g) throw new GoalError(`no goal "${name}"`, 'GOAL_NO_GOAL');
+    const next = { ...g, ...patch };
+    writeAtomic(goalPath(name, configDir), next);
+    return next;
+  });
 }
 
 export function closeGoal(name, outcome = 'done', configDir = defaultConfigDir()) {
@@ -120,9 +122,13 @@ export function closeGoal(name, outcome = 'done', configDir = defaultConfigDir()
 }
 
 export function appendCheckIn(name, summary, configDir = defaultConfigDir()) {
-  const g = getGoal(name, configDir);
-  if (!g) throw new GoalError(`no goal "${name}"`, 'GOAL_NO_GOAL');
-  const next = { ...g, checkIns: [...(g.checkIns || []), { at: new Date().toISOString(), summary }] };
-  writeAtomic(goalPath(name, configDir), next);
-  return next;
+  // Hold the per-goal lock across read+append+write so a concurrent writer
+  // can't clobber the appended check-in.
+  return withKeyedLockSync(goalPath(name, configDir), () => {
+    const g = getGoal(name, configDir);
+    if (!g) throw new GoalError(`no goal "${name}"`, 'GOAL_NO_GOAL');
+    const next = { ...g, checkIns: [...(g.checkIns || []), { at: new Date().toISOString(), summary }] };
+    writeAtomic(goalPath(name, configDir), next);
+    return next;
+  });
 }

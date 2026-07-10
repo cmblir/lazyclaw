@@ -8,9 +8,11 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { ensureValidName as cronEnsureValidName } from './cron.mjs';
 import { getAgent } from './agents.mjs';
+import { defaultConfigDir } from './lib/config_dir.mjs';
+
+export { defaultConfigDir };
 
 const TEAMS_DIRNAME = 'teams';
 
@@ -20,10 +22,6 @@ export class TeamError extends Error {
     this.name = 'TeamError';
     this.code = code || 'TEAM_ERR';
   }
-}
-
-export function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
 }
 
 export function teamsDir(configDir = defaultConfigDir()) {

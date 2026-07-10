@@ -14,9 +14,11 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { ensureValidName as cronEnsureValidName } from './cron.mjs';
 import * as toolRegistry from './mas/tools/registry.mjs';
+import { defaultConfigDir } from './lib/config_dir.mjs';
+
+export { defaultConfigDir };
 
 const AGENTS_DIRNAME = 'agents';
 
@@ -40,10 +42,6 @@ export class AgentError extends Error {
     this.name = 'AgentError';
     this.code = code || 'AGENT_ERR';
   }
-}
-
-export function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
 }
 
 export function agentsDir(configDir = defaultConfigDir()) {

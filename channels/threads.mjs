@@ -7,6 +7,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
+import { withKeyedLockSync } from '../lib/config_dir.mjs';
 
 const FILE = 'threads.jsonl';
 
@@ -71,14 +72,20 @@ export function openThreads(configDir) {
     if (!channel || !externalId || !sessionId) {
       throw new Error('upsert requires channel, externalId, sessionId');
     }
-    const existingId = byExternal.get(externalKey(channel, externalId));
-    const id = threadId || existingId || newThreadId();
-    const row = {
-      op: 'upsert', threadId: id, channel, externalId, sessionId,
-      lastTurnAt: Date.now(),
-    };
-    append(row);
-    return byThread.get(id);
+    // Serialize the resolve-id + append + in-memory-apply as one unit so two
+    // same-process upserts against this store can't lost-update the map or
+    // race on the id assignment. Keyed by the backing file. See
+    // lib/config_dir.mjs withKeyedLockSync.
+    return withKeyedLockSync(file, () => {
+      const existingId = byExternal.get(externalKey(channel, externalId));
+      const id = threadId || existingId || newThreadId();
+      const row = {
+        op: 'upsert', threadId: id, channel, externalId, sessionId,
+        lastTurnAt: Date.now(),
+      };
+      append(row);
+      return byThread.get(id);
+    });
   }
 
   function findByExternal(channel, externalId) {

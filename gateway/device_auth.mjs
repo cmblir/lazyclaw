@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import { withKeyedLockSync } from '../lib/config_dir.mjs';
 
 const GATEWAY_DIRNAME = 'gateway';
 const DEVICES_FILENAME = 'devices.json';
@@ -465,33 +466,39 @@ export class PairingStore {
    * @returns {{ deviceId: string, token: string }}
    */
   approve(requestId, { ttlMs, nowMs = Date.now() } = {}) {
-    const req = this._data.requests[requestId];
-    if (!req) {
-      throw new Error(`unknown pairing request: ${requestId}`);
-    }
-    if (req.status !== 'pending') {
-      throw new Error(`request not pending: ${requestId} (status=${req.status})`);
-    }
-    const token = freshToken();
-    const dev = {
-      deviceId: req.deviceId,
-      platform: req.platform || '',
-      label: req.label || '',
-      role: req.role || '',
-      scopes: Array.isArray(req.scopes) ? req.scopes : [],
-      token,
-      approvedAt: nowIso(),
-    };
-    // Optional TTL: stamp an absolute expiry only when a positive ttlMs is
-    // given. Omitting it keeps the legacy never-expires record.
-    if (Number.isFinite(ttlMs) && ttlMs > 0 && Number.isFinite(nowMs)) {
-      dev.expiresAt = nowMs + ttlMs;
-    }
-    this._data.devices[req.deviceId] = dev;
-    req.status = 'approved';
-    req.approvedAt = nowIso();
-    this._persist();
-    return { deviceId: req.deviceId, token, ...(dev.expiresAt ? { expiresAt: dev.expiresAt } : {}) };
+    // Serialize the check-status + mint-token + persist so two same-process
+    // approvals of the same pending request can't both pass the pending gate
+    // and double-rotate the token. Keyed by the backing file so distinct
+    // stores don't contend. See lib/config_dir.mjs withKeyedLockSync.
+    return withKeyedLockSync(this.path, () => {
+      const req = this._data.requests[requestId];
+      if (!req) {
+        throw new Error(`unknown pairing request: ${requestId}`);
+      }
+      if (req.status !== 'pending') {
+        throw new Error(`request not pending: ${requestId} (status=${req.status})`);
+      }
+      const token = freshToken();
+      const dev = {
+        deviceId: req.deviceId,
+        platform: req.platform || '',
+        label: req.label || '',
+        role: req.role || '',
+        scopes: Array.isArray(req.scopes) ? req.scopes : [],
+        token,
+        approvedAt: nowIso(),
+      };
+      // Optional TTL: stamp an absolute expiry only when a positive ttlMs is
+      // given. Omitting it keeps the legacy never-expires record.
+      if (Number.isFinite(ttlMs) && ttlMs > 0 && Number.isFinite(nowMs)) {
+        dev.expiresAt = nowMs + ttlMs;
+      }
+      this._data.devices[req.deviceId] = dev;
+      req.status = 'approved';
+      req.approvedAt = nowIso();
+      this._persist();
+      return { deviceId: req.deviceId, token, ...(dev.expiresAt ? { expiresAt: dev.expiresAt } : {}) };
+    });
   }
 
   /**

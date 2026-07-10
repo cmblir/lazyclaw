@@ -10,9 +10,11 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import crypto from 'node:crypto';
 import { getTeam } from './teams.mjs';
+import { defaultConfigDir, withKeyedLockSync } from './lib/config_dir.mjs';
+
+export { defaultConfigDir };
 
 const TASKS_DIRNAME = 'tasks';
 // 'paused' is a resumable terminal state: a router turn that stopped on the
@@ -28,10 +30,6 @@ export class TaskError extends Error {
     this.name = 'TaskError';
     this.code = code || 'TASK_ERR';
   }
-}
-
-export function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
 }
 
 export function tasksDir(configDir = defaultConfigDir()) {
@@ -148,21 +146,33 @@ export function listTasks(configDir = defaultConfigDir()) {
 }
 
 export function patchTask(id, patch, configDir = defaultConfigDir()) {
-  const t = getTask(id, configDir);
-  if (!t) throw new TaskError(`no task "${id}"`, 'TASK_NO_TASK');
-  const next = { ...t, ...patch, updatedAt: new Date().toISOString() };
-  if (patch.status !== undefined && !VALID_STATUSES.includes(patch.status)) {
-    throw new TaskError(`bad status "${patch.status}" — one of ${VALID_STATUSES.join(', ')}`, 'TASK_BAD_STATUS');
-  }
-  writeAtomic(taskPath(id, configDir), next);
-  return next;
+  // Serialize the read-modify-write for this task so two same-process writers
+  // can't lost-update. Keyed by the on-disk path (id + configDir) so distinct
+  // tasks/config dirs never contend. See lib/config_dir.mjs withKeyedLockSync.
+  return withKeyedLockSync(taskPath(id, configDir), () => {
+    const t = getTask(id, configDir);
+    if (!t) throw new TaskError(`no task "${id}"`, 'TASK_NO_TASK');
+    const next = { ...t, ...patch, updatedAt: new Date().toISOString() };
+    if (patch.status !== undefined && !VALID_STATUSES.includes(patch.status)) {
+      throw new TaskError(`bad status "${patch.status}" — one of ${VALID_STATUSES.join(', ')}`, 'TASK_BAD_STATUS');
+    }
+    writeAtomic(taskPath(id, configDir), next);
+    return next;
+  });
 }
 
 export function appendTurn(id, turn, configDir = defaultConfigDir()) {
-  const t = getTask(id, configDir);
-  if (!t) throw new TaskError(`no task "${id}"`, 'TASK_NO_TASK');
-  const turns = Array.isArray(t.turns) ? [...t.turns, turn] : [turn];
-  const next = patchTask(id, { turns }, configDir);
+  // Hold the per-task lock across the read+append+write as one unit so a
+  // concurrent same-process writer can't clobber the appended turn. We write
+  // inline here (not via patchTask) to avoid re-acquiring the same key.
+  const { next, turns } = withKeyedLockSync(taskPath(id, configDir), () => {
+    const t = getTask(id, configDir);
+    if (!t) throw new TaskError(`no task "${id}"`, 'TASK_NO_TASK');
+    const nextTurns = Array.isArray(t.turns) ? [...t.turns, turn] : [turn];
+    const written = { ...t, turns: nextTurns, updatedAt: new Date().toISOString() };
+    writeAtomic(taskPath(id, configDir), written);
+    return { next: written, turns: nextTurns };
+  });
   // v5 Group A (M4): mirror the appended turn to the FTS5 sessions
   // index using session_id = `task:<id>` so the recall tool can surface
   // task transcripts the same way it surfaces chat sessions. Namespaced

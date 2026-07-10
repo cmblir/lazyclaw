@@ -10,7 +10,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
+import { defaultConfigDir } from './lib/config_dir.mjs';
+
+export { defaultConfigDir };
 
 const SKILLS_DIRNAME = 'skills';
 const SKILL_EXT = '.md';
@@ -36,10 +38,6 @@ const _bodyCache = new Map();
 
 export function _invalidateSkillsCache(configDir = defaultConfigDir()) {
   _indexCache.delete(configDir);
-}
-
-export function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
 }
 
 export function skillsDir(configDir = defaultConfigDir()) {

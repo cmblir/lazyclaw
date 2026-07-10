@@ -18,14 +18,12 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import crypto from 'node:crypto';
+import { defaultConfigDir } from './lib/config_dir.mjs';
+
+export { defaultConfigDir };
 
 const LOOPS_DIRNAME = 'loops';
-
-export function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
-}
 
 export function loopsDir(configDir = defaultConfigDir()) {
   return path.join(configDir, LOOPS_DIRNAME);

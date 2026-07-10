@@ -17,8 +17,10 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { tightenIfLoose } from './secure_write.mjs';
+import { defaultConfigDir } from './lib/config_dir.mjs';
+
+export { defaultConfigDir };
 
 const MEMORY_DIRNAME = 'memory';
 const RECENT_CAP = 200;
@@ -32,10 +34,6 @@ function _indexMemorySafe(row, configDir) {
   import('./mas/index_db.mjs')
     .then((idx) => { try { idx.indexMemory(row, configDir); } catch { /* best-effort */ } })
     .catch(() => { /* index module unavailable — recall just stays stale */ });
-}
-
-export function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
 }
 
 export function memoryDir(configDir = defaultConfigDir()) { return path.join(configDir, MEMORY_DIRNAME); }
