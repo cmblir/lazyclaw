@@ -30,6 +30,7 @@ import { listToolSchemas, runTool, ToolError } from './tool_runner.mjs';
 import { resolveToolUseAdapter } from './provider_adapters.mjs';
 import { put as _trajPut } from './trajectory_store.mjs';
 import { composePromptStack } from './prompt_stack.mjs';
+import { compactMessages } from '../chat_window.mjs';
 import { emit as emitEvent } from './events.mjs';
 
 export class AgentTurnError extends Error {
@@ -109,6 +110,18 @@ export async function runAgentTurn({
   // mention router (production caller) flips it on so every MAS turn
   // hits the Anthropic prompt cache.
   cache = false,
+  // Phase 1 (compaction-budget) — OPT-IN, default undefined = today's
+  // behavior. When set to { maxTokens, toolResultMaxChars?, keepRecentTurns? }
+  // the transcript is passed through chat_window::compactMessages before every
+  // adapter.callOnce: oversized tool results are truncated (L1) and, if still
+  // over maxTokens, the oldest turns are elided (L2). Non-LLM, $0, deterministic.
+  compact = undefined,
+  // Phase 1 (compaction-budget) — OPT-IN per-run cost/token ceiling, default
+  // undefined = today's behavior. When set to { maxTokens?, maxCostUsd? } the
+  // loop checks accumulated usage BEFORE each adapter.callOnce and, if a ceiling
+  // has been crossed, stops early with stoppedBy:'budget_exceeded' and the
+  // partial text (mirrors the existing stoppedBy taxonomy).
+  budget = undefined,
 } = {}) {
   if (!agent) throw new AgentTurnError('agent is required', 'NO_AGENT');
   // The shared resolver throws PROVIDER_ADAPTER_UNKNOWN (with a
@@ -199,8 +212,35 @@ export async function runAgentTurn({
     } catch { /* trajectory failure must not break the agent turn */ }
   };
 
+  // Phase 1 — has the accumulated usage crossed the opt-in per-run ceiling?
+  // Strict ">" so a ceiling of exactly N (or 0) is not tripped until it is
+  // truly exceeded; without a budget this is always false (today's behavior).
+  const _budgetExceeded = () => {
+    if (!budget || !usageSeen) return false;
+    if (Number.isFinite(budget.maxTokens)) {
+      const spent = usageTotal.inputTokens + usageTotal.outputTokens
+        + usageTotal.cacheCreationInputTokens + usageTotal.cacheReadInputTokens;
+      if (spent > budget.maxTokens) return true;
+    }
+    if (Number.isFinite(budget.maxCostUsd) && usageTotal.totalCostUsd > budget.maxCostUsd) return true;
+    return false;
+  };
+
   while (iterations < maxIterations) {
     if (signal?.aborted) return { text: lastText, iterations, stoppedBy: 'abort', toolCalls, usage: _usage() };
+    // Phase 1 — stop before spending more if the per-run budget is exhausted.
+    if (_budgetExceeded()) {
+      await _maybePersistTrajectory('abandoned');
+      return { text: lastText, iterations, stoppedBy: 'budget_exceeded', toolCalls, usage: _usage() };
+    }
+    // Phase 1 — compact the transcript before the call when opted in. Non-LLM,
+    // in-place-safe (compactMessages deep-copies only what it rewrites), so we
+    // reassign the loop's message array to the compacted view.
+    if (compact && Number.isFinite(compact.maxTokens)) {
+      const { messages: compacted } = compactMessages(messages, compact);
+      messages.length = 0;
+      messages.push(...compacted);
+    }
     iterations++;
     const resp = await adapter.callOnce({
       messages, tools, model: agent.model, apiKey, system: systemPrompt,
