@@ -13,7 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { redactSecrets } from './redact.mjs';
-import { f32ToBlob, blobToF32, blendHybrid } from './recall_blend.mjs';
+import { blobToF32, blendHybrid } from './recall_blend.mjs';
 import {
   SKILL_CONFIDENCE_FLOOR,
   _skillRankWeight,
@@ -29,14 +29,20 @@ import {
   normScope, scopeMatchClause, readStoredVersion,
   buildRecallSQL, RECALL_SCOPES, scopedStmt,
 } from './index_scope.mjs';
+import { embeddingKey } from './embedding_keys.mjs';
 
 // Re-exported so callers/tests keep importing these from index_db.mjs
 // (their historical location) even though the impls now live in index_failures.
 export { _resetNativeHint, _isNativeAbiError, _warnIndexFailure };
 
 // v2 adds a `doc_scope` UNINDEXED column to every FTS5 table (Phase 2 scoped
-// recall). Bumping the version rebuilds an old (column-less) index from source.
-const SCHEMA_VERSION = 2;
+// recall). v3 re-keys embeddings by a STABLE natural key (see embedding_keys)
+// instead of the FTS5 implicit rowid, which is NOT stable across
+// delete-then-insert/reindex — the old rowid-keyed vectors could mis-join to the
+// wrong doc, so the version bump DROPS them (embeddings are opt-in + off by
+// default; they recompute on the next backfill). Bumping the version rebuilds an
+// old index from source.
+const SCHEMA_VERSION = 3;
 const _handles = new Map();   // configDir → { db, stmts }
 
 function defaultConfigDir() {
@@ -70,12 +76,14 @@ function ensureSchema(db) {
       doc_scope UNINDEXED
     );
     CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
-    -- Opt-in hybrid recall (roadmap #4): doc embeddings keyed to the FTS row's
-    -- implicit rowid + scope. Stored as a Float32 BLOB; cosine runs in JS (no
+    -- Opt-in hybrid recall (roadmap #4): doc embeddings keyed by (scope, stable
+    -- natural key) — NOT the FTS implicit rowid, which churns on
+    -- delete-then-insert/reindex and would mis-join a vector to the wrong doc
+    -- (see embedding_keys.mjs). Stored as a Float32 BLOB; cosine runs in JS (no
     -- native vector extension). Empty/unused unless cfg.recall.embeddings is on.
     CREATE TABLE IF NOT EXISTS embeddings (
-      scope TEXT, rowid_ref INTEGER, vec BLOB,
-      PRIMARY KEY (scope, rowid_ref)
+      scope TEXT, doc_key TEXT, vec BLOB,
+      PRIMARY KEY (scope, doc_key)
     );
   `);
   const cur = db.prepare("SELECT value FROM meta WHERE key='schema_version'").get();
@@ -108,9 +116,9 @@ function prepareStatements(db) {
     deleteSkill: db.prepare(`DELETE FROM fts_skills WHERE skill_name = ?`),
     deleteTrajectory: db.prepare(`DELETE FROM fts_trajectories WHERE trajectory_id = ?`),
     deleteMemory: db.prepare(`DELETE FROM fts_memories WHERE topic = ? AND kind = ?`),
-    // Hybrid recall: query/insert doc embeddings by (scope, FTS rowid).
-    getEmbedding: db.prepare(`SELECT vec FROM embeddings WHERE scope = ? AND rowid_ref = ?`),
-    putEmbedding: db.prepare(`INSERT OR REPLACE INTO embeddings(scope, rowid_ref, vec) VALUES (?, ?, ?)`),
+    // Hybrid recall: query/insert doc embeddings by (scope, stable doc_key).
+    getEmbedding: db.prepare(`SELECT vec FROM embeddings WHERE scope = ? AND doc_key = ?`),
+    putEmbedding: db.prepare(`INSERT OR REPLACE INTO embeddings(scope, doc_key, vec) VALUES (?, ?, ?)`),
   };
   // Recall SQL templates live in index_scope.buildRecallSQL; the OPT-IN
   // doc_scope filter is spliced between MATCH and ORDER BY. `doc_scope` is NOT
@@ -315,7 +323,10 @@ export function recall(query, opts = {}) {
   // with `opts.scope` (the table-category selector above).
   const { clause: scopeClause, params: scopeParams } = scopeMatchClause(opts.docScope);
   const hits = [];
-  const rowmeta = [];  // parallel to hits: { scope, rowid } for the cosine join
+  // parallel to hits: { scope, key } — `key` is the doc's STABLE natural key
+  // (derived from the hit's metadata), so the cosine join only ever pairs a
+  // vector with the doc it was computed for. A null key => no embedding join.
+  const rowmeta = [];
   for (const sc of scope) {
     const stmt = scopedStmt(s, sc, scopeClause);
     if (!stmt) continue;
@@ -341,7 +352,10 @@ export function recall(query, opts = {}) {
           if (skip) continue;
         }
         hits.push({ scope: sc2, rank: hits.length, bm25, snippet: plainSnippet, metadata });
-        rowmeta.push({ scope: sc2, rowid });
+        // `rowid` (destructured above) is intentionally NOT used to key the
+        // embedding — it is unstable across reindex. Derive the stable key from
+        // the same metadata columns backfill keyed on.
+        rowmeta.push({ scope: sc2, key: embeddingKey(sc2, metadata) });
       }
     } catch (e) {
       // FTS5 MATCH syntax errors are caller mistakes; skip silently.
@@ -364,7 +378,13 @@ export function recall(query, opts = {}) {
   };
   // Opt-in hybrid re-rank when the caller supplies a query vector; otherwise
   // the confidence-weighted bm25 order is used (pure bm25 for non-skills).
-  const getVec = (sc, rid) => { const row = s.getEmbedding.get(sc, rid); return row ? blobToF32(row.vec) : null; };
+  // Join a hit to its vector by (scope, stable key). A null key (metadata
+  // missing a natural-key field) => no vector => the hit keeps its bm25 score.
+  const getVec = (sc, key) => {
+    if (key == null) return null;
+    const row = s.getEmbedding.get(sc, key);
+    return row ? blobToF32(row.vec) : null;
+  };
   const ordered = blend
     ? blendHybrid(hits, rowmeta, opts.queryVector, getVec, opts.weights)
     : hits.sort((a, b) => sortKey(a) - sortKey(b));
@@ -387,32 +407,9 @@ export async function backfillEmbeddings(configDir = defaultConfigDir(), cfg = {
   if (!embedder) return 0;
   const db = openIndex(configDir, { runIntegrityCheck: false });
   const s = _stmts(configDir);
-  const limit = Number(opts.limit) || 500;
-  const SCOPES = {
-    sessions: 'fts_sessions', skills: 'fts_skills',
-    trajectories: 'fts_trajectories', memories: 'fts_memories',
-  };
-  let embedded = 0;
-  for (const [scope, table] of Object.entries(SCOPES)) {
-    let rows;
-    try {
-      rows = db.prepare(
-        `SELECT f.rowid AS rowid, f.content AS content FROM ${table} f
-          WHERE f.rowid NOT IN (SELECT rowid_ref FROM embeddings WHERE scope = ?)
-          LIMIT ?`).all(scope, limit);
-    } catch { continue; }
-    if (!rows.length) continue;
-    let vecs;
-    try { vecs = await embedder.embed(rows.map((r) => r.content)); }
-    catch (e) { _logIndexFailure(configDir, `embed:${scope}`, e); continue; }
-    for (let i = 0; i < rows.length; i++) {
-      const v = vecs[i];
-      if (!v || !v.length) continue;
-      try { s.putEmbedding.run(scope, rows[i].rowid, f32ToBlob(v)); embedded++; }
-      catch { /* swallow — never break the backfill on a single bad row */ }
-    }
-  }
-  return embedded;
+  const { runBackfill } = await import('./embed_backfill.mjs');
+  return runBackfill(db, s.putEmbedding, embedder, opts,
+    (scope, e) => _logIndexFailure(configDir, `embed:${scope}`, e));
 }
 
 export function integrityCheck(configDir = defaultConfigDir()) {

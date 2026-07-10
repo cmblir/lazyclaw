@@ -29,9 +29,11 @@ export function cosine(a, b) {
 // bm25 standing and never outrank a real semantic match. Strictly additive:
 // it only re-orders the same hit set, never drops a hit.
 //   hits     — [{ bm25, ... }]
-//   rowmeta  — parallel [{ scope, rowid }]
+//   rowmeta  — parallel [{ scope, key }] where `key` is the doc's STABLE
+//              natural key (never the FTS rowid, which is unstable across
+//              reindex), so a vector only ever pairs with its own doc.
 //   qvec     — query embedding (Float32Array)
-//   getVec   — (scope, rowid) => Float32Array | null
+//   getVec   — (scope, key) => Float32Array | null
 export function blendHybrid(hits, rowmeta, qvec, getVec, weights) {
   const wFts = Number.isFinite(weights?.fts) ? weights.fts : 0.5;
   const wVec = Number.isFinite(weights?.vec) ? weights.vec : 0.5;
@@ -40,7 +42,7 @@ export function blendHybrid(hits, rowmeta, qvec, getVec, weights) {
   const ftsScore = (b) => (bMax === bMin ? 1 : (bMax - b) / (bMax - bMin)); // best (lowest) bm25 → 1
   const vecScores = hits.map((_, i) => {
     try {
-      const dv = getVec(rowmeta[i].scope, rowmeta[i].rowid);
+      const dv = getVec(rowmeta[i].scope, rowmeta[i].key);
       if (!dv || dv.length !== qvec.length) return null;
       return cosine(qvec, dv);
     } catch { return null; }
