@@ -2,7 +2,7 @@
 // Spec §0.1 C8: confiner ∈ {none, seatbelt, bubblewrap, firejail, landlock}.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { Sandbox, SandboxSession, SandboxError } from './base.mjs';
+import { Sandbox, SandboxSession, SandboxError, composeSessionEnv } from './base.mjs';
 import { pickAvailableConfiner } from './spawn.mjs';
 import * as seatbelt from './confiners/seatbelt.mjs';
 import * as bubblewrap from './confiners/bubblewrap.mjs';
@@ -28,7 +28,7 @@ class LocalSession extends SandboxSession {
     const r = spawnSync(wrapped[0], wrapped.slice(1), {
       input: opts.input,
       cwd: opts.cwd,
-      env: { ...process.env, ...(opts.env || {}) },
+      env: composeSessionEnv(process.env, opts),
       stdio: opts.stdio || 'pipe',
       encoding: 'utf8',
     });
@@ -37,7 +37,10 @@ class LocalSession extends SandboxSession {
 
   async spawn(argv, opts = {}) {
     const wrapped = this._wrap(argv);
-    return spawn(wrapped[0], wrapped.slice(1), opts);
+    return spawn(wrapped[0], wrapped.slice(1), {
+      ...opts,
+      env: composeSessionEnv(process.env, opts),
+    });
   }
 
   async close() { /* no resources */ }

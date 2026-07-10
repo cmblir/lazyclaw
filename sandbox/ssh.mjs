@@ -7,7 +7,7 @@
 // Master is enough for short tool calls.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { Sandbox, SandboxSession, SandboxError } from './base.mjs';
+import { Sandbox, SandboxSession, SandboxError, composeSessionEnv } from './base.mjs';
 
 export function buildSshArgv(spec, argv) {
   if (!spec || !spec.host) throw new SandboxError('ssh sandbox requires host', 'SANDBOX_BAD_SPEC');
@@ -31,7 +31,7 @@ class SshSession extends SandboxSession {
     const sshArgv = buildSshArgv(this.spec, argv);
     const r = spawnSync(sshArgv[0], sshArgv.slice(1), {
       input: opts.input,
-      env: { ...process.env, ...(opts.env || {}) },
+      env: composeSessionEnv(process.env, opts),
       stdio: opts.stdio || 'pipe',
       encoding: 'utf8',
     });
@@ -40,7 +40,10 @@ class SshSession extends SandboxSession {
 
   async spawn(argv, opts = {}) {
     const sshArgv = buildSshArgv(this.spec, argv);
-    return spawn(sshArgv[0], sshArgv.slice(1), opts);
+    return spawn(sshArgv[0], sshArgv.slice(1), {
+      ...opts,
+      env: composeSessionEnv(process.env, opts),
+    });
   }
 
   async close() { /* ControlPersist handles socket lifecycle */ }

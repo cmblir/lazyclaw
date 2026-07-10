@@ -6,7 +6,7 @@
 // implements the §6 Sandbox interface.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { Sandbox, SandboxSession, SandboxError } from './base.mjs';
+import { Sandbox, SandboxSession, SandboxError, composeSessionEnv } from './base.mjs';
 
 function arrayify(v) {
   if (v === undefined || v === null) return [];
@@ -70,7 +70,7 @@ class DockerSession extends SandboxSession {
     const dockerArgv = buildDockerArgs(this.spec, argv, { cwd: opts.cwd });
     const r = spawnSync('docker', dockerArgv, {
       input: opts.input,
-      env: { ...process.env, ...(opts.env || {}) },
+      env: composeSessionEnv(process.env, opts),
       stdio: opts.stdio || 'pipe',
       encoding: 'utf8',
     });
@@ -78,7 +78,10 @@ class DockerSession extends SandboxSession {
   }
 
   async spawn(argv, opts = {}) {
-    return spawnSandboxed(this.spec, argv[0], argv.slice(1), opts);
+    return spawnSandboxed(this.spec, argv[0], argv.slice(1), {
+      ...opts,
+      env: composeSessionEnv(process.env, opts),
+    });
   }
 
   async close() { this._closed = true; }

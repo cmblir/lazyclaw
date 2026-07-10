@@ -1,7 +1,7 @@
 // sandbox/daytona.mjs — Daytona workspace wrapper.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { Sandbox, SandboxSession, SandboxError } from './base.mjs';
+import { Sandbox, SandboxSession, SandboxError, composeSessionEnv } from './base.mjs';
 
 export function buildDaytonaArgv(spec, argv) {
   if (!spec || !spec.workspace) {
@@ -18,14 +18,17 @@ class DaytonaSession extends SandboxSession {
   async exec(argv, opts = {}) {
     const a = buildDaytonaArgv(this.spec, argv);
     const r = spawnSync(a[0], a.slice(1), {
-      input: opts.input, env: { ...process.env, ...(opts.env || {}) },
+      input: opts.input, env: composeSessionEnv(process.env, opts),
       stdio: opts.stdio || 'pipe', encoding: 'utf8',
     });
     return { code: r.status ?? -1, stdout: r.stdout || '', stderr: r.stderr || '' };
   }
   async spawn(argv, opts = {}) {
     const a = buildDaytonaArgv(this.spec, argv);
-    return spawn(a[0], a.slice(1), opts);
+    return spawn(a[0], a.slice(1), {
+      ...opts,
+      env: composeSessionEnv(process.env, opts),
+    });
   }
   async close() {}
 }

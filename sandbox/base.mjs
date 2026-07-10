@@ -7,9 +7,30 @@
 // (sockets, child PIDs, remote workspace ids) — caller MUST call
 // close() in a finally block.
 
+import { scrubEnv } from '../mas/scrub_env.mjs';
+
 export const SANDBOX_KINDS = Object.freeze([
   'local', 'docker', 'ssh', 'singularity', 'modal', 'daytona',
 ]);
+
+/**
+ * Compose the environment for a session child spawn, scrubbed of secrets.
+ *
+ * Every backend (local/docker/ssh/singularity/modal/daytona) previously
+ * merged `{...process.env, ...opts.env}` UNSCRUBBED — so ssh/modal/singularity/
+ * daytona shipped the operator's full env (API keys, tokens, connection
+ * strings) to a remote host or container by default. Routing every site
+ * through this helper closes that leak with the SAME scrubEnv the bash tool
+ * uses, so secret-bearing keys are dropped from both the parent env and any
+ * caller-supplied `opts.env`, while operational vars (PATH, HOME, …) survive.
+ *
+ * @param {Record<string,string>} [parentEnv] typically process.env
+ * @param {{env?: Record<string,string>}} [opts] per-call session options
+ * @returns {Record<string,string>} scrubbed env for the child
+ */
+export function composeSessionEnv(parentEnv = process.env, opts = {}) {
+  return scrubEnv({ ...parentEnv, ...(opts.env || {}) });
+}
 
 export class SandboxError extends Error {
   constructor(message, code) {

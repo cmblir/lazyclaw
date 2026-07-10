@@ -1,7 +1,7 @@
 // sandbox/modal.mjs — Modal CLI + idle-hibernation wake hook.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { Sandbox, SandboxSession, SandboxError } from './base.mjs';
+import { Sandbox, SandboxSession, SandboxError, composeSessionEnv } from './base.mjs';
 
 export function buildModalArgv(spec, argv) {
   if (!spec || !spec.app) {
@@ -33,7 +33,7 @@ class ModalSession extends SandboxSession {
     await maybeWake(this.spec);
     const a = buildModalArgv(this.spec, argv);
     const r = spawnSync(a[0], a.slice(1), {
-      input: opts.input, env: { ...process.env, ...(opts.env || {}) },
+      input: opts.input, env: composeSessionEnv(process.env, opts),
       stdio: opts.stdio || 'pipe', encoding: 'utf8',
     });
     return { code: r.status ?? -1, stdout: r.stdout || '', stderr: r.stderr || '' };
@@ -41,7 +41,10 @@ class ModalSession extends SandboxSession {
   async spawn(argv, opts = {}) {
     await maybeWake(this.spec);
     const a = buildModalArgv(this.spec, argv);
-    return spawn(a[0], a.slice(1), opts);
+    return spawn(a[0], a.slice(1), {
+      ...opts,
+      env: composeSessionEnv(process.env, opts),
+    });
   }
   async close() {}
 }
