@@ -14,6 +14,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { redactSecrets } from './redact.mjs';
 import { f32ToBlob, blobToF32, blendHybrid } from './recall_blend.mjs';
+import { crossCliDampen } from './confidence.mjs';
 
 const SCHEMA_VERSION = 1;
 const _handles = new Map();   // configDir → { db, stmts }
@@ -284,6 +285,53 @@ function sanitizeFtsQuery(q) {
   return s.replace(/[-:+]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+// Floor for a valid-but-low-confidence skill's ranking weight. A skill that
+// scored e.g. 0.05 should be demoted hard but NOT erased from recall (the fix
+// is a re-rank, not a filter). Clamping the multiplier at this floor keeps the
+// worst legitimate skill just behind an unconfident 0.5 default rather than
+// collapsing its relevance to ~0. Absent confidence defaults to 0.5.
+const SKILL_CONFIDENCE_FLOOR = 0.1;
+const SKILL_CONFIDENCE_DEFAULT = 0.5;
+
+// Read the ranking-relevant frontmatter (confidence + trained_by) for a skill
+// straight off disk. Best-effort: a missing file / unparseable frontmatter
+// yields the default confidence and no trainer, so the skill still ranks (at
+// the unconfident default) instead of being dropped. Not a strict loader —
+// only the two keys the ranker weights are extracted.
+function _readSkillRankMeta(skillName, configDir) {
+  const fallback = { confidence: SKILL_CONFIDENCE_DEFAULT, trainedBy: null };
+  if (!skillName) return fallback;
+  try {
+    const filePath = path.join(configDir, 'skills', `${skillName}.md`);
+    if (!fs.existsSync(filePath)) return fallback;
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const m = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    if (!m) return fallback;
+    const fm = m[1];
+    const cm = fm.match(/^\s*confidence:\s*([0-9.]+)\s*$/m);
+    const tm = fm.match(/^\s*trained_by:\s*['"]?([\w.-]+)['"]?\s*$/m);
+    const conf = cm ? Number(cm[1]) : NaN;
+    return {
+      confidence: Number.isFinite(conf) ? conf : SKILL_CONFIDENCE_DEFAULT,
+      trainedBy: tm ? tm[1] : null,
+    };
+  } catch { return fallback; }
+}
+
+// Confidence-aware ranking weight for a skills-scope hit (Phase 0). Multiplies
+// a base relevance by the skill's frontmatter confidence (floored so a valid
+// low-confidence skill is demoted, not erased) AND by confidence.crossCliDampen
+// when the trainer provider family differs from the worker provider family.
+// The confidence multiply always applies to skills; the cross-CLI dampen is a
+// no-op (crossCliDampen returns the score unchanged) when workerProvider is
+// unset or in the same family. The math lives in mas/confidence.mjs.
+function _skillRankWeight(skillName, configDir, workerProvider) {
+  const { confidence, trainedBy } = _readSkillRankMeta(skillName, configDir);
+  const conf = Number.isFinite(confidence) ? confidence : SKILL_CONFIDENCE_DEFAULT;
+  const floored = Math.max(SKILL_CONFIDENCE_FLOOR, Math.min(1, conf));
+  return crossCliDampen(floored, trainedBy, workerProvider);
+}
+
 /**
  * Cross-scope FTS5 recall. Content-only semantics — all UNINDEXED
  * metadata columns (session_id, skill_name, agent, outcome, topic, …)
@@ -305,6 +353,12 @@ function sanitizeFtsQuery(q) {
  *                                 { trained_by: 'human', agent: 'reviewer' }
  *                                 Applied after FTS5 returns hits; values
  *                                 are coerced to string before compare.
+ * @param {string} [opts.workerProvider]
+ *                                 caller's provider (e.g. 'anthropic'); when
+ *                                 set, a skill whose trainer family differs is
+ *                                 dampened via confidence.crossCliDampen. The
+ *                                 per-skill confidence weighting is applied
+ *                                 regardless.
  */
 export function recall(query, opts = {}) {
   const t0 = process.hrtime.bigint();
@@ -357,12 +411,24 @@ export function recall(query, opts = {}) {
       if (!/syntax error|no such column/i.test(e.message)) throw e;
     }
   }
+  // Confidence-aware ranking (Phase 0): weight each skills-scope hit's base
+  // relevance by its frontmatter confidence (floored) and the cross-CLI dampen.
+  // SQLite bm25 is negative and sorted ascending (more-negative = more
+  // relevant); multiplying by a weight in (0,1] pulls a skill's score TOWARD
+  // zero, demoting it. Non-skills hits keep their exact bm25 as the sort key so
+  // sessions/trajectories/memories order is byte-stable.
+  const workerProvider = opts.workerProvider ? String(opts.workerProvider).trim() : '';
+  const sortKey = (h) => {
+    if (h.scope !== 'skills') return h.bm25;
+    const w = _skillRankWeight(h.metadata?.skill_name, configDir, workerProvider);
+    return h.bm25 * (w > 0 ? w : SKILL_CONFIDENCE_FLOOR);
+  };
   // Opt-in hybrid re-rank when the caller supplies a query vector; otherwise
-  // the exact pure-FTS bm25 order (today's behavior) is preserved.
+  // the confidence-weighted bm25 order is used (pure bm25 for non-skills).
   const getVec = (sc, rid) => { const row = s.getEmbedding.get(sc, rid); return row ? blobToF32(row.vec) : null; };
   const ordered = blend
     ? blendHybrid(hits, rowmeta, opts.queryVector, getVec, opts.weights)
-    : hits.sort((a, b) => a.bm25 - b.bm25);
+    : hits.sort((a, b) => sortKey(a) - sortKey(b));
   const trimmed = ordered.slice(0, k);
   for (let i = 0; i < trimmed.length; i++) trimmed[i].rank = i;
   const elapsedNs = process.hrtime.bigint() - t0;

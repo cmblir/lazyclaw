@@ -93,6 +93,10 @@ export async function exec(args, { configDir } = {}) {
   const scopes = Array.isArray(args.scope) && args.scope.length ? args.scope : DEFAULT_SCOPES;
   const k = Math.max(1, Math.min(MAX_K, Number(args.k) || 10));
   const filter = args.filter && typeof args.filter === 'object' ? args.filter : {};
+  // Provider context for confidence-aware ranking (Phase 0) + the M10 boost.
+  // Passed into index_db so a cross-family skill is dampened at rank time;
+  // reused below for the cross_cli_tested tie-break.
+  const workerProvider = args.workerProvider ? String(args.workerProvider).trim() : '';
   const t0 = Date.now();
 
   let out;
@@ -126,7 +130,7 @@ export async function exec(args, { configDir } = {}) {
       }
     } catch { /* fall back to pure FTS */ }
     try {
-      out = indexRecall(query, { configDir, scope: scopes, k, ...(queryVector ? { queryVector, weights } : {}) });
+      out = indexRecall(query, { configDir, scope: scopes, k, ...(workerProvider ? { workerProvider } : {}), ...(queryVector ? { queryVector, weights } : {}) });
     } catch (err) {
       return { ok: false, error: `recall: query failed — ${err?.message || err}` };
     }
@@ -161,7 +165,6 @@ export async function exec(args, { configDir } = {}) {
   // above untested siblings. We do this AFTER the FTS5 ranking so the
   // base bm25 ordering still dominates — boosting is a tie-breaker /
   // small re-rank, not a wholesale replacement.
-  const workerProvider = args.workerProvider ? String(args.workerProvider).trim() : '';
   if (workerProvider) {
     const boosted = hits.map((h, idx) => {
       if (h.scope !== 'skills') return { h, boost: 0, idx };
