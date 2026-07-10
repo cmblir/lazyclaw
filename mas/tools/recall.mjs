@@ -18,6 +18,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { openIndex, recall as indexRecall } from '../index_db.mjs';
 import { sameFamily } from '../confidence.mjs';
+import { parseFrontmatter as sharedParseFrontmatter } from '../frontmatter.mjs';
 
 export const NAME = 'recall';
 export const DESCRIPTION =
@@ -53,9 +54,9 @@ function _readCfg(configDir) {
   catch { return {}; }
 }
 
-// Minimal frontmatter parser — read just the cross_cli_tested provider
-// list for a skill by name. Returns [] when the file is missing or
-// parse fails (best-effort ranking helper, not a strict loader).
+// Read the cross_cli_tested provider list for a skill by name via the shared
+// frontmatter parser. Returns [] when the file is missing or parse fails
+// (best-effort ranking helper, not a strict loader).
 function _readSkillCrossCli(skillName, configDir) {
   if (!skillName) return [];
   try {
@@ -63,22 +64,12 @@ function _readSkillCrossCli(skillName, configDir) {
     const filePath = path.join(dir, 'skills', `${skillName}.md`);
     if (!fs.existsSync(filePath)) return [];
     const raw = fs.readFileSync(filePath, 'utf8');
-    const m = raw.match(/^---\n([\s\S]*?)\n---/);
-    if (!m) return [];
-    const fm = m[1];
-    // Find cross_cli_tested block — YAML list form:
-    //   cross_cli_tested:
-    //     - provider: anthropic
-    //       …
-    const idx = fm.indexOf('cross_cli_tested:');
-    if (idx < 0) return [];
-    const tail = fm.slice(idx);
-    const providers = [];
-    for (const line of tail.split('\n')) {
-      const pm = line.match(/^\s*-?\s*provider:\s*['"]?([\w.-]+)['"]?\s*$/);
-      if (pm) providers.push(pm[1]);
-    }
-    return providers;
+    // Delegate to the single shared parser, which reads cross_cli_tested as a
+    // list of objects with UNQUOTED provider values (was an inline regex).
+    const { meta } = sharedParseFrontmatter(raw);
+    const list = meta.cross_cli_tested;
+    if (!Array.isArray(list)) return [];
+    return list.map((t) => t && t.provider).filter(Boolean);
   } catch { return []; }
 }
 

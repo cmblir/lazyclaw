@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as skills from '../../skills.mjs';
+import { parseFrontmatter as sharedParseFrontmatter } from '../frontmatter.mjs';
 
 function resolveConfigDir(ctx) {
   return ctx?.configDir || process.env.LAZYCLAW_CONFIG_DIR || path.join(process.env.HOME || '.', '.lazyclaw');
@@ -37,12 +38,10 @@ async function _indexMemorySafe(row, ctx) {
 // Minimal frontmatter key reader — skill_edit only needs trained_by/group
 // off the existing frontmatter block to keep the FTS metadata stable.
 function _parseFm(fm) {
-  const meta = {};
-  for (const line of String(fm || '').split('\n')) {
-    const i = line.indexOf(':');
-    if (i > 0) meta[line.slice(0, i).trim()] = line.slice(i + 1).trim();
-  }
-  return meta;
+  // `fm` is the inner block (no --- fences). Wrap it so the single shared
+  // parser can read it, then return just the meta map (this reader's shape).
+  // Delegating unquotes trained_by / group, keeping FTS metadata drift-free.
+  return sharedParseFrontmatter(`---\n${String(fm || '')}\n---\n`).meta;
 }
 
 const skill_view = {

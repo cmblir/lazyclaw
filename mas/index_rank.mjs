@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { crossCliDampen } from './confidence.mjs';
+import { parseFrontmatter as sharedParseFrontmatter } from './frontmatter.mjs';
 
 // Floor for a valid-but-low-confidence skill's ranking weight. A skill that
 // scored e.g. 0.05 should be demoted hard but NOT erased from recall (the fix
@@ -59,12 +60,9 @@ export function _skillRankWeight(skillName, configDir, workerProvider) {
 // Minimal frontmatter splitter (trained_by / group are the only keys reindex
 // needs); avoids importing skills.mjs and risking an import cycle.
 export function _miniFrontmatter(raw) {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(String(raw || ''));
-  if (!m) return { meta: {}, body: String(raw || '') };
-  const meta = {};
-  for (const line of m[1].split('\n')) {
-    const i = line.indexOf(':');
-    if (i > 0) meta[line.slice(0, i).trim()] = line.slice(i + 1).trim();
-  }
-  return { meta, body: m[2] };
+  // Delegates to the single shared parser so reindex reads UNQUOTED
+  // trained_by / group values (skill_synth.escapeYaml quotes them), avoiding
+  // the stray-quote metadata drift the old split-on-colon reader caused.
+  // Return shape ({ meta, body }) is unchanged.
+  return sharedParseFrontmatter(raw);
 }

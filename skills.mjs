@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { defaultConfigDir } from './lib/config_dir.mjs';
+import { parseFrontmatter as sharedParseFrontmatter } from './mas/frontmatter.mjs';
 
 export { defaultConfigDir };
 
@@ -96,32 +97,10 @@ export function listSkills(configDir = defaultConfigDir()) {
 // keeps us dependency-free. Returns { meta, body }; when no frontmatter
 // is present meta is {} and body is the untouched content.
 export function parseFrontmatter(content) {
-  const text = String(content ?? '');
-  if (!text.startsWith('---')) return { meta: {}, body: text };
-  // The opening fence must be its own line.
-  const afterOpen = text.slice(3);
-  if (!/^\r?\n/.test(afterOpen)) return { meta: {}, body: text };
-  const closeRe = /\r?\n---[ \t]*(?:\r?\n|$)/;
-  const m = closeRe.exec(afterOpen);
-  if (!m) return { meta: {}, body: text };
-  const block = afterOpen.slice(0, m.index);
-  // Drop blank lines between the closing fence and the first body line
-  // so callers can rely on body starting at real content.
-  const body = afterOpen.slice(m.index + m[0].length).replace(/^(?:\r?\n)+/, '');
-  const meta = {};
-  for (const line of block.split(/\r?\n/)) {
-    const mm = /^([A-Za-z0-9_-]+)\s*:\s*(.*)$/.exec(line.trim());
-    if (!mm) continue;
-    let val = mm[2].trim();
-    if (val.length >= 2 && val.startsWith('"') && val.endsWith('"')) {
-      // Symmetric with skill_synth's escapeYaml double-quote escaping.
-      val = val.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-    } else if (val.length >= 2 && val.startsWith("'") && val.endsWith("'")) {
-      val = val.slice(1, -1);
-    }
-    meta[mm[1]] = val;
-  }
-  return { meta, body };
+  // Delegates to the single shared parser (mas/frontmatter.mjs) so all four
+  // former call sites agree on quoting and list handling. The return shape
+  // ({ meta, body }) is unchanged.
+  return sharedParseFrontmatter(content);
 }
 
 function firstHeading(body) {
