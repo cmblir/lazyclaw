@@ -26,6 +26,17 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **Skills now compound over use.** Per-skill success/trial stats feed a real
+  confidence score (Wilson lower bound) instead of a frozen prior, the
+  active-recall-miss path is wired so a skill recalled into a failed task loses
+  confidence and is archived when it drops too low, and a verify-before-store
+  gate skips empty/duplicate/trivial synthesized skills before they pollute
+  recall.
+- **Scoped recall.** Indexed rows carry a scope (session/workspace/agent/global)
+  and recall defaults to the caller's own scope + global, so one agent's
+  trajectories no longer leak into another's prompt in multi-agent setups; the
+  recall tool gains a scope arg and a global opt-out. Default (no scope) behaves
+  exactly as before.
 - **Accessible, deep-linkable dashboard tabs.** The tab bar now implements the
   WAI-ARIA Tabs pattern (`role=tablist/tab/tabpanel`, `aria-selected`, roving
   `tabindex`) with full keyboard navigation (←/→/↑/↓, Home, End), and the active
@@ -39,6 +50,15 @@ Versioning: [SemVer](https://semver.org/).
   unauthenticated and scheduling runs a command.
 
 ### Fixed
+
+- **Hybrid-recall embeddings mis-joined to the wrong document after any
+  re-index.** Vectors were keyed by the unstable FTS5 implicit rowid; they are
+  now keyed by a stable natural key per scope, so a vector only ever pairs with
+  its own document (a hit with no vector falls back to bm25). Behind the opt-in
+  embeddings path; pure-FTS recall is unchanged.
+- **Four divergent frontmatter parsers unified** into one shared module, fixing
+  quoting drift where `trained_by`/`group` persisted with stray quotes on
+  reindex/edit.
 
 - **Scheduled goals, workflows, and cron jobs silently never ran on Homebrew /
   nvm / npm-global installs.** Every scheduled job stored a bare `lazyclaw` and
