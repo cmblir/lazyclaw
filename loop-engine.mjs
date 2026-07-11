@@ -18,6 +18,39 @@
 export const LOOP_MAX_CEILING = 50;
 export const LOOP_MAX_DEFAULT = 3;
 
+// Evaluate the opt-in budget ceilings for an unattended loop/tick. Returns a
+// stop reason ('budget' | 'timeout') when a ceiling is hit, else null. Pure +
+// additive: callers that pass no `budget` never reach this, so default
+// behavior is byte-stable.
+//
+//   budget = {
+//     wallClockMs?: number,   // stop once now()-startedAt exceeds this
+//     maxTokens?:   number,   // stop once accumulated tokens exceed this
+//     maxCost?:     number,   // stop once accumulated cost exceeds this
+//     killSwitch?:  () => boolean,        // global kill (env / config flag)
+//     getUsage?:    () => { tokens?, cost? }, // caller-fed running totals
+//     now?:         () => number,         // clock injection (tests)
+//   }
+export function checkBudget(budget, startedAt) {
+  if (!budget) return null;
+  if (typeof budget.killSwitch === 'function' && budget.killSwitch()) return 'budget';
+  const now = typeof budget.now === 'function' ? budget.now() : Date.now();
+  if (Number.isFinite(budget.wallClockMs) && budget.wallClockMs > 0 && now - startedAt >= budget.wallClockMs) {
+    return 'timeout';
+  }
+  if ((Number.isFinite(budget.maxTokens) && budget.maxTokens > 0) ||
+      (Number.isFinite(budget.maxCost) && budget.maxCost > 0)) {
+    const u = (typeof budget.getUsage === 'function' ? budget.getUsage() : null) || {};
+    if (Number.isFinite(budget.maxTokens) && budget.maxTokens > 0 && Number(u.tokens) >= budget.maxTokens) {
+      return 'budget';
+    }
+    if (Number.isFinite(budget.maxCost) && budget.maxCost > 0 && Number(u.cost) >= budget.maxCost) {
+      return 'budget';
+    }
+  }
+  return null;
+}
+
 export class LoopError extends Error {
   constructor(message, code) {
     super(message);
@@ -116,9 +149,10 @@ export function compileUntil(pattern) {
  * @param {((role: 'user'|'assistant', content: string) => void)|undefined} o.persist
  * @param {((evt: { i: number, max: number, reply: string }) => void)|undefined} o.onIteration
  * @param {AbortSignal|undefined} o.signal
- * @returns {Promise<{ iterations: number, stoppedBy: 'max'|'until'|'abort', lastReply: string }>}
+ * @param {object|undefined} o.budget  opt-in wall-clock/token/cost ceilings + kill-switch (see checkBudget)
+ * @returns {Promise<{ iterations: number, stoppedBy: 'max'|'until'|'abort'|'budget'|'timeout', lastReply: string }>}
  */
-export async function runLoop({ prompt, max, until, messages, sendOnce, persist, onIteration, signal, buildSystem }) {
+export async function runLoop({ prompt, max, until, messages, sendOnce, persist, onIteration, signal, buildSystem, budget }) {
   if (!prompt || !prompt.trim()) {
     throw new LoopError('prompt is required', 'LOOP_NO_PROMPT');
   }
@@ -134,8 +168,15 @@ export async function runLoop({ prompt, max, until, messages, sendOnce, persist,
   let i = 0;
   let lastReply = '';
   let stoppedBy = 'max';
+  // Anchor the wall-clock budget at loop start. A budget-injected now() lets
+  // tests advance a virtual clock without real sleeps.
+  const budgetStart = budget && typeof budget.now === 'function' ? budget.now() : Date.now();
   while (i < max) {
     if (signal?.aborted) { stoppedBy = 'abort'; break; }
+    // Budget gate BEFORE spending a turn — a tiny wall-clock/token/cost cap
+    // (or the global kill-switch) stops the loop before the next paid call.
+    const preStop = checkBudget(budget, budgetStart);
+    if (preStop) { stoppedBy = preStop; break; }
     i++;
     // Per-iteration system rebuild. The caller decides what `sys` is —
     // memory.loadCore(), recall results, the chat's prior skill block,
@@ -177,6 +218,11 @@ export async function runLoop({ prompt, max, until, messages, sendOnce, persist,
       stoppedBy = 'until';
       break;
     }
+    // Post-iteration budget gate: usage the turn just consumed (tokens/cost)
+    // is now visible via getUsage(), so a ceiling crossed mid-run stops the
+    // loop instead of running one more paid iteration.
+    const postStop = checkBudget(budget, budgetStart);
+    if (postStop) { stoppedBy = postStop; break; }
   }
   return { iterations: i, stoppedBy, lastReply };
 }

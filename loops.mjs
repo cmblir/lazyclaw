@@ -20,10 +20,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { defaultConfigDir } from './lib/config_dir.mjs';
+import { acquire as acquireSingleton } from './lib/run_singleton.mjs';
 
 export { defaultConfigDir };
 
 const LOOPS_DIRNAME = 'loops';
+const LOOP_LOCKS_DIRNAME = '.locks';
 
 export function loopsDir(configDir = defaultConfigDir()) {
   return path.join(configDir, LOOPS_DIRNAME);
@@ -34,6 +36,29 @@ export function loopDir(loopId, configDir = defaultConfigDir()) {
     throw new Error(`invalid loop id: ${loopId}`);
   }
   return path.join(loopsDir(configDir), loopId);
+}
+
+// Directory holding per-loop cross-process lockfiles. Kept outside the
+// per-loop <id>/ dirs so a stray `.lock` never looks like a loop run to
+// listLoops(), which enumerates loopsDir() subdirectories.
+export function loopLocksDir(configDir = defaultConfigDir()) {
+  return path.join(loopsDir(configDir), LOOP_LOCKS_DIRNAME);
+}
+
+// Cross-process per-name singleton lock for a loop run. A slow `--detach`
+// loop still running when the next scheduled fire arrives is a SEPARATE
+// process; this SKIPs the new fire (default overlap policy) instead of
+// letting two workers write the same session. Additive + opt-in — nothing
+// calls it unless a call site chooses to. Releases in finally.
+export async function withLoopLock(lockName, fn, { configDir = defaultConfigDir(), ttlMs, now, pid } = {}) {
+  const lk = acquireSingleton(lockName, { dir: loopLocksDir(configDir), ttlMs, now, pid });
+  if (!lk.acquired) return { skipped: true, holder: lk.holder || null };
+  try {
+    const result = await fn();
+    return { skipped: false, result, stolen: lk.stolen };
+  } finally {
+    lk.release();
+  }
 }
 
 export function newLoopId() {

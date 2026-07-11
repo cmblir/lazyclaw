@@ -26,6 +26,33 @@ export async function attachGoalCron({ readConfig, writeConfig, cron, name, sche
   return { jobName, skipped: false };
 }
 
+// Run a single goal tick under the cross-process singleton lock with an
+// overlap policy. A slow scheduled tick still running when the next cron fire
+// arrives — or a manual `goal tick` racing the scheduled one — is a SEPARATE
+// process; without this guard both open the same goal:<name> session and
+// concurrently appendCheckIn, interleaving/losing writes. Default overlap
+// policy is SKIP: if a live holder owns the lock, we do NOT run and return
+// { skipped:true }. Fully dependency-injected so tests drive it with a fake
+// runner and no real provider/session.
+//
+// Additive + opt-in: `commands/automation.mjs` adopts this at the tick site;
+// nothing else changes. Failure-isolated — the lock releases in finally.
+export async function runGoalTick({ name, withGoalLock, runTick, lockOpts }) {
+  if (typeof withGoalLock !== 'function') throw new Error('runGoalTick requires withGoalLock');
+  if (typeof runTick !== 'function') throw new Error('runGoalTick requires runTick');
+  const outcome = await withGoalLock(name, () => runTick(), lockOpts || {});
+  if (outcome && outcome.skipped) {
+    // Overlap: another tick for this goal is in flight. Log + skip so the
+    // scheduler does not crash and no interleaved check-in lands.
+    if (process.env.LAZYCLAW_DEBUG) {
+      const holderPid = outcome.holder && outcome.holder.pid;
+      console.error(`goal tick "${name}" skipped: another tick is running${holderPid ? ` (pid ${holderPid})` : ''}`);
+    }
+    return { skipped: true, holder: outcome.holder || null };
+  }
+  return { skipped: false, result: outcome ? outcome.result : undefined };
+}
+
 export async function detachGoalCron({ readConfig, writeConfig, cron, name }) {
   const cfg = readConfig();
   const jobName = `goal-${name}`;

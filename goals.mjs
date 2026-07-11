@@ -14,10 +14,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ensureValidName as cronEnsureValidName } from './cron.mjs';
 import { defaultConfigDir, withKeyedLockSync } from './lib/config_dir.mjs';
+import { acquire as acquireSingleton } from './lib/run_singleton.mjs';
 
 export { defaultConfigDir };
 
 const GOALS_DIRNAME = 'goals';
+const GOAL_LOCKS_DIRNAME = '.locks';
 
 export class GoalError extends Error {
   constructor(message, code) {
@@ -39,6 +41,32 @@ export function goalPath(name, configDir = defaultConfigDir()) {
 export function ensureValidName(name) {
   try { cronEnsureValidName(name); }
   catch (e) { throw new GoalError(e.message, 'GOAL_BAD_NAME'); }
+}
+
+// Directory holding per-goal cross-process lockfiles. Separate from the goal
+// JSON files so a stray `.lock` never looks like a goal to listGoals().
+export function goalLocksDir(configDir = defaultConfigDir()) {
+  return path.join(goalsDir(configDir), GOAL_LOCKS_DIRNAME);
+}
+
+// Cross-process per-goal singleton lock. Distinct from withKeyedLockSync,
+// which only serializes writers inside ONE process: a slow scheduled `goal
+// tick` and a manual `goal tick` are SEPARATE processes that both open the
+// same goal:<name> session and appendCheckIn. This guards that case.
+//
+// Overlap policy is SKIP (default): when a live holder owns the lock, `fn` is
+// NOT run and { skipped:true, holder } is returned. Additive + opt-in —
+// nothing calls this unless a call site chooses to. Releases in finally.
+export async function withGoalLock(name, fn, { configDir = defaultConfigDir(), ttlMs, now, pid } = {}) {
+  ensureValidName(name);
+  const lk = acquireSingleton(name, { dir: goalLocksDir(configDir), ttlMs, now, pid });
+  if (!lk.acquired) return { skipped: true, holder: lk.holder || null };
+  try {
+    const result = await fn();
+    return { skipped: false, result, stolen: lk.stolen };
+  } finally {
+    lk.release();
+  }
 }
 
 function defaultShape(name) {
