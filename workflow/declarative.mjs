@@ -25,7 +25,16 @@ export class WorkflowError extends Error {
 
 // Validate the static shape (ids present + unique, nodes is an array). Type
 // existence is checked at compile time, where the caps-provided types are known.
-export function validateWorkflow(def) {
+//
+// opts.strictDeps (default false = current lenient behavior) promotes an
+// unknown/typo dep reference from "tolerated at runtime" (topologicalLevels
+// treats it as a satisfied edge) to a HARD failure, so a CI `validate` step
+// catches the typo before it silently mis-orders a run. Opt-in so no existing
+// caller (runWorkflow / runDeclarativeRequest, which validate on every run)
+// changes behavior.
+//
+// @param {{ strictDeps?: boolean }} [opts]
+export function validateWorkflow(def, opts = {}) {
   if (!def || typeof def !== 'object' || Array.isArray(def)) {
     throw new WorkflowError('workflow must be an object', 'WF_SHAPE');
   }
@@ -39,6 +48,15 @@ export function validateWorkflow(def) {
     if (ids.has(n.id)) throw new WorkflowError(`duplicate node id: ${n.id}`, 'WF_DUP_ID');
     ids.add(n.id);
     if (typeof n.type !== 'string' || !n.type.trim()) throw new WorkflowError(`node "${n.id}" needs a type`, 'WF_NODE_TYPE');
+  }
+  if (opts.strictDeps) {
+    for (const n of def.nodes) {
+      for (const d of Array.isArray(n.deps) ? n.deps : []) {
+        if (!ids.has(d)) {
+          throw new WorkflowError(`node "${n.id}": unknown dep "${d}" (not a node id in this workflow)`, 'WF_UNKNOWN_DEP');
+        }
+      }
+    }
   }
   return def;
 }

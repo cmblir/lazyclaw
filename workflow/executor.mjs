@@ -167,10 +167,17 @@ export async function runSequential(nodes, initialInput = null, opts = {}) {
  * other and can run concurrently. Cycles produce an empty trailing
  * remainder, which the caller turns into an error.
  *
+ * `opts.onUnknownDep(nodeId, depId)` (optional) is invoked for every dep
+ * reference that names a non-existent node. Runtime stays lenient (the edge is
+ * still skipped, not fatal) — the callback exists ONLY so a caller can surface
+ * a clear warning instead of the unknown dep being silently dropped. Default:
+ * no callback (current behavior, no signal).
+ *
  * @param {Array<{id: string, deps?: string[]}>} nodes
+ * @param {{ onUnknownDep?: (nodeId: string, depId: string) => void }} [opts]
  * @returns {{ levels: string[][], leftover: string[] }}
  */
-export function topologicalLevels(nodes) {
+export function topologicalLevels(nodes, opts = {}) {
   const idToNode = new Map(nodes.map(n => [n.id, n]));
   const indegree = new Map();
   const reverse = new Map(); // id → [dependents]
@@ -181,8 +188,12 @@ export function topologicalLevels(nodes) {
   for (const n of nodes) {
     for (const d of n.deps || []) {
       // Unknown dep — treated as a satisfied edge (don't lock the node out).
-      // Caller can validate up front if they want strict mode.
-      if (!idToNode.has(d)) continue;
+      // Caller can validate up front if they want strict mode. We still signal
+      // via onUnknownDep so the drop isn't fully silent.
+      if (!idToNode.has(d)) {
+        if (typeof opts.onUnknownDep === 'function') opts.onUnknownDep(n.id, d);
+        continue;
+      }
       indegree.set(n.id, (indegree.get(n.id) || 0) + 1);
       reverse.get(d).push(n.id);
     }

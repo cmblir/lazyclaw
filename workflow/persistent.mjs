@@ -9,10 +9,12 @@ import { performance } from 'node:perf_hooks';
 import { topologicalLevels, retryWithBackoff, runWithTimeout, settleWithConcurrency } from './executor.mjs';
 // Workflow state can carry transcript content; persist it owner-only (0600).
 import { writeJsonSecure } from '../secure_write.mjs';
+import { acquireSessionLock } from './session_lock.mjs';
+import { isTimeout, errorPolicy } from './error_policy.mjs';
 
 const DEFAULT_DIR = '.workflow-state';
 
-/** @typedef {'pending'|'running'|'success'|'failed'} NodeStatus */
+/** @typedef {'pending'|'running'|'success'|'failed'|'skipped'} NodeStatus */
 
 /**
  * @typedef {Object} NodeState
@@ -69,28 +71,60 @@ export function saveState(state, dir = DEFAULT_DIR) {
   writeJsonSecure(statePath(state.sessionId, dir), state);
 }
 
-function initState(sessionId, nodes) {
+// engine: 'sequential' (runPersistent) | 'parallel-persistent' (runPersistentDag).
+// Persisting it lets `resume` auto-select the right engine and lets
+// inspect --critical-path read deps from state instead of re-importing the .mjs.
+// deps: { [id]: string[] } snapshotted from the node definitions.
+function initState(sessionId, nodes, engine) {
   const now = Date.now();
-  return {
+  const state = {
     sessionId,
     order: nodes.map(n => n.id),
     nodes: Object.fromEntries(nodes.map(n => [n.id, { status: 'pending', attempts: 0 }])),
     startedAt: now,
     updatedAt: now,
   };
+  if (engine) state.engine = engine;
+  const deps = {};
+  for (const n of nodes) if (Array.isArray(n.deps)) deps[n.id] = n.deps.slice();
+  if (Object.keys(deps).length > 0) state.deps = deps;
+  return state;
+}
+
+// Backfill engine/deps onto a state file loaded from an older run that predates
+// this metadata, so resume-auto-select works even for in-flight legacy sessions.
+function ensureEngineMeta(state, nodes, engine) {
+  let changed = false;
+  if (!state.engine && engine) { state.engine = engine; changed = true; }
+  if (!state.deps) {
+    const deps = {};
+    for (const n of nodes) if (Array.isArray(n.deps)) deps[n.id] = n.deps.slice();
+    if (Object.keys(deps).length > 0) { state.deps = deps; changed = true; }
+  }
+  return changed;
+}
+
+/**
+ * Report the engine mode recorded by the original run, so `resume` can
+ * auto-select sequential vs parallel-persistent without the user re-passing a
+ * flag. Returns null when there is no state, or the state predates this
+ * metadata (caller falls back to the flag / default).
+ *
+ * @param {string} sessionId
+ * @param {string} [dir]
+ * @returns {'sequential'|'parallel-persistent'|null}
+ */
+export function resumeEngineFromState(sessionId, dir = DEFAULT_DIR) {
+  const state = loadState(sessionId, dir);
+  const e = state?.engine;
+  return e === 'sequential' || e === 'parallel-persistent' ? e : null;
 }
 
 // runWithTimeout lives in executor.mjs (imported above) — single
 // source of truth so the timeout shape stays identical across both
-// engines and any caller that wants to reuse it.
-
-function isTimeout(err) {
-  if (!err) return false;
-  if (err.code === 'TIMEOUT') return true;
-  if (err.message === 'TIMEOUT') return true;
-  if (typeof err.message === 'string' && err.message.toLowerCase().includes('timeout')) return true;
-  return false;
-}
+// engines and any caller that wants to reuse it. The code-based error
+// taxonomy (classifyError/isTimeout) + per-node onError policy live in
+// error_policy.mjs (imported above).
 
 /**
  * @param {import('./executor.mjs').WorkflowNode[]} nodes
@@ -102,6 +136,9 @@ function isTimeout(err) {
  *   timeoutMs?: number,
  *   sleep?: (ms: number) => Promise<void>,
  *   signal?: AbortSignal,
+ *   lock?: boolean,
+ *   lockTtlMs?: number,
+ *   lockPidAlive?: (pid: number) => boolean,
  * }} opts
  */
 export async function runPersistent(nodes, opts) {
@@ -111,11 +148,37 @@ export async function runPersistent(nodes, opts) {
   const sleep = opts.sleep ?? (ms => new Promise(r => setTimeout(r, ms)));
   const signal = opts.signal;
 
+  // Advisory run-lock keyed by sessionId (opt-out via opts.lock === false).
+  // A second concurrent run on the SAME session refuses instead of racing the
+  // state file and double-executing side-effecting nodes. A stale lock (dead
+  // holder / age past TTL) is reclaimed so a crash can't wedge the session.
+  let lock = null;
+  if (opts.lock !== false) {
+    try {
+      lock = acquireSessionLock(opts.sessionId, dir, { ttlMs: opts.lockTtlMs, pidAlive: opts.lockPidAlive });
+    } catch (err) {
+      if (err?.code === 'SESSION_LOCKED') {
+        return { success: false, state: null, failedAt: null, error: err.message, code: 'SESSION_LOCKED', retryDelays: [], executedNodes: [] };
+      }
+      throw err;
+    }
+  }
+  try {
+    return await runPersistentInner(nodes, opts, { dir, maxRetries, baseDelay, sleep, signal });
+  } finally {
+    lock?.release();
+  }
+}
+
+async function runPersistentInner(nodes, opts, ctx) {
+  const { dir, maxRetries, baseDelay, sleep, signal } = ctx;
+
   let state = loadState(opts.sessionId, dir);
   if (!state) {
-    state = initState(opts.sessionId, nodes);
+    state = initState(opts.sessionId, nodes, 'sequential');
     saveState(state, dir);
   } else {
+    ensureEngineMeta(state, nodes, 'sequential');
     for (const id of state.order) {
       const ns = state.nodes[id];
       if (ns && ns.status === 'running') {
@@ -157,6 +220,9 @@ export async function runPersistent(nodes, opts) {
       input = ns.output;
       continue;
     }
+    // A previously 'skipped' node (onError:'continue') is terminal too — don't
+    // re-run it on resume; keep threading the prior input forward.
+    if (ns.status === 'skipped') continue;
     let attempts = ns.attempts ?? 0;
     while (true) {
       if (signal?.aborted) return buildAbortReturn(node.id, attempts);
@@ -180,13 +246,27 @@ export async function runPersistent(nodes, opts) {
           return buildAbortReturn(node.id, attempts);
         }
         const msg = err instanceof Error ? err.message : String(err);
-        if (isTimeout(err) && attempts < maxRetries) {
+        const policy = errorPolicy(node);
+        // A TIMEOUT is retried up to maxRetries (existing behavior). onError:
+        // 'retry' extends the same backoff-retry to a transient NON-timeout
+        // error, so a flaky node recovers consistently without node.retry.
+        if ((isTimeout(err) || policy === 'retry') && attempts < maxRetries) {
           const delay = baseDelay * Math.pow(2, attempts - 1);
           retryDelays.push(delay);
           await sleep(delay);
           continue;
         }
         const durationMs = performance.now() - t0;
+        // onError:'continue' — a non-fatal node: record it as 'skipped' and
+        // keep going, threading the PRIOR input to the next node (this node
+        // produced no output). Default (undefined / 'fail') preserves the
+        // current fail-fast behavior. A timeout never falls through to
+        // 'continue' — an exhausted timeout is still a hard failure.
+        if (policy === 'continue' && !isTimeout(err)) {
+          state.nodes[node.id] = { status: 'skipped', attempts, error: msg, durationMs };
+          saveState(state, dir);
+          break;
+        }
         state.nodes[node.id] = { status: 'failed', attempts, error: msg, durationMs };
         saveState(state, dir);
         return { success: false, state, failedAt: node.id, error: msg, retryDelays, executedNodes };
@@ -225,10 +305,33 @@ export async function runPersistent(nodes, opts) {
  *   timeoutMs?: number,
  *   signal?: AbortSignal,
  *   concurrency?: number,
+ *   lock?: boolean,
+ *   lockTtlMs?: number,
+ *   lockPidAlive?: (pid: number) => boolean,
  * }} opts
  */
 export async function runPersistentDag(nodes, opts) {
   const dir = opts.dir ?? DEFAULT_DIR;
+  // Advisory run-lock (same semantics as runPersistent; opt-out via lock:false).
+  let lock = null;
+  if (opts.lock !== false) {
+    try {
+      lock = acquireSessionLock(opts.sessionId, dir, { ttlMs: opts.lockTtlMs, pidAlive: opts.lockPidAlive });
+    } catch (err) {
+      if (err?.code === 'SESSION_LOCKED') {
+        return { success: false, state: null, failedAt: null, error: err.message, code: 'SESSION_LOCKED', executedNodes: [] };
+      }
+      throw err;
+    }
+  }
+  try {
+    return await runPersistentDagInner(nodes, opts, dir);
+  } finally {
+    lock?.release();
+  }
+}
+
+async function runPersistentDagInner(nodes, opts, dir) {
   const signal = opts.signal;
 
   // Compute topological levels at start. (Static import at module top
@@ -249,9 +352,10 @@ export async function runPersistentDag(nodes, opts) {
   // doesn't accidentally collide between modes.
   let state = loadState(opts.sessionId, dir);
   if (!state) {
-    state = initState(opts.sessionId, nodes);
+    state = initState(opts.sessionId, nodes, 'parallel-persistent');
     saveState(state, dir);
   } else {
+    ensureEngineMeta(state, nodes, 'parallel-persistent');
     // Demote any 'running' from a prior interrupted run back to pending.
     // success outputs are preserved so a fan-in node sees its predecessors.
     for (const id of Object.keys(state.nodes)) {
@@ -305,7 +409,7 @@ export async function runPersistentDag(nodes, opts) {
     // unbounded (every level node runs in parallel).
     const settled = (await settleWithConcurrency(levelIds, async (id) => {
       const ns = state.nodes[id] ?? { status: 'pending' };
-      if (ns.status === 'success') return { id, ok: true, skipped: true };
+      if (ns.status === 'success' || ns.status === 'skipped') return { id, ok: true, skipped: true };
 
       const node = idToNode.get(id);
       const deps = node.deps || [];
@@ -332,10 +436,16 @@ export async function runPersistentDag(nodes, opts) {
       // inherit a slower node's lenient cap.
       const effectiveTimeout = Number.isFinite(node.timeoutMs) ? node.timeoutMs : opts.timeoutMs;
       const fn = () => runWithTimeout(() => node.execute(input, { signal }), effectiveTimeout);
+      const policy = errorPolicy(node);
+      // onError:'retry' supplies a default in-run retry budget when the node
+      // didn't declare node.retry explicitly, so a transient fault recovers
+      // without the author wiring node.retry by hand. An explicit node.retry
+      // always wins.
+      const retrySpec = node.retry && Number.isFinite(node.retry.max) && node.retry.max > 0
+        ? node.retry
+        : (policy === 'retry' ? { max: 3, baseDelayMs: 1 } : null);
       try {
-        const output = node.retry && Number.isFinite(node.retry.max) && node.retry.max > 0
-          ? await retryWithBackoff(fn, node.retry)
-          : await fn();
+        const output = retrySpec ? await retryWithBackoff(fn, retrySpec) : await fn();
         const durationMs = performance.now() - t0;
         state.nodes[id] = { status: 'success', output, attempts: state.nodes[id].attempts, durationMs };
         saveState(state, dir);
@@ -349,6 +459,15 @@ export async function runPersistentDag(nodes, opts) {
         }
         const msg = err instanceof Error ? err.message : String(err);
         const durationMs = performance.now() - t0;
+        // onError:'continue' — a non-fatal node: record 'skipped' and let the
+        // level (and independent downstream nodes) proceed. A dependent of a
+        // skipped node still sees `undefined` for that dep's output. A timeout
+        // is never softened to 'continue' — it stays a hard failure.
+        if (policy === 'continue' && !isTimeout(err)) {
+          state.nodes[id] = { status: 'skipped', error: msg, attempts: state.nodes[id].attempts, durationMs };
+          saveState(state, dir);
+          return { id, ok: true, softSkipped: true };
+        }
         state.nodes[id] = { status: 'failed', error: msg, attempts: state.nodes[id].attempts, durationMs };
         saveState(state, dir);
         return { id, ok: false, error: msg };
@@ -358,7 +477,7 @@ export async function runPersistentDag(nodes, opts) {
     let firstAbort = null;
     for (const r of settled) {
       if (r.aborted) { if (!firstAbort) firstAbort = r; continue; }
-      if (r.ok && !r.skipped) executedNodes.push(r.id);
+      if (r.ok && !r.skipped && !r.softSkipped) executedNodes.push(r.id);
       if (!r.ok && !firstFailure) firstFailure = r;
     }
     if (firstAbort || signal?.aborted) {
