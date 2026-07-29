@@ -4,6 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { introFrames, playSplashIntro, REVEAL_MS, SHIMMER_MS } from '../tui/splash_intro.mjs';
+import { wordmark } from '../tui/wordmark.mjs';
 
 const splashText = ['row-a', 'row-b', 'row-c', 'row-d'].join('\n');
 
@@ -24,13 +25,49 @@ test('every reveal frame is a prefix of the splash', () => {
   }
 });
 
-test('the shimmer phase adds frames that all render the full splash', () => {
+test('below the wordmark breakpoint, shimmer adds no frames (no dead-air hold)', () => {
+  // columns: 80 is below WORDMARK_BREAKPOINT (140), so the wordmark band never
+  // renders and there is nothing for the shimmer phase to animate. It must
+  // hand straight over after the reveal instead of holding the settled frame
+  // for the shimmer beat — that hold used to cost ~800ms of frozen screen on
+  // every non-wide terminal for zero visual change.
   const withShimmer = introFrames(splashText, { revealMs: 100, shimmerMs: 300, fps: 20, columns: 80 });
   const revealOnly = introFrames(splashText, { revealMs: 100, shimmerMs: 0, fps: 20, columns: 80 });
-  assert.ok(withShimmer.length > revealOnly.length, 'shimmer must add frames');
-  for (const f of withShimmer.slice(revealOnly.length)) {
-    assert.equal(f.replace(/\x1b\[[0-9;]*m/g, '').split('\n').length, 4);
+  assert.equal(withShimmer.length, revealOnly.length,
+    'narrow/medium tiers must not grow frames for a shimmer they cannot show');
+  assert.deepEqual(withShimmer, revealOnly,
+    'the frame sequence must be identical regardless of shimmerMs below the breakpoint');
+});
+
+test('at or above the wordmark breakpoint, shimmer recolours only the wordmark band', () => {
+  // A realistic wide-tier shape: rows.length > wordmark.height (13), columns
+  // at the WIDE breakpoint, so introFrames must take the shimmer branch that
+  // was previously reachable only through an ad-hoc probe, not a committed test.
+  const bandRows = wordmark.rows.length; // 13
+  const bodyRows = ['panel-1', 'panel-2', 'panel-3'];
+  const wideText = [...wordmark.rows, ...bodyRows].join('\n');
+  const frames = introFrames(wideText, { revealMs: 0, shimmerMs: 150, fps: 20, columns: 140 });
+  const shimmerFrames = frames.slice(1); // frame 0 is the settled reveal frame
+  assert.ok(shimmerFrames.length >= 2, 'expected multiple shimmer frames');
+
+  const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*m/g, '');
+  for (const f of shimmerFrames) {
+    const rows = f.split('\n');
+    assert.equal(rows.length, bandRows + bodyRows.length, 'row count must stay constant');
+    // Rows below the wordmark band carry no ANSI and are byte-identical.
+    for (let i = bandRows; i < rows.length; i++) {
+      assert.equal(rows[i], bodyRows[i - bandRows], `row ${i} below the band must be untouched`);
+    }
+    // Rows inside the band are still the same text once colour is stripped.
+    for (let i = 0; i < bandRows; i++) {
+      assert.equal(stripAnsi(rows[i]), wordmark.rows[i], `row ${i} in the band must keep its text`);
+    }
   }
+  // Distinct ANSI colour across successive shimmer frames — the sweep moves.
+  const firstBandRow0 = shimmerFrames[0].split('\n')[0];
+  const secondBandRow0 = shimmerFrames[1].split('\n')[0];
+  assert.notEqual(firstBandRow0, secondBandRow0,
+    'the shimmer sweep must actually change colour between frames');
 });
 
 test('playSplashIntro writes nothing when motion is off', async () => {
@@ -94,6 +131,33 @@ test('playSplashIntro leaves the screen cleared for Ink', async () => {
   const last = writes[writes.length - 1];
   assert.ok(last.includes('\x1b[2J') && last.includes('\x1b[3J') && last.endsWith('\x1b[H'),
     `the final write must hand Ink a clean screen, got: ${JSON.stringify(last)}`);
+});
+
+test('a write that throws mid-loop still restores the cursor', async () => {
+  // Regression: SHOW_CURSOR + CLEAR must run on every exit path, not only
+  // when the frame loop finishes normally. Simulates a write failing partway
+  // through (e.g. a closed stdout) and asserts the terminal is still restored
+  // rather than left with an invisible cursor.
+  const writes = [];
+  let calls = 0;
+  const throwingWrite = (s) => {
+    calls += 1;
+    if (calls === 3) throw new Error('simulated write failure');
+    writes.push(s);
+  };
+  await assert.rejects(
+    () => playSplashIntro({ version: '1.0.0', tools: [], skills: [], provider: 'p', model: 'm' }, {
+      write: throwingWrite,
+      sleep: async () => {},
+      env: {},
+      stream: { isTTY: true },
+      columns: 100,
+    }),
+    /simulated write failure/,
+  );
+  const last = writes[writes.length - 1];
+  assert.ok(last && last.includes('\x1b[?25h') && last.includes('\x1b[2J') && last.endsWith('\x1b[H'),
+    `cursor must be restored even though the loop threw, got: ${JSON.stringify(last)}`);
 });
 
 test('the intro budget stays short enough not to delay the prompt', () => {

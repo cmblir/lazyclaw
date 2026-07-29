@@ -10,7 +10,7 @@
 // outright for ~1.15s and then handing Ink a cleared screen is strictly
 // simpler and has no interaction with Ink's bookkeeping at all.
 
-import { renderSplashToString } from './splash.mjs';
+import { renderSplashToString, WORDMARK_BREAKPOINT } from './splash.mjs';
 import { wordmark } from './wordmark.mjs';
 import { motionEnabled, revealRows, shimmerIndex } from './motion.mjs';
 
@@ -49,8 +49,12 @@ export function introFrames(splashText, { revealMs = REVEAL_MS, shimmerMs = SHIM
   }
 
   // Phase 2 — shimmer. Only the wordmark band (the first wordmark.height rows,
-  // and only when the WIDE tier actually drew it) is recoloured per frame.
-  const hasWordmark = columns >= 140 && rows.length > wordmark.height;
+  // and only when the WIDE tier actually drew it) is recoloured per frame. On
+  // narrower tiers the wordmark never renders, so there is nothing to animate
+  // — hand straight over after the reveal instead of holding the settled
+  // frame for the shimmer beat (that hold used to burn ~800ms of dead air on
+  // every non-wide terminal for zero visual change).
+  const hasWordmark = columns >= WORDMARK_BREAKPOINT && rows.length > wordmark.height;
   if (shimmerMs > 0 && hasWordmark) {
     const steps = Math.max(1, Math.round(shimmerMs / step));
     for (let i = 0; i < steps; i++) {
@@ -58,11 +62,6 @@ export function introFrames(splashText, { revealMs = REVEAL_MS, shimmerMs = SHIM
         r < wordmark.height ? _paintWordmarkRow(row, shimmerIndex(r, i, wordmark.palette.length)) : row);
       frames.push(painted.join('\n'));
     }
-  } else if (shimmerMs > 0) {
-    // No wordmark on screen (narrow terminal): hold the settled splash for the
-    // same beat so the timing feels identical across tiers.
-    const steps = Math.max(1, Math.round(shimmerMs / step));
-    for (let i = 0; i < steps; i++) frames.push(rows.join('\n'));
   }
   return frames;
 }
@@ -80,11 +79,16 @@ export async function playSplashIntro(splashProps, deps = {}) {
   const step = Math.max(1, Math.round(1000 / FPS));
 
   write(HIDE_CURSOR + CLEAR);
-  for (const frame of frames) {
-    write(HOME + frame);
-    await sleep(step);
+  try {
+    for (const frame of frames) {
+      write(HOME + frame);
+      await sleep(step);
+    }
+  } finally {
+    // Hand Ink a clean screen — it re-draws the settled splash via <Static>.
+    // Runs on every exit path (including a throw mid-loop) so a failure never
+    // leaves the user with an invisible cursor on a half-painted screen.
+    write(SHOW_CURSOR + CLEAR);
   }
-  // Hand Ink a clean screen — it re-draws the settled splash via <Static>.
-  write(SHOW_CURSOR + CLEAR);
   return true;
 }

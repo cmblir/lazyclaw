@@ -22,7 +22,7 @@ const TITLE = ' trainer-split · FTS5 recall · 6-backend sandbox ';
 // 90 the sloth (48 cols) cannot share a row with a usable right column,
 // so NARROW stacks the sloth ABOVE a full-width wrapped panel. Below 45
 // even a stacked sloth overflows, so MINIMAL absorbs that range.
-const WORDMARK_BREAKPOINT = 140;  // drop wordmark below this
+export const WORDMARK_BREAKPOINT = 140;  // drop wordmark below this
 const MEDIUM_BREAKPOINT   = 90;   // side-by-side sloth+panel above this; stacked below
 const NARROW_BREAKPOINT   = 45;   // headline-only fallback below this
 
