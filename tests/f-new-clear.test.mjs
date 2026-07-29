@@ -81,6 +81,16 @@ test('onConversationReset: with no splash item, scrollback becomes empty', () =>
   assert.deepEqual(next.scrollback, [], 'scrollback must be empty when there is no splash');
 });
 
+// ─── 1b. Pure constant — CLEAR_TERMINAL must actually drop the scrollback ──
+
+test('CLEAR_TERMINAL wipes the screen AND the scrollback buffer', () => {
+  // \x1b[3J is the part that drops the scrollback buffer; without it the old
+  // conversation is still reachable by scrolling up.
+  assert.ok(CLEAR_TERMINAL.includes('\x1b[3J'));
+  assert.ok(CLEAR_TERMINAL.includes('\x1b[2J'));
+  assert.ok(CLEAR_TERMINAL.endsWith('\x1b[H'));
+});
+
 // ─── 2. Behavioral — /new wipes the terminal in a real Ink mount ───────────
 
 test('ReplApp: /new (NEW sentinel) writes the clear-screen+scrollback escape so the screen starts fresh', async () => {

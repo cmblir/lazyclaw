@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeReplState, onUserInput, onStreamChunk, onTurnComplete } from '../tui/repl_reducers.mjs';
-import { onConversationReset, CLEAR_TERMINAL } from '../tui/repl_reset.mjs';
+import { onConversationReset } from '../tui/repl_reset.mjs';
 
 const splashItem = { kind: 'splash', id: 'splash-0', splashProps: { provider: 'anthropic', model: 'm' } };
 
@@ -45,12 +45,4 @@ test('a reset with no splash item still bumps the generation', () => {
   const s = onConversationReset(makeReplState());
   assert.deepEqual(s.scrollback, []);
   assert.equal(s.generation, 1);
-});
-
-test('CLEAR_TERMINAL wipes the screen AND the scrollback buffer', () => {
-  // \x1b[3J is the part that drops the scrollback buffer; without it the old
-  // conversation is still reachable by scrolling up.
-  assert.ok(CLEAR_TERMINAL.includes('\x1b[3J'));
-  assert.ok(CLEAR_TERMINAL.includes('\x1b[2J'));
-  assert.ok(CLEAR_TERMINAL.endsWith('\x1b[H'));
 });
