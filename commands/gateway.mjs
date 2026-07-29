@@ -33,8 +33,11 @@ export const GATEWAY_CHANNELS = ['slack', 'telegram', 'matrix'];
 export const PLUGIN_CHANNELS = ['discord', 'email', 'signal', 'voice', 'whatsapp'];
 
 // The gateway runs in the foreground like the bare daemon, so a started
-// gateway records its pid + bound port here. `/gateway status|stop` and
-// `lazyclaw service` read it back; cmdGateway removes it on shutdown.
+// gateway records its pid + bound port here; `/gateway status|stop` reads
+// it back and cmdGateway removes it on shutdown. `lazyclaw service`'s
+// fallback backend (no launchd/systemd) independently reuses this exact
+// path for its own bare-pid bookkeeping, colliding with the JSON format
+// written here (see the write site below); launchd/systemd never read it.
 export function _gatewayPidfilePath(configDir) {
   return path.join(configDir, 'gateway.pid');
 }
@@ -314,9 +317,11 @@ export async function cmdGateway(flags = {}) {
   process.stderr.write('[gateway] running. Ctrl-C to stop.\n');
 
   // Record pid + the ACTUAL bound port so `/gateway status|stop` can find us
-  // without an lsof on the port. This pidfile is for that pair only —
-  // `lazyclaw service` tracks its managed processes through its own
-  // servicePaths scheme (commands/service.mjs) and never reads gateway.pid.
+  // without an lsof on the port. `lazyclaw service`'s launchd/systemd
+  // backends never consult this file, tracking processes instead through
+  // their own servicePaths scheme (commands/service.mjs) — but its fallback
+  // backend independently writes a bare pid to this exact path
+  // (lib/service_install.mjs), so the two writers' formats collide here.
   const pidfile = _gatewayPidfilePath(path.dirname(configPath()));
   try { fs.writeFileSync(pidfile, JSON.stringify({ pid: process.pid, port: gw.port })); }
   catch { /* non-fatal: the gateway still runs, just isn't stoppable by pidfile */ }
