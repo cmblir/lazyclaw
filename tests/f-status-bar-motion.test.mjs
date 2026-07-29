@@ -62,11 +62,11 @@ test('mounted StatusBar shows the live rate segment while streaming with hud + l
   try {
     // Not pinning the exact digits: elapsedMs is `Date.now() - streamStartedAt`
     // computed at render time, so it drifts by however long the test took to
-    // reach this assertion. Assert the shape instead (no "k" — ~2500/s stays
-    // well under the 10k/s abbreviation threshold regardless of that drift).
+    // reach this assertion. Assert the shape instead (no "k" — ~2500 ch/s stays
+    // well under the 10k ch/s abbreviation threshold regardless of that drift).
     const frame = plain(lastFrame() || '');
-    assert.match(frame, /⇅ \d+\/s/, `expected a rate segment, got: ${frame}`);
-    assert.doesNotMatch(frame, /k\/s/, `expected no k-abbreviation at ~2.5k chars/s, got: ${frame}`);
+    assert.match(frame, /⇅ \d+ ch\/s/, `expected a rate segment, got: ${frame}`);
+    assert.doesNotMatch(frame, /k ch\/s/, `expected no k-abbreviation at ~2.5k ch/s, got: ${frame}`);
   } finally {
     unmount();
   }

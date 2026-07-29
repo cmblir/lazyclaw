@@ -88,9 +88,13 @@ export function formatGauge(used, budget, cellsOverride = null) {
   return body;
 }
 
-// Throughput during a streaming turn. Characters (not tokens) because that is
-// what the REPL can count locally and instantly — providers only report token
-// usage at the end of a turn, which is too late to animate.
+// Throughput during a streaming turn, in CHARACTERS per second — not tokens.
+// Providers only report token usage at the end of a turn, which is too late
+// to animate, so characters are the only thing the REPL can count locally and
+// instantly. The unit is spelled out in the output ("ch/s") rather than left
+// as a bare "/s" because this segment sits right next to the token counts
+// (`↑1.2k ↓340 tok`) in the HUD row, and a bare "/s" there reads as tokens/sec
+// to anyone skimming it — it must not imply a number it cannot back up.
 //
 // Samples shorter than this are dominated by first-token latency and produce a
 // wildly wrong number, so they render as nothing at all.
@@ -100,10 +104,10 @@ export function formatRate(chars, elapsedMs) {
   const ms = Number(elapsedMs) || 0;
   if (c <= 0 || ms < RATE_MIN_SAMPLE_MS) return '';
   const perSec = (c / ms) * 1000;
-  // Switch to a "k/s" abbreviation only once the plain digit count itself
-  // gets hard to read at a glance (>= 10,000/s); a 4-digit rate like 2500/s
-  // is still perfectly legible as-is.
-  return perSec >= 10_000 ? `${(perSec / 1000).toFixed(1)}k/s` : `${Math.round(perSec)}/s`;
+  // Switch to a "k ch/s" abbreviation only once the plain digit count itself
+  // gets hard to read at a glance (>= 10,000/s); a 4-digit rate like
+  // 2500 ch/s is still perfectly legible as-is.
+  return perSec >= 10_000 ? `${(perSec / 1000).toFixed(1)}k ch/s` : `${Math.round(perSec)} ch/s`;
 }
 
 // Render the HUD line (the extra row below the compact status line). Returns
