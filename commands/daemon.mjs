@@ -363,8 +363,8 @@ export async function cmdDaemon(flags) {
       }
       shuttingDown = true;
       if (logger) logger.info('shutdown.begin', { timeoutMs });
-      const result = await gracefulShutdown(d.server, timeoutMs);
       removePidfile();
+      const result = await gracefulShutdown(d.server, timeoutMs);
       if (logger) logger.info('shutdown.end', result);
       process.exit(result.forced ? 1 : 0);
     };
