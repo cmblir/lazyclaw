@@ -129,8 +129,15 @@ test('playSplashIntro leaves the screen cleared for Ink', async () => {
   });
   assert.ok(writes.length > 0, 'expected frames to be written');
   const last = writes[writes.length - 1];
-  assert.ok(last.includes('\x1b[2J') && last.includes('\x1b[3J') && last.endsWith('\x1b[H'),
+  assert.ok(last.includes('\x1b[2J') && last.endsWith('\x1b[H'),
     `the final write must hand Ink a clean screen, got: ${JSON.stringify(last)}`);
+  // The intro must clear the VISIBLE screen only. \x1b[3J additionally wipes the
+  // terminal's scrollback, destroying whatever the user had on screen before
+  // launching chat — an unrecoverable side effect of merely starting the app.
+  for (const chunk of writes) {
+    assert.equal(chunk.includes('\x1b[3J'), false,
+      `the intro must never erase the scrollback, got: ${JSON.stringify(chunk)}`);
+  }
 });
 
 test('a write that throws mid-loop still restores the cursor', async () => {

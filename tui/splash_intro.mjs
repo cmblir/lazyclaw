@@ -17,7 +17,14 @@ import { motionEnabled, revealRows, shimmerIndex } from './motion.mjs';
 export const REVEAL_MS = 350;
 export const SHIMMER_MS = 800;
 export const FPS = 30;
-const CLEAR = '\x1b[2J\x1b[3J\x1b[H';
+// Visible screen only — deliberately NOT \x1b[3J. That extra final would wipe
+// the terminal's SCROLLBACK buffer, i.e. everything the user was doing in this
+// terminal before they typed `lazyclaw`, on every single chat launch. Nobody
+// asked the intro to do that. Overpainting the visible screen is enough to hand
+// Ink a clean canvas, and prior output stays recoverable by scrolling up.
+// (`/clear` keeps its own 3J — see tui/repl_reset.mjs — because there the user
+// explicitly asked for the scrollback to go.)
+const CLEAR = '\x1b[2J\x1b[H';
 const HOME = '\x1b[H\x1b[J';
 const HIDE_CURSOR = '\x1b[?25l';
 const SHOW_CURSOR = '\x1b[?25h';
