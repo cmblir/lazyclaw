@@ -46,7 +46,7 @@ import {
   fillSlashCommand,
   fillArgToken,
 } from './editor_keys.mjs';
-import { anchorState as _anchorState, installAnchorShim as _installAnchorShim } from './editor_anchor.mjs';
+import { anchorState as _anchorState } from './editor_anchor.mjs';
 import { motionEnabled, useMotion, flashBorderColor, FLASH_MS, FLASH_TICK_MS } from './motion.mjs';
 // Re-exported (not just imported) so the established import path
 // `from '../tui/editor.mjs'` still resolves — flashBorderColor + FLASH_MS
@@ -369,7 +369,9 @@ export function Editor({
     // starts at col 3. Cursor sits one cell past the typed content.
     const prefixWidth = rowInEditor === 0 ? PROMPT_WIDTH : CONTINUATION_WIDTH;
     const colTarget = 3 + prefixWidth + colInLine;
-    _installAnchorShim();
+    // The shim this effect depends on is installed at mount by ReplApp, NOT
+    // here: it also carries the stray-write redirect, which must stay on even
+    // when LAZYCLAW_NO_CURSOR_ANCHOR turns this effect off above.
     // If a previous anchor moved the cursor up and NO render's eraseLines has
     // consumed that offset yet (two state updates between redraws — e.g. fast
     // typing or backspace), the cursor is still parked up inside the editor.

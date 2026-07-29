@@ -42,7 +42,8 @@ import { argSpecFor } from './slash_args.mjs';
 import { ModalPicker, filterModalItems, resolveModalPick } from './modal_picker.mjs';
 import { LiveRegion } from './live_region.mjs';
 import { Thinking } from './thinking.mjs';
-import { setInkWriter } from './stray_writes.mjs';
+import { isInkStdout, setInkWriter } from './stray_writes.mjs';
+import { installAnchorShim } from './editor_anchor.mjs';
 import { StatusBar } from './status_bar.mjs';
 import { ScrollbackItem } from './scrollback_item.mjs'; export { ScrollbackItem };
 import { onConversationReset, clearTerminalScreen } from './repl_reset.mjs'; export { StatusBar };
@@ -116,8 +117,21 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
   }, [stdout]);
   // Stray writes (slash progress, background loop/cron logs) reach the terminal
   // without Ink's knowledge and desync its erase bookkeeping into stale rows.
-  // Register Ink's own writer so tui/stray_writes.mjs can redirect them.
-  useEffect(() => { setInkWriter(writeStdout, stdout); return () => setInkWriter(null); }, [writeStdout, stdout]);
+  // Install the redirecting stdout/stderr shim and register Ink's own writer so
+  // tui/stray_writes.mjs can hand those chunks to Ink's safe write path.
+  //
+  // At mount, NOT from the Editor's cursor-anchor effect that also uses the
+  // shim: that effect opts out on LAZYCLAW_NO_CURSOR_ANCHOR=1, so installing
+  // from there made opting out of the anchor silently disable this redirect too.
+  // Gated on isInkStdout rather than on that env var because the shim patches
+  // the REAL process.stdout/stderr permanently — a mount rendering elsewhere
+  // (ink-testing-library's private stream) would leak the patch process-wide.
+  // See the LEAK WARNING in tests/helpers/motion_gate.mjs.
+  useEffect(() => {
+    if (isInkStdout(stdout)) installAnchorShim();
+    setInkWriter(writeStdout, stdout);
+    return () => setInkWriter(null);
+  }, [writeStdout, stdout]);
 
   // writeFn: route run_turn chunks into React state (factory mode only).
   const writeFn = useCallback((chunk) => {

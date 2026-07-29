@@ -22,7 +22,7 @@ import { applyChatWindow as _applyChatWindow, estimateMessagesTokens, CHAT_WINDO
 import { makeRunTurn as _chatRunTurnFactory } from '../tui/run_turn.mjs';
 import { hudStatus as _hudStatus } from '../tui/hud.mjs';
 import { _makeInkApprove } from '../tui/slash_dispatcher.mjs';
-import { makeInkStdout, setInkWriter } from '../tui/stray_writes.mjs';
+import { makeInkStream, setInkWriter } from '../tui/stray_writes.mjs';
 import { wrapInteractiveProv, makeLegacyApprove } from './chat_hardening.mjs';
 import { makeLegacySlashHandler } from './chat_legacy_slash.mjs';
 import { makeInkSlashHandler } from './chat_slash_bridge.mjs';
@@ -318,7 +318,7 @@ export async function cmdChat(flags = {}) {
         // tui/stray_writes.mjs can tell its own traffic (including writeToStderr)
         // apart from writes that bypass it and leave stale rows.
       }), { // exitOnCtrlC false → editor 2-stage Ctrl+C
-        stdout: makeInkStdout(process.stdout), stderr: makeInkStdout(process.stderr),
+        stdout: makeInkStream(process.stdout), stderr: makeInkStream(process.stderr),
         exitOnCtrlC: false, patchConsole: true,
       });
       try {

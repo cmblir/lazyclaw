@@ -16,13 +16,12 @@
 //
 // Telling Ink's own frame traffic apart from a foreign write is the hard part,
 // because both arrive at the same process.stdout. So Ink is mounted on
-// dedicated proxy streams (makeInkStdout, for BOTH its stdout and its stderr)
+// dedicated proxy streams (makeInkStream, for BOTH its stdout and its stderr)
 // that raise a flag around its own writes; anything else that reaches the
 // patched process.stdout / process.stderr while the REPL is mounted is foreign.
 //
 // Leaf module on purpose: no React, and nothing imported from editor.mjs —
 // tui/editor_anchor.mjs consumes this and must stay cycle-free.
-import { StringDecoder } from 'node:string_decoder';
 
 // True for the duration of a write Ink itself issued through a proxy.
 let inkWriting = false;
@@ -46,7 +45,7 @@ const INK_PROXY = Symbol.for('lazyclaw.inkStdout');
  *
  * @param {{write: Function}} real the stream to render onto (process.stdout)
  */
-export function makeInkStdout(real) {
+export function makeInkStream(real) {
   const proxy = {
     [INK_PROXY]: true,
     write(chunk, ...rest) {
@@ -71,7 +70,7 @@ export function makeInkStdout(real) {
   return proxy;
 }
 
-/** True only for a stream built by makeInkStdout. */
+/** True only for a stream built by makeInkStream. */
 export function isInkStdout(stream) {
   return Boolean(stream && stream[INK_PROXY] === true);
 }
@@ -118,17 +117,23 @@ const ANSI_RE = /\x1b\[[\x30-\x3F]*[\x20-\x2F]*[\x40-\x7E]|\x1b[\x40-\x5A\x5C-\x
 // J erase-in-display, L/M insert-delete line, S/T scroll, r scroll region; plus
 // the alternate-screen switch, and the two-character IND/NEL/RI/RIS and
 // cursor save-restore escapes.
-const ROW_MOVING_RE = /\x1b\[[\x30-\x3F]*[\x20-\x2F]*[ABEFHJLMSTdefr]|\x1b\[\?(?:1049|47)[hl]|\x1b[DEMc78]/;
+const ROW_MOVING_RE = /\x1b\[[\x30-\x3F]*[\x20-\x2F]*[ABEFHJLMSTdefr]|\x1b\[\?(?:1049|1047|47)[hl]|\x1b[DEMc78]/;
 
 // Decoding happens ONLY to classify; the original chunk is what gets handed to
-// Ink, so a Buffer is never re-encoded. A module-scope decoder keeps a multi-byte
-// character split across two chunks from being classified as a replacement char.
-const decoder = new StringDecoder('utf8');
-
+// Ink, so a Buffer is never re-encoded.
+//
+// Stateless on purpose. A shared StringDecoder would carry the tail of a
+// multi-byte character split across two chunks into the classification of the
+// NEXT, unrelated chunk — and since this module classifies both stdout and
+// stderr, that contamination crossed streams. Decoding each chunk in isolation
+// means a chunk cut mid-codepoint yields U+FFFD, which reads as a printable
+// cell and so classifies as "must go through Ink": the safe answer. The cost is
+// cosmetic mojibake on a fragmented write; the benefit is that no later chunk
+// is ever misclassified because of an earlier one.
 function decodeForClassification(chunk) {
   if (typeof chunk === 'string') return chunk;
   if (!ArrayBuffer.isView(chunk)) return '';
-  return decoder.write(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+  return Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength).toString('utf8');
 }
 
 /**
@@ -136,8 +141,7 @@ function decodeForClassification(chunk) {
  *
  * Callers MUST gate redirectThroughInk on this — it is deliberately split out so
  * the anchor shim can decide whether to consume its pending cursor offset before
- * committing to a redirect, and so a binary chunk is classified exactly once
- * (the shared decoder is stateful).
+ * committing to a redirect.
  *
  * @param {string|Buffer|Uint8Array} chunk
  */

@@ -5,7 +5,7 @@
 // private stream (what ink-testing-library does):
 //
 //   In production `render(<ReplApp/>)` mounts Ink on
-//   `makeInkStdout(process.stdout)` — a thin proxy whose `write` forwards to
+//   `makeInkStream(process.stdout)` — a thin proxy whose `write` forwards to
 //   `process.stdout`, the SAME object tui/editor_anchor.mjs monkey-patches. That
 //   patch is the entire compensation mechanism: it prepends `\x1b[<offset>B\r`
 //   to Ink's frame chunks so the erase walks up from the row Ink expects rather
@@ -14,7 +14,7 @@
 //   and the shim never sees Ink's writes at all — you would get "corruption"
 //   that cannot happen in the real app. So the harness keeps ONE underlying
 //   stream per fd: it installs fake TTYs AS `process.stdout` / `process.stderr`,
-//   mounts Ink on `makeInkStdout(thatFake)` for BOTH exactly as production does,
+//   mounts Ink on `makeInkStream(thatFake)` for BOTH exactly as production does,
 //   and the anchor shim installs itself on top of the fakes as it does on the
 //   real streams.
 //
@@ -36,7 +36,7 @@ import { render } from 'ink';
 import React from 'react';
 import { ReplApp } from '../../tui/repl.mjs';
 import { anchorState } from '../../tui/editor_anchor.mjs';
-import { makeInkStdout } from '../../tui/stray_writes.mjs';
+import { makeInkStream, setInkWriter } from '../../tui/stray_writes.mjs';
 
 function fakeTty(sink, { columns, rows } = {}) {
   const s = new EventEmitter();
@@ -101,6 +101,11 @@ export function mountRepl(props = {}, { columns = 100, rows = 40 } = {}) {
   anchorState.shimmed = false;
 
   function restore() {
+    // Deregister explicitly rather than trusting ReplApp's effect cleanup: that
+    // cleanup only runs if React actually unmounts, so a mount that threw or an
+    // unmount() that failed would leave this mount's writer registered and let
+    // the NEXT test's stray writes be handed to a dead Ink instance.
+    setInkWriter(null);
     restoreStdout();
     restoreStderr();
     anchorState.offset = saved.offset;
@@ -123,8 +128,8 @@ export function mountRepl(props = {}, { columns = 100, rows = 40 } = {}) {
       // through Ink's SAFE writeToStdout path anyway — the unsafe direct
       // `process.stdout.write` callsites this bug is about are unaffected by it.
       {
-        stdout: makeInkStdout(stdout),
-        stderr: makeInkStdout(stderr),
+        stdout: makeInkStream(stdout),
+        stderr: makeInkStream(stderr),
         stdin,
         exitOnCtrlC: false,
         patchConsole: false,
