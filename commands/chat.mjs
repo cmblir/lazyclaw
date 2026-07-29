@@ -295,6 +295,8 @@ export async function cmdChat(flags = {}) {
       // primary). The v5.4.0 pre-print made the screen go blank during
       // chat because alt-buffer cleared it on enter. Splash lives in the
       // Static scrollback now regardless of alt-buffer state.
+      // Launch animation: owns the screen outright, then clears it for Ink.
+      await (await import('../tui/splash_intro.mjs')).playSplashIntro(splashProps);
       const ink = render(/* @__PURE__ */ React.createElement(ReplApp, {
         splashProps,
         statusInfo: { provider: activeProvName, model: activeModel },
