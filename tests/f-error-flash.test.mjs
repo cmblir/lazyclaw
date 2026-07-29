@@ -9,6 +9,7 @@ import { flashBorderColor, FLASH_MS } from '../tui/editor.mjs';
 import { theme } from '../tui/theme.mjs';
 import { makeReplState, onUserInput, onTurnComplete } from '../tui/repl_reducers.mjs';
 import { ReplApp } from '../tui/repl.mjs';
+import { withMotionForced } from './helpers/motion_gate.mjs';
 
 test('no error means the normal border', () => {
   assert.equal(flashBorderColor(null, 1000, true), theme.border);
@@ -55,53 +56,11 @@ test('onTurnComplete records the error timestamp and clears it on success', () =
 // that drops `errorAt: state.lastErrorAt` from the <Editor/> call fails a
 // test instead of silently regressing.
 //
-// motionEnabled() reads process.stdout.isTTY via its default parameter (the
-// REAL global stream, not ink-testing-library's private one) and is falsy
-// under `node --test`, so the gate must be forced open for the mount —
-// mirrors the save/restore-in-finally discipline in
-// tests/f-ctx-gauge-tween.test.mjs's withMotionForced.
-//
-// Forcing process.stdout.isTTY also satisfies the IME cursor anchor's own
-// TTY gate (tui/editor.mjs), which — unlike motionEnabled() — installs a
-// PERMANENT monkey-patch on process.stdout.write the first time it fires
-// (tui/editor_anchor.mjs, anchorState.shimmed never resets itself). That
-// patch has nothing to do with this test, so LAZYCLAW_NO_CURSOR_ANCHOR=1
-// keeps it from installing at all rather than relying on cleanup after.
-//
-// chalk.level is forced too: Ink's border colouring (node_modules/ink's
-// colorize.js) calls chalk.hex(color)(str) on the same chalk singleton this
-// file imports, and chalk.level is 0 in this process (no real TTY at
-// import time) regardless of any of the above — so without this, colours
-// never reach the rendered frame at all and the assertion below would be
-// vacuously true.
+// withMotionForced (tests/helpers/motion_gate.mjs) forces motionEnabled()
+// open, forces chalk.level so Ink's border colouring actually emits ANSI
+// codes, and keeps the IME cursor-anchor effect's monkey-patch from
+// installing — see that module's header comment for why each is needed.
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-async function withMotionForced(fn) {
-  const saved = {
-    isTTY: process.stdout.isTTY,
-    noColor: process.env.NO_COLOR,
-    term: process.env.TERM,
-    noMotion: process.env.LAZYCLAW_NO_MOTION,
-    noAnchor: process.env.LAZYCLAW_NO_CURSOR_ANCHOR,
-    chalkLevel: chalk.level,
-  };
-  try {
-    process.stdout.isTTY = true;
-    delete process.env.NO_COLOR;
-    process.env.TERM = 'xterm-256color';
-    delete process.env.LAZYCLAW_NO_MOTION;
-    process.env.LAZYCLAW_NO_CURSOR_ANCHOR = '1';
-    chalk.level = 3;
-    return await fn();
-  } finally {
-    process.stdout.isTTY = saved.isTTY;
-    if (saved.noColor === undefined) delete process.env.NO_COLOR; else process.env.NO_COLOR = saved.noColor;
-    if (saved.term === undefined) delete process.env.TERM; else process.env.TERM = saved.term;
-    if (saved.noMotion === undefined) delete process.env.LAZYCLAW_NO_MOTION; else process.env.LAZYCLAW_NO_MOTION = saved.noMotion;
-    if (saved.noAnchor === undefined) delete process.env.LAZYCLAW_NO_CURSOR_ANCHOR; else process.env.LAZYCLAW_NO_CURSOR_ANCHOR = saved.noAnchor;
-    chalk.level = saved.chalkLevel;
-  }
-}
 
 test('ReplApp: a failed turn flashes the input border red (wiring guard)', async () => {
   await withMotionForced(async () => {

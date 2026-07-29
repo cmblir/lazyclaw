@@ -54,13 +54,14 @@ test('tweening cells walks from the old fill to the new one', () => {
 // motionEnabled() reads process.stdout.isTTY via its default parameter
 // (`stream = process.stdout`) — the REAL global stream, not whatever fake
 // stdout ink-testing-library hands the mounted instance — and it is falsy
-// under `node --test`. Force the gate open for the duration of the mount and
-// restore every value in a `finally`, mirroring the save/restore discipline
-// in tests/helpers/repl_harness.mjs: a leaked patch here would corrupt every
+// under `node --test`. withMotionForced (tests/helpers/motion_gate.mjs)
+// forces the gate open for the duration of the mount and restores every
+// patched value in a `finally`: a leaked patch here would corrupt every
 // later test in this file (and in this process).
 import { render } from 'ink-testing-library';
 import React from 'react';
 import { StatusBar, GAUGE_TWEEN_MS } from '../tui/status_bar.mjs';
+import { withMotionForced } from './helpers/motion_gate.mjs';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // Derived from the real constant so a future change to GAUGE_TWEEN_MS can't
@@ -68,27 +69,6 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // tween window, SETTLE_WAIT is comfortably past it.
 const MID_WAIT = GAUGE_TWEEN_MS * 0.4;
 const SETTLE_WAIT = GAUGE_TWEEN_MS + 200;
-
-async function withMotionForced(fn) {
-  const saved = {
-    isTTY: process.stdout.isTTY,
-    noColor: process.env.NO_COLOR,
-    term: process.env.TERM,
-    noMotion: process.env.LAZYCLAW_NO_MOTION,
-  };
-  try {
-    process.stdout.isTTY = true;
-    delete process.env.NO_COLOR;
-    process.env.TERM = 'xterm-256color';
-    delete process.env.LAZYCLAW_NO_MOTION;
-    return await fn();
-  } finally {
-    process.stdout.isTTY = saved.isTTY;
-    if (saved.noColor === undefined) delete process.env.NO_COLOR; else process.env.NO_COLOR = saved.noColor;
-    if (saved.term === undefined) delete process.env.TERM; else process.env.TERM = saved.term;
-    if (saved.noMotion === undefined) delete process.env.LAZYCLAW_NO_MOTION; else process.env.LAZYCLAW_NO_MOTION = saved.noMotion;
-  }
-}
 
 test('mounted StatusBar renders the streaming elapsed clock (motion forced on)', async () => {
   await withMotionForced(async () => {
