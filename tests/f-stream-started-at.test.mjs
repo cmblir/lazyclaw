@@ -209,3 +209,71 @@ test("a mid-stream interrupt does NOT touch the in-flight turn's liveCharCount",
   assert.equal(s.liveCharCount, 7, 'the interrupt branch must not touch liveCharCount');
   assert.equal(s.pendingPrepend, 'oh wait, do this instead');
 });
+
+// lastErrorAt lifecycle — Date.now() of the most recent failed turn, or null.
+// Same per-turn latch/clear shape as the fields above: set only by
+// onTurnComplete when reason === 'error', cleared on every other path back
+// to idle (a new turn, Esc, or a full conversation reset). Feeds the input
+// border's flash (tui/editor.mjs flashBorderColor) so a failure stays
+// visible even after its error text has scrolled out of view.
+
+test('makeReplState starts lastErrorAt null', () => {
+  assert.equal(makeReplState().lastErrorAt, null);
+});
+
+test("onUserInput's idle branch starts each new turn with lastErrorAt null", () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onTurnComplete(s, { reason: 'error', error: 'boom' });
+  assert.ok(typeof s.lastErrorAt === 'number' && s.lastErrorAt > 0);
+  // A brand new turn must not start with a stale flash from the previous failure.
+  s = onUserInput(s, { text: 'try again', controller: { abort: () => {} } });
+  assert.equal(s.lastErrorAt, null);
+});
+
+test('onTurnComplete sets lastErrorAt on error and clears it on success', () => {
+  const before = Date.now();
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onTurnComplete(s, { reason: 'error', error: 'boom' });
+  const after = Date.now();
+  assert.ok(Number.isFinite(s.lastErrorAt), `expected a finite timestamp, got: ${s.lastErrorAt}`);
+  assert.ok(s.lastErrorAt >= before && s.lastErrorAt <= after,
+    `expected lastErrorAt in [${before}, ${after}], got: ${s.lastErrorAt}`);
+
+  s = onUserInput(s, { text: 'hi again', controller: { abort: () => {} } });
+  s = onTurnComplete(s, { reason: 'done' });
+  assert.equal(s.lastErrorAt, null, 'a successful turn clears the flash');
+});
+
+test('onEscape clears lastErrorAt back to null (an abort is not an error)', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onTurnComplete(s, { reason: 'error', error: 'boom' });
+  assert.notEqual(s.lastErrorAt, null);
+  // Simulate the flash carrying over into a later turn that is then aborted.
+  s = onUserInput(s, { text: 'retry', controller: { abort: () => {} } });
+  s = { ...s, lastErrorAt: Date.now() }; // pretend a stale flash is still set
+  s = onEscape(s);
+  assert.equal(s.lastErrorAt, null);
+});
+
+test('onConversationReset clears lastErrorAt back to null', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onTurnComplete(s, { reason: 'error', error: 'boom' });
+  assert.notEqual(s.lastErrorAt, null);
+  s = onConversationReset(s);
+  assert.equal(s.lastErrorAt, null);
+});
+
+test("a mid-stream interrupt does NOT touch the in-flight turn's lastErrorAt", () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'first task', controller: { abort: () => {} } });
+  // Pretend a flash is somehow still set on the in-flight turn's state.
+  s = { ...s, lastErrorAt: 12345 };
+
+  s = onUserInput(s, { text: 'oh wait, do this instead', controller: { abort: () => {} } });
+  assert.equal(s.lastErrorAt, 12345, 'the interrupt branch must not touch lastErrorAt');
+  assert.equal(s.pendingPrepend, 'oh wait, do this instead');
+});

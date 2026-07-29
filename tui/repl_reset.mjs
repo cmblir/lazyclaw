@@ -25,6 +25,7 @@ export function onConversationReset(state) {
     streamStartedAt: null,
     hasStreamedContent: false,
     liveCharCount: 0,
+    lastErrorAt: null,
   };
 }
 

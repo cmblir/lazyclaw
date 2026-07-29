@@ -44,12 +44,19 @@ export function makeReplState(opts) {
     // the whole turn — using it directly would make the HUD's rate meter
     // collapse toward zero every time a line break lands.
     liveCharCount: 0,
+    // Date.now() of the most recent failed turn, or null. Set by
+    // onTurnComplete when reason === 'error'; cleared on every other path
+    // back to idle (new turn, Esc, or a full conversation reset). Feeds the
+    // Editor's border-flash so a failure is visible even if its error text
+    // in scrollback has scrolled out of view.
+    lastErrorAt: null,
   };
 }
 
 export function onUserInput(state, { text, controller }) {
   if (state.streaming && state.controller) {
     // mid-stream interrupt — abort current turn, queue text for next turn.
+    // Leaves in-flight turn state (including lastErrorAt) untouched.
     try { state.controller.abort(); } catch {}
     return { ...state, pendingPrepend: text };
   }
@@ -63,6 +70,8 @@ export function onUserInput(state, { text, controller }) {
     streamStartedAt: Date.now(),
     hasStreamedContent: false,
     liveCharCount: 0,
+    // A new turn starts without a stale flash from a previous failure.
+    lastErrorAt: null,
     history: [...state.history, text],
     scrollback: [...state.scrollback, { kind: 'user', id, text }],
     turnCounter: state.turnCounter + 1,
@@ -74,7 +83,8 @@ export function onEscape(state) {
     try { state.controller.abort(); } catch {}
   }
   // Drop any partial live assistant text on explicit Esc — the user is
-  // telling us to discard, not to keep.
+  // telling us to discard, not to keep. An abort is not an error, so the
+  // flash is cleared too.
   return {
     ...state,
     streaming: false,
@@ -84,6 +94,7 @@ export function onEscape(state) {
     streamStartedAt: null,
     hasStreamedContent: false,
     liveCharCount: 0,
+    lastErrorAt: null,
   };
 }
 
@@ -140,6 +151,7 @@ export function onTurnComplete(state, { reason, error } = {}) {
     streamStartedAt: null,
     hasStreamedContent: false,
     liveCharCount: 0,
+    lastErrorAt: reason === 'error' ? Date.now() : null,
   };
 }
 

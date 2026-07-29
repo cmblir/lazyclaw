@@ -528,6 +528,9 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
           // overlay where the user is actually typing instead of on
           // the row below the editor box. Opt-out via env.
           altEnabled,
+          // Drives the input border's red flash after a failed turn
+          // (tui/editor.mjs flashBorderColor). Null while idle or successful.
+          errorAt: state.lastErrorAt,
         })
       )
     )

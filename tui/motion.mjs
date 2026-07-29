@@ -17,7 +17,7 @@
 // can't silently drift apart — a change to one is a change to both.
 
 import { useState, useEffect } from 'react';
-import { colorEnabled } from './theme.mjs';
+import { colorEnabled, theme } from './theme.mjs';
 
 export const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 export const SPINNER_MS = 90;
@@ -75,6 +75,32 @@ export function shimmerIndex(rowIndex, tick, paletteLength) {
   const row = Number.isFinite(rowIndex) ? Math.trunc(rowIndex) : 0;
   const t = Number.isFinite(tick) ? Math.trunc(tick) : 0;
   return (((row + t) % n) + n) % n;
+}
+
+// How long the chat input's border pulses red after a failed turn, and the
+// colour it pulses to (tui/editor.mjs's <Editor/>). Two full pulses inside
+// the window — long enough to notice, short enough not to read as a
+// permanent error state. Lives here (not editor.mjs, which re-exports it)
+// because editor.mjs sits at the 500-line file-size gate.
+export const FLASH_MS = 900;
+const FLASH_HEX = '#F87171';
+const FLASH_PULSES = 2;
+// 2*FLASH_PULSES+1 segments (odd) so the window both opens AND closes on the
+// red segment — FLASH_PULSES=2 reads as "dips to normal twice" rather than
+// ending on a dim tail right before the window closes. Exported so the
+// Editor's re-render interval (useMotion) samples at least once per segment
+// without editor.mjs needing FLASH_PULSES itself.
+export const FLASH_TICK_MS = FLASH_MS / (FLASH_PULSES * 2 + 1);
+
+export function flashBorderColor(errorAt, now, motion, t = theme) {
+  // `errorAt == null` (not `!errorAt`) — errorAt is a Date.now() timestamp,
+  // and Date.now() === 0 at the Unix epoch is a legitimate (if theoretical)
+  // value; only null/undefined mean "no error yet".
+  if (!motion || errorAt == null) return t.border;
+  const age = now - errorAt;
+  if (age < 0 || age >= FLASH_MS) return t.border;
+  const phase = Math.floor(age / FLASH_TICK_MS);
+  return phase % 2 === 0 ? FLASH_HEX : t.border;
 }
 
 // One interval per animated component, torn down the moment it goes inactive.
