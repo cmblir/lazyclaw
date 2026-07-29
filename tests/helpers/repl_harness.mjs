@@ -13,9 +13,10 @@
 //   that BYPASSES Ink to Ink's own writer instead. Give Ink an unrelated stream
 //   and the shim never sees Ink's writes at all — you would get "corruption"
 //   that cannot happen in the real app. So the harness keeps ONE underlying
-//   stream: it installs a fake TTY AS `process.stdout`, mounts Ink on
-//   `makeInkStdout(thatFake)` exactly as production does, and the anchor shim
-//   installs itself on top of the fake as it does on the real stream.
+//   stream per fd: it installs fake TTYs AS `process.stdout` / `process.stderr`,
+//   mounts Ink on `makeInkStdout(thatFake)` for BOTH exactly as production does,
+//   and the anchor shim installs itself on top of the fakes as it does on the
+//   real streams.
 //
 //   `process.stderr` is faked into the same byte array too, because in a real
 //   terminal stderr lands on the same screen and the bug is an ordering problem
@@ -121,7 +122,13 @@ export function mountRepl(props = {}, { columns = 100, rows = 40 } = {}) {
       // hijack the test runner's console. patchConsole only routes console.*
       // through Ink's SAFE writeToStdout path anyway — the unsafe direct
       // `process.stdout.write` callsites this bug is about are unaffected by it.
-      { stdout: makeInkStdout(stdout), stderr, stdin, exitOnCtrlC: false, patchConsole: false },
+      {
+        stdout: makeInkStdout(stdout),
+        stderr: makeInkStdout(stderr),
+        stdin,
+        exitOnCtrlC: false,
+        patchConsole: false,
+      },
     );
   } catch (err) {
     restore();

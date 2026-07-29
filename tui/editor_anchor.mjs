@@ -34,7 +34,7 @@
 //
 // process.stderr is patched the same way: in a real terminal it lands
 // on the same screen, and background loop/cron code logs there.
-import { hasInkWriter, isInkWriting, redirectThroughInk } from './stray_writes.mjs';
+import { hasInkWriter, isInkWriting, redirectThroughInk, shouldRedirect } from './stray_writes.mjs';
 
 export const anchorState = { offset: 0, shimmed: false, writing: false };
 
@@ -64,16 +64,23 @@ function patchStream(name) {
         }
         return orig.call(this, chunk, ...rest);
       }
-      // 3. A foreign write while the REPL is mounted. Ink's writeToStdout
-      //    erases from the cursor's CURRENT row, so undo the anchor first.
-      if (hasInkWriter()) {
+      // 3. A foreign write while the REPL is mounted. Classify BEFORE touching
+      //    the anchor offset: a chunk Ink will not take must leave the offset
+      //    pending, or the cursor sits outside the frame for a render cycle.
+      if (hasInkWriter() && shouldRedirect(chunk)) {
+        // Ink's writeToStdout erases from the cursor's CURRENT row, so restore
+        // the baseline first. If the redirect is refused after all (Ink already
+        // unmounted), the chunk falls through to `orig` and lands on that same
+        // baseline, so the undo is still the right thing to have written.
         const undo = takeUndo();
         if (undo) orig.call(this, undo);
         if (redirectThroughInk(chunk)) {
-          // The chunk never reached `orig`, so honour a write callback here or
-          // a caller awaiting drain would hang.
+          // The chunk never reached `orig`, so honour a write callback here or a
+          // caller awaiting drain would hang. Node's writable.write(chunk, cb)
+          // contract is that cb fires asynchronously — calling it inline would
+          // hand a caller that writes again from cb surprise reentrancy.
           const done = rest.find((arg) => typeof arg === 'function');
-          if (done) done();
+          if (done) process.nextTick(done);
           return true;
         }
       }

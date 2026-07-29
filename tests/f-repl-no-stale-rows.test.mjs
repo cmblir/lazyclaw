@@ -155,6 +155,34 @@ test('a write that bypasses Ink leaves exactly one status row and one input box'
   // a stale status row and an orphaned editor top border above the real ones.
   assert.equal(countLines(screen, 'idle'), 1, `status row duplicated:\n${tail(screen)}`);
   assert.equal(editorTopBorders(screen), 1, `editor border duplicated:\n${tail(screen)}`);
+  // The row counts alone are also satisfied by an implementation that DROPS the
+  // bypassing write, so pin that the text survives. Pre-fix it did not: the
+  // handler's output printed at the parked cursor inside the editor box and the
+  // next frame overwrote it, so the user never saw it either.
+  assert.equal(countLines(screen, 'gateway: running'), 1,
+    `the redirected write must be visible, not swallowed:\n${tail(screen)}`);
+});
+
+test('a redirected write reaches the screen, from stdout and from stderr', async () => {
+  // Guards the failure mode the row counts cannot see. Ink's writeToStdout
+  // returns having written nothing once isUnmounted is true, and the REPL's
+  // deregistration runs in a React effect cleanup a macrotask later — so a
+  // redirect that reports success without checking is a silent data loss bug.
+  const screen = await screenAfter(async (h) => {
+    h.type('hi');
+    await h.settle();
+    process.stdout.write('STRAY_ON_STDOUT\n');
+    await h.settle();
+    process.stderr.write('STRAY_ON_STDERR\n');
+    await h.settle();
+    h.type('!');
+  });
+  assert.equal(countLines(screen, 'STRAY_ON_STDOUT'), 1,
+    `stdout write swallowed or duplicated:\n${tail(screen)}`);
+  assert.equal(countLines(screen, 'STRAY_ON_STDERR'), 1,
+    `stderr write swallowed or duplicated:\n${tail(screen)}`);
+  assert.equal(countLines(screen, 'idle'), 1, `status row duplicated:\n${tail(screen)}`);
+  assert.equal(editorTopBorders(screen), 1, `editor border duplicated:\n${tail(screen)}`);
 });
 
 test('every bypassing write adds another stale status row', async () => {

@@ -15,26 +15,30 @@
 // above it, and repaints the frame below.
 //
 // Telling Ink's own frame traffic apart from a foreign write is the hard part,
-// because both arrive at the same process.stdout. So Ink is mounted on a
-// dedicated proxy stream (makeInkStdout) that raises a flag around its own
-// writes; anything else that reaches the patched process.stdout /
-// process.stderr while the REPL is mounted is foreign.
+// because both arrive at the same process.stdout. So Ink is mounted on
+// dedicated proxy streams (makeInkStdout, for BOTH its stdout and its stderr)
+// that raise a flag around its own writes; anything else that reaches the
+// patched process.stdout / process.stderr while the REPL is mounted is foreign.
 //
 // Leaf module on purpose: no React, and nothing imported from editor.mjs —
 // tui/editor_anchor.mjs consumes this and must stay cycle-free.
+import { StringDecoder } from 'node:string_decoder';
 
-// True for the duration of a write Ink itself issued through the proxy.
+// True for the duration of a write Ink itself issued through a proxy.
 let inkWriting = false;
 // The mounted REPL's useStdout().write, or null when nothing is mounted.
 let inkWriter = null;
 // True while a foreign chunk is being handed to inkWriter (reentrancy guard).
 let redirecting = false;
+// Liveness probe: set by a proxy write, checked after inkWriter returns.
+let sawInkWrite = false;
 
 const INK_PROXY = Symbol.for('lazyclaw.inkStdout');
 
 /**
- * The stream Ink should render into: a thin proxy over `real` that flags Ink's
- * own writes so the stdout/stderr shim can recognise them.
+ * One of the streams Ink renders into — pass it as BOTH the `stdout` and the
+ * `stderr` render option. A thin proxy over `real` that flags Ink's own writes
+ * so the stdout/stderr shim can recognise them.
  *
  * `columns`/`rows` are live getters, never copies — a terminal resize mutates
  * them on the underlying stream, and a snapshot taken at mount would freeze the
@@ -48,6 +52,7 @@ export function makeInkStdout(real) {
     write(chunk, ...rest) {
       const outer = inkWriting;
       inkWriting = true;
+      sawInkWrite = true;
       // `real.write` is resolved per call, not bound up front:
       // tui/editor_anchor.mjs patches process.stdout.write AFTER this proxy is
       // built and must still see Ink's frames.
@@ -77,40 +82,82 @@ export function isInkStdout(stream) {
  * `inkStdout` must be the proxy Ink renders into. A mount that supplied its own
  * stream (ink-testing-library, for instance) writes somewhere other than the
  * terminal being shimmed, so redirecting into it would swallow output rather
- * than fix anything — such a mount registers nothing and keeps the old
- * pass-through behaviour.
+ * than fix anything — such a mount is ignored. Ignored, not cleared: it must not
+ * be able to deregister a live REPL that is mounted elsewhere in the process.
  *
- * @param {Function|null} fn useStdout().write, or null to clear
+ * @param {Function|null} fn useStdout().write, or null to deregister
  * @param {object} [inkStdout] the stream that Ink renders into
  */
 export function setInkWriter(fn, inkStdout) {
-  inkWriter = typeof fn === 'function' && isInkStdout(inkStdout) ? fn : null;
+  if (typeof fn !== 'function') { inkWriter = null; return; }
+  if (!isInkStdout(inkStdout)) return;
+  inkWriter = fn;
 }
 
-/** True while Ink is writing one of its own frames through the proxy. */
+/** True while Ink is writing one of its own frames through a proxy. */
 export function isInkWriting() { return inkWriting; }
 
 /** True while a mounted REPL can absorb foreign writes. */
 export function hasInkWriter() { return inkWriter !== null; }
 
-// A chunk of nothing but escape sequences cannot displace a row and has no
-// cell content to lose, so it is passed straight through. This is load-bearing,
-// not an optimisation: log-update calls cli-cursor, which writes `\x1b[?25l` /
-// `\x1b[?25h` directly to process.stderr — outside the proxy — so those arrive
-// here looking foreign. Feeding them to writeToStdout would repaint the whole
-// frame a second time (Ink's unmount does log.done() -> cliCursor.show() while
-// isUnmounted is still false, which would leave a duplicate final frame), and
-// at process exit restore-cursor's `\x1b[?25h` would be absorbed by an
-// already-unmounted Ink and lost, leaving the terminal cursor hidden.
+// The one escape pair Ink emits OUTSIDE its proxies: log-update calls cli-cursor
+// (which writes straight to process.stderr) before stream.write, and again from
+// log.done() during unmount. Redirecting these is actively wrong — the unmount
+// one runs while isUnmounted is still false, so it would repaint the whole final
+// frame a second time, and restore-cursor's exit-time show would be absorbed by
+// an already-unmounted Ink and lost, leaving the terminal cursor hidden.
+const CURSOR_VISIBILITY_RE = /^(?:\x1b\[\?25[lh])+$/;
+
+// Escape sequences, used to find the chunks that carry no printable cell.
 const ANSI_RE = /\x1b\[[\x30-\x3F]*[\x20-\x2F]*[\x40-\x7E]|\x1b[\x40-\x5A\x5C-\x5F]/g;
 
+// "Escape-only" is NOT the same as "harmless". These carry no printable cell yet
+// still move the cursor's row or destroy the frame, so passing one through would
+// recreate the very desync this module exists to prevent. CSI finals: A/B cursor
+// up-down, E/F next-previous line, H/f absolute position, d/e row position,
+// J erase-in-display, L/M insert-delete line, S/T scroll, r scroll region; plus
+// the alternate-screen switch, and the two-character IND/NEL/RI/RIS and
+// cursor save-restore escapes.
+const ROW_MOVING_RE = /\x1b\[[\x30-\x3F]*[\x20-\x2F]*[ABEFHJLMSTdefr]|\x1b\[\?(?:1049|47)[hl]|\x1b[DEMc78]/;
+
+// Decoding happens ONLY to classify; the original chunk is what gets handed to
+// Ink, so a Buffer is never re-encoded. A module-scope decoder keeps a multi-byte
+// character split across two chunks from being classified as a replacement char.
+const decoder = new StringDecoder('utf8');
+
+function decodeForClassification(chunk) {
+  if (typeof chunk === 'string') return chunk;
+  if (!ArrayBuffer.isView(chunk)) return '';
+  return decoder.write(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+}
+
 /**
- * Hand a foreign chunk to Ink's writer so it lands in the scrollback above the
- * live frame instead of inside it.
+ * Content policy: does this chunk need Ink's safe write path?
  *
- * @param {string|Buffer} chunk
- * @returns {boolean} true when Ink consumed the chunk; false when the caller
- *   must write it itself.
+ * Callers MUST gate redirectThroughInk on this — it is deliberately split out so
+ * the anchor shim can decide whether to consume its pending cursor offset before
+ * committing to a redirect, and so a binary chunk is classified exactly once
+ * (the shared decoder is stateful).
+ *
+ * @param {string|Buffer|Uint8Array} chunk
+ */
+export function shouldRedirect(chunk) {
+  const text = decodeForClassification(chunk);
+  if (text === '') return false;
+  if (CURSOR_VISIBILITY_RE.test(text)) return false;
+  // Printable cells: must go through Ink or they land inside the live frame.
+  if (text.replace(ANSI_RE, '') !== '') return true;
+  // No printable cells — only worth redirecting if it would move the cursor.
+  return ROW_MOVING_RE.test(text);
+}
+
+/**
+ * Delivery: hand an already-classified foreign chunk to Ink's writer so it lands
+ * in the scrollback above the live frame instead of inside it.
+ *
+ * @param {string|Buffer|Uint8Array} chunk as given to the shimmed stream
+ * @returns {boolean} true when Ink actually wrote the chunk; false when the
+ *   caller must write it itself.
  */
 export function redirectThroughInk(chunk) {
   // Reentrancy: writeToStdout performs three writes of its own
@@ -119,14 +166,19 @@ export function redirectThroughInk(chunk) {
   // send them straight back here and recurse without this guard. It also covers
   // the cli-cursor write log-update issues from inside that repaint.
   if (redirecting || inkWriter === null) return false;
-  const text = typeof chunk === 'string'
-    ? chunk
-    : (Buffer.isBuffer(chunk) ? chunk.toString('utf8') : null);
-  if (!text || text.replace(ANSI_RE, '') === '') return false;
+  sawInkWrite = false;
   redirecting = true;
   try {
-    inkWriter(text);
-    return true;
+    // The ORIGINAL chunk, not a decoded copy: writeToStdout passes `data`
+    // straight to stdout.write, so a Buffer survives byte-for-byte.
+    inkWriter(chunk);
+    // writeToStdout returns having written NOTHING when Ink is already unmounted
+    // (ink.js:142-144), and setInkWriter(null) runs in a React effect cleanup
+    // that flushes a macrotask later — or never, on the signal-exit path. Every
+    // live branch of writeToStdout writes to options.stdout at least once, so an
+    // untouched flag means the chunk was dropped, not delivered: report that and
+    // let the caller write it raw rather than swallowing it.
+    return sawInkWrite;
   } catch {
     return false; // Ink refused it — let the caller write it raw.
   } finally {
