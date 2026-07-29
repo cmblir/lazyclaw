@@ -15,32 +15,77 @@
 // frame starting one editor-height higher than the previous one.
 //
 // v5.4.4 fix — monkey-patch process.stdout.write the first time the
-// anchor fires. When the patched writer sees a chunk that BEGINS with
-// `\x1b[2K` (the start of log-update's eraseLines) AND the anchor
-// offset is non-zero, it prepends `\x1b[<offset>B\r` to move the
-// cursor BACK DOWN to the row log-update expects (one below the
-// previous frame's last line). The user sees no flicker; IME still
-// reads the editor cursor position because the anchor lives across
-// the gap between renders.
-export const anchorState = { offset: 0, shimmed: false };
+// anchor fires. When the patched writer sees one of Ink's own frame
+// chunks AND the anchor offset is non-zero, it prepends
+// `\x1b[<offset>B\r` to move the cursor BACK DOWN to the row
+// log-update expects (one below the previous frame's last line). The
+// user sees no flicker; IME still reads the editor cursor position
+// because the anchor lives across the gap between renders.
+//
+// ─── Stray writes (v6.9.x) ──────────────────────────────────────────
+//
+// That compensation is not enough on its own. A write that reaches the
+// terminal WITHOUT Ink's knowledge and ends a line moves the cursor to
+// another row, and no cursor arithmetic here can repair Ink's line
+// accounting afterwards — the next eraseLines starts N rows too low
+// and leaves N stale rows on screen. Such chunks are handed to Ink
+// instead (see ./stray_writes.mjs), which erases the live frame, lets
+// the text land in the scrollback above it, and repaints below.
+//
+// process.stderr is patched the same way: in a real terminal it lands
+// on the same screen, and background loop/cron code logs there.
+import { hasInkWriter, isInkWriting, redirectThroughInk } from './stray_writes.mjs';
 
-export function installAnchorShim() {
-  if (anchorState.shimmed) return;
-  if (!(process.stdout && typeof process.stdout.write === 'function')) return;
-  const orig = process.stdout.write.bind(process.stdout);
-  process.stdout.write = function patchedWrite(chunk, ...rest) {
+export const anchorState = { offset: 0, shimmed: false, writing: false };
+
+// Consume the parked offset and return the escape that moves the cursor back
+// down to the row log-update expects, or '' when nothing is parked.
+function takeUndo() {
+  const off = anchorState.offset;
+  if (!(off > 0)) return '';
+  anchorState.offset = 0;
+  return `\x1b[${off}B\r`;
+}
+
+function patchStream(name) {
+  const stream = process[name];
+  if (!(stream && typeof stream.write === 'function')) return false;
+  const orig = stream.write.bind(stream);
+  stream.write = function patchedWrite(chunk, ...rest) {
     try {
-      if (
-        anchorState.offset > 0 &&
-        typeof chunk === 'string' &&
-        chunk.startsWith('\x1b[2K')
-      ) {
-        const off = anchorState.offset;
-        anchorState.offset = 0;
-        return orig.call(this, `\x1b[${off}B\r` + chunk, ...rest);
+      // 1. The anchor's own cursor move IS the displacement — never undo it.
+      if (anchorState.writing) return orig.call(this, chunk, ...rest);
+      // 2. Ink's own frame traffic: restore the baseline the anchor moved away
+      //    from, then let the frame through untouched.
+      if (isInkWriting()) {
+        if (typeof chunk === 'string') {
+          const undo = takeUndo();
+          if (undo) return orig.call(this, undo + chunk, ...rest);
+        }
+        return orig.call(this, chunk, ...rest);
+      }
+      // 3. A foreign write while the REPL is mounted. Ink's writeToStdout
+      //    erases from the cursor's CURRENT row, so undo the anchor first.
+      if (hasInkWriter()) {
+        const undo = takeUndo();
+        if (undo) orig.call(this, undo);
+        if (redirectThroughInk(chunk)) {
+          // The chunk never reached `orig`, so honour a write callback here or
+          // a caller awaiting drain would hang.
+          const done = rest.find((arg) => typeof arg === 'function');
+          if (done) done();
+          return true;
+        }
       }
     } catch { /* fall through to unmodified write */ }
     return orig.call(this, chunk, ...rest);
   };
+  return true;
+}
+
+export function installAnchorShim() {
+  if (anchorState.shimmed) return;
+  if (!patchStream('stdout')) return;
+  patchStream('stderr');
   anchorState.shimmed = true;
 }

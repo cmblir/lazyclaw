@@ -41,6 +41,8 @@ import { SLASH_COMMANDS } from './slash_commands.mjs';
 import { argSpecFor } from './slash_args.mjs';
 import { ModalPicker, filterModalItems, resolveModalPick } from './modal_picker.mjs';
 import { theme } from './theme.mjs';
+import { LiveRegion } from './live_region.mjs';
+import { setInkWriter } from './stray_writes.mjs';
 import { StatusBar } from './status_bar.mjs';
 import { onConversationReset, clearTerminalScreen } from './repl_reset.mjs'; export { StatusBar };
 // Alt-buffer (DEC 1049) mount cluster moved to ./repl_altbuffer.mjs and pure
@@ -111,6 +113,10 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
     stdout.on('resize', onResize);
     return () => { stdout.off('resize', onResize); };
   }, [stdout]);
+  // Stray writes (slash progress, background loop/cron logs) reach the terminal
+  // without Ink's knowledge and desync its erase bookkeeping into stale rows.
+  // Register Ink's own writer so tui/stray_writes.mjs can redirect them.
+  useEffect(() => { setInkWriter(writeStdout, stdout); return () => setInkWriter(null); }, [writeStdout, stdout]);
 
   // writeFn: route run_turn chunks into React state (factory mode only).
   const writeFn = useCallback((chunk) => {
@@ -427,13 +433,7 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
             ),
             // Live region — partial assistant stream (inside the scroll
             // region so it grows naturally above the status bar).
-            state.liveAssistant
-              ? React.createElement(
-                  Box,
-                  { flexDirection: 'column' },
-                  React.createElement(Text, { color: theme.fg }, state.liveAssistant)
-                )
-              : null,
+            React.createElement(LiveRegion, { text: state.liveAssistant }),
           )
         : React.createElement(
             Static,
@@ -441,13 +441,7 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
             (item) => React.createElement(ScrollbackItem, { key: item.id, item })
           ),
       // Live region (legacy path only — alt path already rendered it inside the inner Box).
-      !altEnabled && state.liveAssistant
-        ? React.createElement(
-            Box,
-            { flexDirection: 'column' },
-            React.createElement(Text, { color: theme.fg }, state.liveAssistant)
-          )
-        : null,
+      altEnabled ? null : React.createElement(LiveRegion, { text: state.liveAssistant }),
       // 3) Slash popup — flex sibling above the StatusBar; Ink can't
       //    absolutely position so this is the "just above input" pattern.
       showSlashPopup

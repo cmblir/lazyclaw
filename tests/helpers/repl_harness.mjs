@@ -4,16 +4,18 @@
 // Why this swaps the whole `process.stdout` OBJECT instead of handing Ink a
 // private stream (what ink-testing-library does):
 //
-//   In production `render(<ReplApp/>)` is called with no stdout option, so Ink
-//   writes to `process.stdout` — the SAME object tui/editor_anchor.mjs
-//   monkey-patches. That patch is the entire compensation mechanism: it
-//   prepends `\x1b[<offset>B\r` to any chunk starting with `\x1b[2K` (Ink's
-//   eraseLines) so the erase walks up from the row Ink expects rather than from
-//   the row the IME cursor anchor parked on. Give Ink a separate stream and the
-//   shim never sees Ink's writes at all — you would get "corruption" that
-//   cannot happen in the real app. So the harness keeps ONE stream: it installs
-//   a fake TTY AS `process.stdout`, and the anchor shim installs itself on top
-//   of that fake exactly as it does on the real stream in production.
+//   In production `render(<ReplApp/>)` mounts Ink on
+//   `makeInkStdout(process.stdout)` — a thin proxy whose `write` forwards to
+//   `process.stdout`, the SAME object tui/editor_anchor.mjs monkey-patches. That
+//   patch is the entire compensation mechanism: it prepends `\x1b[<offset>B\r`
+//   to Ink's frame chunks so the erase walks up from the row Ink expects rather
+//   than from the row the IME cursor anchor parked on, and it hands any write
+//   that BYPASSES Ink to Ink's own writer instead. Give Ink an unrelated stream
+//   and the shim never sees Ink's writes at all — you would get "corruption"
+//   that cannot happen in the real app. So the harness keeps ONE underlying
+//   stream: it installs a fake TTY AS `process.stdout`, mounts Ink on
+//   `makeInkStdout(thatFake)` exactly as production does, and the anchor shim
+//   installs itself on top of the fake as it does on the real stream.
 //
 //   `process.stderr` is faked into the same byte array too, because in a real
 //   terminal stderr lands on the same screen and the bug is an ordering problem
@@ -33,6 +35,7 @@ import { render } from 'ink';
 import React from 'react';
 import { ReplApp } from '../../tui/repl.mjs';
 import { anchorState } from '../../tui/editor_anchor.mjs';
+import { makeInkStdout } from '../../tui/stray_writes.mjs';
 
 function fakeTty(sink, { columns, rows } = {}) {
   const s = new EventEmitter();
@@ -114,12 +117,11 @@ export function mountRepl(props = {}, { columns = 100, rows = 40 } = {}) {
   try {
     instance = render(
       React.createElement(ReplApp, { runTurn: async () => {}, ...props }),
-      // Production options (commands/chat.mjs:332) minus patchConsole, which
-      // would hijack the test runner's console. patchConsole only routes
-      // console.* through Ink's SAFE writeToStdout path anyway — the unsafe
-      // direct `process.stdout.write` callsites this bug is about are
-      // unaffected by it.
-      { stdout, stderr, stdin, exitOnCtrlC: false, patchConsole: false },
+      // Production options (commands/chat.mjs) minus patchConsole, which would
+      // hijack the test runner's console. patchConsole only routes console.*
+      // through Ink's SAFE writeToStdout path anyway — the unsafe direct
+      // `process.stdout.write` callsites this bug is about are unaffected by it.
+      { stdout: makeInkStdout(stdout), stderr, stdin, exitOnCtrlC: false, patchConsole: false },
     );
   } catch (err) {
     restore();
