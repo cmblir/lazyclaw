@@ -10,39 +10,40 @@
 // and when the user opts out with LAZYCLAW_NO_MOTION=1 (the reduced-motion
 // escape hatch). Every animated component must check it.
 //
-// motionEnabled takes (env, stream) as explicit parameters rather than
-// wrapping tui/theme.mjs's colorEnabled(stream), which reads process.env
-// directly. That gate can't be probed with a fake env object, and this
-// package's own tests need to inject LAZYCLAW_NO_MOTION / NO_COLOR / TERM
-// without mutating the real process.env — so the two gates share logic by
-// eye, not by delegation.
+// motionEnabled(env, stream) delegates its three shared checks (NO_COLOR,
+// TERM==='dumb', !stream.isTTY) to tui/theme.mjs's colorEnabled(env, stream)
+// and layers only LAZYCLAW_NO_MOTION on top. colorEnabled takes an injectable
+// `env` (defaulting to process.env) for exactly this reason, so the two gates
+// can't silently drift apart — a change to one is a change to both.
 
 import { useState, useEffect } from 'react';
+import { colorEnabled } from './theme.mjs';
 
 export const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 export const SPINNER_MS = 90;
 
 export function spinnerFrame(tick) {
   const n = SPINNER_FRAMES.length;
-  // Negative ticks (clock skew, a reset race) clamp to frame 0 rather than
-  // wrapping backward into the tail of the cycle — a defensive floor, not a
-  // circular wrap.
-  const i = Math.max(0, Math.trunc(tick)) % n;
+  // Non-finite ticks (NaN, ±Infinity, non-numeric input) and negative ticks
+  // (clock skew, a reset race) all clamp to frame 0 rather than wrapping
+  // backward into the tail of the cycle or falling through to `undefined` —
+  // a defensive floor, not a circular wrap.
+  const t = Number.isFinite(tick) ? Math.trunc(tick) : 0;
+  const i = Math.max(0, t) % n;
   return SPINNER_FRAMES[i];
 }
 
 export function motionEnabled(env = process.env, stream = process.stdout) {
   if (!env || env.LAZYCLAW_NO_MOTION === '1') return false;
-  if (env.NO_COLOR) return false;
-  if (env.TERM === 'dumb') return false;
-  if (!stream || !stream.isTTY) return false;
-  return true;
+  return colorEnabled(env, stream);
 }
 
 // Elapsed turn time. Seconds under a minute, zero-padded m/s above, so the
 // status row's width stays stable as a turn runs long.
 export function formatElapsed(ms) {
-  const total = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+  const n = Number(ms);
+  const safe = Number.isFinite(n) ? n : 0;
+  const total = Math.max(0, Math.floor(safe / 1000));
   if (total < 60) return `${total}s`;
   const m = Math.floor(total / 60);
   const s = total % 60;
@@ -50,23 +51,30 @@ export function formatElapsed(ms) {
 }
 
 export function tween(from, to, progress) {
+  const f = Number.isFinite(Number(from)) ? Number(from) : 0;
+  const t = Number.isFinite(Number(to)) ? Number(to) : 0;
   const p = Math.min(1, Math.max(0, Number(progress) || 0));
-  return from + (to - from) * p;
+  return f + (t - f) * p;
 }
 
 // How many rows of a stacked banner are visible `elapsedMs` into a reveal.
 export function revealRows(elapsedMs, totalRows, durationMs) {
-  if (totalRows <= 0) return 0;
-  if (!durationMs || durationMs <= 0) return totalRows;
-  const p = Math.min(1, Math.max(0, elapsedMs / durationMs));
-  return Math.min(totalRows, Math.round(p * totalRows));
+  const total = Number.isFinite(totalRows) ? totalRows : 0;
+  if (total <= 0) return 0;
+  const duration = Number.isFinite(durationMs) ? durationMs : 0;
+  if (duration <= 0) return total;
+  const elapsed = Number.isFinite(elapsedMs) ? elapsedMs : 0;
+  const p = Math.min(1, Math.max(0, elapsed / duration));
+  return Math.min(total, Math.round(p * total));
 }
 
 // Palette index for row `rowIndex` at animation `tick` — a diagonal sweep, so
 // the highlight travels down the wordmark instead of flashing it uniformly.
 export function shimmerIndex(rowIndex, tick, paletteLength) {
-  const n = Math.max(1, paletteLength);
-  return (((rowIndex + tick) % n) + n) % n;
+  const n = Number.isFinite(paletteLength) ? Math.max(1, Math.trunc(paletteLength)) : 1;
+  const row = Number.isFinite(rowIndex) ? Math.trunc(rowIndex) : 0;
+  const t = Number.isFinite(tick) ? Math.trunc(tick) : 0;
+  return (((row + t) % n) + n) % n;
 }
 
 // One interval per animated component, torn down the moment it goes inactive.
