@@ -435,7 +435,7 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
             // Live region — partial assistant stream (inside the scroll
             // region so it grows naturally above the status bar).
             React.createElement(LiveRegion, { text: state.liveAssistant }),
-            React.createElement(Thinking, { active: state.streaming && !state.liveAssistant }),
+            React.createElement(Thinking, { active: state.streaming && !state.hasStreamedContent }),
           )
         : React.createElement(
             Static,
@@ -444,7 +444,7 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
           ),
       // Live region (legacy path only — alt path already rendered it inside the inner Box).
       altEnabled ? null : React.createElement(LiveRegion, { text: state.liveAssistant }),
-      altEnabled ? null : React.createElement(Thinking, { active: state.streaming && !state.liveAssistant }),
+      altEnabled ? null : React.createElement(Thinking, { active: state.streaming && !state.hasStreamedContent }),
       // 3) Slash popup — flex sibling above the StatusBar; Ink can't
       //    absolutely position so this is the "just above input" pattern.
       showSlashPopup

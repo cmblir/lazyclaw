@@ -31,6 +31,12 @@ export function makeReplState(opts) {
     // When the current turn started (Date.now()), or null while idle. Feeds
     // the StatusBar's elapsed-time readout; cleared on every path back to idle.
     streamStartedAt: null,
+    // Latches true on the turn's first chunk, cleared on every path back to
+    // idle. liveAssistant is a partial-LINE buffer (onStreamChunk empties it
+    // whenever a chunk ends on a newline) so it is unsafe as a "has anything
+    // arrived yet" signal — it goes back to '' mid-turn while content the
+    // user can already see sits in scrollback. This flag is the real signal.
+    hasStreamedContent: false,
   };
 }
 
@@ -48,6 +54,7 @@ export function onUserInput(state, { text, controller }) {
     streaming: true,
     controller,
     streamStartedAt: Date.now(),
+    hasStreamedContent: false,
     history: [...state.history, text],
     scrollback: [...state.scrollback, { kind: 'user', id, text }],
     turnCounter: state.turnCounter + 1,
@@ -67,6 +74,7 @@ export function onEscape(state) {
     pendingPrepend: null,
     liveAssistant: '',
     streamStartedAt: null,
+    hasStreamedContent: false,
   };
 }
 
@@ -80,7 +88,7 @@ export function onEscape(state) {
 export function onStreamChunk(state, { chunk }) {
   const buf = state.liveAssistant + chunk;
   const nl = buf.lastIndexOf('\n');
-  if (nl < 0) return { ...state, liveAssistant: buf };
+  if (nl < 0) return { ...state, liveAssistant: buf, hasStreamedContent: true };
   const complete = buf.slice(0, nl);          // one or more whole lines
   const remainder = buf.slice(nl + 1);        // trailing partial (may be '')
   const id = `as-${state.turnCounter}-${state.scrollback.length}`;
@@ -88,6 +96,7 @@ export function onStreamChunk(state, { chunk }) {
     ...state,
     scrollback: [...state.scrollback, { kind: 'assistant', id, text: complete }],
     liveAssistant: remainder,
+    hasStreamedContent: true,
   };
 }
 
@@ -115,6 +124,7 @@ export function onTurnComplete(state, { reason, error } = {}) {
     scrollback: nextScrollback,
     turnCounter: state.turnCounter + 1,
     streamStartedAt: null,
+    hasStreamedContent: false,
   };
 }
 

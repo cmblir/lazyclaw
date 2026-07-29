@@ -23,6 +23,7 @@ export function onConversationReset(state) {
     scrollback: splash ? [splash] : [],
     generation: (state.generation || 0) + 1,
     streamStartedAt: null,
+    hasStreamedContent: false,
   };
 }
 
