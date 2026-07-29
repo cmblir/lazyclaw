@@ -170,6 +170,16 @@ test('serviceStatus fallback: JSON without a usable pid is treated as no pid', (
   assert.equal(st.pid, null);
 });
 
+test('serviceStatus fallback: JSON with pid as a numeric string still reads that pid', () => {
+  // Not a shape either writer produces today, but the reader coerces it, so pin
+  // the behaviour rather than leaving it to be rediscovered by probing.
+  const d = fakeDeps();
+  d.files.set('/home/u/.lazyclaw/daemon.pid', JSON.stringify({ pid: '4242', port: 19600 }));
+  const st = serviceStatus({ ...SPEC, backend: 'fallback', home: '/home/u' }, { ...d, isAlive: (pid) => pid === 4242 });
+  assert.equal(st.running, true);
+  assert.equal(st.pid, 4242);
+});
+
 test('uninstallService fallback: a {"pid":N,"port":P} file kills pid N', () => {
   const d = fakeDeps();
   d.files.set('/home/u/.lazyclaw/daemon.pid', JSON.stringify({ pid: 4242, port: 19600 }));
