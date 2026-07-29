@@ -34,17 +34,17 @@
 //
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Box, Static, Text, useApp, useStdout } from 'ink';
-import { Splash, renderSplashToString } from './splash.mjs';
+import { renderSplashToString } from './splash.mjs';
 import { Editor } from './editor.mjs';
 import { SlashPopup, filterSlashCommands } from './slash_popup.mjs';
 import { SLASH_COMMANDS } from './slash_commands.mjs';
 import { argSpecFor } from './slash_args.mjs';
 import { ModalPicker, filterModalItems, resolveModalPick } from './modal_picker.mjs';
-import { theme } from './theme.mjs';
 import { LiveRegion } from './live_region.mjs';
 import { Thinking } from './thinking.mjs';
 import { setInkWriter } from './stray_writes.mjs';
 import { StatusBar } from './status_bar.mjs';
+import { ScrollbackItem } from './scrollback_item.mjs'; export { ScrollbackItem };
 import { onConversationReset, clearTerminalScreen } from './repl_reset.mjs'; export { StatusBar };
 // Alt-buffer (DEC 1049) mount cluster moved to ./repl_altbuffer.mjs and pure
 // state reducers moved to ./repl_reducers.mjs (file-size gate). Re-exported so
@@ -533,31 +533,8 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
   );
 }
 
-// ScrollbackItem renders each scrollback child. Splash renders via the real
-// <Splash/> component (preserves gradient wordmark colorization); everything
-// else is plain Text.
-//
-// Wrapped in React.memo: scrollback item objects are stable across renders,
-// so when only the editor buffer changes (every keystroke) the memo skips
-// re-rendering every committed line. Without this the whole alt-buffer
-// scrollback re-rendered on each keypress — the source of the typing flicker.
-export const ScrollbackItem = React.memo(function ScrollbackItem({ item }) {
-  if (item.kind === 'splash') {
-    return React.createElement(Splash, item.splashProps);
-  }
-  if (item.kind === 'user') {
-    return React.createElement(
-      Box,
-      { flexDirection: 'column' },
-      React.createElement(Text, null, theme.accent('› ') + item.text)
-    );
-  }
-  if (item.kind === 'error') {
-    return React.createElement(Text, { color: 'red' }, item.text);
-  }
-  // 'assistant' (default)
-  return React.createElement(Text, { color: theme.fg }, item.text);
-});
+// ScrollbackItem moved to ./scrollback_item.mjs (re-exported above) so it can
+// grow without pushing repl.mjs over the file-size ratchet.
 
 // StatusBar moved to ./status_bar.mjs (re-exported above) so the HUD row can
 // grow without pushing repl.mjs over the file-size ratchet.
