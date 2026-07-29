@@ -42,6 +42,7 @@ import { argSpecFor } from './slash_args.mjs';
 import { ModalPicker, filterModalItems, resolveModalPick } from './modal_picker.mjs';
 import { theme } from './theme.mjs';
 import { LiveRegion } from './live_region.mjs';
+import { Thinking } from './thinking.mjs';
 import { setInkWriter } from './stray_writes.mjs';
 import { StatusBar } from './status_bar.mjs';
 import { onConversationReset, clearTerminalScreen } from './repl_reset.mjs'; export { StatusBar };
@@ -434,6 +435,7 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
             // Live region — partial assistant stream (inside the scroll
             // region so it grows naturally above the status bar).
             React.createElement(LiveRegion, { text: state.liveAssistant }),
+            React.createElement(Thinking, { active: state.streaming && !state.liveAssistant }),
           )
         : React.createElement(
             Static,
@@ -442,6 +444,7 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
           ),
       // Live region (legacy path only — alt path already rendered it inside the inner Box).
       altEnabled ? null : React.createElement(LiveRegion, { text: state.liveAssistant }),
+      altEnabled ? null : React.createElement(Thinking, { active: state.streaming && !state.liveAssistant }),
       // 3) Slash popup — flex sibling above the StatusBar; Ink can't
       //    absolutely position so this is the "just above input" pattern.
       showSlashPopup
