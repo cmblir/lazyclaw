@@ -19,6 +19,24 @@ import {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Poll until `predicate()` is true, instead of sleeping a fixed duration and
+// hoping the condition landed by then. A fixed sleep either wastes time (the
+// common case) or, under CPU contention (e.g. a busy full-suite run), doesn't
+// wait long enough and produces a flaky failure — the condition here (a real
+// timer tick landing, a React passive effect flushing) has no fixed latency.
+// The deadline is generous relative to the 10-20ms intervals under test, so a
+// timeout only fires for a genuine regression, not scheduling noise.
+async function pollUntil(predicate, { timeoutMs = 2000, intervalMs = 5, message } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (predicate()) return;
+    if (Date.now() >= deadline) {
+      throw new Error(message || `condition not met within ${timeoutMs}ms`);
+    }
+    await sleep(intervalMs);
+  }
+}
+
 test('spinnerFrame cycles through the frames and wraps', () => {
   assert.equal(SPINNER_FRAMES.length, 10);
   assert.equal(spinnerFrame(0), SPINNER_FRAMES[0]);
@@ -127,14 +145,37 @@ function withIntervalSpy(fn) {
   const realSetInterval = global.setInterval;
   const realClearInterval = global.clearInterval;
   const calls = { created: 0, cleared: 0 };
-  global.setInterval = (...args) => { calls.created += 1; return realSetInterval(...args); };
-  global.clearInterval = (id) => { calls.cleared += 1; return realClearInterval(id); };
+  // Track every interval ID our stub hands out, dropping it once the code
+  // under test clears it. If useMotion's own cleanup ever regresses, this
+  // set is how we notice: the ID for the leaked interval simply never gets
+  // removed.
+  const outstanding = new Set();
+  global.setInterval = (...args) => {
+    calls.created += 1;
+    const id = realSetInterval(...args);
+    outstanding.add(id);
+    return id;
+  };
+  global.clearInterval = (id) => {
+    calls.cleared += 1;
+    outstanding.delete(id);
+    return realClearInterval(id);
+  };
   return (async () => {
     try {
       return await fn(calls);
     } finally {
       global.setInterval = realSetInterval;
       global.clearInterval = realClearInterval;
+      // Restoring the globals above does NOT clear intervals that are
+      // already scheduled — a real leaked interval would otherwise keep
+      // Node's event loop alive and hang `node --test` instead of just
+      // failing it. This runs after `fn(calls)` has returned or thrown, so
+      // the assertions inside it (which is where a leak would be caught as
+      // a genuine failure) have already had their say; this force-clear
+      // only exists to stop that failure from also hanging the process.
+      for (const id of outstanding) realClearInterval(id);
+      outstanding.clear();
     }
   })();
 }
@@ -154,7 +195,9 @@ test('useMotion owns exactly one interval while active', async () => {
   await withIntervalSpy(async (calls) => {
     const { lastFrame, unmount } = render(React.createElement(Probe, { active: true, intervalMs: 10 }));
     try {
-      await sleep(45);
+      await pollUntil(() => Number(lastFrame()) > 0, {
+        message: `tick never advanced while active, got ${lastFrame()}`,
+      });
       assert.equal(calls.created, 1, 'exactly one setInterval while active');
       assert.equal(calls.cleared, 0, 'not cleared while still active and mounted');
       assert.ok(Number(lastFrame()) > 0, `tick should have advanced, got ${lastFrame()}`);
@@ -171,11 +214,15 @@ test('useMotion tears down its interval when active flips to false', async () =>
   await withIntervalSpy(async (calls) => {
     const { rerender, lastFrame, unmount } = render(React.createElement(Probe, { active: true, intervalMs: 10 }));
     try {
-      await sleep(35);
+      await pollUntil(() => Number(lastFrame()) > 0, {
+        message: `tick never advanced while active, got ${lastFrame()}`,
+      });
       assert.ok(Number(lastFrame()) > 0, 'sanity: ticking while active');
       rerender(React.createElement(Probe, { active: false, intervalMs: 10 }));
       await flushEffects();
-      await sleep(10);
+      await pollUntil(() => calls.cleared === 1, {
+        message: `interval was never cleared after active flipped to false, cleared=${calls.cleared}`,
+      });
       assert.equal(calls.created, 1, 'no new interval is created after going inactive');
       assert.equal(calls.cleared, 1, 'the interval is cleared the moment active goes false');
       assert.equal(lastFrame(), '0', 'tick resets to 0 while inactive');
@@ -189,7 +236,12 @@ test('useMotion tears down its interval when active flips to false', async () =>
 test('useMotion tears down its interval on unmount', async () => {
   await withIntervalSpy(async (calls) => {
     const { unmount } = render(React.createElement(Probe, { active: true, intervalMs: 10 }));
-    await sleep(20);
+    // Wait for the mount effect to actually run (i.e. the interval to exist)
+    // before unmounting, so this test exercises "unmount while running"
+    // rather than racing the mount effect itself.
+    await pollUntil(() => calls.created === 1, {
+      message: `mount effect never ran (interval never created), created=${calls.created}`,
+    });
     unmount();
     await flushEffects();
     assert.equal(calls.created, 1);
@@ -201,12 +253,16 @@ test('useMotion swaps the interval when intervalMs changes without resetting the
   await withIntervalSpy(async (calls) => {
     const { rerender, lastFrame, unmount } = render(React.createElement(Probe, { active: true, intervalMs: 10 }));
     try {
-      await sleep(45);
+      await pollUntil(() => Number(lastFrame()) > 0, {
+        message: `tick never advanced before the interval swap, got ${lastFrame()}`,
+      });
       const before = Number(lastFrame());
       assert.ok(before > 0, 'tick should have advanced before the interval swap');
       rerender(React.createElement(Probe, { active: true, intervalMs: 20 }));
       await flushEffects();
-      await sleep(5);
+      await pollUntil(() => calls.created === 2 && calls.cleared === 1, {
+        message: `interval swap never completed, created=${calls.created} cleared=${calls.cleared}`,
+      });
       assert.equal(calls.created, 2, 'a new interval is created for the new intervalMs');
       assert.equal(calls.cleared, 1, 'the old interval is cleared before the new one starts');
       assert.ok(Number(lastFrame()) >= before, 'the tick keeps counting up — the swap does not reset it');
