@@ -88,6 +88,19 @@ test('start spawns a detached gateway and waits for it to come up', async () => 
   assert.match(out, /pid 900/);
 });
 
+test('start reports a spawn that fails outright', async () => {
+  // Distinct from "spawned but never came up": here the child never starts at
+  // all (bad node path, EACCES, EMFILE). The handler must report it rather than
+  // sit through the 6s start poll waiting for something that will never exist.
+  const out = await gatewaySlash('start', ctx, {
+    status: () => ({ running: false, pid: null, port: null }),
+    spawn: () => { throw new Error('EACCES: permission denied'); },
+    sleep: async () => { throw new Error('must not poll after a failed spawn'); },
+  });
+  assert.match(out, /could not spawn/);
+  assert.match(out, /EACCES/);
+});
+
 test('start reports a gateway that never came up instead of hanging', async () => {
   const out = await gatewaySlash('start', ctx, {
     status: () => ({ running: false, pid: null, port: null }),
