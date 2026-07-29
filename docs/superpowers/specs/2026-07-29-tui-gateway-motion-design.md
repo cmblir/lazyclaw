@@ -64,22 +64,28 @@ Symptom: multiple `○ idle claude-cli · claude-opus-5 ctx --` rows and a
 detached editor top-border pile up above the live frame on the primary
 buffer.
 
-This is an Ink erase mismatch: Ink repaints the live frame by cursor-up +
-erase of the previous frame's height; anything that breaks that count
-leaves orphaned rows. Candidate causes, to be confirmed by reproduction
-first (systematic-debugging):
+This is an Ink erase mismatch. Verified by reading
+`node_modules/ink/build/{ink,log-update}.js`: Ink repaints by walking the
+cursor UP `previousLineCount` rows from wherever the cursor currently is,
+and `tui/editor.mjs:373-378` deliberately parks the cursor up inside the
+editor box after every commit (for CJK/Hangul IME pre-edit).
+`tui/editor_anchor.mjs` compensates for that only when a chunk begins with
+`\x1b[2K`. Every Ink write path in 5.2.1 does call `log.clear()` first, so
+the compensation usually fires — **the exact trigger is not yet proven.**
+Candidate causes, to be confirmed by reproduction first:
 
-1. Writes to stdout that bypass Ink while the REPL is mounted (background
-   loop/goal ticks, channel/gateway logs, stray `console.log` in host
-   code). Ink can't erase lines it didn't draw.
-2. Live frame height exceeding terminal rows in non-alt mode (slash popup
-   + status bar + editor + hints) — rows scroll off and can't be erased.
-3. The editor cursor re-anchor writes (`tui/editor.mjs:373-378`) running
-   outside the alt-buffer path and desyncing Ink's cursor bookkeeping.
+1. Writes that bypass Ink while the REPL is mounted — `commands/chat.mjs`
+   hands the slash dispatcher a callback that writes straight to
+   `process.stdout`, and background loop/cron code can write to
+   `process.stderr`. Ink can't erase lines it didn't draw.
+2. Live frame height reaching terminal rows, which switches Ink to its
+   `clearTerminal + fullStaticOutput` branch.
+3. The interleaving of `log` and `throttledLog` around a `<Static>` append.
 
-Fix by confirmed cause: route host/background writes through the Ink
-`writeFn`/`patchConsole`, clamp popup + live-region height to the
-terminal, and/or guard the anchor writes to alt mode only. Acceptance:
+The reproduction instrument is a VT100 screen model fed by one ordered
+byte log containing both Ink's writes and the anchor's writes. Fix by
+confirmed cause; the anchor shim is additionally hardened to compensate
+before *any* foreign write, which closes the whole class. Acceptance:
 typing `/…` (popup open/close), long streamed replies, background loop
 ticks, and window resize produce zero duplicated rows.
 
@@ -105,14 +111,14 @@ tests unaffected.
    gradient sweeps once for ~1.5 s (palette offset cycling per row,
    `tui/wordmark.mjs` palette), then settles to the static gradient.
 
-   Mechanism note (non-alt path): `<Static>` output is write-once, so a
-   splash inside it cannot animate. During the animation window
-   (~2.3 s at startup, and again after a `/clear` remount) the splash
-   renders as a live flex child; when the animation settles, the final
-   static splash is committed to scrollback and the live copy unmounts in
-   the same commit. The two renders are identical, so the swap is
-   seamless; if it flickers in practice, the fallback is animating in the
-   alt-buffer path only and keeping the primary buffer static.
+   Mechanism (revised during planning): `<Static>` output is write-once,
+   so a splash rendered through it cannot animate, and swapping a live
+   splash for a static copy mid-flight is the same erase/cursor desync
+   class as W3. Instead the intro plays **before Ink mounts**, writing
+   frames to a screen it owns outright, then clears and hands over.
+   Consequence: the intro plays at **startup only**, not after `/clear`
+   (`/clear` re-prints the settled splash per W2). Budget ~1.15 s total
+   (350 ms reveal + 800 ms shimmer), skipped entirely when motion is off.
 4. **Thinking indicator** — between submit and the first stream chunk, the
    live region shows `⠋ thinking…` (same spinner frames). Disappears on
    first chunk.
