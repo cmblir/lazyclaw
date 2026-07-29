@@ -72,10 +72,10 @@ async function _status(cfgDir, cfg, d) {
   const channels = _enabledChannels(cfg);
   return [
     'gateway: running',
-    `  pid ${st.pid}`,
-    `  url: http://127.0.0.1:${st.port}`,
-    `  health: ${health}`,
-    `  auth: ${token ? 'token present (gateway.token)' : 'no token file — open loopback'}`,
+    `  pid:      ${st.pid}`,
+    `  url:      http://127.0.0.1:${st.port}`,
+    `  health:   ${health}`,
+    `  auth:     ${token ? 'token present (gateway.token)' : 'no token file — open loopback'}`,
     `  channels: ${channels.length ? channels.join(' · ') : '(none enabled — daemon core only)'}`,
   ].join('\n');
 }

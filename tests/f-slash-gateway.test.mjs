@@ -35,7 +35,7 @@ test('status reports a running gateway with health, port and channels', async ()
     },
   });
   assert.match(out, /running/);
-  assert.match(out, /pid 4242/);
+  assert.match(out, /pid:\s+4242/);
   assert.match(out, /19600/);
   assert.match(out, /healthy/);
   assert.match(out, /slack/);
