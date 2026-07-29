@@ -54,6 +54,7 @@ import { _dashboard, parseDashboardUrl } from './slash_dashboard.mjs';
 import { _channels, _context } from './slash_channels.mjs';
 import { _trainer } from './slash_trainer.mjs';
 import { _help, _status, _version, _usage } from './slash_basics.mjs';
+import { gatewaySlash } from './slash_gateway.mjs';
 
 // Re-export so callers/tests that import parseDashboardUrl from this module
 // (the dispatcher was its original home) keep resolving after the extraction.
@@ -1311,6 +1312,7 @@ export const SLASH_HANDLERS = new Map([
   ['/task', _task],
   ['/trainer', _trainer],
   ['/dashboard', _dashboard],
+  ['/gateway', gatewaySlash],
   ['/menu', _menu],
   ['/channels', _channels],
   ['/orchestrator', orchestratorSlash],
