@@ -1,0 +1,279 @@
+// tests/f-stream-started-at.test.mjs — pins the streamStartedAt reducer
+// lifecycle end to end. This field is set by onUserInput's idle branch
+// (tui/repl_reducers.mjs) and cleared on every path back to idle: turn
+// completion, Esc, and a full conversation reset (tui/repl_reset.mjs).
+// It lives in its own file rather than being folded into an existing test
+// file because the invariant spans two separate reducer modules
+// (repl_reducers.mjs + repl_reset.mjs) and no existing test file's stated
+// scope (interrupt handling, /new-clear, status-bar rendering, ...) covers
+// that cross-module lifecycle without blurring its own single responsibility.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { makeReplState, onUserInput, onEscape, onTurnComplete, onStreamChunk } from '../tui/repl_reducers.mjs';
+import { onConversationReset } from '../tui/repl_reset.mjs';
+
+test('makeReplState starts streamStartedAt null, with or without a splash item', () => {
+  assert.equal(makeReplState().streamStartedAt, null);
+  const splashItem = { kind: 'splash', id: 'splash-0', splashProps: {} };
+  assert.equal(makeReplState({ splashItem }).streamStartedAt, null);
+});
+
+test("onUserInput's idle branch sets streamStartedAt to a finite time close to now", () => {
+  const before = Date.now();
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  const after = Date.now();
+  assert.ok(Number.isFinite(s.streamStartedAt), `expected a finite timestamp, got: ${s.streamStartedAt}`);
+  assert.ok(s.streamStartedAt >= before && s.streamStartedAt <= after,
+    `expected streamStartedAt in [${before}, ${after}], got: ${s.streamStartedAt}`);
+});
+
+test('onTurnComplete clears streamStartedAt back to null', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  assert.notEqual(s.streamStartedAt, null);
+  s = onTurnComplete(s, { reason: 'done' });
+  assert.equal(s.streamStartedAt, null);
+});
+
+test('onEscape clears streamStartedAt back to null', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  assert.notEqual(s.streamStartedAt, null);
+  s = onEscape(s);
+  assert.equal(s.streamStartedAt, null);
+});
+
+test('onConversationReset clears streamStartedAt back to null', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  assert.notEqual(s.streamStartedAt, null);
+  s = onConversationReset(s);
+  assert.equal(s.streamStartedAt, null);
+});
+
+test("a mid-stream interrupt does NOT overwrite the in-flight turn's streamStartedAt", () => {
+  // While streaming (state.streaming && state.controller truthy), onUserInput
+  // takes the interrupt branch — abort + queue pendingPrepend — and returns
+  // `{ ...state, pendingPrepend: text }`. It spreads the existing state and
+  // only overrides pendingPrepend, so streamStartedAt is left exactly as-is;
+  // the original turn's clock keeps running until that turn actually ends.
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'first task', controller: { abort: () => {} } });
+  const startedAt = s.streamStartedAt;
+  assert.notEqual(startedAt, null);
+
+  s = onUserInput(s, { text: 'oh wait, do this instead', controller: { abort: () => {} } });
+  assert.equal(s.streamStartedAt, startedAt, 'the interrupt branch must not touch streamStartedAt');
+  assert.equal(s.pendingPrepend, 'oh wait, do this instead');
+});
+
+// hasStreamedContent lifecycle — a per-turn latch, not a read of the
+// transient liveAssistant buffer. onStreamChunk flushes completed lines to
+// scrollback and empties liveAssistant on every newline boundary, so
+// `!liveAssistant` alone is true both before the first chunk AND after any
+// line-terminated chunk mid-turn. hasStreamedContent latches on and stays on
+// once *any* chunk has arrived, regardless of what liveAssistant looks like
+// afterward.
+
+test('makeReplState starts hasStreamedContent false', () => {
+  assert.equal(makeReplState().hasStreamedContent, false);
+});
+
+test("onUserInput's idle branch starts each new turn with hasStreamedContent false", () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  assert.equal(s.hasStreamedContent, false);
+});
+
+test('onStreamChunk sets hasStreamedContent true on the first chunk', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onStreamChunk(s, { chunk: 'partial, no newline yet' });
+  assert.equal(s.hasStreamedContent, true);
+});
+
+test('regression guard: hasStreamedContent stays true after a line-terminated chunk empties liveAssistant', () => {
+  // This is the whole point of the flag. A chunk ending in '\n' flushes the
+  // completed line to scrollback and resets liveAssistant to '' (see
+  // onStreamChunk), which would make a naive `!liveAssistant` check flip back
+  // to true — reactivating the thinking indicator underneath text the user
+  // can already read. hasStreamedContent must NOT reset here.
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onStreamChunk(s, { chunk: 'first line\n' });
+  assert.equal(s.liveAssistant, '', 'sanity check: the newline flush really does empty liveAssistant');
+  assert.equal(s.hasStreamedContent, true, 'hasStreamedContent must survive the newline flush');
+});
+
+test('onTurnComplete clears hasStreamedContent back to false', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onStreamChunk(s, { chunk: 'reply\n' });
+  assert.equal(s.hasStreamedContent, true);
+  s = onTurnComplete(s, { reason: 'done' });
+  assert.equal(s.hasStreamedContent, false);
+});
+
+test('onEscape clears hasStreamedContent back to false', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onStreamChunk(s, { chunk: 'reply\n' });
+  assert.equal(s.hasStreamedContent, true);
+  s = onEscape(s);
+  assert.equal(s.hasStreamedContent, false);
+});
+
+test('onConversationReset clears hasStreamedContent back to false', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onStreamChunk(s, { chunk: 'reply\n' });
+  assert.equal(s.hasStreamedContent, true);
+  s = onConversationReset(s);
+  assert.equal(s.hasStreamedContent, false);
+});
+
+test("a mid-stream interrupt does NOT touch the in-flight turn's hasStreamedContent", () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'first task', controller: { abort: () => {} } });
+  s = onStreamChunk(s, { chunk: 'partial' });
+  assert.equal(s.hasStreamedContent, true);
+
+  s = onUserInput(s, { text: 'oh wait, do this instead', controller: { abort: () => {} } });
+  assert.equal(s.hasStreamedContent, true, 'the interrupt branch must not touch hasStreamedContent');
+  assert.equal(s.pendingPrepend, 'oh wait, do this instead');
+});
+
+// liveCharCount lifecycle — total characters streamed THIS turn, feeding the
+// HUD's live rate meter (tui/hud.mjs formatRate, tui/status_bar.mjs). Same
+// per-turn latch/reset shape as hasStreamedContent above, and for the same
+// reason it can't be read off liveAssistant.length: onStreamChunk truncates
+// liveAssistant back to the trailing partial line on every newline, so that
+// buffer's length alone would make the rate collapse toward zero every time a
+// line break lands mid-turn.
+
+test('makeReplState starts liveCharCount at 0', () => {
+  assert.equal(makeReplState().liveCharCount, 0);
+});
+
+test("onUserInput's idle branch starts each new turn with liveCharCount 0", () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  assert.equal(s.liveCharCount, 0);
+});
+
+test('onStreamChunk accumulates chunk lengths across the whole turn, surviving newline flushes', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onStreamChunk(s, { chunk: 'first line\n' }); // 11 chars, flushes to scrollback
+  assert.equal(s.liveAssistant, '', 'sanity check: the newline flush really does empty liveAssistant');
+  assert.equal(s.liveCharCount, 11, 'liveCharCount must NOT reset when liveAssistant is flushed');
+  s = onStreamChunk(s, { chunk: 'second' }); // +6 chars, no newline yet
+  assert.equal(s.liveCharCount, 17);
+});
+
+test('onTurnComplete clears liveCharCount back to 0', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onStreamChunk(s, { chunk: 'reply\n' });
+  assert.equal(s.liveCharCount, 6);
+  s = onTurnComplete(s, { reason: 'done' });
+  assert.equal(s.liveCharCount, 0);
+});
+
+test('onEscape clears liveCharCount back to 0', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onStreamChunk(s, { chunk: 'reply\n' });
+  assert.equal(s.liveCharCount, 6);
+  s = onEscape(s);
+  assert.equal(s.liveCharCount, 0);
+});
+
+test('onConversationReset clears liveCharCount back to 0', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onStreamChunk(s, { chunk: 'reply\n' });
+  assert.equal(s.liveCharCount, 6);
+  s = onConversationReset(s);
+  assert.equal(s.liveCharCount, 0);
+});
+
+test("a mid-stream interrupt does NOT touch the in-flight turn's liveCharCount", () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'first task', controller: { abort: () => {} } });
+  s = onStreamChunk(s, { chunk: 'partial' });
+  assert.equal(s.liveCharCount, 7);
+
+  s = onUserInput(s, { text: 'oh wait, do this instead', controller: { abort: () => {} } });
+  assert.equal(s.liveCharCount, 7, 'the interrupt branch must not touch liveCharCount');
+  assert.equal(s.pendingPrepend, 'oh wait, do this instead');
+});
+
+// lastErrorAt lifecycle — Date.now() of the most recent failed turn, or null.
+// Same per-turn latch/clear shape as the fields above: set only by
+// onTurnComplete when reason === 'error', cleared on every other path back
+// to idle (a new turn, Esc, or a full conversation reset). Feeds the input
+// border's flash (tui/motion.mjs flashBorderColor) so a failure stays
+// visible even after its error text has scrolled out of view.
+
+test('makeReplState starts lastErrorAt null', () => {
+  assert.equal(makeReplState().lastErrorAt, null);
+});
+
+test("onUserInput's idle branch starts each new turn with lastErrorAt null", () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onTurnComplete(s, { reason: 'error', error: 'boom' });
+  assert.ok(typeof s.lastErrorAt === 'number' && s.lastErrorAt > 0);
+  // A brand new turn must not start with a stale flash from the previous failure.
+  s = onUserInput(s, { text: 'try again', controller: { abort: () => {} } });
+  assert.equal(s.lastErrorAt, null);
+});
+
+test('onTurnComplete sets lastErrorAt on error and clears it on success', () => {
+  const before = Date.now();
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onTurnComplete(s, { reason: 'error', error: 'boom' });
+  const after = Date.now();
+  assert.ok(Number.isFinite(s.lastErrorAt), `expected a finite timestamp, got: ${s.lastErrorAt}`);
+  assert.ok(s.lastErrorAt >= before && s.lastErrorAt <= after,
+    `expected lastErrorAt in [${before}, ${after}], got: ${s.lastErrorAt}`);
+
+  s = onUserInput(s, { text: 'hi again', controller: { abort: () => {} } });
+  s = onTurnComplete(s, { reason: 'done' });
+  assert.equal(s.lastErrorAt, null, 'a successful turn clears the flash');
+});
+
+test('onEscape clears lastErrorAt back to null (an abort is not an error)', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onTurnComplete(s, { reason: 'error', error: 'boom' });
+  assert.notEqual(s.lastErrorAt, null);
+  // Simulate the flash carrying over into a later turn that is then aborted.
+  s = onUserInput(s, { text: 'retry', controller: { abort: () => {} } });
+  s = { ...s, lastErrorAt: Date.now() }; // pretend a stale flash is still set
+  s = onEscape(s);
+  assert.equal(s.lastErrorAt, null);
+});
+
+test('onConversationReset clears lastErrorAt back to null', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onTurnComplete(s, { reason: 'error', error: 'boom' });
+  assert.notEqual(s.lastErrorAt, null);
+  s = onConversationReset(s);
+  assert.equal(s.lastErrorAt, null);
+});
+
+test("a mid-stream interrupt does NOT touch the in-flight turn's lastErrorAt", () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'first task', controller: { abort: () => {} } });
+  // Pretend a flash is somehow still set on the in-flight turn's state.
+  s = { ...s, lastErrorAt: 12345 };
+
+  s = onUserInput(s, { text: 'oh wait, do this instead', controller: { abort: () => {} } });
+  assert.equal(s.lastErrorAt, 12345, 'the interrupt branch must not touch lastErrorAt');
+  assert.equal(s.pendingPrepend, 'oh wait, do this instead');
+});

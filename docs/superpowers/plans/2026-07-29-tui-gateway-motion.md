@@ -1242,6 +1242,18 @@ Reproducing scenario: <fill in the scenario that failed>"
 
 ### Task 6: Fix the stale rows
 
+> **SUPERSEDED DURING EXECUTION.** Task 5 reproduced the bug and proved the fix below insufficient.
+> Root cause as verified: a foreign write that **ends a line** moves the cursor down N rows while the
+> editor's anchor still believes it is parked N rows higher, so Ink's next `eraseLines` walks up from
+> the wrong baseline and the top N rows of the previous frame survive. No amount of cursor arithmetic
+> in a shim can repair Ink's line accounting after a foreign newline — only Ink's own
+> `writeToStdout` (clear → write → repaint) can. The human approved a redesign: a stray-write adapter
+> that redirects foreign stdout/stderr writes through Ink's writer, using a proxy stdout to tell
+> Ink's own frame traffic apart from foreign writes.
+>
+> **The governing spec for Task 6 is `.superpowers/sdd/<plan>/task-6-brief.md`, not the steps below.**
+> The steps below are retained only as the record of what was originally planned.
+
 Two hardening changes, applied together. Which one is *the* fix depends on the scenario Task 5 reproduced — record that in the commit body. Both are independently correct regardless.
 
 1. `editor_anchor.mjs` only undoes the pending cursor offset for chunks that start with `\x1b[2K` (log-update's `eraseLines` prefix). Any other write — Ink's raw `<Static>` output, `useStdout()` output, or a write from outside Ink entirely — lands at the raised cursor with the offset still pending. Compensating for *every* foreign write closes the whole class instead of one member of it.

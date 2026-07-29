@@ -83,11 +83,26 @@ Candidate causes, to be confirmed by reproduction first:
 3. The interleaving of `log` and `throttledLog` around a `<Static>` append.
 
 The reproduction instrument is a VT100 screen model fed by one ordered
-byte log containing both Ink's writes and the anchor's writes. Fix by
-confirmed cause; the anchor shim is additionally hardened to compensate
-before *any* foreign write, which closes the whole class. Acceptance:
+byte log containing both Ink's writes and the anchor's writes. Acceptance:
 typing `/…` (popup open/close), long streamed replies, background loop
 ticks, and window resize produce zero duplicated rows.
+
+**RESOLVED during execution.** The reproduction landed on suspect (1) and
+sharpened it: the trigger is a foreign write that **ends a line**. Its
+newlines move the cursor down N rows while the anchor still believes the
+cursor is parked N rows higher, so Ink's next `eraseLines` walks up from
+the wrong baseline and the top N rows of the previous frame survive. Each
+bypassing write leaves one more stale row.
+
+That also invalidated the planned fix: no cursor arithmetic in a shim can
+repair Ink's line accounting after a foreign newline. Only Ink's own
+`writeToStdout` (clear the frame → write the text → repaint below it) can.
+The fix is therefore a **stray-write adapter**: Ink renders into a proxy
+stdout that flags its own writes, and the shim redirects everything else —
+stdout and stderr alike — through Ink's registered writer. That makes
+stray writes safe from anywhere, including background loop/cron code, not
+just from the one in-repo caller (`commands/chat.mjs`'s slash callback,
+which is additionally routed into scrollback).
 
 ## W4 — motion package (7 features)
 

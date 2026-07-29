@@ -21,6 +21,11 @@ export function onConversationReset(state) {
     liveAssistant: '',
     history: [],
     scrollback: splash ? [splash] : [],
+    generation: (state.generation || 0) + 1,
+    streamStartedAt: null,
+    hasStreamedContent: false,
+    liveCharCount: 0,
+    lastErrorAt: null,
   };
 }
 

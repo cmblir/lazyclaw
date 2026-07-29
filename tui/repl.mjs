@@ -34,14 +34,18 @@
 //
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Box, Static, Text, useApp, useStdout } from 'ink';
-import { Splash, renderSplashToString } from './splash.mjs';
+import { renderSplashToString } from './splash.mjs';
 import { Editor } from './editor.mjs';
 import { SlashPopup, filterSlashCommands } from './slash_popup.mjs';
 import { SLASH_COMMANDS } from './slash_commands.mjs';
 import { argSpecFor } from './slash_args.mjs';
 import { ModalPicker, filterModalItems, resolveModalPick } from './modal_picker.mjs';
-import { theme } from './theme.mjs';
+import { LiveRegion } from './live_region.mjs';
+import { Thinking } from './thinking.mjs';
+import { isInkStdout, setInkWriter } from './stray_writes.mjs';
+import { installAnchorShim } from './editor_anchor.mjs';
 import { StatusBar } from './status_bar.mjs';
+import { ScrollbackItem } from './scrollback_item.mjs'; export { ScrollbackItem };
 import { onConversationReset, clearTerminalScreen } from './repl_reset.mjs'; export { StatusBar };
 // Alt-buffer (DEC 1049) mount cluster moved to ./repl_altbuffer.mjs and pure
 // state reducers moved to ./repl_reducers.mjs (file-size gate). Re-exported so
@@ -111,6 +115,23 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
     stdout.on('resize', onResize);
     return () => { stdout.off('resize', onResize); };
   }, [stdout]);
+  // Stray writes (slash progress, background loop/cron logs) reach the terminal
+  // without Ink's knowledge and desync its erase bookkeeping into stale rows.
+  // Install the redirecting stdout/stderr shim and register Ink's own writer so
+  // tui/stray_writes.mjs can hand those chunks to Ink's safe write path.
+  //
+  // At mount, NOT from the Editor's cursor-anchor effect that also uses the
+  // shim: that effect opts out on LAZYCLAW_NO_CURSOR_ANCHOR=1, so installing
+  // from there made opting out of the anchor silently disable this redirect too.
+  // Gated on isInkStdout rather than on that env var because the shim patches
+  // the REAL process.stdout/stderr permanently — a mount rendering elsewhere
+  // (ink-testing-library's private stream) would leak the patch process-wide.
+  // See the LEAK WARNING in tests/helpers/motion_gate.mjs.
+  useEffect(() => {
+    if (isInkStdout(stdout)) installAnchorShim();
+    setInkWriter(writeStdout, stdout);
+    return () => setInkWriter(null);
+  }, [writeStdout, stdout]);
 
   // writeFn: route run_turn chunks into React state (factory mode only).
   const writeFn = useCallback((chunk) => {
@@ -427,27 +448,17 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
             ),
             // Live region — partial assistant stream (inside the scroll
             // region so it grows naturally above the status bar).
-            state.liveAssistant
-              ? React.createElement(
-                  Box,
-                  { flexDirection: 'column' },
-                  React.createElement(Text, { color: theme.fg }, state.liveAssistant)
-                )
-              : null,
+            React.createElement(LiveRegion, { text: state.liveAssistant }),
+            React.createElement(Thinking, { active: state.streaming && !state.hasStreamedContent }),
           )
         : React.createElement(
             Static,
-            { items: state.scrollback },
+            { key: `sb-${state.generation}`, items: state.scrollback },
             (item) => React.createElement(ScrollbackItem, { key: item.id, item })
           ),
       // Live region (legacy path only — alt path already rendered it inside the inner Box).
-      !altEnabled && state.liveAssistant
-        ? React.createElement(
-            Box,
-            { flexDirection: 'column' },
-            React.createElement(Text, { color: theme.fg }, state.liveAssistant)
-          )
-        : null,
+      altEnabled ? null : React.createElement(LiveRegion, { text: state.liveAssistant }),
+      altEnabled ? null : React.createElement(Thinking, { active: state.streaming && !state.hasStreamedContent }),
       // 3) Slash popup — flex sibling above the StatusBar; Ink can't
       //    absolutely position so this is the "just above input" pattern.
       showSlashPopup
@@ -491,6 +502,8 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
         ctxUsed: _status.ctxUsed,
         ctxTotal: _status.ctxTotal,
         hud: _status.hud,
+        streamStartedAt: state.streamStartedAt,
+        liveChars: state.liveCharCount,
       }),
       // 5) Editor — sticky bottom, content-sized. Wrapped in a flexShrink:0
       //    Box so Yoga doesn't squeeze the input row when scrollback fills.
@@ -529,37 +542,17 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
           // overlay where the user is actually typing instead of on
           // the row below the editor box. Opt-out via env.
           altEnabled,
+          // Drives the input border's red flash after a failed turn
+          // (tui/motion.mjs flashBorderColor). Null while idle or successful.
+          errorAt: state.lastErrorAt,
         })
       )
     )
   );
 }
 
-// ScrollbackItem renders each scrollback child. Splash renders via the real
-// <Splash/> component (preserves gradient wordmark colorization); everything
-// else is plain Text.
-//
-// Wrapped in React.memo: scrollback item objects are stable across renders,
-// so when only the editor buffer changes (every keystroke) the memo skips
-// re-rendering every committed line. Without this the whole alt-buffer
-// scrollback re-rendered on each keypress — the source of the typing flicker.
-export const ScrollbackItem = React.memo(function ScrollbackItem({ item }) {
-  if (item.kind === 'splash') {
-    return React.createElement(Splash, item.splashProps);
-  }
-  if (item.kind === 'user') {
-    return React.createElement(
-      Box,
-      { flexDirection: 'column' },
-      React.createElement(Text, null, theme.accent('› ') + item.text)
-    );
-  }
-  if (item.kind === 'error') {
-    return React.createElement(Text, { color: 'red' }, item.text);
-  }
-  // 'assistant' (default)
-  return React.createElement(Text, { color: theme.fg }, item.text);
-});
+// ScrollbackItem moved to ./scrollback_item.mjs (re-exported above) so it can
+// grow without pushing repl.mjs over the file-size ratchet.
 
 // StatusBar moved to ./status_bar.mjs (re-exported above) so the HUD row can
 // grow without pushing repl.mjs over the file-size ratchet.

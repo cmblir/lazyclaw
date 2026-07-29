@@ -21,20 +21,16 @@ import { firstRunMode as _firstRunMode, hasConfiguredProvider } from '../first_r
 import { applyChatWindow as _applyChatWindow, estimateMessagesTokens, CHAT_WINDOW_TURNS, CHAT_WINDOW_TOKEN_BUDGET } from '../chat_window.mjs';
 import { makeRunTurn as _chatRunTurnFactory } from '../tui/run_turn.mjs';
 import { hudStatus as _hudStatus } from '../tui/hud.mjs';
-import { dispatchSlash as _dispatchSlash, parseSlashLine as _parseSlashLine, _makeInkApprove } from '../tui/slash_dispatcher.mjs';
+import { _makeInkApprove } from '../tui/slash_dispatcher.mjs';
+import { makeInkStream, setInkWriter } from '../tui/stray_writes.mjs';
 import { wrapInteractiveProv, makeLegacyApprove } from './chat_hardening.mjs';
 import { makeLegacySlashHandler } from './chat_legacy_slash.mjs';
+import { makeInkSlashHandler } from './chat_slash_bridge.mjs';
 // Re-export so tests that import legacySlashRoute from ./chat.mjs keep working
 // after the legacy slash router was extracted to ./chat_legacy_slash.mjs.
 export { legacySlashRoute } from './chat_legacy_slash.mjs';
-
-// /new, /reset and /clear must signal the Ink REPL to wipe the screen +
-// scrollback via the 'NEW' sentinel (handled in tui/repl.mjs). _newReset itself
-// returns a human string for the string-rendering consumers, so the Ink handler
-// translates these commands here. Exported so the contract is unit-testable.
-export function _isInkResetCmd(cmd) {
-  return /^\/(new|reset|clear)$/i.test(String(cmd || ''));
-}
+// Same for _isInkResetCmd, now living beside the Ink slash handler it serves.
+export { _isInkResetCmd } from './chat_slash_bridge.mjs';
 
 // The legacy (non-Ink) readline slash router (legacySlashRoute,
 // LEGACY_DELEGATED_SLASHES, and the ~650-line hand-written switch) lives in
@@ -266,24 +262,11 @@ export async function cmdChat(flags = {}) {
         ctx: _inkCtx,
         writeFn,
       });
-      // v5.4: full slash-command dispatch via tui/slash_dispatcher.mjs.
-      // Dispatcher returns a string (rendered to scrollback by ReplApp),
-      // 'EXIT' (caller unmounts), or void (streamed via write). /exit and
-      // /quit are also intercepted earlier inside ReplApp.handleSubmit so
-      // either path terminates cleanly.
-      const _inkSlashHandler = async (line, signal) => {
-        const { cmd, args } = _parseSlashLine(line);
-        // Thread the REPL's abort signal so Esc/Ctrl-C can stop a /loop.
-        _inkCtx.loopSignal = signal || null;
-        const result = await _dispatchSlash(cmd, args, _inkCtx, (chunk) => {
-          try { process.stdout.write(chunk); } catch { /* swallow */ }
-        });
-        // _newReset (/new, /reset, /clear) returns a human string, but repl.mjs
-        // only wipes the screen + scrollback on the 'NEW' sentinel. Translate
-        // here (mirrors the 'EXIT' sentinel) so the real /new actually clears.
-        if (_isInkResetCmd(cmd)) return 'NEW';
-        return result;
-      };
+      // v5.4: full slash-command dispatch via tui/slash_dispatcher.mjs, bridged
+      // by ./chat_slash_bridge.mjs (sentinel translation + streamed-output
+      // collection). /exit and /quit are also intercepted earlier inside
+      // ReplApp.handleSubmit so either path terminates cleanly.
+      const _inkSlashHandler = makeInkSlashHandler(_inkCtx);
       // v6.x slash-argument completion (two surfaces, see tui/slash_args.mjs):
       //   onArgList     → inline candidates rendered in the popup (login, hud,
       //                   memory, config, channels, subcommands, names, …).
@@ -312,6 +295,8 @@ export async function cmdChat(flags = {}) {
       // primary). The v5.4.0 pre-print made the screen go blank during
       // chat because alt-buffer cleared it on enter. Splash lives in the
       // Static scrollback now regardless of alt-buffer state.
+      // Launch animation: owns the screen outright, then clears it for Ink.
+      await (await import('../tui/splash_intro.mjs')).playSplashIntro(splashProps);
       const ink = render(/* @__PURE__ */ React.createElement(ReplApp, {
         splashProps,
         statusInfo: { provider: activeProvName, model: activeModel },
@@ -329,8 +314,23 @@ export async function cmdChat(flags = {}) {
         onArgComplete: _inkArgComplete,
         onArgList: _inkArgList,
         pickerRef: _inkPickerRef,
-      }), { exitOnCtrlC: false, patchConsole: true }); // false → editor 2-stage Ctrl+C
-      await ink.waitUntilExit();
+        // stdout/stderr: Ink renders into proxies of the real streams so
+        // tui/stray_writes.mjs can tell its own traffic (including writeToStderr)
+        // apart from writes that bypass it and leave stale rows.
+      }), { // exitOnCtrlC false → editor 2-stage Ctrl+C
+        stdout: makeInkStream(process.stdout), stderr: makeInkStream(process.stderr),
+        exitOnCtrlC: false, patchConsole: true,
+      });
+      try {
+        await ink.waitUntilExit();
+      } finally {
+        // ReplApp deregisters in a React effect cleanup, which flushes a
+        // macrotask after unmount — and never at all on the signal-exit path.
+        // Close the redirect window here so anything written next (the
+        // diagnostic in the catch below, for one) cannot be handed to an
+        // unmounted Ink.
+        setInkWriter(null);
+      }
       // /setup → full wizard (then shell). /config single step → run JUST
       // that step now that Ink released stdin, then re-enter chat.
       if (_inkCtx.requestSetup) await (await import('./setup.mjs')).cmdSetup(undefined, [], {});

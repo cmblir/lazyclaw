@@ -15,13 +15,15 @@ const GREEN_HEX = '#34D399'; // emerald — "live/working" (matches the dashboar
 // (https://no-color.org — any non-empty NO_COLOR), the terminal is `dumb`,
 // or the target stream isn't a TTY (piped / screen-reader / CI). Evaluated
 // per call so tests and runtime env changes are honored without re-importing.
-// `stream` defaults to stdout; tests pass a fake `{ isTTY }` to probe the
-// gate without mutating the real process streams. chalk self-detects the same
-// conditions (level 0), so its tokens degrade automatically; this gate is for
-// callers that emit raw ANSI.
-export function colorEnabled(stream = process.stdout) {
-  if (process.env.NO_COLOR) return false;
-  if (process.env.TERM === 'dumb') return false;
+// `env` defaults to process.env and `stream` to stdout; tests pass a fake
+// env object and/or a fake `{ isTTY }` to probe the gate without mutating the
+// real process env/streams — this is also what lets tui/motion.mjs's
+// motionEnabled() delegate its shared NO_COLOR/TERM/isTTY checks here instead
+// of duplicating them. chalk self-detects the same conditions (level 0), so
+// its tokens degrade automatically; this gate is for callers that emit raw ANSI.
+export function colorEnabled(env = process.env, stream = process.stdout) {
+  if (env.NO_COLOR) return false;
+  if (env.TERM === 'dumb') return false;
   if (!stream || !stream.isTTY) return false;
   return true;
 }

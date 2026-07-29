@@ -24,12 +24,39 @@ export function makeReplState(opts) {
     scrollback: splashItem ? [splashItem] : [],
     liveAssistant: '',
     turnCounter: 0,
+    // Bumped by onConversationReset. ReplApp keys its <Static> scrollback by
+    // this so a /clear remounts it — Ink's <Static> is write-once, so without
+    // a remount the retained splash item is never re-printed.
+    generation: 0,
+    // When the current turn started (Date.now()), or null while idle. Feeds
+    // the StatusBar's elapsed-time readout; cleared on every path back to idle.
+    streamStartedAt: null,
+    // Latches true on the turn's first chunk, cleared on every path back to
+    // idle. liveAssistant is a partial-LINE buffer (onStreamChunk empties it
+    // whenever a chunk ends on a newline) so it is unsafe as a "has anything
+    // arrived yet" signal — it goes back to '' mid-turn while content the
+    // user can already see sits in scrollback. This flag is the real signal.
+    hasStreamedContent: false,
+    // Total characters streamed so far THIS turn, cleared on every path back
+    // to idle (mirrors hasStreamedContent above). Same reason it can't be
+    // read off liveAssistant.length: that buffer is flushed to scrollback on
+    // every newline, so it only ever reflects the trailing partial line, not
+    // the whole turn — using it directly would make the HUD's rate meter
+    // collapse toward zero every time a line break lands.
+    liveCharCount: 0,
+    // Date.now() of the most recent failed turn, or null. Set by
+    // onTurnComplete when reason === 'error'; cleared on every other path
+    // back to idle (new turn, Esc, or a full conversation reset). Feeds the
+    // Editor's border-flash so a failure is visible even if its error text
+    // in scrollback has scrolled out of view.
+    lastErrorAt: null,
   };
 }
 
 export function onUserInput(state, { text, controller }) {
   if (state.streaming && state.controller) {
     // mid-stream interrupt — abort current turn, queue text for next turn.
+    // Leaves in-flight turn state (including lastErrorAt) untouched.
     try { state.controller.abort(); } catch {}
     return { ...state, pendingPrepend: text };
   }
@@ -40,6 +67,11 @@ export function onUserInput(state, { text, controller }) {
     ...state,
     streaming: true,
     controller,
+    streamStartedAt: Date.now(),
+    hasStreamedContent: false,
+    liveCharCount: 0,
+    // A new turn starts without a stale flash from a previous failure.
+    lastErrorAt: null,
     history: [...state.history, text],
     scrollback: [...state.scrollback, { kind: 'user', id, text }],
     turnCounter: state.turnCounter + 1,
@@ -51,13 +83,18 @@ export function onEscape(state) {
     try { state.controller.abort(); } catch {}
   }
   // Drop any partial live assistant text on explicit Esc — the user is
-  // telling us to discard, not to keep.
+  // telling us to discard, not to keep. An abort is not an error, so the
+  // flash is cleared too.
   return {
     ...state,
     streaming: false,
     controller: null,
     pendingPrepend: null,
     liveAssistant: '',
+    streamStartedAt: null,
+    hasStreamedContent: false,
+    liveCharCount: 0,
+    lastErrorAt: null,
   };
 }
 
@@ -70,8 +107,12 @@ export function onEscape(state) {
 // existing reducer tests are unchanged.
 export function onStreamChunk(state, { chunk }) {
   const buf = state.liveAssistant + chunk;
+  // Total chars streamed this turn — NOT derived from liveAssistant/buf,
+  // both of which get truncated back to the trailing partial line below.
+  // Feeds the HUD's live rate meter (tui/status_bar.mjs).
+  const liveCharCount = state.liveCharCount + (chunk ? chunk.length : 0);
   const nl = buf.lastIndexOf('\n');
-  if (nl < 0) return { ...state, liveAssistant: buf };
+  if (nl < 0) return { ...state, liveAssistant: buf, hasStreamedContent: true, liveCharCount };
   const complete = buf.slice(0, nl);          // one or more whole lines
   const remainder = buf.slice(nl + 1);        // trailing partial (may be '')
   const id = `as-${state.turnCounter}-${state.scrollback.length}`;
@@ -79,6 +120,8 @@ export function onStreamChunk(state, { chunk }) {
     ...state,
     scrollback: [...state.scrollback, { kind: 'assistant', id, text: complete }],
     liveAssistant: remainder,
+    hasStreamedContent: true,
+    liveCharCount,
   };
 }
 
@@ -105,6 +148,10 @@ export function onTurnComplete(state, { reason, error } = {}) {
     liveAssistant: '',
     scrollback: nextScrollback,
     turnCounter: state.turnCounter + 1,
+    streamStartedAt: null,
+    hasStreamedContent: false,
+    liveCharCount: 0,
+    lastErrorAt: reason === 'error' ? Date.now() : null,
   };
 }
 

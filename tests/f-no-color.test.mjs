@@ -40,13 +40,13 @@ function asTTY(fn) {
 
 test('colorEnabled true on a TTY with no NO_COLOR / dumb term', () => {
   withEnv({ NO_COLOR: undefined, TERM: 'xterm-256color' }, () => {
-    assert.equal(colorEnabled(TTY), true);
+    assert.equal(colorEnabled(process.env, TTY), true);
   });
 });
 
 test('NO_COLOR (any non-empty value) disables color and paint strips escapes', () => {
   withEnv({ NO_COLOR: '1' }, () => {
-    assert.equal(colorEnabled(TTY), false);
+    assert.equal(colorEnabled(process.env, TTY), false);
     const out = paint('38;5;245', 'hello');
     assert.equal(out, 'hello', 'paint must return bare text under NO_COLOR');
     assert.ok(!ESC.test(out));
@@ -55,13 +55,13 @@ test('NO_COLOR (any non-empty value) disables color and paint strips escapes', (
 
 test('TERM=dumb disables color even on a TTY', () => {
   withEnv({ NO_COLOR: undefined, TERM: 'dumb' }, () => {
-    assert.equal(colorEnabled(TTY), false);
+    assert.equal(colorEnabled(process.env, TTY), false);
   });
 });
 
 test('non-TTY stdout disables color', () => {
   withEnv({ NO_COLOR: undefined, TERM: 'xterm' }, () => {
-    assert.equal(colorEnabled(NOT_TTY), false);
+    assert.equal(colorEnabled(process.env, NOT_TTY), false);
   });
 });
 

@@ -21,6 +21,7 @@ import { ensureRegistry } from '../lib/registry_boot.mjs';
 import { loadDotenvIfAny } from '../dotenv_min.mjs';
 import { assertUnattendedSafe, installCrashHandlers } from '../lib/gateway_guard.mjs';
 import { makeInboundHandler } from '../lib/inbound_client.mjs';
+import { pidfileStatus, pidfileStop } from './daemon.mjs';
 
 export const GATEWAY_CHANNELS = ['slack', 'telegram', 'matrix'];
 
@@ -30,6 +31,24 @@ export const GATEWAY_CHANNELS = ['slack', 'telegram', 'matrix'];
 // Channel (start/send/stop). The gateway loads the ENABLED ones at runtime so
 // `channels enable discord` is actually reachable instead of a no-op.
 export const PLUGIN_CHANNELS = ['discord', 'email', 'signal', 'voice', 'whatsapp'];
+
+// The gateway runs in the foreground like the bare daemon, so a started
+// gateway records its pid + bound port here; `/gateway status|stop` reads
+// it back and cmdGateway removes it on shutdown. `lazyclaw service`'s
+// fallback backend (no launchd/systemd) independently reuses this exact
+// path for its own bare-pid bookkeeping, colliding with the JSON format
+// written here (see the write site below); launchd/systemd never read it.
+export function _gatewayPidfilePath(configDir) {
+  return path.join(configDir, 'gateway.pid');
+}
+
+export function gatewayStatus({ configDir }, deps = {}) {
+  return pidfileStatus(_gatewayPidfilePath(configDir), deps);
+}
+
+export function gatewayStop({ configDir }, deps = {}) {
+  return pidfileStop(_gatewayPidfilePath(configDir), deps);
+}
 
 // Default per-channel constructors. Each receives { handler, logger,
 // allowlist }, must return a started channel exposing send()/stop().
@@ -297,13 +316,25 @@ export async function cmdGateway(flags = {}) {
   }) + '\n');
   process.stderr.write('[gateway] running. Ctrl-C to stop.\n');
 
-  installCrashHandlers({ label: 'gateway', stop: () => gw.stop() });
+  // Record pid + the ACTUAL bound port so `/gateway status|stop` can find us
+  // without an lsof on the port. `lazyclaw service`'s launchd/systemd
+  // backends never consult this file, tracking processes instead through
+  // their own servicePaths scheme (commands/service.mjs) — but its fallback
+  // backend independently writes a bare pid to this exact path
+  // (lib/service_install.mjs), so the two writers' formats collide here.
+  const pidfile = _gatewayPidfilePath(path.dirname(configPath()));
+  try { fs.writeFileSync(pidfile, JSON.stringify({ pid: process.pid, port: gw.port })); }
+  catch { /* non-fatal: the gateway still runs, just isn't stoppable by pidfile */ }
+  const removePidfile = () => { try { fs.rmSync(pidfile); } catch { /* already gone */ } };
+
+  installCrashHandlers({ label: 'gateway', stop: () => { removePidfile(); return gw.stop(); } });
   await new Promise((resolve) => {
     let shuttingDown = false;
     const onSig = async () => {
       if (shuttingDown) return process.exit(1);
       shuttingDown = true;
       process.stderr.write('\n[gateway] shutting down…\n');
+      removePidfile();
       try { await gw.stop(); } catch { /* best-effort */ }
       resolve();
     };

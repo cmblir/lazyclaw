@@ -27,6 +27,7 @@ export const SLASH_COMMANDS = [
   { cmd: '/trainer',     help: 'view or set trainer provider/model: /trainer show|set <p:m>|clear' },
   { cmd: '/personality', help: 'pick a personality (or sub: list|show|install|remove|use)' },
   { cmd: '/dashboard',   help: 'open the lazyclaw web UI in your browser' },
+  { cmd: '/gateway',     help: 'gateway: status · start (background) · stop' },
   { cmd: '/menu',        help: 'browse the full subcommand catalog (command palette)' },
   { cmd: '/setup',       help: 'first-run / full re-setup: leave chat and run every wizard step' },
   { cmd: '/config',      help: 'change ONE setting: provider, model, context, channel creds, webhook, …' },

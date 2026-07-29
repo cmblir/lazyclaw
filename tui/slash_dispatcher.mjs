@@ -53,6 +53,8 @@ import { splitWhitespace, _mod, _promptText, _promptConfirm } from './slash_help
 import { _dashboard, parseDashboardUrl } from './slash_dashboard.mjs';
 import { _channels, _context } from './slash_channels.mjs';
 import { _trainer } from './slash_trainer.mjs';
+import { _help, _status, _version, _usage } from './slash_basics.mjs';
+import { gatewaySlash } from './slash_gateway.mjs';
 
 // Re-export so callers/tests that import parseDashboardUrl from this module
 // (the dispatcher was its original home) keep resolving after the extraction.
@@ -73,66 +75,6 @@ export function parseSlashLine(line) {
 }
 
 // ─── handlers ────────────────────────────────────────────────────────────
-
-async function _help() {
-  const lines = ['slash commands:'];
-  for (const c of SLASH_COMMANDS) lines.push(`  ${c.cmd.padEnd(14)} — ${c.help}`);
-  return lines.join('\n');
-}
-
-async function _status(_args, ctx) {
-  const registry = await _mod(ctx, 'registryMod', () => import('../providers/registry.mjs'));
-  const provider = ctx.getActiveProvName();
-  const model = ctx.getActiveModel() || '(default)';
-  const keyMasked = registry.maskApiKey(ctx.cfg && ctx.cfg['api-key']);
-  const messageCount = ctx.getMessages().length;
-  const sessionId = ctx.getSessionId() || '(none — in-memory)';
-  return [
-    'status:',
-    `  provider:  ${provider}`,
-    `  model:     ${model}`,
-    `  api key:   ${keyMasked}`,
-    `  messages:  ${messageCount}`,
-    `  session:   ${sessionId}`,
-  ].join('\n');
-}
-
-async function _version(_args, ctx) {
-  const v = ctx.version || '0.0.0';
-  return `lazyclaw ${v} (node ${process.version}, ${process.platform})`;
-}
-
-async function _usage(_args, ctx) {
-  const msgs = ctx.getMessages();
-  const runningUsage = ctx.getRunningUsage && ctx.getRunningUsage();
-  const charsSent = (ctx.getCharsSent && ctx.getCharsSent()) || 0;
-  const lines = [
-    'usage:',
-    `  messages:  ${msgs.length}`,
-    `  chars sent: ${charsSent.toLocaleString('en-US')}`,
-  ];
-  if (runningUsage) {
-    lines.push(
-      `  tokens in:  ${(runningUsage.inputTokens || 0).toLocaleString('en-US')}`,
-      `  tokens out: ${(runningUsage.outputTokens || 0).toLocaleString('en-US')}`,
-      `  tokens tot: ${(runningUsage.totalTokens || 0).toLocaleString('en-US')}`,
-      `  turns:      ${runningUsage.turnsWithUsage || 0}`,
-    );
-    if (ctx.cfg && ctx.cfg.rates && typeof ctx.cfg.rates === 'object') {
-      try {
-        const { costFromUsage } = await import('../providers/rates.mjs');
-        const r = costFromUsage(
-          { provider: ctx.getActiveProvName(), model: ctx.getActiveModel(), usage: runningUsage },
-          ctx.cfg.rates,
-        );
-        if (r && r.totalUsd != null) {
-          lines.push(`  cost (USD): $${Number(r.totalUsd).toFixed(4)}`);
-        }
-      } catch { /* never let cost-card lookup fail the slash */ }
-    }
-  }
-  return lines.join('\n');
-}
 
 async function _newReset(_args, ctx) {
   if (ctx.setMessages) ctx.setMessages([]);
@@ -1370,6 +1312,7 @@ export const SLASH_HANDLERS = new Map([
   ['/task', _task],
   ['/trainer', _trainer],
   ['/dashboard', _dashboard],
+  ['/gateway', gatewaySlash],
   ['/menu', _menu],
   ['/channels', _channels],
   ['/orchestrator', orchestratorSlash],
