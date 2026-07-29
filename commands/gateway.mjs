@@ -36,8 +36,11 @@ export const PLUGIN_CHANNELS = ['discord', 'email', 'signal', 'voice', 'whatsapp
 // gateway records its pid + bound port here; `/gateway status|stop` reads
 // it back and cmdGateway removes it on shutdown. `lazyclaw service`'s
 // fallback backend (no launchd/systemd) independently reuses this exact
-// path for its own bare-pid bookkeeping, colliding with the JSON format
-// written here (see the write site below); launchd/systemd never read it.
+// path for its own bare-pid bookkeeping (see the write site below). The two
+// writers still disagree on format — bare pid vs. this file's JSON — but
+// lib/service_install.mjs's reader now tolerates both shapes, so a
+// service-installed gateway's status/uninstall still resolve the right pid;
+// launchd/systemd never read it.
 export function _gatewayPidfilePath(configDir) {
   return path.join(configDir, 'gateway.pid');
 }
@@ -321,7 +324,10 @@ export async function cmdGateway(flags = {}) {
   // backends never consult this file, tracking processes instead through
   // their own servicePaths scheme (commands/service.mjs) — but its fallback
   // backend independently writes a bare pid to this exact path
-  // (lib/service_install.mjs), so the two writers' formats collide here.
+  // (lib/service_install.mjs). The two writers still use different formats,
+  // but lib/service_install.mjs's reader now parses either shape, so that
+  // format collision no longer breaks `service status`/`service uninstall
+  // gateway` for a service-installed gateway.
   const pidfile = _gatewayPidfilePath(path.dirname(configPath()));
   try { fs.writeFileSync(pidfile, JSON.stringify({ pid: process.pid, port: gw.port })); }
   catch { /* non-fatal: the gateway still runs, just isn't stoppable by pidfile */ }

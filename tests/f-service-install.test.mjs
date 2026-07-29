@@ -128,6 +128,79 @@ test('serviceStatus fallback: reads pidfile + liveness', () => {
   assert.equal(dead.running, false);
 });
 
+// ---- fallback pidfile reader tolerates both writer formats ----
+//
+// `<configDir>/gateway.pid` is written as a bare pid by installService's
+// fallback backend AND, independently, as `{ pid, port }` JSON by
+// `lazyclaw gateway` (commands/gateway.mjs) when the service-spawned child
+// starts up and overwrites it. serviceStatus/uninstallService must be able
+// to read either shape rather than getting NaN out of the JSON case.
+
+test('serviceStatus fallback: a bare-pid file still reads correctly (pre-existing behaviour)', () => {
+  const d = fakeDeps();
+  d.files.set('/home/u/.lazyclaw/daemon.pid', '4242');
+  const st = serviceStatus({ ...SPEC, backend: 'fallback', home: '/home/u' }, { ...d, isAlive: (pid) => pid === 4242 });
+  assert.equal(st.running, true);
+  assert.equal(st.pid, 4242);
+});
+
+test('serviceStatus fallback: a {"pid":N,"port":P} file (gateway\'s own format) reads pid N', () => {
+  const d = fakeDeps();
+  d.files.set('/home/u/.lazyclaw/daemon.pid', JSON.stringify({ pid: 4242, port: 19600 }));
+  const st = serviceStatus({ ...SPEC, backend: 'fallback', home: '/home/u' }, { ...d, isAlive: (pid) => pid === 4242 });
+  assert.equal(st.installed, true);
+  assert.equal(st.running, true);
+  assert.equal(st.pid, 4242);
+});
+
+test('serviceStatus fallback: a malformed pidfile is treated as no pid, not a throw', () => {
+  const d = fakeDeps();
+  d.files.set('/home/u/.lazyclaw/daemon.pid', 'not json and not a number');
+  const st = serviceStatus({ ...SPEC, backend: 'fallback', home: '/home/u' }, { ...d, isAlive: () => true });
+  assert.equal(st.installed, true);
+  assert.equal(st.running, false);
+  assert.equal(st.pid, null);
+});
+
+test('serviceStatus fallback: JSON without a usable pid is treated as no pid', () => {
+  const d = fakeDeps();
+  d.files.set('/home/u/.lazyclaw/daemon.pid', JSON.stringify({ port: 19600 }));
+  const st = serviceStatus({ ...SPEC, backend: 'fallback', home: '/home/u' }, { ...d, isAlive: () => true });
+  assert.equal(st.running, false);
+  assert.equal(st.pid, null);
+});
+
+test('uninstallService fallback: a {"pid":N,"port":P} file kills pid N', () => {
+  const d = fakeDeps();
+  d.files.set('/home/u/.lazyclaw/daemon.pid', JSON.stringify({ pid: 4242, port: 19600 }));
+  const killed = [];
+  const origKill = process.kill;
+  process.kill = (pid) => killed.push(pid);
+  try {
+    const r = uninstallService({ ...SPEC, backend: 'fallback', home: '/home/u' }, d);
+    assert.equal(r.killed, 4242);
+    assert.deepEqual(killed, [4242]);
+  } finally {
+    process.kill = origKill;
+  }
+});
+
+test('uninstallService fallback: a malformed pidfile is treated as no pid, not a throw', () => {
+  const d = fakeDeps();
+  d.files.set('/home/u/.lazyclaw/daemon.pid', 'garbage');
+  const killed = [];
+  const origKill = process.kill;
+  process.kill = (pid) => killed.push(pid);
+  try {
+    // Must not throw, and must not attempt to signal a garbage "pid".
+    const r = uninstallService({ ...SPEC, backend: 'fallback', home: '/home/u' }, d);
+    assert.deepEqual(killed, []);
+    assert.ok(Number.isNaN(r.killed), 'no usable pid, same as the pre-existing bare parseInt behaviour');
+  } finally {
+    process.kill = origKill;
+  }
+});
+
 test('installService: unknown backend throws ServiceError', () => {
   const d = fakeDeps();
   let err = null;

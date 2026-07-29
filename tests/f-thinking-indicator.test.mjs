@@ -9,6 +9,8 @@ import { SPINNER_FRAMES, motionEnabled } from '../tui/motion.mjs';
 import { makeReplState, onUserInput, onStreamChunk } from '../tui/repl_reducers.mjs';
 import { ReplApp } from '../tui/repl.mjs';
 import { withMotionForced } from './helpers/motion_gate.mjs';
+import { mountRepl } from './helpers/repl_harness.mjs';
+import { makeScreen, plainText } from './helpers/vt_screen.mjs';
 
 test('thinkingLabel pairs the spinner frame with the word', () => {
   assert.equal(thinkingLabel(0), `${SPINNER_FRAMES[0]} thinking…`);
@@ -112,6 +114,69 @@ test('ReplApp: thinking… shows between submit and the first chunk, and goes aw
       release();
       try { instance.unmount(); } catch { /* already gone */ }
       try { instance.cleanup(); } catch { /* ignore */ }
+    }
+  });
+});
+
+// ─── Alt-buffer wiring guard ────────────────────────────────────────────
+//
+// tui/repl.mjs renders <Thinking/> a SECOND time, in the alt-buffer layout
+// arm (the branch taken when LAZYCLAW_ALT=1), ahead of the non-alt copy the
+// test above pins. Nothing else in this suite ever exercises that arm —
+// tests/helpers/repl_harness.mjs deletes LAZYCLAW_ALT by default to pin the
+// non-alt layout — so that copy was unpinned: deleting only the alt-buffer
+// call leaves the whole suite green. mountRepl's `alt: true` option (added
+// alongside this test) sets LAZYCLAW_ALT=1 instead of deleting it, which is
+// what computeAltEnabled (tui/repl_altbuffer.mjs) reads to pick the alt arm.
+//
+// Uses the vt_screen model rather than a raw substring check on h.bytes so
+// the assertion reflects what is CURRENTLY on screen (post cursor-move /
+// erase replay), the same standard tests/f-clear-splash-repaint.test.mjs and
+// tests/f-hud-live-meter.test.mjs hold mounted-harness tests to.
+function snapshotScreen(h) {
+  const screen = makeScreen({ rows: 40, columns: 100 });
+  for (const chunk of h.bytes) screen.write(chunk);
+  return plainText(screen);
+}
+
+async function waitForScreen(h, predicate, label) {
+  const deadline = Date.now() + 3000;
+  let text = '';
+  while (Date.now() < deadline) {
+    text = snapshotScreen(h);
+    if (predicate(text)) return;
+    await sleep(25);
+  }
+  assert.fail(`${label}\nlast frame:\n${text}`);
+}
+
+test('ReplApp (alt-buffer): thinking… shows between submit and the first chunk (wiring guard)', async () => {
+  await withMotionForced(async () => {
+    // Same shape as the non-alt guard above: the turn hangs until `release`
+    // is called, so the window under test is exactly submitted+streaming
+    // with zero chunks received.
+    let release;
+    const turnGate = new Promise((resolve) => { release = resolve; });
+    const h = mountRepl(
+      {
+        splashProps: { provider: 'mock', model: 'm', version: '6.x', cwd: '/tmp', tools: [], skills: [] },
+        runTurnFactory: () => async () => { await turnGate; },
+      },
+      { alt: true },
+    );
+    try {
+      await h.settle();
+      assert.equal(snapshotScreen(h).includes('thinking…'), false,
+        'precondition: nothing should be thinking before a turn is submitted');
+
+      h.type('hello');
+      await h.settle(40);
+      h.type('\r');
+      await waitForScreen(h, (text) => text.includes('thinking…'),
+        'expected a frame showing thinking… while the turn had produced no output yet (alt-buffer arm) — the <Thinking/> wiring in tui/repl.mjs\'s alt-buffer branch may be missing');
+    } finally {
+      release();
+      h.unmount();
     }
   });
 });

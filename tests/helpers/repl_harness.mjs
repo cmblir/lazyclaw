@@ -73,9 +73,13 @@ function swap(key, value) {
  * Mount ReplApp the way commands/chat.mjs does, over a faked-TTY process.stdout.
  *
  * @param {object} props extra ReplApp props (merged over the defaults)
- * @param {{columns?: number, rows?: number}} geom fake terminal geometry
+ * @param {{columns?: number, rows?: number, alt?: boolean}} geom fake terminal
+ *   geometry. `alt: true` sets LAZYCLAW_ALT=1 (instead of deleting it) so
+ *   computeAltEnabled (tui/repl_altbuffer.mjs) resolves to the alt-buffer
+ *   layout arm. Default stays non-alt (env var deleted), matching prior
+ *   behavior exactly.
  */
-export function mountRepl(props = {}, { columns = 100, rows = 40 } = {}) {
+export function mountRepl(props = {}, { columns = 100, rows = 40, alt = false } = {}) {
   const bytes = [];
   const stdout = fakeTty(bytes, { columns, rows });
   const stderr = fakeTty(bytes);
@@ -93,7 +97,9 @@ export function mountRepl(props = {}, { columns = 100, rows = 40 } = {}) {
   // Pin the configuration under test: the PRIMARY terminal buffer (Ink
   // <Static> scrollback, the default) with the IME cursor anchor ON. Both are
   // env-switchable, so a developer's shell must not change what tests assert.
-  delete process.env.LAZYCLAW_ALT;
+  // `alt: true` opts into the alt-buffer arm instead (LAZYCLAW_ALT=1).
+  if (alt) process.env.LAZYCLAW_ALT = '1';
+  else delete process.env.LAZYCLAW_ALT;
   delete process.env.LAZYCLAW_NO_CURSOR_ANCHOR;
   // Force the anchor shim to re-install over THIS mount's stdout; the module
   // singleton would otherwise still hold a previous mount's stream.
