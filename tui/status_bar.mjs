@@ -78,6 +78,11 @@ export function StatusBar({ provider, model, streaming, ctxUsed, ctxTotal, hud, 
   // 1 and stays there — tweening flips false for good once it does, and
   // useMotion tears its interval down the moment `active` goes false.
   const tweening = motion && progress < 1;
+  // Return value intentionally unused: this call is kept purely for its
+  // repaint side effect (the internal setTick forces a re-render every
+  // GAUGE_TWEEN_STEP_MS while tweening, which is what advances `progress`
+  // above), not for a tick value we read. Do not delete it as dead code —
+  // doing so silently stops the bar from ever re-rendering mid-tween.
   useMotion(tweening, GAUGE_TWEEN_STEP_MS);
   const animCells = tweening ? animatedNow : null;
   const ctx = (ctxUsed != null && ctxTotal != null)
