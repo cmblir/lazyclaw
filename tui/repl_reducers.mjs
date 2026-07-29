@@ -28,6 +28,9 @@ export function makeReplState(opts) {
     // this so a /clear remounts it — Ink's <Static> is write-once, so without
     // a remount the retained splash item is never re-printed.
     generation: 0,
+    // When the current turn started (Date.now()), or null while idle. Feeds
+    // the StatusBar's elapsed-time readout; cleared on every path back to idle.
+    streamStartedAt: null,
   };
 }
 
@@ -44,6 +47,7 @@ export function onUserInput(state, { text, controller }) {
     ...state,
     streaming: true,
     controller,
+    streamStartedAt: Date.now(),
     history: [...state.history, text],
     scrollback: [...state.scrollback, { kind: 'user', id, text }],
     turnCounter: state.turnCounter + 1,
@@ -62,6 +66,7 @@ export function onEscape(state) {
     controller: null,
     pendingPrepend: null,
     liveAssistant: '',
+    streamStartedAt: null,
   };
 }
 
@@ -109,6 +114,7 @@ export function onTurnComplete(state, { reason, error } = {}) {
     liveAssistant: '',
     scrollback: nextScrollback,
     turnCounter: state.turnCounter + 1,
+    streamStartedAt: null,
   };
 }
 
