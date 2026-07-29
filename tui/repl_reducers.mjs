@@ -37,6 +37,13 @@ export function makeReplState(opts) {
     // arrived yet" signal — it goes back to '' mid-turn while content the
     // user can already see sits in scrollback. This flag is the real signal.
     hasStreamedContent: false,
+    // Total characters streamed so far THIS turn, cleared on every path back
+    // to idle (mirrors hasStreamedContent above). Same reason it can't be
+    // read off liveAssistant.length: that buffer is flushed to scrollback on
+    // every newline, so it only ever reflects the trailing partial line, not
+    // the whole turn — using it directly would make the HUD's rate meter
+    // collapse toward zero every time a line break lands.
+    liveCharCount: 0,
   };
 }
 
@@ -55,6 +62,7 @@ export function onUserInput(state, { text, controller }) {
     controller,
     streamStartedAt: Date.now(),
     hasStreamedContent: false,
+    liveCharCount: 0,
     history: [...state.history, text],
     scrollback: [...state.scrollback, { kind: 'user', id, text }],
     turnCounter: state.turnCounter + 1,
@@ -75,6 +83,7 @@ export function onEscape(state) {
     liveAssistant: '',
     streamStartedAt: null,
     hasStreamedContent: false,
+    liveCharCount: 0,
   };
 }
 
@@ -87,8 +96,12 @@ export function onEscape(state) {
 // existing reducer tests are unchanged.
 export function onStreamChunk(state, { chunk }) {
   const buf = state.liveAssistant + chunk;
+  // Total chars streamed this turn — NOT derived from liveAssistant/buf,
+  // both of which get truncated back to the trailing partial line below.
+  // Feeds the HUD's live rate meter (tui/status_bar.mjs).
+  const liveCharCount = state.liveCharCount + (chunk ? chunk.length : 0);
   const nl = buf.lastIndexOf('\n');
-  if (nl < 0) return { ...state, liveAssistant: buf, hasStreamedContent: true };
+  if (nl < 0) return { ...state, liveAssistant: buf, hasStreamedContent: true, liveCharCount };
   const complete = buf.slice(0, nl);          // one or more whole lines
   const remainder = buf.slice(nl + 1);        // trailing partial (may be '')
   const id = `as-${state.turnCounter}-${state.scrollback.length}`;
@@ -97,6 +110,7 @@ export function onStreamChunk(state, { chunk }) {
     scrollback: [...state.scrollback, { kind: 'assistant', id, text: complete }],
     liveAssistant: remainder,
     hasStreamedContent: true,
+    liveCharCount,
   };
 }
 
@@ -125,6 +139,7 @@ export function onTurnComplete(state, { reason, error } = {}) {
     turnCounter: state.turnCounter + 1,
     streamStartedAt: null,
     hasStreamedContent: false,
+    liveCharCount: 0,
   };
 }
 

@@ -24,6 +24,7 @@ export function onConversationReset(state) {
     generation: (state.generation || 0) + 1,
     streamStartedAt: null,
     hasStreamedContent: false,
+    liveCharCount: 0,
   };
 }
 

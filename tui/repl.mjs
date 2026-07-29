@@ -489,6 +489,7 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
         ctxTotal: _status.ctxTotal,
         hud: _status.hud,
         streamStartedAt: state.streamStartedAt,
+        liveChars: state.liveCharCount,
       }),
       // 5) Editor — sticky bottom, content-sized. Wrapped in a flexShrink:0
       //    Box so Yoga doesn't squeeze the input row when scrollback fills.

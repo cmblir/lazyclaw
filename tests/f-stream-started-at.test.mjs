@@ -143,3 +143,69 @@ test("a mid-stream interrupt does NOT touch the in-flight turn's hasStreamedCont
   assert.equal(s.hasStreamedContent, true, 'the interrupt branch must not touch hasStreamedContent');
   assert.equal(s.pendingPrepend, 'oh wait, do this instead');
 });
+
+// liveCharCount lifecycle — total characters streamed THIS turn, feeding the
+// HUD's live rate meter (tui/hud.mjs formatRate, tui/status_bar.mjs). Same
+// per-turn latch/reset shape as hasStreamedContent above, and for the same
+// reason it can't be read off liveAssistant.length: onStreamChunk truncates
+// liveAssistant back to the trailing partial line on every newline, so that
+// buffer's length alone would make the rate collapse toward zero every time a
+// line break lands mid-turn.
+
+test('makeReplState starts liveCharCount at 0', () => {
+  assert.equal(makeReplState().liveCharCount, 0);
+});
+
+test("onUserInput's idle branch starts each new turn with liveCharCount 0", () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  assert.equal(s.liveCharCount, 0);
+});
+
+test('onStreamChunk accumulates chunk lengths across the whole turn, surviving newline flushes', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onStreamChunk(s, { chunk: 'first line\n' }); // 11 chars, flushes to scrollback
+  assert.equal(s.liveAssistant, '', 'sanity check: the newline flush really does empty liveAssistant');
+  assert.equal(s.liveCharCount, 11, 'liveCharCount must NOT reset when liveAssistant is flushed');
+  s = onStreamChunk(s, { chunk: 'second' }); // +6 chars, no newline yet
+  assert.equal(s.liveCharCount, 17);
+});
+
+test('onTurnComplete clears liveCharCount back to 0', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onStreamChunk(s, { chunk: 'reply\n' });
+  assert.equal(s.liveCharCount, 6);
+  s = onTurnComplete(s, { reason: 'done' });
+  assert.equal(s.liveCharCount, 0);
+});
+
+test('onEscape clears liveCharCount back to 0', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onStreamChunk(s, { chunk: 'reply\n' });
+  assert.equal(s.liveCharCount, 6);
+  s = onEscape(s);
+  assert.equal(s.liveCharCount, 0);
+});
+
+test('onConversationReset clears liveCharCount back to 0', () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'hi', controller: { abort: () => {} } });
+  s = onStreamChunk(s, { chunk: 'reply\n' });
+  assert.equal(s.liveCharCount, 6);
+  s = onConversationReset(s);
+  assert.equal(s.liveCharCount, 0);
+});
+
+test("a mid-stream interrupt does NOT touch the in-flight turn's liveCharCount", () => {
+  let s = makeReplState();
+  s = onUserInput(s, { text: 'first task', controller: { abort: () => {} } });
+  s = onStreamChunk(s, { chunk: 'partial' });
+  assert.equal(s.liveCharCount, 7);
+
+  s = onUserInput(s, { text: 'oh wait, do this instead', controller: { abort: () => {} } });
+  assert.equal(s.liveCharCount, 7, 'the interrupt branch must not touch liveCharCount');
+  assert.equal(s.pendingPrepend, 'oh wait, do this instead');
+});

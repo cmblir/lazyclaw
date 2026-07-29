@@ -31,7 +31,7 @@ export function streamingIndicator(streaming, blinkOn, t = theme, opts = {}) {
   return blinkOn ? t.success('● streaming') : t.dim('● streaming');
 }
 
-export function StatusBar({ provider, model, streaming, ctxUsed, ctxTotal, hud, streamStartedAt }) {
+export function StatusBar({ provider, model, streaming, ctxUsed, ctxTotal, hud, streamStartedAt, liveChars }) {
   const motion = motionEnabled();
   // One interval either way: the spinner ticks fast, the legacy pulse slow.
   const tick = useMotion(!!streaming, motion ? SPINNER_MS : BLINK_MS);
@@ -90,7 +90,10 @@ export function StatusBar({ provider, model, streaming, ctxUsed, ctxTotal, hud, 
   const indicator = streamingIndicator(streaming, blinkOn, theme, { motion, tick, elapsedMs });
   const prov = provider || '?';
   const mdl = model || '?';
-  const hudRow = hud ? formatHudRow(hud) : '';
+  // Live rate segment only while actually streaming with a started clock —
+  // an idle/finished turn has no meaningful "chars this turn" sample.
+  const hudRow = hud ? formatHudRow(hud, streaming && streamStartedAt
+    ? { chars: liveChars || 0, elapsedMs } : null) : '';
   return React.createElement(
     Box,
     { flexShrink: 0, flexDirection: 'column', paddingX: 1 },

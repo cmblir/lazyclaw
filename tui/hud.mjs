@@ -88,12 +88,34 @@ export function formatGauge(used, budget, cellsOverride = null) {
   return body;
 }
 
+// Throughput during a streaming turn. Characters (not tokens) because that is
+// what the REPL can count locally and instantly — providers only report token
+// usage at the end of a turn, which is too late to animate.
+//
+// Samples shorter than this are dominated by first-token latency and produce a
+// wildly wrong number, so they render as nothing at all.
+const RATE_MIN_SAMPLE_MS = 250;
+export function formatRate(chars, elapsedMs) {
+  const c = Number(chars) || 0;
+  const ms = Number(elapsedMs) || 0;
+  if (c <= 0 || ms < RATE_MIN_SAMPLE_MS) return '';
+  const perSec = (c / ms) * 1000;
+  // Switch to a "k/s" abbreviation only once the plain digit count itself
+  // gets hard to read at a glance (>= 10,000/s); a 4-digit rate like 2500/s
+  // is still perfectly legible as-is.
+  return perSec >= 10_000 ? `${(perSec / 1000).toFixed(1)}k/s` : `${Math.round(perSec)}/s`;
+}
+
 // Render the HUD line (the extra row below the compact status line). Returns
-// '' when there's nothing worth showing.
-export function formatHudRow(f) {
+// '' when there's nothing worth showing. `live` is an optional
+// { chars, elapsedMs } sample fed in while a turn is streaming — omitted (or
+// trivial), the output is byte-identical to the no-`live` form.
+export function formatHudRow(f, live = null) {
   if (!f) return '';
   const seg = [`↑${fmtTok(f.inTok)} ↓${fmtTok(f.outTok)} tok`];
   if (f.costUsd > 0) seg.push(`$${f.costUsd.toFixed(4)}`);
+  const rate = live ? formatRate(live.chars, live.elapsedMs) : '';
+  if (rate) seg.push(`⇅ ${rate}`);
   if (f.trainer) seg.push(`trainer ${f.trainer}`);
   if (f.orch) seg.push(`orch ${f.orch}`);
   return seg.join('   ');

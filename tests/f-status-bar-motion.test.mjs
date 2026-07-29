@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { streamingIndicator, StatusBar } from '../tui/status_bar.mjs';
 import { SPINNER_FRAMES } from '../tui/motion.mjs';
 import React from 'react';
+import { render } from 'ink-testing-library';
 
 const plain = (s) => s.replace(/\x1b\[[0-9;]*m/g, '');
 
@@ -45,4 +46,42 @@ test('StatusBar accepts streamStartedAt without breaking its existing props', ()
   });
   assert.equal(el.props.streamStartedAt, 1000);
   assert.equal(el.props.provider, 'openai');
+});
+
+// The HUD's live rate segment (tui/hud.mjs formatRate) is fed from a
+// `liveChars` prop only while an in-flight turn is actually streaming — a
+// finished/idle turn has no meaningful "chars this turn" sample to show.
+const hud = { inTok: 100, outTok: 50, costUsd: 0, trainer: '', orch: '' };
+
+test('mounted StatusBar shows the live rate segment while streaming with hud + liveChars', () => {
+  const { lastFrame, unmount } = render(React.createElement(StatusBar, {
+    provider: 'anthropic', model: 'opus', streaming: true,
+    ctxUsed: 100, ctxTotal: 1000, streamStartedAt: Date.now() - 2000,
+    hud, liveChars: 5000,
+  }));
+  try {
+    // Not pinning the exact digits: elapsedMs is `Date.now() - streamStartedAt`
+    // computed at render time, so it drifts by however long the test took to
+    // reach this assertion. Assert the shape instead (no "k" — ~2500/s stays
+    // well under the 10k/s abbreviation threshold regardless of that drift).
+    const frame = plain(lastFrame() || '');
+    assert.match(frame, /⇅ \d+\/s/, `expected a rate segment, got: ${frame}`);
+    assert.doesNotMatch(frame, /k\/s/, `expected no k-abbreviation at ~2.5k chars/s, got: ${frame}`);
+  } finally {
+    unmount();
+  }
+});
+
+test('mounted StatusBar hides the rate segment once the turn ends', () => {
+  const { lastFrame, unmount } = render(React.createElement(StatusBar, {
+    provider: 'anthropic', model: 'opus', streaming: false,
+    ctxUsed: 100, ctxTotal: 1000, streamStartedAt: null,
+    hud, liveChars: 5000,
+  }));
+  try {
+    const frame = plain(lastFrame() || '');
+    assert.doesNotMatch(frame, /⇅/, `rate segment must not linger after the turn ends, got: ${frame}`);
+  } finally {
+    unmount();
+  }
 });
