@@ -142,6 +142,22 @@ The REPL has slash commands for everything you'd otherwise edit config for — p
 
 `/help` lists them all. Autocomplete works as you type: command names (`/...`) and, after a command, its **arguments** — `/login` → `codex-cli`/`gemini-cli`, `/hud` → `on`/`off`, `/channels` → channel names, subcommands for `/task` `/team` `/agent` `/personality` `/trainer` `/orchestrator`, and more — appear in a popup (↑/↓ select, Enter fill). The 2-step provider→model picks (`/model`, `/trainer set`, `/orchestrator planner`) show a `↹ pick` hint; press **Tab** to open the drill-in modal. CJK/Hangul input composes inside the box.
 
+Manage the always-on gateway without leaving the chat:
+
+```
+/gateway              # or /gateway status — pid, port, /health, auth, channels
+/gateway start        # spawn a detached gateway and wait for it to come up
+/gateway stop         # SIGTERM the recorded pid
+```
+
+The gateway records its pid to `gateway.pid` in the config dir, alongside the daemon's own `daemon.pid`.
+
+The REPL also animates when your terminal supports it: a launch reveal + wordmark shimmer, a braille streaming spinner with elapsed turn time, a `thinking…` indicator before the first token, a tweened context gauge, a live throughput meter in the HUD row, and a red input-border pulse after a failed turn.
+
+| Env var | Effect |
+|---|---|
+| `LAZYCLAW_NO_MOTION` | `1` disables every terminal animation (launch intro, streaming spinner, gauge tween, error flash). Animation is also off automatically without a TTY, under `NO_COLOR`, and on `TERM=dumb`. |
+
 ## The dashboard
 
 ```bash

@@ -48,6 +48,21 @@ Versioning: [SemVer](https://semver.org/).
   read-only daemon refuses it); goals and loops are read-only here. Creating
   schedules stays in the CLI, since the dashboard daemon is loopback but
   unauthenticated and scheduling runs a command.
+- **`/gateway status|start|stop`** in the chat REPL, so checking on the
+  always-on gateway no longer means leaving the chat session. `status` (also
+  bare `/gateway`) reports pid, port, a `GET /health` probe result, whether an
+  auth token file is present, and which channels are enabled; `start` spawns a
+  detached gateway and waits for its pidfile; `stop` SIGTERMs the recorded pid.
+  The gateway now records `gateway.pid` in the config dir, alongside the
+  daemon's existing `daemon.pid`.
+- **Terminal motion package**, on automatically when the terminal supports it:
+  a launch reveal plus a one-shot wordmark gradient shimmer, a braille
+  streaming spinner with the turn's elapsed time, a `thinking…` indicator
+  covering the gap before the first token, a tweened fill on the context
+  gauge, a live throughput meter (characters/sec) in the HUD row, and a red
+  pulse on the input border after a failed turn. Disable all of it with
+  `LAZYCLAW_NO_MOTION=1`; it's also off automatically without a TTY, under
+  `NO_COLOR`, and on `TERM=dumb`.
 
 ### Fixed
 
@@ -99,6 +114,18 @@ Versioning: [SemVer](https://semver.org/).
   `TEAM_BAD_AGENT`) in native alerts. Errors now show only the server's
   human-readable message, and creating a team guides you to register an agent
   first instead of failing with a 400.
+- **`/clear` left a blank screen instead of the splash.** Ink's `<Static>` is
+  write-once, so resetting React state back to just the splash item
+  re-printed nothing; it is now keyed by a generation counter that the reset
+  bumps, which remounts it.
+- **Stale duplicated status rows and orphaned input-box borders piled up above
+  the live frame.** Root cause: any write that reached the terminal without
+  Ink's knowledge and ended a line moved the cursor, so Ink's next erase
+  walked up from the wrong baseline and the top rows of the previous frame
+  survived. Stray stdout/stderr writes are now redirected through Ink's own
+  writer.
+- **The context gauge showed a misleading `0%`** when the context size was
+  unknown; it now shows `--`.
 
 ## [6.9.3] - 2026-06-23
 
