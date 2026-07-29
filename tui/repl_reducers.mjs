@@ -24,6 +24,10 @@ export function makeReplState(opts) {
     scrollback: splashItem ? [splashItem] : [],
     liveAssistant: '',
     turnCounter: 0,
+    // Bumped by onConversationReset. ReplApp keys its <Static> scrollback by
+    // this so a /clear remounts it — Ink's <Static> is write-once, so without
+    // a remount the retained splash item is never re-printed.
+    generation: 0,
   };
 }
 

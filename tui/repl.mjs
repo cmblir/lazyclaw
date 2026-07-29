@@ -437,7 +437,7 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
           )
         : React.createElement(
             Static,
-            { items: state.scrollback },
+            { key: `sb-${state.generation}`, items: state.scrollback },
             (item) => React.createElement(ScrollbackItem, { key: item.id, item })
           ),
       // Live region (legacy path only — alt path already rendered it inside the inner Box).

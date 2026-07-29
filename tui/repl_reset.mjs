@@ -21,6 +21,7 @@ export function onConversationReset(state) {
     liveAssistant: '',
     history: [],
     scrollback: splash ? [splash] : [],
+    generation: (state.generation || 0) + 1,
   };
 }
 
