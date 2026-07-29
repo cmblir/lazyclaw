@@ -48,10 +48,6 @@ import {
 } from './editor_keys.mjs';
 import { anchorState as _anchorState } from './editor_anchor.mjs';
 import { motionEnabled, useMotion, flashBorderColor, FLASH_MS, FLASH_TICK_MS } from './motion.mjs';
-// Re-exported (not just imported) so the established import path
-// `from '../tui/editor.mjs'` still resolves — flashBorderColor + FLASH_MS
-// moved to motion.mjs to keep this file under the 500-line file-size gate.
-export { flashBorderColor, FLASH_MS };
 
 // Re-export the pure state machine + measurement helpers (moved to
 // editor_keys.mjs to keep this file under the 500-line gate) so every

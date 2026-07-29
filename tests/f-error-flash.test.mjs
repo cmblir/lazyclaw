@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import chalk from 'chalk';
 import { render } from 'ink-testing-library';
-import { flashBorderColor, FLASH_MS } from '../tui/editor.mjs';
+import { flashBorderColor, FLASH_MS } from '../tui/motion.mjs';
 import { theme } from '../tui/theme.mjs';
 import { makeReplState, onUserInput, onTurnComplete } from '../tui/repl_reducers.mjs';
 import { ReplApp } from '../tui/repl.mjs';

@@ -214,7 +214,7 @@ test("a mid-stream interrupt does NOT touch the in-flight turn's liveCharCount",
 // Same per-turn latch/clear shape as the fields above: set only by
 // onTurnComplete when reason === 'error', cleared on every other path back
 // to idle (a new turn, Esc, or a full conversation reset). Feeds the input
-// border's flash (tui/editor.mjs flashBorderColor) so a failure stays
+// border's flash (tui/motion.mjs flashBorderColor) so a failure stays
 // visible even after its error text has scrolled out of view.
 
 test('makeReplState starts lastErrorAt null', () => {

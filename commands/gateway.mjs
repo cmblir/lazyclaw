@@ -313,8 +313,10 @@ export async function cmdGateway(flags = {}) {
   }) + '\n');
   process.stderr.write('[gateway] running. Ctrl-C to stop.\n');
 
-  // Record pid + the ACTUAL bound port so `/gateway status|stop` and
-  // `lazyclaw service` can find us without an lsof on the port.
+  // Record pid + the ACTUAL bound port so `/gateway status|stop` can find us
+  // without an lsof on the port. This pidfile is for that pair only —
+  // `lazyclaw service` tracks its managed processes through its own
+  // servicePaths scheme (commands/service.mjs) and never reads gateway.pid.
   const pidfile = _gatewayPidfilePath(path.dirname(configPath()));
   try { fs.writeFileSync(pidfile, JSON.stringify({ pid: process.pid, port: gw.port })); }
   catch { /* non-fatal: the gateway still runs, just isn't stoppable by pidfile */ }
