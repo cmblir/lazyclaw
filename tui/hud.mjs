@@ -54,16 +54,35 @@ const fmtTok = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n | 0));
 const GAUGE_CELLS = 8;
 const GAUGE_FILLED = '▰';
 const GAUGE_EMPTY = '▱';
-export function formatGauge(used, budget) {
+
+// Cells of the 8-wide bar a given percentage fills. Exported so the status
+// bar's fill animation and formatGauge agree on the scale.
+export function gaugeCells(pct) {
+  const p = Number(pct);
+  if (!Number.isFinite(p)) return 0;
+  return Math.min(GAUGE_CELLS, Math.max(0, Math.round((p / 100) * GAUGE_CELLS)));
+}
+
+export function formatGauge(used, budget, cellsOverride = null) {
+  // Reject null/undefined explicitly before the Number() coercion below:
+  // Number(null) is 0 — a finite, "valid-looking" number — so a null `used`
+  // would otherwise slip past the Number.isFinite guard and render a
+  // misleading "0%" instead of admitting the data is missing.
+  if (used == null || budget == null) return '--';
   const u = Number(used);
   const b = Number(budget);
   if (!Number.isFinite(u) || !Number.isFinite(b) || b <= 0) return '--';
   const pct = (u / b) * 100;
-  const filled = Math.min(GAUGE_CELLS, Math.max(0, Math.round((pct / 100) * GAUGE_CELLS)));
+  // The bar may be mid-animation, but the counts and percentage always report
+  // the real value — an animation must never misstate how full the window is.
+  const filled = Number.isFinite(cellsOverride)
+    ? Math.min(GAUGE_CELLS, Math.max(0, Math.round(cellsOverride)))
+    : gaugeCells(pct);
   const bar = GAUGE_FILLED.repeat(filled) + GAUGE_EMPTY.repeat(GAUGE_CELLS - filled);
   const body = `${fmtTok(u)}/${fmtTok(b)} ${Math.round(pct)}% ${bar}`;
   // >=95% danger, >=80% warn — prefix a plain marker so it's legible without
-  // color, then tint the whole gauge so it stands out at a glance.
+  // color, then tint the whole gauge so it stands out at a glance. Keyed off
+  // the real `pct`, never the animated cell count.
   if (pct >= 95) return chalk.red(`! ${body}`);
   if (pct >= 80) return chalk.yellow(`⚠ ${body}`);
   return body;
