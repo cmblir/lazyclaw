@@ -27,43 +27,47 @@ export function readDaemonPidfile(pidfilePath) {
   } catch { return null; }
 }
 
-// Inspect the daemon pidfile and report liveness. A pidfile pointing at a
-// dead pid is stale (the daemon crashed without removing it), so we clean it
-// up here to keep `status` self-healing.
-export function daemonStatus({ configDir }, deps = {}) {
+// Inspect a pidfile and report liveness. A pidfile pointing at a dead pid is
+// stale (the process crashed without removing it), so we clean it up here to
+// keep `status` self-healing. Shared by the daemon and the gateway.
+export function pidfileStatus(pidfilePath, deps = {}) {
   const isAlive = deps.isAlive || isProcessAlive;
-  const pf = _daemonPidfilePath(configDir);
-  const rec = readDaemonPidfile(pf);
+  const rec = readDaemonPidfile(pidfilePath);
   if (!rec) return { running: false, pid: null, port: null };
   if (isAlive(rec.pid)) return { running: true, pid: rec.pid, port: rec.port };
-  // Stale pidfile — remove it so the next start/status starts clean.
-  try { fs.rmSync(pf); } catch { /* already gone */ }
+  try { fs.rmSync(pidfilePath); } catch { /* already gone */ }
   return { running: false, pid: null, port: null };
 }
 
-// SIGTERM the recorded daemon, falling back to SIGKILL only if it ignores the
+// SIGTERM the recorded process, falling back to SIGKILL only if it ignores the
 // graceful signal. Returns { running, pid, port, killed, exitCode }; a missing
 // or dead pidfile is "not running" (exit 0), never an error.
-export function daemonStop({ configDir }, deps = {}) {
+export function pidfileStop(pidfilePath, deps = {}) {
   const isAlive = deps.isAlive || isProcessAlive;
   const kill = deps.kill || ((pid, sig) => process.kill(pid, sig));
-  const pf = _daemonPidfilePath(configDir);
-  const rec = readDaemonPidfile(pf);
+  const rec = readDaemonPidfile(pidfilePath);
   if (!rec || !isAlive(rec.pid)) {
-    try { fs.rmSync(pf); } catch { /* nothing to clean */ }
+    try { fs.rmSync(pidfilePath); } catch { /* nothing to clean */ }
     return { running: false, pid: rec ? rec.pid : null, port: rec ? rec.port : null, killed: false, exitCode: 0 };
   }
   try { kill(rec.pid, 'SIGTERM'); } catch { /* raced with exit */ }
-  // Short grace window, then SIGKILL the holdout. This is best-effort and
-  // synchronous so the CLI exits deterministically; the daemon's own
-  // graceful-shutdown hook usually wins well inside the window.
+  // Short grace window, then SIGKILL the holdout. Synchronous so the CLI exits
+  // deterministically; the process's own shutdown hook usually wins inside it.
   if (isAlive(rec.pid)) {
     const until = Date.now() + 1500;
     while (isAlive(rec.pid) && Date.now() < until) { /* spin briefly */ }
     if (isAlive(rec.pid)) { try { kill(rec.pid, 'SIGKILL'); } catch { /* gone */ } }
   }
-  try { fs.rmSync(pf); } catch { /* removed by the daemon already */ }
+  try { fs.rmSync(pidfilePath); } catch { /* removed by the process already */ }
   return { running: true, pid: rec.pid, port: rec.port, killed: true, exitCode: 0 };
+}
+
+export function daemonStatus({ configDir }, deps = {}) {
+  return pidfileStatus(_daemonPidfilePath(configDir), deps);
+}
+
+export function daemonStop({ configDir }, deps = {}) {
+  return pidfileStop(_daemonPidfilePath(configDir), deps);
 }
 
 // Fail closed before binding the HTTP surface: the daemon/dashboard serve

@@ -21,6 +21,7 @@ import { ensureRegistry } from '../lib/registry_boot.mjs';
 import { loadDotenvIfAny } from '../dotenv_min.mjs';
 import { assertUnattendedSafe, installCrashHandlers } from '../lib/gateway_guard.mjs';
 import { makeInboundHandler } from '../lib/inbound_client.mjs';
+import { pidfileStatus, pidfileStop } from './daemon.mjs';
 
 export const GATEWAY_CHANNELS = ['slack', 'telegram', 'matrix'];
 
@@ -30,6 +31,21 @@ export const GATEWAY_CHANNELS = ['slack', 'telegram', 'matrix'];
 // Channel (start/send/stop). The gateway loads the ENABLED ones at runtime so
 // `channels enable discord` is actually reachable instead of a no-op.
 export const PLUGIN_CHANNELS = ['discord', 'email', 'signal', 'voice', 'whatsapp'];
+
+// The gateway runs in the foreground like the bare daemon, so a started
+// gateway records its pid + bound port here. `/gateway status|stop` and
+// `lazyclaw service` read it back; cmdGateway removes it on shutdown.
+export function _gatewayPidfilePath(configDir) {
+  return path.join(configDir, 'gateway.pid');
+}
+
+export function gatewayStatus({ configDir }, deps = {}) {
+  return pidfileStatus(_gatewayPidfilePath(configDir), deps);
+}
+
+export function gatewayStop({ configDir }, deps = {}) {
+  return pidfileStop(_gatewayPidfilePath(configDir), deps);
+}
 
 // Default per-channel constructors. Each receives { handler, logger,
 // allowlist }, must return a started channel exposing send()/stop().
@@ -297,13 +313,21 @@ export async function cmdGateway(flags = {}) {
   }) + '\n');
   process.stderr.write('[gateway] running. Ctrl-C to stop.\n');
 
-  installCrashHandlers({ label: 'gateway', stop: () => gw.stop() });
+  // Record pid + the ACTUAL bound port so `/gateway status|stop` and
+  // `lazyclaw service` can find us without an lsof on the port.
+  const pidfile = _gatewayPidfilePath(path.dirname(configPath()));
+  try { fs.writeFileSync(pidfile, JSON.stringify({ pid: process.pid, port: gw.port })); }
+  catch { /* non-fatal: the gateway still runs, just isn't stoppable by pidfile */ }
+  const removePidfile = () => { try { fs.rmSync(pidfile); } catch { /* already gone */ } };
+
+  installCrashHandlers({ label: 'gateway', stop: () => { removePidfile(); return gw.stop(); } });
   await new Promise((resolve) => {
     let shuttingDown = false;
     const onSig = async () => {
       if (shuttingDown) return process.exit(1);
       shuttingDown = true;
       process.stderr.write('\n[gateway] shutting down…\n');
+      removePidfile();
       try { await gw.stop(); } catch { /* best-effort */ }
       resolve();
     };
