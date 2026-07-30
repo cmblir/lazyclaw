@@ -146,11 +146,12 @@ Manage the always-on gateway without leaving the chat:
 
 ```
 /gateway              # or /gateway status — pid, port, /health, auth, channels
-/gateway start        # spawn a detached gateway and wait for it to come up
+/gateway start [--port N]   # spawn a detached gateway and wait for it to come up (--port is a one-off, not persisted)
+/gateway port [N]     # print the effective port + its source (flag/config/default), or set + persist a new one
 /gateway stop         # SIGTERM the recorded pid
 ```
 
-The gateway records its pid to `gateway.pid` in the config dir, alongside the daemon's own `daemon.pid`.
+The gateway records its pid to `gateway.pid` in the config dir, alongside the daemon's own `daemon.pid`. The port itself resolves in order: an explicit `--port` flag, then `gateway.port` in `config.json` (`dashboard.port` / `daemon.port` for the other two surfaces), then the historical default `19600` — so moving one surface off a collision doesn't require touching the others.
 
 The REPL also animates when your terminal supports it: a launch reveal + wordmark shimmer, a braille streaming spinner with elapsed turn time, a `thinking…` indicator before the first token, a tweened context gauge, a live throughput meter in the HUD row, and a red input-border pulse after a failed turn.
 
@@ -161,8 +162,10 @@ The REPL also animates when your terminal supports it: a launch reveal + wordmar
 ## The dashboard
 
 ```bash
-lazyclaw dashboard          # local web UI on http://127.0.0.1:19600
+lazyclaw dashboard          # local web UI on http://127.0.0.1:19600 (override with --port N or dashboard.port in config.json)
 ```
+
+From chat, `/dashboard [--port N]` (or `/dashboard stop`) does the same.
 
 A framework-free SPA over the daemon's JSON API: Chat, Sessions, Workflows, Skills, Providers, Rates, Metrics, Doctor, Config, Status, Agents, Teams, Tasks, **Team Live**, Trainer, Recall, Sandbox, Channels — 18 tabs, dark amber theme. The **Team Live** tab is a real-time org view: avatar tiles with status rings + harness badges (`provider · model`), live agent-A→B delegation, and click-to-drill-down (harness, current task, recent activity), streamed over Server-Sent Events (`GET /events`).
 
