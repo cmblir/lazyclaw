@@ -49,3 +49,38 @@ test('network failure is reported, not thrown', async () => {
   assert.equal(r.ok, false);
   assert.match(r.detail, /could not reach/);
 });
+
+// Slack's auth.test response carries the identity of the account the token
+// belongs to. /setup needs `user_id` to offer the operator a pairing default
+// instead of making them go find their own Slack ID, so verifyChannel keeps the
+// raw fields alongside the human-readable `detail` rather than discarding them.
+test('slack verify exposes the identity auth.test returned', async () => {
+  const r = await verifyChannel('slack', {
+    env: { SLACK_BOT_TOKEN: 'xoxb-x' },
+    fetchImpl: okFetch({ ok: true, team: 'Acme', user: 'lazyclaw', user_id: 'U123', team_id: 'T456', bot_id: 'B789' }),
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.identity.userId, 'U123');
+  assert.equal(r.identity.teamId, 'T456');
+  assert.equal(r.identity.user, 'lazyclaw');
+  assert.equal(r.identity.team, 'Acme');
+});
+
+test('slack verify identity is absent, not a throw, when auth.test omits the ids', async () => {
+  const r = await verifyChannel('slack', {
+    env: { SLACK_BOT_TOKEN: 'xoxb-x' },
+    fetchImpl: okFetch({ ok: true, team: 'Acme', user: 'lazyclaw' }),
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.identity.userId, null);
+  assert.equal(r.identity.team, 'Acme');
+});
+
+test('a rejected slack token carries no identity', async () => {
+  const r = await verifyChannel('slack', {
+    env: { SLACK_BOT_TOKEN: 'bad' },
+    fetchImpl: okFetch({ ok: false, error: 'invalid_auth' }),
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.identity, null);
+});
