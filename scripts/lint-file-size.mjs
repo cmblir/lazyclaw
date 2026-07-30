@@ -40,7 +40,6 @@ const ALLOW = {
   // split-debt until the legacy path can be folded into the Ink dispatcher.
   'commands/chat_legacy_slash.mjs': 716,
   'tui/pickers.mjs': 886,
-  'commands/setup.mjs': 706,
   'gateway/device_auth.mjs': 664,
   'tui/repl.mjs': 570,
   'commands/automation.mjs': 516,

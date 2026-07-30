@@ -193,6 +193,30 @@ export function _codexConfigModels({ home, readFileSync } = {}) {
   } catch { return []; }
 }
 
+// The codex CLI keeps the models the signed-in account can actually use in
+// ~/.codex/models_cache.json, refreshed by codex itself. That is a much better
+// answer than config.toml's single pinned `model` line, which only says which
+// one is currently selected — a ChatGPT-plan login otherwise saw exactly one
+// entry in the picker while the cache listed every available model.
+//
+// Shape (codex-cli 0.146): { fetched_at, etag, client_version, models: [
+//   { slug, display_name, visibility, priority, … } ] }. `visibility: "hide"`
+// marks internal entries (e.g. codex-auto-review) that must not be offered;
+// `priority` ascending is codex's own preferred ordering. Returns [] for a
+// missing, malformed, or empty cache so the config.toml fallback still applies.
+export function _codexCachedModels({ home, readFileSync } = {}) {
+  const h = home || os.homedir();
+  const read = readFileSync || fs.readFileSync;
+  try {
+    const j = JSON.parse(read(path.join(h, '.codex/models_cache.json'), 'utf8'));
+    if (!Array.isArray(j?.models)) return [];
+    return j.models
+      .filter((m) => m && m.visibility !== 'hide' && typeof m.slug === 'string' && m.slug)
+      .sort((a, b) => (Number(a.priority) || 0) - (Number(b.priority) || 0))
+      .map((m) => m.slug);
+  } catch { return []; }
+}
+
 // Same idea for a `gemini` Google-account login: no listable platform catalogue,
 // but ~/.gemini/settings.json may pin a model. Returns [] when absent.
 export function _geminiConfigModels({ home, readFileSync } = {}) {
@@ -240,8 +264,11 @@ export async function fetchModelsForProvider(deps) {
       const { fetchOpenAICompatModels } = await import('./openai_compat.mjs');
       return fetchOpenAICompatModels({ baseUrl: 'https://api.openai.com/v1', apiKey, fetch: deps?.fetchImpl });
     }
-    // ChatGPT-plan login has no platform API key — list the model the local
-    // codex config is set to use instead of erroring with "fetch failed".
+    // ChatGPT-plan login has no platform API key, so /v1/models is unavailable.
+    // Prefer codex's own cache of what the account can use; fall back to the
+    // single model config.toml pins when the cache is missing or unreadable.
+    const cached = deps?._codexCachedModels ? deps._codexCachedModels() : _codexCachedModels();
+    if (cached.length > 0) return cached;
     return deps?._codexConfigModels ? deps._codexConfigModels() : _codexConfigModels();
   }
   const c = modelCatalogueFor(deps);
