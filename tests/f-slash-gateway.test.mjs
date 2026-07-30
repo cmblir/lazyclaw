@@ -113,6 +113,35 @@ test('start --port <N> passes a one-off override to the spawned child, without p
   assert.equal(wrote, false, 'a one-off start override must not persist to config');
 });
 
+// Fix round 1: a present-but-invalid --port used to silently fall back to
+// config/default instead of being reported — this pins that it's now caught
+// and returned as a readable string (gatewaySlash must never throw at the
+// user), and that a bad port is rejected BEFORE spawning, not just left for
+// the child to fail on its own.
+test('start --port <invalid> is rejected with a readable message, before spawning', async () => {
+  const out = await gatewaySlash('start --port abc', ctx, {
+    spawn: () => { throw new Error('must not spawn on an invalid --port'); },
+  });
+  assert.match(out, /invalid/i);
+  assert.match(out, /abc/);
+  assert.doesNotMatch(out, /gateway: gateway:/, 'must not double-prefix the surface label');
+});
+
+test('start --port 0 (ephemeral sentinel) is still accepted, not rejected as invalid', async () => {
+  let spawned = null;
+  let probes = 0;
+  const out = await gatewaySlash('start --port 0', ctx, {
+    status: () => (probes++ === 0 ? { running: false, pid: null, port: null }
+                                  : { running: true, pid: 902, port: 51234 }),
+    spawn: (cmd, argv, opts) => { spawned = { cmd, argv, opts }; return { unref() {} }; },
+    sleep: async () => {},
+  });
+  assert.ok(spawned, 'spawn was not called');
+  const pi = spawned.argv.indexOf('--port');
+  assert.equal(spawned.argv[pi + 1], '0');
+  assert.match(out, /started/);
+});
+
 test('start reports a spawn that fails outright', async () => {
   // Distinct from "spawned but never came up": here the child never starts at
   // all (bad node path, EACCES, EMFILE). The handler must report it rather than

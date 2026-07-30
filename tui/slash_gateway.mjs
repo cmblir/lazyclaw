@@ -16,7 +16,7 @@ import {
   gatewayStatus, gatewayStop, _gatewayPidfilePath,
   GATEWAY_CHANNELS, PLUGIN_CHANNELS,
 } from '../commands/gateway.mjs';
-import { resolvePort, configuredPort, isValidPort } from '../lib/ports.mjs';
+import { resolvePort, configuredPort, isValidPort, InvalidPortError } from '../lib/ports.mjs';
 
 const SUBCOMMANDS = ['status', 'start', 'stop', 'port'];
 // How long `/gateway start` waits for the child to record its pidfile before
@@ -128,9 +128,15 @@ async function _start(cfgDir, cfg, d, overridePort) {
     return `gateway: already running (pid ${before.pid}, http://127.0.0.1:${before.port})`;
   }
   // The port this attempt is actually aiming at — the one-off override if
-  // given, else whatever config/default resolves to — used only to make the
-  // EADDRINUSE hint below name the real collision, not a stale literal.
-  const effectivePort = overridePort != null ? overridePort : resolvePort('gateway', {}, cfg);
+  // given, else whatever config/default resolves to. Resolving it here (via
+  // resolvePort rather than trusting overridePort as-is) means a typo'd
+  // --port is reported immediately, in this response, instead of only
+  // surfacing after spawning a child that would fail the identical check
+  // itself (resolvePort throws InvalidPortError on a present-but-invalid
+  // value; gatewaySlash's outer catch turns that into a readable string).
+  const effectivePort = overridePort != null
+    ? resolvePort('gateway', { port: overridePort }, cfg)
+    : resolvePort('gateway', {}, cfg);
   // Keep the child detached (it must outlive this chat session) but PIPE its
   // stderr rather than discarding it. A gateway that cannot start says why in
   // one line and exits — port already in use, unattended-safety guard, missing
@@ -141,7 +147,7 @@ async function _start(cfgDir, cfg, d, overridePort) {
     // --port is a one-off override for THIS run only — it is never persisted.
     // Use `/gateway port <N>` to change the value future starts pick up.
     const argv = [_cliEntrypoint(), 'gateway'];
-    if (overridePort != null) argv.push('--port', String(overridePort));
+    if (overridePort != null) argv.push('--port', String(effectivePort));
     child = d.spawn(process.execPath, argv, {
       detached: true,
       stdio: ['ignore', 'ignore', 'pipe'],
@@ -248,7 +254,10 @@ export async function gatewaySlash(args, ctx = {}, deps = {}) {
       return await _start(cfgDir, cfg, d, overridePort);
     }
   } catch (err) {
-    return `gateway: ${err?.message || err}`;
+    // InvalidPortError already names its own surface ("gateway: invalid
+    // --port ..."), so return it as-is — the generic wrapper below would
+    // otherwise double up into "gateway: gateway: invalid --port ...".
+    return err instanceof InvalidPortError ? err.message : `gateway: ${err?.message || err}`;
   }
   return `gateway: unknown subcommand "${sub}" — try ${SUBCOMMANDS.map((s) => `/gateway ${s}`).join(' · ')}`;
 }

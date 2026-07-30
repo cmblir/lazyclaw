@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { DEFAULT_PORT, resolvePort, configuredPort, isValidPort } from '../lib/ports.mjs';
+import { DEFAULT_PORT, resolvePort, configuredPort, isValidPort, InvalidPortError } from '../lib/ports.mjs';
 
 test('DEFAULT_PORT is the historical hardcoded value', () => {
   assert.equal(DEFAULT_PORT, 19600);
@@ -102,23 +102,62 @@ test('a surface section present but with no port key falls back to default', () 
 });
 
 // ---- invalid values rejected sensibly ----
+//
+// Fix round 1: a PRESENT --port that fails to parse used to fall through to
+// config/default silently — "the port you asked for quietly didn't take
+// effect" is exactly the failure this feature exists to eliminate (it's just
+// as bad as the original shared-19600 collision, only one abstraction layer
+// deeper). Before this resolver existed, a bad --port reached
+// server.listen() and Node threw ERR_SOCKET_BAD_PORT — loud and immediate.
+// A PRESENT-but-invalid flag must now throw InvalidPortError instead of
+// falling through. An ABSENT flag (the key simply not set) is unaffected —
+// that still falls through to config, then the default. Do not "simplify"
+// the throw back into a fallthrough.
 
-test('non-numeric flag falls through to config, not NaN', () => {
+test('an ABSENT flag (key not set) still falls through to config, then default — unchanged', () => {
+  assert.equal(resolvePort('gateway', {}, { gateway: { port: 5001 } }), 5001);
+  assert.equal(resolvePort('gateway', {}, {}), DEFAULT_PORT);
+  assert.equal(resolvePort('gateway', undefined, { gateway: { port: 5001 } }), 5001);
+});
+
+test('a PRESENT non-numeric flag throws InvalidPortError instead of falling through', () => {
   const cfg = { gateway: { port: 5001 } };
-  assert.equal(resolvePort('gateway', { port: 'not-a-number' }, cfg), 5001);
+  assert.throws(() => resolvePort('gateway', { port: 'not-a-number' }, cfg), InvalidPortError);
+  assert.throws(() => resolvePort('gateway', { port: 'garbage' }, {}), InvalidPortError);
 });
 
-test('non-numeric flag with no config falls through to the default', () => {
-  assert.equal(resolvePort('gateway', { port: 'garbage' }, {}), DEFAULT_PORT);
+test('a PRESENT empty-string flag throws InvalidPortError instead of falling through', () => {
+  assert.throws(() => resolvePort('gateway', { port: '' }, { gateway: { port: 5001 } }), InvalidPortError);
 });
 
-test('a flag outside the 16-bit port range falls through to config, not the nonsense value', () => {
+test('a PRESENT flag outside the 16-bit port range throws InvalidPortError instead of falling through', () => {
   const cfg = { gateway: { port: 5001 } };
-  assert.equal(resolvePort('gateway', { port: 99999 }, cfg), 5001);
-  assert.equal(resolvePort('gateway', { port: -5 }, cfg), 5001);
+  assert.throws(() => resolvePort('gateway', { port: 99999 }, cfg), InvalidPortError);
+  assert.throws(() => resolvePort('gateway', { port: -5 }, cfg), InvalidPortError);
+  assert.throws(() => resolvePort('gateway', { port: -1 }, cfg), InvalidPortError);
 });
 
-test('out-of-range or non-numeric config value is ignored, falling to the default', () => {
+test('InvalidPortError names the surface, the offending value, and the accepted range', () => {
+  try {
+    resolvePort('gateway', { port: 'abc' }, {});
+    assert.fail('expected resolvePort to throw');
+  } catch (err) {
+    assert.ok(err instanceof InvalidPortError);
+    assert.ok(err instanceof RangeError, 'InvalidPortError must be a RangeError');
+    assert.match(err.message, /gateway/);
+    assert.match(err.message, /"abc"/);
+    assert.match(err.message, /0.*65535/);
+    assert.equal(err.surface, 'gateway');
+    assert.equal(err.value, 'abc');
+  }
+});
+
+test('--port 0 (ephemeral-port sentinel) still resolves, not thrown — regression guard', () => {
+  assert.equal(resolvePort('gateway', { port: 0 }, { gateway: { port: 5001 } }), 0);
+  assert.equal(resolvePort('gateway', { port: '0' }, {}), 0);
+});
+
+test('out-of-range or non-numeric CONFIG value (no flag involved) is ignored, falling to the default', () => {
   assert.equal(resolvePort('gateway', {}, { gateway: { port: 99999 } }), DEFAULT_PORT);
   assert.equal(resolvePort('gateway', {}, { gateway: { port: 'abc' } }), DEFAULT_PORT);
   assert.equal(resolvePort('gateway', {}, { gateway: { port: 80 } }), DEFAULT_PORT);

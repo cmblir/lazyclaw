@@ -71,7 +71,12 @@ export async function cmdService(sub, positional = [], flags = {}) {
     if (surface !== 'daemon') assertServicePairing(cfg, { service: true, surface });
   } catch (e) { console.error(e.message); process.exit(2); }
 
-  const spec = _buildSpec(surface, flags, cfgDir, { cfg });
+  // A present-but-invalid --port throws InvalidPortError (lib/ports.mjs) —
+  // fail closed here rather than baking a typo'd port into an installed
+  // service's argv with no warning at install time.
+  let spec;
+  try { spec = _buildSpec(surface, flags, cfgDir, { cfg }); }
+  catch (e) { console.error(e.message); process.exit(2); }
   const emit = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
 
   try {

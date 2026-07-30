@@ -148,7 +148,13 @@ export async function _dashboard(args, ctx = {}) {
   const tokens = splitWhitespace(args);
   const pi = tokens.indexOf('--port');
   const flags = pi >= 0 && tokens[pi + 1] !== undefined ? { port: tokens[pi + 1] } : {};
-  const port = resolvePort('dashboard', flags, ctx.cfg || {});
+  // A present-but-invalid --port throws InvalidPortError (lib/ports.mjs) —
+  // catch it and return a readable string. dispatchSlash does not wrap
+  // handlers in a try/catch, so an uncaught throw here would propagate all
+  // the way up into the REPL's turn handling instead of just this response.
+  let port;
+  try { port = resolvePort('dashboard', flags, ctx.cfg || {}); }
+  catch (err) { return err.message; }
   const url = `http://127.0.0.1:${port}/dashboard`;
   // Under the node:test runner, never launch a real daemon or open a browser
   // (it leaked a background daemon + opened a tab on every test run).

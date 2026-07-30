@@ -43,20 +43,44 @@ test('--port overrides the default when no config is present', async () => {
   assert.match(out, /:6004\/dashboard/);
 });
 
-test('a --port value outside the 16-bit port range is rejected sensibly, falling back to config', async () => {
+// Fix round 1: a present-but-invalid --port used to silently fall back to
+// config/default (tested above as "rejected sensibly, falling back to
+// config") — that's exactly the failure this feature exists to eliminate,
+// just one layer deeper: the port you typed quietly didn't take effect.
+// resolvePort now throws InvalidPortError for a PRESENT-but-invalid value;
+// _dashboard must catch it and return a readable string (a slash handler
+// must never throw — dispatchSlash does not wrap handlers in try/catch), and
+// must NOT silently substitute the configured/default port instead.
+
+test('a --port value outside the 16-bit port range is rejected with a readable message, not silently replaced', async () => {
   const out = await _dashboard('--port 99999', { cfg: { dashboard: { port: 19601 } } });
-  assert.match(out, /:19601\/dashboard/);
+  assert.match(out, /invalid/i);
+  assert.match(out, /99999/);
+  assert.doesNotMatch(out, /19601/, 'must not silently substitute the configured port');
 });
 
-test('a non-numeric --port value is rejected sensibly, falling back to the default', async () => {
+test('a non-numeric --port value is rejected with a readable message, not silently replaced', async () => {
   const out = await _dashboard('--port notanumber', {});
-  assert.match(out, /:19600\/dashboard/);
+  assert.match(out, /invalid/i);
+  assert.match(out, /notanumber/);
+  assert.doesNotMatch(out, /19600/, 'must not silently substitute the default port');
 });
 
-test('the stop subcommand still parses (and stays test-safe: no real kill/spawn runs)', async () => {
+test('--port 0 (ephemeral sentinel) is still accepted, not rejected as invalid', async () => {
+  const out = await _dashboard('--port 0', { cfg: { dashboard: { port: 19601 } } });
+  assert.match(out, /:0\/dashboard/);
+});
+
+test('an absent --port flag is unaffected by the throw-on-invalid change: still falls through to config, then default', async () => {
+  assert.match(await _dashboard('', { cfg: { dashboard: { port: 19601 } } }), /:19601\/dashboard/);
+  assert.match(await _dashboard('', {}), /:19600\/dashboard/);
+});
+
+// This does NOT exercise _dashboardStop — under NODE_TEST_CONTEXT, _dashboard
+// returns before ever reading tokens[0], so "stop" is equivalent to any other
+// string here. It only pins that the stop/kill token doesn't get mistaken
+// for a --port value (e.g. an accidental off-by-one in the tokens array).
+test('the literal "stop" argument does not disturb port parsing (stop itself is untested here — see module comment)', async () => {
   const out = await _dashboard('stop', { cfg: { dashboard: { port: 19601 } } });
-  // Under NODE_TEST_CONTEXT the function returns before reaching
-  // _dashboardStop, so this just pins that adding ctx/port parsing didn't
-  // break the stop/kill argument path.
   assert.match(out, /:19601\/dashboard/);
 });
