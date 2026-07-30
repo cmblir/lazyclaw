@@ -156,9 +156,22 @@ export async function verifyChannel(name, { env = process.env, fetchImpl } = {})
       const base = env.SLACK_API_BASE || 'https://slack.com/api';
       const res = await f(`${base}/auth.test`, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
       const j = await res.json().catch(() => ({}));
+      // Keep the ids auth.test hands back, not just the human-readable summary:
+      // /setup uses `userId` to offer a pairing default so the operator does not
+      // have to go dig their own Slack ID out of the app. Never carries a token.
       return j && j.ok
-        ? { ok: true, detail: `team=${j.team || '?'} user=${j.user || '?'}`, hint: '' }
-        : { ok: false, detail: `Slack rejected the token (${j && j.error ? j.error : 'auth.test failed'})`, hint: 'check SLACK_BOT_TOKEN via /channels slack setup' };
+        ? {
+            ok: true,
+            detail: `team=${j.team || '?'} user=${j.user || '?'}`,
+            hint: '',
+            identity: {
+              userId: j.user_id || null,
+              teamId: j.team_id || null,
+              user: j.user || null,
+              team: j.team || null,
+            },
+          }
+        : { ok: false, detail: `Slack rejected the token (${j && j.error ? j.error : 'auth.test failed'})`, hint: 'check SLACK_BOT_TOKEN via /channels slack setup', identity: null };
     }
     if (name === 'telegram') {
       const token = need('TELEGRAM_BOT_TOKEN');
@@ -187,7 +200,7 @@ export async function verifyChannel(name, { env = process.env, fetchImpl } = {})
 
 // Configure ONE channel: prompt each credential field (secrets masked),
 // persist to .env + cfg.channels, echo a summary. Returns the persist entry.
-async function configureChannel({ cfgDir, spec, prompt, colors, write, fetchImpl }) {
+async function configureChannel({ cfgDir, spec, prompt, colors, write, fetchImpl, slackHandoff }) {
   const { dim, ok, warn } = colors;
   const answers = {};
   for (const f of spec.fields) {
@@ -211,6 +224,13 @@ async function configureChannel({ cfgDir, spec, prompt, colors, write, fetchImpl
       const ver = await verifyChannel(spec.name, { env: { ...process.env, ...entry.envVars }, fetchImpl });
       if (ver.ok === true) write(`  ${ok('✓ verified:')} ${dim(ver.detail || '')}\n`);
       else if (ver.ok === false) write(`  ${warn('✗ not verified:')} ${ver.detail || ''}${ver.hint ? dim(`  (${ver.hint})`) : ''}\n`);
+      // A verified Slack bot is one step from being usable, so finish the job
+      // here rather than leaving the user with credentials and no running
+      // agent: pair them, offer to start the gateway, and let the bot say
+      // hello. Each part is declinable and none of it can fail the wizard.
+      if (spec.name === 'slack' && ver.ok === true && slackHandoff !== false) {
+        await runSlackHandoff({ cfgDir, identity: ver.identity, write, prompt, colors, deps: slackHandoff });
+      }
     } catch { /* verification is best-effort — never block setup on it */ }
   }
   // Honest requirement notice: these channels ship in-tree but need a runtime
@@ -230,12 +250,87 @@ async function configureChannel({ cfgDir, spec, prompt, colors, write, fetchImpl
   return entry;
 }
 
+// Wire the Slack hand-off (pair -> start -> announce) to the real world. Split
+// from finishSlackSetup so that module stays free of process/network concerns
+// and can be unit-tested without binding a port, spawning, or calling Slack.
+// `deps` overrides the whole set for tests.
+async function runSlackHandoff({ cfgDir, identity, write, prompt, colors, deps }) {
+  const { finishSlackSetup } = await import('./setup_slack_handoff.mjs');
+  const { dim } = colors;
+  write(`\n  ${dim('Almost there — pair yourself, start the gateway, and let the bot say hello.')}\n`);
+  const io = {
+    write,
+    // The wizard's prompt() is a line reader; treat a leading y/Enter as yes so
+    // this matches how the rest of setup asks.
+    confirm: async (q) => {
+      const a = (await prompt(`${q} [Y/n]: `) || '').trim().toLowerCase();
+      return a === '' || a === 'y' || a === 'yes';
+    },
+    prompt: async (q) => (await prompt(q) || ''),
+  };
+  const real = {
+    writeConfig,
+    isPortListening: async (port) => {
+      const { createConnection } = await import('node:net');
+      return new Promise((resolve) => {
+        const sock = createConnection({ host: '127.0.0.1', port });
+        const done = (v) => { try { sock.destroy(); } catch { /* closed */ } resolve(v); };
+        sock.setTimeout(200);
+        sock.on('connect', () => done(true));
+        sock.on('timeout', () => done(false));
+        sock.on('error', () => done(false));
+      });
+    },
+    // Detached so the gateway outlives this wizard, but stderr is piped: a
+    // gateway that cannot bind says why in one line and exits, and discarding
+    // that is what made `/gateway start` report a useless generic timeout.
+    spawnGateway: async ({ port }) => {
+      const { spawn } = await import('node:child_process');
+      const entry = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'cli.mjs');
+      let child;
+      try {
+        child = spawn(process.execPath, [entry, 'gateway', '--port', String(port)],
+          { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+      } catch (e) { return { ok: false, reason: e?.message || String(e) }; }
+      let errText = '';
+      let exited = null;
+      child.stderr?.on('data', (c) => { errText += String(c); });
+      child.on?.('exit', (code) => { exited = code; });
+      child.unref?.();
+      // Give it a moment to either bind or die with a reason.
+      for (let i = 0; i < 24 && exited === null; i++) {
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      if (exited !== null) {
+        const line = errText.split('\n').map((l) => l.trim())
+          .filter((l) => l && !l.startsWith('[gateway]')).pop();
+        return { ok: false, reason: line || `exited with code ${exited}` };
+      }
+      return { ok: true, pid: child.pid, port };
+    },
+    sendMessage: async (dest, text) => {
+      const { SlackChannel } = await import('../channels/slack.mjs');
+      const ch = new SlackChannel();
+      return ch.send(dest, text);
+    },
+  };
+  try {
+    await finishSlackSetup({
+      cfg: readConfig(), identity, io,
+      deps: { ...real, ...(deps && typeof deps === 'object' ? deps : {}) },
+    });
+  } catch (e) {
+    // The hand-off is a convenience; never let it cost the user the run.
+    write(`  ${dim(`hand-off skipped: ${e?.message || e}`)}\n`);
+  }
+}
+
 // Interactive channel step. Picks the channel from an arrow-key list (no
 // typing the name), then prompts that channel's credential fields, and loops
 // so several channels can be set up in one pass. `prompt(label, {secret})`
 // resolves to a trimmed string; `write(text)` sinks UI output. Returns
 // { skipped, channels: [names], needsPlugin? }. Never echoes a secret value.
-export async function runChannelStep({ cfgDir, prompt, colors, write = (s) => process.stdout.write(s), pick, fetchImpl }) {
+export async function runChannelStep({ cfgDir, prompt, colors, write = (s) => process.stdout.write(s), pick, fetchImpl, slackHandoff }) {
   const { dim, ok, warn } = colors;
   // `pick` is the arrow-key list selector — injectable so tests can script it
   // (the real _arrowMenu reads raw stdin, which a unit test can't drive).
@@ -265,7 +360,7 @@ export async function runChannelStep({ cfgDir, prompt, colors, write = (s) => pr
     const spec = channelByName(id);
     if (!spec) { write(`  ${warn('skipped:')} unknown channel "${id}"\n\n`); continue; }
     try {
-      const entry = await configureChannel({ cfgDir, spec, prompt, colors, write, fetchImpl });
+      const entry = await configureChannel({ cfgDir, spec, prompt, colors, write, fetchImpl, slackHandoff });
       if (!configured.includes(id)) configured.push(id);
       if (!entry.ready && entry.missingDeps && entry.missingDeps.length) needsPlugin = entry.missingDeps.join(', ');
     } catch (e) {
