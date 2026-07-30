@@ -82,8 +82,11 @@ test('start spawns a detached gateway and waits for it to come up', async () => 
   });
   assert.ok(spawned, 'spawn was not called');
   assert.deepEqual(spawned.argv.slice(-1), ['gateway']);
-  assert.equal(spawned.opts.detached, true);
-  assert.equal(spawned.opts.stdio, 'ignore');
+  assert.equal(spawned.opts.detached, true, 'the gateway must outlive this chat session');
+  // stderr is PIPED, not ignored: a gateway that cannot bind says why in one
+  // line and exits, and discarding that left only a generic timeout. stdin and
+  // stdout stay ignored — we want the reason, not its whole log.
+  assert.deepEqual(spawned.opts.stdio, ['ignore', 'ignore', 'pipe']);
   assert.match(out, /started/);
   assert.match(out, /pid 900/);
 });
@@ -130,4 +133,53 @@ test('an unknown subcommand lists the valid ones', async () => {
   assert.match(out, /status/);
   assert.match(out, /start/);
   assert.match(out, /stop/);
+});
+
+// A gateway that fails to bind (the common case: the dashboard already holds
+// port 19600) exits within a second with a one-line reason on stderr. The
+// original implementation spawned with stdio:'ignore', so that reason was
+// discarded and the user got "spawned but did not come up within 6s — run
+// `lazyclaw gateway` in a terminal to see why", which is the tool asking the
+// user to do its job. Capture the child's stderr and report it.
+test('start surfaces the child\'s own failure reason instead of a generic timeout', async () => {
+  const listeners = {};
+  const child = {
+    unref() {},
+    stderr: { on: (ev, fn) => { listeners[`stderr:${ev}`] = fn; } },
+    on: (ev, fn) => { listeners[ev] = fn; },
+  };
+  const out = await gatewaySlash('start', ctx, {
+    status: () => ({ running: false, pid: null, port: null }),
+    spawn: () => child,
+    sleep: async () => {
+      // Mimic the real sequence: the child writes its reason, then exits 2.
+      listeners['stderr:data']?.(Buffer.from(
+        'gateway: listen EADDRINUSE: address already in use 127.0.0.1:19600\n',
+      ));
+      listeners.exit?.(2, null);
+    },
+  });
+  assert.match(out, /EADDRINUSE/, 'the bind failure must reach the user');
+  assert.match(out, /19600/, 'and so must the port it collided on');
+  assert.doesNotMatch(out, /did not come up within/, 'a real reason must replace the generic timeout');
+});
+
+test('start still reports a silent no-show when the child says nothing', async () => {
+  const child = { unref() {}, stderr: { on() {} }, on() {} };
+  const out = await gatewaySlash('start', ctx, {
+    status: () => ({ running: false, pid: null, port: null }),
+    spawn: () => child,
+    sleep: async () => {},
+  });
+  assert.match(out, /did not come up/, 'the timeout path must survive for a child that hangs silently');
+});
+
+test('start tolerates a spawn result with no stderr stream', async () => {
+  // Defensive: a stubbed/older spawn may not expose stderr at all.
+  const out = await gatewaySlash('start', ctx, {
+    status: () => ({ running: false, pid: null, port: null }),
+    spawn: () => ({ unref() {} }),
+    sleep: async () => {},
+  });
+  assert.match(out, /did not come up/);
 });
