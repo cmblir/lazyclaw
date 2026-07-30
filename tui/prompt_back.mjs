@@ -39,6 +39,14 @@ export function promptWithBack(label, opts = {}) {
     output.write('\n' + label);
     try { input.setRawMode(true); } catch { /* ignore */ }
     input.resume();
+    // resume() does NOT re-reference an unref'd handle, and _arrowMenu's
+    // cleanup unrefs process.stdin (tui/pickers.mjs) so `lazyclaw setup` can
+    // exit rather than hang. Without this ref() a backPrompt that follows an
+    // arrow menu — the wizard's context-window step into the permission step —
+    // attaches its listener to an unreferenced handle, the event loop drains,
+    // and node exits 0 with the prompt on screen and the answer never read.
+    // _quickPrompt pairs resume()+ref() for the same reason.
+    if (input.ref) input.ref();
     let buf = '';
     let escTimer = null;
     const finish = (result) => {

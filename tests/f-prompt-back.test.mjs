@@ -31,6 +31,30 @@ function fakeTTY() {
 }
 const sink = () => ({ buf: '', write(x) { this.buf += x; } });
 
+// Regression: promptWithBack must RE-REFERENCE stdin, not just resume it.
+//
+// tui/pickers.mjs's _arrowMenu unrefs process.stdin in its cleanup so that
+// `lazyclaw setup` can exit instead of hanging. libuv's unref is sticky:
+// neither resume() nor attaching a 'data' listener re-references the handle.
+// So a backPrompt running straight after an arrow menu — which is exactly the
+// setup wizard's context-window step followed by the permission step — attached
+// its listener to an unreferenced handle, the event loop drained, and node
+// exited 0 with the prompt label on screen and the answer never read.
+//
+// _quickPrompt (pickers.mjs) already pairs resume() with ref() for this very
+// reason. This test exists because the fakeTTY above has no `ref`, which is why
+// the four tests below never caught the omission.
+test('promptWithBack: re-references stdin after an _arrowMenu cleanup unref\'d it', async () => {
+  const input = fakeTTY(); const output = sink();
+  let refs = 0;
+  input.ref = () => { refs += 1; return input; };
+  const p = promptWithBack('name: ', { input, output });
+  input.feed('x');
+  input.feed('\r');
+  await p;
+  assert.equal(refs, 1, 'resume() alone leaves the handle unreferenced — the loop drains and setup exits mid-prompt');
+});
+
 test('promptWithBack: typing + Enter resolves the trimmed value, back=false', async () => {
   const input = fakeTTY(); const output = sink();
   const p = promptWithBack('name: ', { input, output });
