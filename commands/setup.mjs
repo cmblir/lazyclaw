@@ -63,6 +63,10 @@ export async function cmdOnboard(flags) {
       }
     }
     const readline = await import('node:readline');
+    // _arrowMenu unrefs stdin and createInterface only resumes; without ref()
+    // the prompts below never resolve. See tests/f-onboard-stdin-ref.
+    process.stdin.resume();
+    if (process.stdin.ref) process.stdin.ref();
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const ask = q => new Promise(resolve => rl.question(q, resolve));
     if (!flags.provider) {
