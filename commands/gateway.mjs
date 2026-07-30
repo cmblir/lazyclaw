@@ -17,6 +17,7 @@ import { randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { configPath, readConfig, writeConfig, readVersionFromRepo } from '../lib/config.mjs';
+import { resolvePort, InvalidPortError } from '../lib/ports.mjs';
 import { ensureRegistry } from '../lib/registry_boot.mjs';
 import { loadDotenvIfAny } from '../dotenv_min.mjs';
 import { assertUnattendedSafe, installCrashHandlers } from '../lib/gateway_guard.mjs';
@@ -229,7 +230,7 @@ export async function runGateway(flags = {}, deps = {}) {
   const { startDaemon } = await import('../daemon.mjs');
   const startDaemonImpl = deps.startDaemonImpl || startDaemon;
   const d = await startDaemonImpl({
-    port: flags.port !== undefined ? parseInt(flags.port, 10) : 19600,
+    port: resolvePort('gateway', flags, cfg),
     once: false,
     readConfig,
     writeConfig: authToken ? writeConfig : undefined,
@@ -307,7 +308,10 @@ export async function cmdGateway(flags = {}) {
   try {
     gw = await runGateway(flags);
   } catch (err) {
-    console.error(`gateway: ${err?.message || err}`);
+    // InvalidPortError already names its own surface ("gateway: invalid
+    // --port ..."), so print it as-is — the generic `gateway: ` wrapper below
+    // would otherwise double up into "gateway: gateway: invalid --port ...".
+    console.error(err instanceof InvalidPortError ? err.message : `gateway: ${err?.message || err}`);
     process.exit(2);
   }
   process.stdout.write(JSON.stringify({

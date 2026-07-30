@@ -91,6 +91,57 @@ test('start spawns a detached gateway and waits for it to come up', async () => 
   assert.match(out, /pid 900/);
 });
 
+test('start --port <N> passes a one-off override to the spawned child, without persisting', async () => {
+  let spawned = null;
+  let probes = 0;
+  let wrote = false;
+  const localCtx = { ...ctx, writeConfig: () => { wrote = true; } };
+  const out = await gatewaySlash('start --port 5050', localCtx, {
+    status: () => (probes++ === 0 ? { running: false, pid: null, port: null }
+                                  : { running: true, pid: 901, port: 5050 }),
+    spawn: (cmd, argv, opts) => {
+      spawned = { cmd, argv, opts };
+      return { unref() {} };
+    },
+    sleep: async () => {},
+  });
+  assert.ok(spawned, 'spawn was not called');
+  const pi = spawned.argv.indexOf('--port');
+  assert.ok(pi >= 0, 'the spawned child must receive --port');
+  assert.equal(spawned.argv[pi + 1], '5050');
+  assert.match(out, /started/);
+  assert.equal(wrote, false, 'a one-off start override must not persist to config');
+});
+
+// Fix round 1: a present-but-invalid --port used to silently fall back to
+// config/default instead of being reported — this pins that it's now caught
+// and returned as a readable string (gatewaySlash must never throw at the
+// user), and that a bad port is rejected BEFORE spawning, not just left for
+// the child to fail on its own.
+test('start --port <invalid> is rejected with a readable message, before spawning', async () => {
+  const out = await gatewaySlash('start --port abc', ctx, {
+    spawn: () => { throw new Error('must not spawn on an invalid --port'); },
+  });
+  assert.match(out, /invalid/i);
+  assert.match(out, /abc/);
+  assert.doesNotMatch(out, /gateway: gateway:/, 'must not double-prefix the surface label');
+});
+
+test('start --port 0 (ephemeral sentinel) is still accepted, not rejected as invalid', async () => {
+  let spawned = null;
+  let probes = 0;
+  const out = await gatewaySlash('start --port 0', ctx, {
+    status: () => (probes++ === 0 ? { running: false, pid: null, port: null }
+                                  : { running: true, pid: 902, port: 51234 }),
+    spawn: (cmd, argv, opts) => { spawned = { cmd, argv, opts }; return { unref() {} }; },
+    sleep: async () => {},
+  });
+  assert.ok(spawned, 'spawn was not called');
+  const pi = spawned.argv.indexOf('--port');
+  assert.equal(spawned.argv[pi + 1], '0');
+  assert.match(out, /started/);
+});
+
 test('start reports a spawn that fails outright', async () => {
   // Distinct from "spawned but never came up": here the child never starts at
   // all (bad node path, EACCES, EMFILE). The handler must report it rather than
@@ -182,4 +233,79 @@ test('start tolerates a spawn result with no stderr stream', async () => {
     sleep: async () => {},
   });
   assert.match(out, /did not come up/);
+});
+
+// ---- /gateway port [N] — read/write the configured port through the ctx
+// readConfig/writeConfig seam, the same pattern tui/hud.mjs's hudSlash uses.
+
+function fakeCtx(initialCfg) {
+  const store = { cfg: initialCfg };
+  return {
+    cfgDir: '/cfg',
+    cfg: store.cfg,
+    readConfig: () => store.cfg,
+    writeConfig: (c) => { store.cfg = c; },
+    _store: store,
+  };
+}
+
+test('/gateway port with no argument reports the effective port and its source (default)', async () => {
+  const out = await gatewaySlash('port', fakeCtx({}), { isPortListening: async () => false });
+  assert.match(out, /19600/);
+  assert.match(out, /default/);
+});
+
+test('/gateway port with no argument reports the configured value and source (config)', async () => {
+  const out = await gatewaySlash('port', fakeCtx({ gateway: { port: 7777 } }), { isPortListening: async () => false });
+  assert.match(out, /7777/);
+  assert.match(out, /config/);
+});
+
+test('/gateway port <N> persists to cfg.gateway.port, reports old -> new, and mirrors onto ctx.cfg', async () => {
+  const localCtx = fakeCtx({});
+  const out = await gatewaySlash('port 6001', localCtx, { isPortListening: async () => false });
+  assert.match(out, /19600/, 'the old value must be reported');
+  assert.match(out, /6001/, 'the new value must be reported');
+  assert.match(out, /restart/i);
+  assert.equal(localCtx._store.cfg.gateway.port, 6001, 'must be persisted through ctx.writeConfig');
+  assert.equal(localCtx.cfg.gateway.port, 6001, 'must mirror onto ctx.cfg for a live getStatus');
+});
+
+test('/gateway port <N> refuses a non-numeric value and writes nothing', async () => {
+  const localCtx = fakeCtx({});
+  const out = await gatewaySlash('port abc', localCtx, {});
+  assert.match(out, /invalid/i);
+  assert.equal(localCtx._store.cfg.gateway, undefined, 'nothing should have been written');
+});
+
+test('/gateway port <N> refuses an out-of-range value and writes nothing', async () => {
+  const localCtx = fakeCtx({});
+  const out = await gatewaySlash('port 80', localCtx, {});
+  assert.match(out, /invalid/i);
+  assert.match(out, /1024/);
+  assert.equal(localCtx._store.cfg.gateway, undefined);
+});
+
+test('/gateway port <N> refuses a port already listening elsewhere and writes nothing', async () => {
+  const localCtx = fakeCtx({});
+  const out = await gatewaySlash('port 6002', localCtx, { isPortListening: async () => true });
+  assert.match(out, /already in use/i);
+  assert.equal(localCtx._store.cfg.gateway, undefined);
+});
+
+test('/gateway status reports whether the configured port came from config or the default', async () => {
+  const outDefault = await gatewaySlash('status', fakeCtx({ channels: {} }), {
+    status: () => ({ running: true, pid: 4242, port: 19600 }),
+    readToken: () => null,
+    fetch: async () => ({ ok: true, status: 200 }),
+  });
+  assert.match(outDefault, /default/);
+
+  const outConfigured = await gatewaySlash('status', fakeCtx({ gateway: { port: 7000 }, channels: {} }), {
+    status: () => ({ running: true, pid: 4242, port: 7000 }),
+    readToken: () => null,
+    fetch: async () => ({ ok: true, status: 200 }),
+  });
+  assert.match(outConfigured, /config/);
+  assert.match(outConfigured, /7000/);
 });

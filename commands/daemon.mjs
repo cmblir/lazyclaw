@@ -4,6 +4,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { ensureRegistry } from '../lib/registry_boot.mjs';
 import { configPath, readConfig, writeConfig, readVersionFromRepo } from '../lib/config.mjs';
+import { resolvePort } from '../lib/ports.mjs';
 import { assertUnattendedSafe, installCrashHandlers } from '../lib/gateway_guard.mjs';
 import { isProcessAlive } from '../loops.mjs';
 
@@ -112,7 +113,12 @@ export async function cmdDashboard(flags = {}) {
   _bootGuard('dashboard');
   const sessionsMod = await import('../sessions.mjs');
   const { startDaemon } = await import('../daemon.mjs');
-  const port = flags.port !== undefined ? parseInt(flags.port, 10) : 19600;
+  // A present-but-invalid --port throws InvalidPortError (see lib/ports.mjs);
+  // fail closed here, same style as _bootGuard above, rather than letting a
+  // typo silently fall back to config/default.
+  let port;
+  try { port = resolvePort('dashboard', flags, readConfig()); }
+  catch (e) { console.error(e.message); process.exit(2); }
   const cfgDir = path.dirname(configPath());
   const daemonOpts = {
     port,
