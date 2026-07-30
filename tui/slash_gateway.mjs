@@ -80,20 +80,48 @@ async function _status(cfgDir, cfg, d) {
   ].join('\n');
 }
 
+// The gateway logs progress lines to stderr before it fails, so take the last
+// non-empty line rather than the first — the failure is what it exits on. The
+// `[gateway]` progress prefix and the pairing/auth warnings are noise here.
+function _firstMeaningfulLine(text) {
+  const lines = String(text || '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith('[gateway]'));
+  return lines.length ? lines[lines.length - 1] : '';
+}
+
+function _portInUse(reason) {
+  return /EADDRINUSE|address already in use/i.test(String(reason || ''));
+}
+
 async function _start(cfgDir, d) {
   const before = d.status({ configDir: cfgDir });
   if (before.running) {
     return `gateway: already running (pid ${before.pid}, http://127.0.0.1:${before.port})`;
   }
+  // Keep the child detached (it must outlive this chat session) but PIPE its
+  // stderr rather than discarding it. A gateway that cannot start says why in
+  // one line and exits — port already in use, unattended-safety guard, missing
+  // channel creds — and with stdio:'ignore' that reason was lost, leaving only
+  // a generic timeout that told the user to go re-run the command themselves.
+  let child;
   try {
-    const child = d.spawn(process.execPath, [_cliEntrypoint(), 'gateway'], {
+    child = d.spawn(process.execPath, [_cliEntrypoint(), 'gateway'], {
       detached: true,
-      stdio: 'ignore',
+      stdio: ['ignore', 'ignore', 'pipe'],
     });
-    child.unref();
   } catch (err) {
     return `gateway: could not spawn — ${err?.message || err}`;
   }
+  let errText = '';
+  let exited = null;
+  try {
+    child.stderr?.on('data', (chunk) => { errText += String(chunk); });
+    child.on?.('exit', (code, signal) => { exited = { code, signal }; });
+  } catch { /* a stub without streams/events still works, just without detail */ }
+  child.unref?.();
+
   const deadline = Date.now() + START_TIMEOUT_MS;
   while (Date.now() < deadline) {
     await d.sleep(START_POLL_MS);
@@ -101,9 +129,20 @@ async function _start(cfgDir, d) {
     if (st.running) {
       return `gateway: started (pid ${st.pid}, http://127.0.0.1:${st.port}) — /gateway status for detail`;
     }
+    // The child died before binding — report its own reason now instead of
+    // waiting out the rest of the timeout.
+    if (exited) break;
+  }
+  const reason = _firstMeaningfulLine(errText);
+  if (reason) {
+    return [
+      `gateway: failed to start — ${reason}`,
+      ...(_portInUse(reason) ? ['  Something else holds that port. `lazyclaw daemon status` and `lsof -nP -iTCP:19600 -sTCP:LISTEN` will name it,',
+        '  or start the gateway on another port with `lazyclaw gateway --port <N>`.'] : []),
+    ].join('\n');
   }
   return [
-    'gateway: spawned but did not come up within 6s.',
+    `gateway: spawned but did not come up within ${Math.round(START_TIMEOUT_MS / 1000)}s${exited ? ` (it exited${exited.code != null ? ` with code ${exited.code}` : ''} without explaining why)` : ''}.`,
     '  Run `lazyclaw gateway` in a terminal to see why (config guard, port in use, channel creds).',
   ].join('\n');
 }
