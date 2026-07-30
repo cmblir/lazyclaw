@@ -78,6 +78,19 @@ function swap(key, value) {
  *   computeAltEnabled (tui/repl_altbuffer.mjs) resolves to the alt-buffer
  *   layout arm. Default stays non-alt (env var deleted), matching prior
  *   behavior exactly.
+ *
+ *   KNOWN LEAK, `alt: true` only: unmounting an alt-mode instance emits
+ *   `\x1b[?1049l\x1b[?25h` to the REAL process.stdout a tick later — so it
+ *   lands in piped/redirected output (CI logs) too, not just an interactive
+ *   terminal. Cause: FullScreen's alt-buffer-exit cleanup in
+ *   tui/repl_altbuffer.mjs writes to `process.stdout` directly and runs on
+ *   React's passive-effect tick, which is AFTER unmount() has synchronously
+ *   restored the real stream. Assertions are unaffected (they all complete
+ *   before unmount), and the bytes are inert on the primary buffer. Left
+ *   as-is deliberately: fixing it means either changing that production
+ *   cleanup or deferring restore() across a tick, and restore() ordering is
+ *   shared by every mountRepl caller. If you add a second `alt: true` test,
+ *   you inherit this — it is noise in the log, not a broken assertion.
  */
 export function mountRepl(props = {}, { columns = 100, rows = 40, alt = false } = {}) {
   const bytes = [];
@@ -165,6 +178,12 @@ export function mountRepl(props = {}, { columns = 100, rows = 40, alt = false } 
       // Ink caches instances by stdout object; cleanup() drops this mount's
       // entry so the map does not grow across a file's worth of tests.
       try { instance.cleanup(); } catch { /* ignore */ }
+      // restore() is synchronous and runs BEFORE React's passive-effect
+      // cleanup. For `alt: true` mounts that means FullScreen's alt-exit
+      // escape lands on the real stdout — see the KNOWN LEAK note on
+      // mountRepl. Do not "fix" that by deferring this call: every caller
+      // relies on the env/stream restore having happened by the time
+      // unmount() returns.
       restore();
     },
   };
