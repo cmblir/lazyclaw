@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { configPath, readConfig } from '../lib/config.mjs';
+import { resolvePort } from '../lib/ports.mjs';
 import { assertUnattendedSafe, assertServicePairing } from '../lib/gateway_guard.mjs';
 import { detectBackend, installService, uninstallService, serviceStatus } from '../lib/service_install.mjs';
 
@@ -34,8 +35,9 @@ export function _buildSpec(surface, flags = {}, cfgDir = '', deps = {}) {
   // Default the service to the well-known port the channel listeners dial
   // (the LAZYCLAW_DAEMON_URL default), so `service install` + `* listen`
   // work together out of the box. Bare `lazyclaw daemon` still defaults to a
-  // random port for ad-hoc / scripted use.
-  args.push('--port', flags.port !== undefined ? String(flags.port) : '19600');
+  // random port for ad-hoc / scripted use. Resolved the same way cmdService's
+  // own EADDRINUSE warning below is, so the two never disagree.
+  args.push('--port', String(resolvePort(surface, flags, deps.cfg)));
   if (flags['auth-token']) args.push('--auth-token', String(flags['auth-token']));
   if (flags.log) args.push('--log', String(flags.log));
   if (flags.channels) args.push('--channels', String(flags.channels));
@@ -69,7 +71,7 @@ export async function cmdService(sub, positional = [], flags = {}) {
     if (surface !== 'daemon') assertServicePairing(cfg, { service: true, surface });
   } catch (e) { console.error(e.message); process.exit(2); }
 
-  const spec = _buildSpec(surface, flags, cfgDir);
+  const spec = _buildSpec(surface, flags, cfgDir, { cfg });
   const emit = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
 
   try {
@@ -84,7 +86,7 @@ export async function cmdService(sub, positional = [], flags = {}) {
         await new Promise((s) => setTimeout(s, 800));
         const st = serviceStatus(spec);
         if (!st.running) {
-          const port = flags.port !== undefined ? String(flags.port) : '19600';
+          const port = resolvePort(surface, flags, cfg);
           process.stderr.write(`warning: the daemon did not stay up — port ${port} may already be in use (a daemon is already running?). Check: lsof -ti tcp:${port}. Free it or pass --port, then re-run.\n`);
         }
       }

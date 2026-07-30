@@ -17,6 +17,7 @@ import { randomBytes } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { configPath, readConfig, writeConfig, readVersionFromRepo } from '../lib/config.mjs';
+import { resolvePort } from '../lib/ports.mjs';
 import { ensureRegistry } from '../lib/registry_boot.mjs';
 import { loadDotenvIfAny } from '../dotenv_min.mjs';
 import { assertUnattendedSafe, installCrashHandlers } from '../lib/gateway_guard.mjs';
@@ -229,7 +230,7 @@ export async function runGateway(flags = {}, deps = {}) {
   const { startDaemon } = await import('../daemon.mjs');
   const startDaemonImpl = deps.startDaemonImpl || startDaemon;
   const d = await startDaemonImpl({
-    port: flags.port !== undefined ? parseInt(flags.port, 10) : 19600,
+    port: resolvePort('gateway', flags, cfg),
     once: false,
     readConfig,
     writeConfig: authToken ? writeConfig : undefined,
