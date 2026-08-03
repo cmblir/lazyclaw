@@ -1,13 +1,22 @@
 // f-dashboard-auth — the web dashboard must work against an auth-token
 // daemon. Two gaps pinned here:
-//   (a) web/dashboard.js api()/apiSoft() helpers sent a bare fetch() with no
-//       Authorization header, so every JSON call got 401 with no recovery.
+//   (a) the auth-aware fetch helpers (getToken/apiRaw/api/apiSoft) sent a
+//       bare fetch() with no Authorization header, so every JSON call got
+//       401 with no recovery.
 //   (b) the auth gate sat ahead of the static dashboard routes, so the
 //       browser couldn't even load the page to enter a token.
 //
 // Fix: static dashboard shell (HTML/CSS/JS, no secrets) bypasses the token
 // gate; the JSON API stays gated; the browser attaches a bearer token from
 // localStorage and prompts once on 401.
+//
+// (a) used to be checked against the single web/dashboard.js file. The
+// dom/api/modal extraction (dashboard-shell-motion Task 1) moved the auth
+// helpers into web/ui/api.mjs, and web/ui/ keeps growing — one panel module
+// per later task, 30+ files by the end. So the source-level checks below
+// target web/ui/api.mjs directly, and the bare-fetch scan walks every file
+// under web/ui/ recursively (not just dashboard.js), so a bare fetch( added
+// in any future panel still can't slip past this test.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -17,6 +26,20 @@ import { isAuthorized, isStaticDashboardPath } from '../daemon/lib/auth.mjs';
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const DASHBOARD_JS = path.join(HERE, '..', 'web', 'dashboard.js');
+const API_MJS = path.join(HERE, '..', 'web', 'ui', 'api.mjs');
+const UI_DIR = path.join(HERE, '..', 'web', 'ui');
+
+// Recursively list every file under `dir` (web/ui/ is one file today, 30+
+// once every panel moves out of dashboard.js — see the fetch-bypass test).
+function walkFiles(dir) {
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...walkFiles(p));
+    else out.push(p);
+  }
+  return out;
+}
 
 // ── (b) auth allowlist ──────────────────────────────────────────────
 test('isStaticDashboardPath allows exactly the static shell routes', () => {
@@ -65,9 +88,9 @@ test('no token configured -> everything is authorized (loopback default)', () =>
   assert.equal(isAuthorized(req, ''), true);
 });
 
-// ── (a) dashboard.js source-level ───────────────────────────────────
-test('dashboard.js api helper attaches a bearer token from localStorage', () => {
-  const src = fs.readFileSync(DASHBOARD_JS, 'utf8');
+// ── (a) web/ui/api.mjs source-level ─────────────────────────────────
+test('web/ui/api.mjs attaches a bearer token from localStorage', () => {
+  const src = fs.readFileSync(API_MJS, 'utf8');
   // Reads/stores the token under the agreed localStorage key.
   assert.match(src, /lazyclaw_token/, 'should reference the lazyclaw_token localStorage key');
   assert.match(src, /localStorage\.getItem/, 'should read the token from localStorage');
@@ -77,14 +100,21 @@ test('dashboard.js api helper attaches a bearer token from localStorage', () => 
   assert.match(src, /Bearer /, 'should use the Bearer scheme');
   // Prompts the user once and retries on 401.
   assert.match(src, /401/, 'should detect a 401 to trigger the token prompt');
+  assert.match(src, /async function apiRaw\(/, 'apiRaw is the single auth-aware fetch primitive');
 });
 
 test('every dashboard request routes through the auth-aware fetch (no bare fetch bypasses auth)', () => {
-  const src = fs.readFileSync(DASHBOARD_JS, 'utf8');
   // The ONLY place allowed to call fetch directly is apiRaw, via
-  // globalThis.fetch. Any other `fetch(` (export/delete/test/POST call
-  // sites) would bypass the Authorization header and 401 on a token daemon.
-  const bareFetch = (src.match(/(?<!globalThis\.)\bfetch\(/g) || []).length;
-  assert.equal(bareFetch, 0, 'no bare fetch( may bypass apiRaw; all calls must route through apiRaw/globalThis.fetch');
-  assert.match(src, /async function apiRaw\(/, 'apiRaw is the single auth-aware fetch primitive');
+  // globalThis.fetch. Any other `fetch(` — in dashboard.js's panel loaders,
+  // or in ANY file under web/ui/ (there will be 30+ once every panel moves
+  // out) — would bypass the Authorization header and 401 on a token daemon.
+  // Walk web/ui/ recursively so a panel added in a later task can't
+  // introduce a bare fetch( unnoticed.
+  const files = [DASHBOARD_JS, ...walkFiles(UI_DIR)];
+  let bareFetch = 0;
+  for (const f of files) {
+    const src = fs.readFileSync(f, 'utf8');
+    bareFetch += (src.match(/(?<!globalThis\.)\bfetch\(/g) || []).length;
+  }
+  assert.equal(bareFetch, 0, 'no bare fetch( may bypass apiRaw; all calls must route through apiRaw/globalThis.fetch (checked across dashboard.js and web/ui/**)');
 });
