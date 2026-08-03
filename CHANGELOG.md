@@ -6,6 +6,8 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.10.0] - 2026-08-03
+
 ### Security
 
 - **Unattended team runs are now fail-closed.** The default `claude-cli`
@@ -55,6 +57,27 @@ Versioning: [SemVer](https://semver.org/).
   detached gateway and waits for its pidfile; `stop` SIGTERMs the recorded pid.
   The gateway now records `gateway.pid` in the config dir, alongside the
   daemon's existing `daemon.pid`.
+- **Configurable HTTP ports.** `19600` was hardcoded independently in five
+  places, so the gateway, dashboard and daemon aimed at the same port by
+  construction and no choice persisted — a stale dashboard holding the port made
+  `/gateway start` fail with nothing but a timeout. `lib/ports.mjs` is now the
+  single resolver: an explicit `--port` wins, then `cfg.<surface>.port`
+  (`gateway` / `dashboard` / `daemon`, all optional), then `19600`. A config
+  without those sections behaves exactly as before. `/gateway port [N]` reports
+  or persists the port and names where the effective value came from;
+  `/gateway start --port <N>` and `/dashboard --port <N>` are one-off overrides
+  that do not write config. An invalid explicit `--port` is now a hard error
+  rather than a silent fall back to the default — `--port 0` stays valid as
+  Node's ephemeral-port sentinel.
+- **`/setup` finishes the Slack hand-off.** Setup verified the bot token and
+  stopped, which left credentials on disk, an empty pairing allowlist (so the
+  gateway would answer anyone who could reach the channel), no gateway running,
+  and no next step. The Slack branch now offers to pair the operator — using the
+  member id Slack's `auth.test` already returns, so nobody has to go find their
+  own id — offers to start the gateway on its resolved port (with an alternate
+  when that port is taken), and has the bot post one short confirmation so
+  success is visible in Slack. Each part is declinable; none of them can fail
+  the wizard. Declining the pairing says plainly what an open allowlist means.
 - **Terminal motion package**, on automatically when the terminal supports it:
   a launch reveal plus a one-shot wordmark gradient shimmer, a braille
   streaming spinner with the turn's elapsed time, a `thinking…` indicator
@@ -66,6 +89,44 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Fixed
 
+- **`lazyclaw setup` exited in the middle of a prompt.** The wizard printed the
+  tool-permission question and terminated with status 0 without reading the
+  answer, so it never advanced past the context-window step. `_arrowMenu` unrefs
+  `process.stdin` in its cleanup so setup can exit rather than hang, and libuv's
+  unref is sticky: neither `resume()` nor attaching a listener re-references the
+  handle, and `readline.createInterface` only resumes. Two readers followed a
+  picker without re-referencing — `promptWithBack`, and `cmdOnboard`'s own
+  readline interface (reachable both by backing out of the picker and by
+  choosing the provider's own default model). Both now `ref()`.
+- **The context-model picker offered a single codex model.** A ChatGPT-plan
+  `codex` login has no platform API key, so `/v1/models` cannot be listed and
+  the fallback read only the one model pinned in `~/.codex/config.toml`. The
+  codex CLI already caches every model the account can use in
+  `~/.codex/models_cache.json` and refreshes it itself; that is read instead,
+  excluding `visibility: "hide"` entries and ordering by codex's own priority,
+  with `config.toml` still the fallback when the cache is absent.
+- **`/gateway start` reported a generic timeout instead of the real failure.**
+  It spawned the child with `stdio: 'ignore'`, so a gateway that could not bind
+  exited with the reason on stderr and it was discarded, leaving "spawned but did
+  not come up within 6s — run it in a terminal to see why". stderr is now piped,
+  the poll loop breaks as soon as the child exits, and the reason is reported; a
+  port collision additionally names the commands that identify the occupant. The
+  piped handle is released once the gateway is up, since holding a child's stderr
+  read end keeps the parent's event loop from draining.
+- **The context gauge reported a misleading `0%`** when the context size was
+  unknown, because `Number(null)` is a finite zero. It now shows `--`.
+- **A raw NUL byte in `tui/editor.mjs`** made git classify the file as binary, so
+  every diff of it — including this branch's own changes to it — was invisible.
+  Replaced with the escape; runtime behaviour is unchanged.
+- **`cmdDaemon` leaked `daemon.pid` on a second signal.** The pidfile was removed
+  only after awaiting graceful shutdown, so a second SIGINT/SIGTERM hit the force
+  path first and `daemon status` then reported a dead daemon as running. Removal
+  now happens as soon as shutdown is committed to, matching what the gateway
+  already did.
+- **`lazyclaw service status gateway` misreported a live gateway** on the fallback
+  backend: the service layer writes a bare pid to `gateway.pid` while `cmdGateway`
+  writes `{pid, port}` JSON at the same path, so `parseInt` yielded `NaN`. The
+  reader accepts either shape now; neither writer changed.
 - **Hybrid-recall embeddings mis-joined to the wrong document after any
   re-index.** Vectors were keyed by the unstable FTS5 implicit rowid; they are
   now keyed by a stable natural key per scope, so a vector only ever pairs with
