@@ -1,3 +1,7 @@
+import { el, clear, escHtml, chip, phead, table, rowList, kvlist, banner } from '/ui/dom.mjs';
+import { getToken, setToken, withAuth, apiRaw, api, apiSoft } from '/ui/api.mjs';
+import { openModal, closeModal } from '/ui/modal.mjs';
+
     // Tab switching — WAI-ARIA Tabs pattern: a role=tablist of role=tab buttons
     // with roving tabindex + arrow-key navigation, each controlling a
     // role=tabpanel. The URL hash (#<tab>) is the source of truth, so the active
@@ -62,91 +66,6 @@
 
     document.getElementById('footer-url').textContent = location.href;
 
-    // ── Auth token ────────────────────────────────────────────────
-    // The static dashboard shell is served without a token, but the JSON
-    // API stays gated when the daemon runs with --auth-token. We keep the
-    // token in localStorage and attach it as `Authorization: Bearer` on
-    // every API call. A loopback daemon with no auth never sends a token —
-    // the header is simply absent and calls work unchanged.
-    const TOKEN_KEY = 'lazyclaw_token';
-    function getToken() {
-      try { return localStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; }
-    }
-    function setToken(t) {
-      try { localStorage.setItem(TOKEN_KEY, t); } catch {}
-    }
-    // Merge an Authorization header into the caller's opts when a token is
-    // known, without clobbering any other headers they passed.
-    function withAuth(opts = {}) {
-      const token = getToken();
-      if (!token) return opts;
-      return { ...opts, headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + token } };
-    }
-    // On 401 from a gated route, prompt the user once for the token, store
-    // it, and signal the caller to retry. window.prompt is fine for v1.
-    function promptForToken() {
-      const entered = window.prompt(
-        'This daemon requires an auth token (started with --auth-token).\n' +
-        'Paste the token to continue:',
-        getToken(),
-      );
-      if (entered == null) return false; // user cancelled
-      setToken(entered.trim());
-      return true;
-    }
-
-    // Single auth-aware fetch primitive: adds the bearer token via withAuth,
-    // prompts for a token + retries once on 401, returns the raw Response.
-    // ALL dashboard requests route through this (api/apiSoft + the direct
-    // export/delete/test/POST call sites) so none bypass the auth gate. Uses
-    // globalThis.fetch so this is the only place that touches fetch directly.
-    async function apiRaw(path, opts = {}) {
-      let r = await globalThis.fetch(path, withAuth(opts));
-      if (r.status === 401 && promptForToken()) {
-        r = await globalThis.fetch(path, withAuth(opts)); // retry once with the new token
-      }
-      return r;
-    }
-    // Tiny fetch helper that surfaces errors as toasts on the page.
-    async function api(path, opts = {}) {
-      const r = await apiRaw(path, opts);
-      if (!r.ok && r.status !== 200) {
-        // Surface the server's human-readable `error` string only — never the
-        // raw JSON envelope or an internal error code (e.g. TEAM_BAD_AGENT).
-        let msg = '';
-        try { const b = await r.json(); if (b && typeof b.error === 'string') msg = b.error; } catch {}
-        throw new Error(msg || `${r.status} ${r.statusText}`);
-      }
-      return r.json();
-    }
-    // Soft variant: returns { status, body } no matter what — used by the
-    // /doctor (503 on issues), /rates/validate (422), /config/validate (422)
-    // endpoints where a non-200 carries a meaningful payload, not an error.
-    async function apiSoft(path, opts = {}) {
-      const r = await apiRaw(path, opts);
-      let body = null;
-      try { body = await r.json(); } catch {}
-      return { status: r.status, ok: r.ok, body };
-    }
-    function escHtml(s) {
-      return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    }
-    // ── Shared modal ────────────────────────────────────────────────
-    // openModal({ title, bodyHtml, footHtml }) renders into the markup
-    // declared at the bottom of <body> and shows the backdrop. ESC and
-    // backdrop click close. Only one modal is open at a time — calling
-    // openModal while another is already open replaces its contents.
-    function openModal({ title, bodyHtml, footHtml }) {
-      document.getElementById('modal-title').textContent = title || '';
-      document.getElementById('modal-body').innerHTML = bodyHtml || '';
-      document.getElementById('modal-foot').innerHTML = footHtml || '';
-      document.getElementById('modal-backdrop').classList.add('open');
-    }
-    function closeModal() {
-      document.getElementById('modal-backdrop').classList.remove('open');
-      document.getElementById('modal-body').innerHTML = '';
-      document.getElementById('modal-foot').innerHTML = '';
-    }
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && document.getElementById('modal-backdrop').classList.contains('open')) closeModal();
     });
@@ -1794,3 +1713,10 @@
       lines.push('Assistant:');
       return lines.join('\n\n');
     }
+
+// Transitional: dashboard.html still uses inline onclick= for these. Task 4
+// removes the inline handlers and this block with them.
+Object.assign(window, {
+  LOADERS, resetChat, sendChat, closeModal, openAddProviderModal, openRateCardModal,
+  openConfigEditModal, openAgentModal, openTeamModal, deleteCron, closeTask,
+});
