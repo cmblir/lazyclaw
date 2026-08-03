@@ -30,8 +30,20 @@ export function constantTimeEqual(a, b) {
 const STATIC_DASHBOARD_PATHS = new Set([
   '/', '/dashboard', '/dashboard/', '/dashboard.css', '/dashboard.js',
 ]);
+
+/**
+ * The dashboard shell is ES modules under web/ui/, so the static allowlist
+ * needs a shape as well as an exact set. Deliberately narrow: lowercase
+ * ASCII, digits, `_` and `-` only, at most ONE nested directory, and a
+ * literal `.mjs` tail. That admits `/ui/shell.mjs` and `/ui/panels/chat.mjs`
+ * while refusing `..`, encoded dots, uppercase, and any second extension.
+ * isAuthorized normalizes the URL before calling us, so `/ui/../config` has
+ * already become `/config` by the time it gets here.
+ */
+const UI_MODULE_RE = /^\/ui\/(?:[a-z0-9_-]+\/)?[a-z0-9_-]+\.mjs$/;
+
 export function isStaticDashboardPath(pathname) {
-  return STATIC_DASHBOARD_PATHS.has(pathname);
+  return STATIC_DASHBOARD_PATHS.has(pathname) || UI_MODULE_RE.test(pathname);
 }
 
 export function isAuthorized(req, expectedToken) {

@@ -28,6 +28,7 @@ export const ROUTES = [
   { m: (c) => c.route === 'GET /' || c.route === 'GET /dashboard' || c.route === 'GET /dashboard/', h: meta.dashboard },
   { m: (c) => c.route === 'GET /dashboard.css', h: meta.dashboardCss },
   { m: (c) => c.route === 'GET /dashboard.js', h: meta.dashboardJs },
+  { m: (c) => c.req.method === 'GET' && /^\/ui\/(?:[a-z0-9_-]+\/)?[a-z0-9_-]+\.mjs$/.test(c.path || ''), h: meta.uiModule },
   { m: (c) => c.req.method === 'GET' && /^\/avatars\/\d{2}\.png$/.test(c.path || ''), h: meta.avatar },
   { m: (c) => c.req.method === 'GET' && /^\/agent-avatars\/[A-Za-z0-9_.-]+\.(?:png|jpe?g|gif|webp)$/i.test(c.path || ''), h: meta.agentAvatar },
   { m: (c) => c.route === 'GET /version', h: meta.version },

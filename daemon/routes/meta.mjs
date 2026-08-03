@@ -65,6 +65,21 @@ export async function dashboardJs(c) {
   return serveWebFile(c, 'dashboard.js', 'text/javascript; charset=utf-8');
 }
 
+// Serve a dashboard ES module (web/ui/<name>.mjs or web/ui/<dir>/<name>.mjs).
+// The regex is the SAME shape as UI_MODULE_RE in daemon/lib/auth.mjs — keep
+// them in step. Validating here (not just at the auth gate) means the file
+// read can never see a `..`, mirroring how the avatar route is guarded.
+const UI_MODULE_PATH_RE = /^\/ui\/((?:[a-z0-9_-]+\/)?[a-z0-9_-]+\.mjs)$/;
+
+export async function uiModule(c) {
+  const m = UI_MODULE_PATH_RE.exec(c.path || '');
+  if (!m) {
+    c.res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+    return c.res.end('not found\n');
+  }
+  return serveWebFile(c, nodePath.join('ui', m[1]), 'text/javascript; charset=utf-8');
+}
+
 // Serve a custom agent character image (web app: <img src="/agent-avatars/NN">).
 // These are user-supplied photos copied under <configDir>/agent-avatars/ by
 // `lazyclaw agent set-avatar`. Served from the config dir (NOT the package web/

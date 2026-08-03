@@ -52,6 +52,17 @@ test('isStaticDashboardPath allows exactly the static shell routes', () => {
   }
 });
 
+test('isStaticDashboardPath also allows the dashboard shell ES modules under /ui/', () => {
+  // web/ui/ is where the dom/api/modal extraction (Task 1) and later panel
+  // modules live — the allowlist needs a shape, not just an exact set.
+  for (const p of ['/ui/dom.mjs', '/ui/shell.mjs', '/ui/panels/chat.mjs']) {
+    assert.equal(isStaticDashboardPath(p), true, `${p} should be allowed`);
+  }
+  for (const p of ['/ui/../config', '/ui/Dom.mjs', '/ui/dom.mjs.map', '/ui/a/b/c.mjs']) {
+    assert.equal(isStaticDashboardPath(p), false, `${p} should not be allowed`);
+  }
+});
+
 test('static dashboard paths bypass the token check; data routes still require it', () => {
   const token = 'sekret-token';
   // Static shell: no Authorization header, but authorized because the path
