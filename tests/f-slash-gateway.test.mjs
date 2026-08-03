@@ -309,3 +309,37 @@ test('/gateway status reports whether the configured port came from config or th
   assert.match(outConfigured, /config/);
   assert.match(outConfigured, /7000/);
 });
+
+// The gateway is detached so it outlives the chat session, and we pipe its
+// stderr to report a bind failure. child.unref() releases the CHILD handle but
+// NOT the stderr stream — that is a separate libuv handle, and while the parent
+// still holds its read end the event loop never drains, so /exit unmounts the UI
+// and the process just sits there. Once the gateway is up we no longer need its
+// stderr, so let it go.
+test('a started gateway does not keep the parent event loop alive', async () => {
+  const released = [];
+  const child = {
+    pid: 900,
+    unref() { released.push('child'); },
+    stderr: {
+      on() {},
+      destroy() { released.push('stderr.destroy'); },
+      unref() { released.push('stderr.unref'); },
+      removeAllListeners() { released.push('stderr.removeAllListeners'); },
+    },
+    on() {},
+  };
+  let probes = 0;
+  const out = await gatewaySlash('start', ctx, {
+    status: () => (probes++ === 0 ? { running: false, pid: null, port: null }
+                                  : { running: true, pid: 900, port: 19600 }),
+    spawn: () => child,
+    sleep: async () => {},
+  });
+  assert.match(out, /started/);
+  assert.ok(released.includes('child'), 'the child handle must still be unref\'d');
+  assert.ok(
+    released.some((r) => r.startsWith('stderr.')),
+    `the stderr pipe must be released once the gateway is up, released: ${JSON.stringify(released)}`,
+  );
+});

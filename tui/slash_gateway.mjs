@@ -163,11 +163,25 @@ async function _start(cfgDir, cfg, d, overridePort) {
   } catch { /* a stub without streams/events still works, just without detail */ }
   child.unref?.();
 
+  // Unref'ing the child is not enough: child.stderr is its OWN libuv handle,
+  // and while the parent holds its read end the event loop never drains — so
+  // /exit would unmount the UI and then hang forever with the gateway happily
+  // running in the background. We only need that pipe long enough to learn why
+  // a start failed, so release it on every path out of here.
+  const releaseStderr = () => {
+    const s = child.stderr;
+    if (!s) return;
+    try { s.removeAllListeners?.('data'); } catch { /* already gone */ }
+    try { s.unref?.(); } catch { /* not socket-backed */ }
+    try { s.destroy?.(); } catch { /* already destroyed */ }
+  };
+
   const deadline = Date.now() + START_TIMEOUT_MS;
   while (Date.now() < deadline) {
     await d.sleep(START_POLL_MS);
     const st = d.status({ configDir: cfgDir });
     if (st.running) {
+      releaseStderr();
       return `gateway: started (pid ${st.pid}, http://127.0.0.1:${st.port}) — /gateway status for detail`;
     }
     // The child died before binding — report its own reason now instead of
@@ -175,6 +189,7 @@ async function _start(cfgDir, cfg, d, overridePort) {
     if (exited) break;
   }
   const reason = _firstMeaningfulLine(errText);
+  releaseStderr();
   if (reason) {
     return [
       `gateway: failed to start — ${reason}`,
