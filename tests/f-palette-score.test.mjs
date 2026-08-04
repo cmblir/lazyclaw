@@ -36,3 +36,12 @@ test('kind and hint are searchable, not just the label', () => {
   assert.ok(score(item, 'agents') > 0, 'hint is part of the haystack');
   assert.ok(score(item, 'panel') > 0, 'so is kind');
 });
+
+test('a repeated needle character needs that many occurrences in the haystack', () => {
+  // hay ("team live panel agents") has exactly one "v" (in "live"). The
+  // subsequence scan advances its needle index only on a match, which is
+  // correct for order but says nothing about count on its own — a buggy
+  // version could report "vv" as found from that single v if it didn't also
+  // require the haystack to actually contain a second one afterward.
+  assert.ok(score(item, 'vv') < 0, 'two v\'s cannot match against a haystack with only one');
+});
