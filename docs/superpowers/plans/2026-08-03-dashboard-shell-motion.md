@@ -2246,10 +2246,6 @@ Expected: PASS (5 tests)
 ```js
 mountPalette({
   extraItems: () => [
-    ...cachedTeams.map((t) => ({ label: t.displayName || t.name, kind: 'team',
-      hint: t.slackChannel || 'no inbox', go: 'team', then: () => selectTeam(t.name) })),
-    ...cachedAgents.map((a) => ({ label: a.name, kind: 'agent',
-      hint: teamOf(a.name) || 'unassigned', go: 'team', then: () => selectAgent(a.name) })),
     { label: 'Start a task', kind: 'run', hint: 'tasks', go: 'tasks' },
     { label: 'New team', kind: 'run', hint: 'teams', go: 'teams' },
     { label: 'Review pending approvals', kind: 'run', hint: 'gateway', go: 'approvals' },
@@ -2258,7 +2254,21 @@ mountPalette({
 });
 ```
 
-`cachedTeams` / `cachedAgents` are filled by a single `GET /teams` + `GET /agents` on boot; the palette reads whatever is cached and does not fetch.
+> **Panels and static run actions only — no per-team or per-agent entries.** An earlier
+> revision of this step also mapped `cachedTeams` and `cachedAgents` into items whose `then`
+> called `selectTeam(t.name)` / `selectAgent(a.name)`. None of those five symbols exist, and no
+> task in this plan builds them. `team.mjs` does have a selection function, but it is
+> `selectTeamAgent`, a closure inside `render(host)` over that render's `TEAM` state — it
+> cannot be exported, because there is nothing stable to export.
+>
+> Typing a team or agent name and landing on it needs two things this plan does not have: a
+> boot-time `GET /teams` + `GET /agents` cache in `dashboard.js`, and a way to deep-link a
+> selection *into* a panel. The second is the real work — it means a hash parameter
+> (`#team?agent=backend`) or a panel-level entry API, plus deciding what happens when the
+> named agent has since left the roster. That is its own task, not a wiring detail of this one.
+>
+> So the palette reaches all 21 panels plus the four run actions above. Reaching a specific
+> team or agent by name is deliberately out of scope here.
 
 - [ ] **Step 6: Verify keyboard-only operation**
 
