@@ -14,6 +14,12 @@
 // file exists there is nowhere in the tree for these regressions to hide or
 // resurface, so the checks below are skipped rather than weakened — once
 // workflows.mjs lands they run unchanged against it.
+//
+// BUG 3 is the one exception: the reindex confirm it pins belongs to the
+// Doctor panel's FTS5 "Rebuild" button (LOADERS.doctor in the pre-split
+// monolith), not workflow-detail rendering — the two just happened to live in
+// the same file before Task 3 split it. It moves to web/ui/panels/doctor.mjs,
+// so it's gated on that file separately rather than on workflows.mjs.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
@@ -26,6 +32,12 @@ const skip = !existsSync(workflowsPanel)
   ? 'workflow-detail rendering moved out of web/dashboard.js in Task 3 and has not yet landed in web/ui/panels/workflows.mjs (Task 4)'
   : false;
 const src = skip ? '' : readFileSync(workflowsPanel, 'utf8');
+
+const doctorPanel = join(here, '..', 'web', 'ui', 'panels', 'doctor.mjs');
+const doctorSkip = !existsSync(doctorPanel)
+  ? 'doctor panel (FTS5 rebuild confirm) has not yet landed in web/ui/panels/doctor.mjs (Task 4)'
+  : false;
+const doctorSrc = doctorSkip ? '' : readFileSync(doctorPanel, 'utf8');
 
 test('BUG 1: workflow detail reads .nodes (not nodeResults)', { skip }, () => {
   // GET /workflows/<id> returns the per-node map under `nodes`
@@ -58,15 +70,15 @@ test('BUG 1c: Done stat shows the success COUNT, not the allDone boolean', { ski
   assert.match(src, /sm\.success \?\? 0/, 'completed-node count must render sm.success');
 });
 
-test('BUG 3: reindex confirm reflects repopulation, not data loss', { skip }, () => {
+test('BUG 3: reindex confirm reflects repopulation, not data loss', { skip: doctorSkip }, () => {
   // The route now calls reindexAll which REPOPULATES from the corpus, so the
   // old "deleted and recreated empty" warning is false and scary.
   assert.ok(
-    !/deleted and recreated empty/.test(src),
+    !/deleted and recreated empty/.test(doctorSrc),
     'reindex confirm must not claim the index is recreated empty',
   );
   assert.match(
-    src,
+    doctorSrc,
     /rebuilt|repopulat|recall/i,
     'reindex confirm must explain recall is rebuilt from the corpus',
   );
