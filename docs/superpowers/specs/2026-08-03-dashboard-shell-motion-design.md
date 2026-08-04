@@ -282,7 +282,11 @@ export function connect()          // idempotent
 }
 @media (prefers-reduced-motion: reduce) {
   :root { --dur-fast: 1ms; --dur-mid: 1ms; --dur-slow: 1ms; --stagger: 0ms; --lift: 0px; --ambient: 0; }
-  * { animation: none !important; }
+  /* `*` alone does NOT match ::before / ::after, so the two always-on
+     animations — the live-rail sweep (.liverail::before) and the streaming
+     caret (#stream-text::after) — kept running under reduced motion. The
+     pseudo-elements must be named explicitly. */
+  *, ::before, ::after { animation: none !important; }
 }
 ```
 
