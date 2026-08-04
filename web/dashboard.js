@@ -15,11 +15,17 @@ import * as team from '/ui/panels/team.mjs';
 import * as workflows from '/ui/panels/workflows.mjs';
 import * as scheduling from '/ui/panels/scheduling.mjs';
 import * as trainer from '/ui/panels/trainer.mjs';
+import * as skills from '/ui/panels/skills.mjs';
+import * as recall from '/ui/panels/recall.mjs';
+import * as sandbox from '/ui/panels/sandbox.mjs';
 
 const panels = {};
 for (const { id, label } of ALL) {
   panels[id] = { render: (host) => { host.append(el('h2', { text: label })); } };
 }
-Object.assign(panels, { chat, tasks, sessions, agents, teams, team, workflows, scheduling, trainer });
+Object.assign(panels, {
+  chat, tasks, sessions, agents, teams, team, workflows, scheduling, trainer,
+  skills, recall, sandbox,
+});
 
 mount({ panels });
