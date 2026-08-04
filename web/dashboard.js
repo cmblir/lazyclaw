@@ -1,10 +1,10 @@
-// web/dashboard.js — entry point. <script type="module" src="/dashboard.js">
-// Mounts the grouped-sidebar shell. Real panel bodies move here one module
-// per file in dashboard-shell-motion Task 4 (see web/ui/panels/); ids not
-// yet moved still fall back to a placeholder so every panel renders.
+// web/dashboard.js — the dashboard entry. Everything real lives in /ui.
+//
+// palette.mjs (Task 9) and stream.mjs (Task 6) don't exist yet — their
+// imports and mountPalette()/connect() calls are omitted rather than stubbed,
+// per this task's brief: a stub file left behind is worse than an import
+// added later.
 import { mount } from '/ui/shell.mjs';
-import { el } from '/ui/dom.mjs';
-import { ALL } from '/ui/nav_model.mjs';
 
 import * as chat from '/ui/panels/chat.mjs';
 import * as tasks from '/ui/panels/tasks.mjs';
@@ -20,14 +20,16 @@ import * as recall from '/ui/panels/recall.mjs';
 import * as sandbox from '/ui/panels/sandbox.mjs';
 import * as approvals from '/ui/panels/approvals.mjs';
 import * as gateway from '/ui/panels/gateway.mjs';
+import * as providers from '/ui/panels/providers.mjs';
+import * as rates from '/ui/panels/rates.mjs';
+import * as metrics from '/ui/panels/metrics.mjs';
+import * as doctor from '/ui/panels/doctor.mjs';
+import * as config from '/ui/panels/config.mjs';
+import * as status from '/ui/panels/status.mjs';
+import * as channels from '/ui/panels/channels.mjs';
 
-const panels = {};
-for (const { id, label } of ALL) {
-  panels[id] = { render: (host) => { host.append(el('h2', { text: label })); } };
-}
-Object.assign(panels, {
+mount({ panels: {
   chat, tasks, sessions, agents, teams, team, workflows, scheduling, trainer,
-  skills, recall, sandbox, approvals, gateway,
-});
-
-mount({ panels });
+  skills, recall, sandbox, approvals, gateway, providers, rates, metrics,
+  doctor, config, status, channels,
+} });
