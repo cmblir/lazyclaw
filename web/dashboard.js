@@ -2,6 +2,7 @@
 import { mount } from '/ui/shell.mjs';
 import { connect } from '/ui/stream.mjs';
 import { mountPalette } from '/ui/palette.mjs';
+import { mountLiveRail } from '/ui/liverail.mjs';
 
 import * as chat from '/ui/panels/chat.mjs';
 import * as tasks from '/ui/panels/tasks.mjs';
@@ -48,4 +49,5 @@ mountPalette({
     { label: 'Rebuild search index', kind: 'run', hint: 'doctor', go: 'doctor' },
   ],
 });
+mountLiveRail();
 connect();

@@ -14,6 +14,7 @@ import { getAgent } from '../../agents.mjs';
 import { registerTask } from '../../tasks.mjs';
 import { defaultSandboxSpec } from '../../sandbox/index.mjs';
 import { resolvePermissionModeForSurface } from '../../lib/permission_mode.mjs';
+import { emit as emitEvent } from '../../mas/events.mjs';
 
 export async function routeInboundToTeam({
   cfg, channel, text, configDir, apiKey, baseUrl, logger, slackSender, onUsage, signal, _runTaskTurn,
@@ -29,6 +30,11 @@ export async function routeInboundToTeam({
     if (rec) agentsById[name] = rec;
   }
   if (!agentsById[team.lead]) return null;
+
+  // Live-rail routing fact: which channel handed off to which lead agent.
+  // `routeInboundToTeam` never learns the actually-resolved *responding*
+  // agent (only { reply, team, taskId }), so `to` is the team's lead here.
+  emitEvent('channel.inbound', { channel, to: team.lead, team: team.name });
 
   const task = registerTask({
     title: String(text).slice(0, 80) || '(channel task)',

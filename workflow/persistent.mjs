@@ -11,6 +11,7 @@ import { topologicalLevels, retryWithBackoff, runWithTimeout, settleWithConcurre
 import { writeJsonSecure } from '../secure_write.mjs';
 import { acquireSessionLock } from './session_lock.mjs';
 import { isTimeout, errorPolicy } from './error_policy.mjs';
+import { emit as emitEvent } from '../mas/events.mjs';
 
 const DEFAULT_DIR = '.workflow-state';
 
@@ -236,6 +237,9 @@ async function runPersistentInner(nodes, opts, ctx) {
         state.nodes[node.id] = { status: 'success', output, attempts, durationMs };
         saveState(state, dir);
         executedNodes.push(node.id);
+        // Live-rail progress: a completed-count, not a step index, so the
+        // shape stays meaningful if a DAG-run caller ever emits it too.
+        emitEvent('workflow.step', { id: opts.sessionId, done: executedNodes.length, total: nodes.length, node: node.id });
         input = output;
         break;
       } catch (err) {

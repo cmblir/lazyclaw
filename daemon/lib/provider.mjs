@@ -5,6 +5,7 @@ import { PROVIDERS } from '../../providers/registry.mjs';
 import { withRateLimitRetry } from '../../providers/retry.mjs';
 import { withFallback } from '../../providers/fallback.mjs';
 import { withResponseCache } from '../../providers/cache.mjs';
+import { emit as emitEvent } from '../../mas/events.mjs';
 
 // Resolve the provider for a request. Composes opt-in wrappers in this
 // order (innermost first):
@@ -50,9 +51,13 @@ export function resolveProvider(body, providerName, cachedByName, logger) {
       chain.push(useCache ? wrapWithCache(name) : PROVIDERS[name]);
     }
     prov = withFallback(chain, {
-      onFallback: ({ from, to, err }) => dbg('provider.fallback', {
-        from, to, errorCode: err?.code || null, errorMsg: String(err?.message || err).slice(0, 120),
-      }),
+      onFallback: ({ from, to, err }) => {
+        dbg('provider.fallback', {
+          from, to, errorCode: err?.code || null, errorMsg: String(err?.message || err).slice(0, 120),
+        });
+        // Live-rail routing fact: which provider failed, never the full error.
+        emitEvent('provider.error', { provider: from, detail: err?.code || err?.message || 'failed' });
+      },
     });
   }
   const r = body?.retry;
