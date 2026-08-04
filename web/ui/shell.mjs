@@ -8,6 +8,7 @@
 // directly.
 import { el, clear } from './dom.mjs';
 import { GROUPS, ALL } from './nav_model.mjs';
+import { initModal } from './modal.mjs';
 
 export { GROUPS, ALL };
 
@@ -53,11 +54,21 @@ export function mount(opts) {
   burger.addEventListener('click', () => (rail.hasAttribute('data-open') ? closeDrawer() : openDrawer()));
   railScrim.addEventListener('click', closeDrawer);
   // The drawer is a modal overlay on mobile — Escape is the expected way out.
+  // The modal (a higher stacking layer, see modal.mjs) has its own Escape
+  // listener; when it's open, Escape must close only the modal, so skip the
+  // drawer here rather than closing both layers on one keypress.
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && rail.hasAttribute('data-open')) closeDrawer();
+    if (e.key !== 'Escape') return;
+    if (document.getElementById('modal-scrim').hasAttribute('data-open')) return;
+    if (rail.hasAttribute('data-open')) closeDrawer();
   });
   window.addEventListener('hashchange', onHash);
   window.addEventListener('resize', () => moveMarker(navButtons.get(currentId)));
+
+  // The shell owns startup wiring for every shell-level overlay, including
+  // the modal's dismissal (× button / backdrop click / Escape) — modal.mjs
+  // itself only holds open/close state and dismissal logic, not the wiring.
+  initModal();
 
   onHash(true);
 }

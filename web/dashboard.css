@@ -36,14 +36,6 @@
     .nav-item .count.urgent { color: var(--accent-ink); background: var(--accent);
                               border-radius: 999px; padding: 2px 6px; font-weight: 700; }
     @media (pointer: coarse) { .nav-item { min-height: 44px; } }
-    @media (max-width: 820px) {
-      .shell { grid-template-columns: minmax(0, 1fr); height: auto; }
-      .burger { display: grid; place-items: center; }
-      .rail { position: fixed; z-index: 60; top: 0; bottom: 0; left: 0; width: 250px;
-              transform: translateX(-100%); transition: transform var(--dur-mid) var(--ease-out); }
-      .rail[data-open] { transform: translateX(0); }
-      #rail-scrim[data-open] { display: block; }
-    }
 
     #nav-marker {
       position: absolute; left: 0; width: 3px; background: var(--accent);
@@ -86,6 +78,21 @@
       display: none; width: 34px; height: 34px; background: none;
       border: 1px solid var(--border); border-radius: 6px; color: var(--text);
       font-size: 16px; cursor: pointer;
+    }
+    /* Placed after every base rule it overrides (.shell / .rail / .burger
+       above): same-specificity CSS rules resolve by source order regardless
+       of media-query nesting, so a max-width override declared BEFORE an
+       unconditional same-selector rule loses to it even while the query
+       matches. (Caught by an actual ≤820px Playwright viewport test — the
+       sandboxed browser used for manual verification couldn't resize its
+       real viewport, so this shipped broken until that test caught it.) */
+    @media (max-width: 820px) {
+      .shell { grid-template-columns: minmax(0, 1fr); height: auto; }
+      .burger { display: grid; place-items: center; }
+      .rail { position: fixed; z-index: 60; top: 0; bottom: 0; left: 0; width: 250px;
+              transform: translateX(-100%); transition: transform var(--dur-mid) var(--ease-out); }
+      .rail[data-open] { transform: translateX(0); }
+      #rail-scrim[data-open] { display: block; }
     }
     .omni {
       flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0;
