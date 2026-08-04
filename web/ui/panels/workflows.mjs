@@ -3,6 +3,7 @@
 import { el, phead, table } from '../dom.mjs';
 import { api, apiRaw } from '../api.mjs';
 import { openModal } from '../modal.mjs';
+import { reconcile } from '../reconcile.mjs';
 
 function fmtDuration(ms) {
   if (!Number.isFinite(ms) || ms < 0) return '—';
@@ -32,8 +33,53 @@ export function render(host) {
 
   let grid = el('div', { class: 'grid' });
   host.append(grid);
+
+  // The sessions table shell is built once; reconcile() only touches the
+  // fields that change on a re-fetch (state pills, counts, updated time),
+  // so a Refresh no longer discards every session row's node and re-plays
+  // its entrance animation.
+  const tbody = el('tbody', {});
+  const tableWrap = el('div', { class: 'scroll' }, el('table', { class: 'tbl' },
+    el('thead', {}, el('tr', {}, ['Session', 'State', 'Done / Total', 'Failed', 'Updated', ''].map((h) => el('th', { text: h })))),
+    tbody));
+
   let list = el('div', { class: 'empty', text: 'Loading…' });
   host.append(list);
+  function showList(node) { list.replaceWith(list = node); }
+
+  function tagsFor(sm) {
+    const tags = [];
+    if (sm.running > 0) tags.push(el('span', { class: 'pill warn', text: 'running' }));
+    if (sm.failed > 0) tags.push(el('span', { class: 'pill err', text: 'failed' }));
+    if (sm.resumable) tags.push(el('span', { class: 'pill warn', text: 'resumable' }));
+    if (sm.done) tags.push(el('span', { class: 'pill ok', text: 'done' }));
+    return tags.length ? tags : [el('span', { class: 'dim', text: '—' })];
+  }
+
+  function createRow(s) {
+    const sm = s.summary || {};
+    const tr = el('tr', { class: 'clickable', '--i': s.i },
+      el('td', {}, el('code', { text: s.sessionId })),
+      el('td', { 'data-f': 'tags' }, tagsFor(sm)),
+      el('td', { class: 'num', 'data-f': 'counts', text: `${sm.success ?? 0} / ${sm.total ?? ''}` }),
+      el('td', { class: 'num', 'data-f': 'failed', text: String(sm.failed ?? 0) }),
+      el('td', { class: 'dim', 'data-f': 'updated', text: s.updatedAt || s.startedAt || '' }),
+      el('td', {}, el('button', { class: 'btn btn-danger btn-sm', type: 'button', text: 'Delete', onclick: (e) => { e.stopPropagation(); deleteWorkflow(s.sessionId); } })));
+    tr.addEventListener('click', () => openWorkflowDetail(s.sessionId));
+    return tr;
+  }
+
+  // Only the fields a re-fetch can actually change: state, done/total,
+  // failed count, and the updated timestamp. sessionId and the click/delete
+  // handlers are fixed for the life of a session, so the row they belong to
+  // never needs to be rebuilt.
+  function updateRow(tr, s) {
+    const sm = s.summary || {};
+    tr.querySelector('[data-f="tags"]').replaceChildren(...tagsFor(sm));
+    tr.querySelector('[data-f="counts"]').textContent = `${sm.success ?? 0} / ${sm.total ?? ''}`;
+    tr.querySelector('[data-f="failed"]').textContent = String(sm.failed ?? 0);
+    tr.querySelector('[data-f="updated"]').textContent = s.updatedAt || s.startedAt || '';
+  }
 
   let debounceTimer = null;
   statusSel.addEventListener('change', () => load());
@@ -43,7 +89,10 @@ export function render(host) {
   });
 
   async function load() {
-    list.replaceWith(list = el('div', { class: 'empty', text: 'Loading…' }));
+    // Only show the transient placeholder when there's nothing on screen
+    // yet — once the table is up, a Refresh reconciles it in place instead
+    // of flashing back to "Loading…" and losing every row's node for that.
+    if (list !== tableWrap) showList(el('div', { class: 'empty', text: 'Loading…' }));
     grid.replaceChildren();
     try {
       const status = statusSel.value;
@@ -76,33 +125,14 @@ export function render(host) {
           : null,
       );
       if (sessions.length === 0) {
-        list.replaceWith(list = el('div', { class: 'empty' },
+        showList(el('div', { class: 'empty' },
           'No workflow runs yet. Run one with ', el('code', { text: 'lazyclaw run <id> ./flow.mjs' }), '.'));
         return;
       }
-      const rows = sessions.map((s, i) => {
-        const sm = s.summary || {};
-        const tags = [];
-        if (sm.running > 0) tags.push(el('span', { class: 'pill warn', text: 'running' }));
-        if (sm.failed > 0) tags.push(el('span', { class: 'pill err', text: 'failed' }));
-        if (sm.resumable) tags.push(el('span', { class: 'pill warn', text: 'resumable' }));
-        if (sm.done) tags.push(el('span', { class: 'pill ok', text: 'done' }));
-        const tr = el('tr', { class: 'clickable', '--i': i },
-          el('td', {}, el('code', { text: s.sessionId })),
-          el('td', {}, tags.length ? tags : el('span', { class: 'dim', text: '—' })),
-          el('td', { class: 'num', text: `${sm.success ?? 0} / ${sm.total ?? ''}` }),
-          el('td', { class: 'num', text: String(sm.failed ?? 0) }),
-          el('td', { class: 'dim', text: s.updatedAt || s.startedAt || '' }),
-          el('td', {}, el('button', { class: 'btn btn-danger btn-sm', type: 'button', text: 'Delete', onclick: (e) => { e.stopPropagation(); deleteWorkflow(s.sessionId); } })));
-        tr.addEventListener('click', () => openWorkflowDetail(s.sessionId));
-        return tr;
-      });
-      list.replaceWith(list = el('div', { class: 'scroll' },
-        el('table', { class: 'tbl' },
-          el('thead', {}, el('tr', {}, ['Session', 'State', 'Done / Total', 'Failed', 'Updated', ''].map((h) => el('th', { text: h })))),
-          el('tbody', {}, rows))));
+      if (list !== tableWrap) showList(tableWrap);
+      reconcile(tbody, sessions.map((s, i) => ({ ...s, i })), (s) => s.sessionId, createRow, updateRow);
     } catch (e) {
-      list.replaceWith(list = el('div', { class: 'empty', text: '⚠ ' + e.message }));
+      showList(el('div', { class: 'empty', text: '⚠ ' + e.message }));
     }
   }
 

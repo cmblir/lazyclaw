@@ -8,6 +8,7 @@ import { el, phead } from '../dom.mjs';
 import { api } from '../api.mjs';
 import { harnessLabel, avatarGlyph, avatarSrc, buildTeamTree } from '../team_tree.mjs';
 import { subscribe } from '../stream.mjs';
+import { reconcile } from '../reconcile.mjs';
 
 export function render(host) {
   host.append(phead('Team Live', null));
@@ -32,9 +33,20 @@ export function render(host) {
 
   const TEAM = { team: null, agentsById: {}, status: {}, activity: {}, task: null, selected: null };
 
-  function renderAgentTile(name) {
+  // The lead tile and the children row are reconciled containers (kept for
+  // the panel's lifetime, never recreated) so a tile's Element identity
+  // survives a topology re-render — Task 8 reassigns an agent's manager and
+  // needs each tile's old/new bounding box to FLIP-animate between them,
+  // which only works if the tile itself was not thrown away and rebuilt.
+  const leadRow = el('div', { class: 'team-row' });
+  const childrenRow = el('div', { class: 'team-row' });
+  const childrenWrap = el('div', { class: 'team-children' }, childrenRow);
+
+  function tileStatus(name) { return TEAM.status[name] || 'idle'; }
+
+  function createTile(name) {
     const rec = TEAM.agentsById[name] || { name };
-    const st = TEAM.status[name] || 'idle';
+    const st = tileStatus(name);
     const img = el('img', { src: avatarSrc(rec), alt: '', onerror: (e) => e.target.remove() });
     return el('button', {
       class: `tagent ${st}`, 'data-agent': name, role: 'treeitem',
@@ -47,18 +59,34 @@ export function render(host) {
       el('div', { class: 'harness-badge', text: harnessLabel(rec) }));
   }
 
+  // Refreshes exactly what createTile computed from live state, so a
+  // reused tile ends up identical to a freshly-created one — status,
+  // selection, name/harness/avatar can all change out from under a
+  // survivor between renders (setAgentStatus/selectTeamAgent already patch
+  // these in place for the SSE-driven case; this covers the same fields
+  // for a full topology re-render).
+  function updateTile(btn, name) {
+    const rec = TEAM.agentsById[name] || { name };
+    const st = tileStatus(name);
+    btn.className = `tagent ${st}`;
+    btn.setAttribute('aria-selected', String(TEAM.selected === name));
+    btn.querySelector('.tagent-name').textContent = rec.displayName || name;
+    btn.querySelector('.tagent-status').textContent = st === 'working' ? '● working' : '○ idle';
+    btn.querySelector('.harness-badge').textContent = harnessLabel(rec);
+    btn.querySelector('.tagent-glyph').textContent = avatarGlyph(rec);
+    const img = btn.querySelector('.tagent-avatar img');
+    if (img) img.src = avatarSrc(rec);
+  }
+
   function renderTeamCanvas() {
     if (!TEAM.team) { canvas.replaceChildren(el('div', { class: 'empty', text: 'No team selected.' })); return; }
     const tree = buildTeamTree(TEAM.team, TEAM.agentsById);
     if (!tree) { canvas.replaceChildren(el('div', { class: 'empty', text: 'This team has no lead.' })); return; }
     const flat = [];
     (function walk(n) { for (const c of n.children) { flat.push(c.name); walk(c); } })(tree);
-    const nodes = [el('div', { class: 'team-row' }, renderAgentTile(tree.name))];
-    if (flat.length) {
-      nodes.push(el('div', { class: 'team-children' },
-        el('div', { class: 'team-row' }, flat.map((n) => renderAgentTile(n)))));
-    }
-    canvas.replaceChildren(...nodes);
+    reconcile(leadRow, [tree.name], (n) => n, createTile, updateTile);
+    reconcile(childrenRow, flat, (n) => n, createTile, updateTile);
+    canvas.replaceChildren(leadRow, ...(flat.length ? [childrenWrap] : []));
   }
 
   function selectTeamAgent(name) {
