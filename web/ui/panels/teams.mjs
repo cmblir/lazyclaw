@@ -1,0 +1,73 @@
+// web/ui/panels/teams.mjs — registered teams: list, create (prompt-driven,
+// guided by the already-registered agent names), delete.
+import { el, phead, table } from '../dom.mjs';
+import { api } from '../api.mjs';
+
+export async function render(host) {
+  const meta = el('span', { class: 'dim' });
+  host.append(phead('Teams', null));
+  host.append(el('div', { class: 'toolbar' },
+    el('button', { class: 'btn', type: 'button', text: '+ New team', onclick: () => openTeamModal() }),
+    el('button', { class: 'btn btn-secondary', type: 'button', text: 'Refresh', onclick: () => load() }),
+    meta));
+  let list = el('div', { class: 'empty', text: 'Loading…' });
+  host.append(list);
+
+  async function load() {
+    try {
+      const arr = await api('/teams');
+      meta.textContent = `${arr.length} team(s)`;
+      if (arr.length === 0) {
+        list.replaceWith(list = el('div', { class: 'empty', text: 'No teams yet — click + New team to create one.' }));
+        return;
+      }
+      const rows = arr.map((t) => ({
+        name: el('div', {}, el('strong', { text: t.name }), el('br'), el('span', { class: 'dim', text: t.displayName || '' })),
+        lead: t.lead || '',
+        agents: (t.agents || []).join(', '),
+        slack: t.slackChannel ? el('code', { text: t.slackChannel }) : el('span', { class: 'dim', text: '(none)' }),
+        actions: el('button', { class: 'btn btn-secondary', type: 'button', text: 'Delete', onclick: () => deleteTeam(t.name) }),
+      }));
+      list.replaceWith(list = table(
+        [{ key: 'name', label: 'name' }, { key: 'lead', label: 'lead' }, { key: 'agents', label: 'agents' },
+         { key: 'slack', label: 'slack channel' }, { key: 'actions', label: '' }],
+        rows,
+      ));
+    } catch (e) {
+      list.replaceWith(list = el('div', { class: 'empty', text: 'Error: ' + e.message }));
+    }
+  }
+
+  async function openTeamModal() {
+    // A team can only reference agents already registered (the server
+    // rejects unknown names) — guide the flow instead of letting the user
+    // guess: bail early with a hint when there are none, pre-fill otherwise.
+    let registered = [];
+    try { registered = (await api('/agents')).map((a) => a.name); } catch { /* fall through with empty list */ }
+    if (registered.length === 0) {
+      alert('Create an agent first (Agents tab → + New agent). A team is built from agents you have already registered.');
+      return;
+    }
+    const name = (prompt('Team name (e.g. shop, growth):') || '').trim();
+    if (!name) return;
+    const agentsRaw = (prompt(`Agents (comma-separated) — registered: ${registered.join(', ')}`, registered.join(', ')) || '').trim();
+    if (!agentsRaw) return;
+    const agents = agentsRaw.split(',').map((s) => s.trim()).filter(Boolean);
+    const lead = (prompt(`Lead (one of ${agents.join(', ')}):`, agents[0]) || agents[0]).trim();
+    const slackChannel = (prompt('Slack channel id (C…, optional):') || '').trim();
+    try {
+      await api('/teams', { method: 'POST', body: JSON.stringify({ name, agents, lead, slackChannel }) });
+      load();
+    } catch (e) {
+      alert('Create failed: ' + e.message);
+    }
+  }
+
+  async function deleteTeam(name) {
+    if (!confirm(`Delete team "${name}"?`)) return;
+    try { await api(`/teams/${encodeURIComponent(name)}`, { method: 'DELETE' }); load(); }
+    catch (e) { alert('Delete failed: ' + e.message); }
+  }
+
+  await load();
+}

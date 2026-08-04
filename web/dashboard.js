@@ -9,11 +9,14 @@ import { ALL } from '/ui/nav_model.mjs';
 import * as chat from '/ui/panels/chat.mjs';
 import * as tasks from '/ui/panels/tasks.mjs';
 import * as sessions from '/ui/panels/sessions.mjs';
+import * as agents from '/ui/panels/agents.mjs';
+import * as teams from '/ui/panels/teams.mjs';
+import * as team from '/ui/panels/team.mjs';
 
 const panels = {};
 for (const { id, label } of ALL) {
   panels[id] = { render: (host) => { host.append(el('h2', { text: label })); } };
 }
-Object.assign(panels, { chat, tasks, sessions });
+Object.assign(panels, { chat, tasks, sessions, agents, teams, team });
 
 mount({ panels });
