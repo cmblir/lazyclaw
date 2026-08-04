@@ -1,9 +1,98 @@
-// web/ui/panels/gateway.mjs — paired devices for the Slack/gateway bridge.
-// No daemon route exists yet: GET /devices lands in dashboard-shell-motion
-// Task 12. Placeholder only — no fetch until that route exists.
-import { phead, banner } from '../dom.mjs';
+// web/ui/panels/gateway.mjs — paired devices for the companion-node gateway.
+// Read-only: approve/revoke/rotate happen via `lazyclaw nodes`, never here —
+// see daemon/routes/gateway_views.mjs for why.
+import { el, phead, chip, table, kvlist } from '../dom.mjs';
+import { api } from '../api.mjs';
 
-export function render(host) {
-  host.append(phead('Devices', 'Devices paired to this gateway.'));
-  host.append(banner('warn', '!', 'The GET /devices route lands in a later task. Nothing to show yet.'));
+const REQUEST_COLS = [
+  { key: 'deviceId', label: 'Device' },
+  { key: 'platform', label: 'Platform' },
+  { key: 'label', label: 'Label' },
+  { key: 'role', label: 'Role' },
+  { key: 'status', label: 'Status' },
+  { key: 'createdAt', label: 'Requested' },
+];
+
+const DEVICE_COLS = [
+  { key: 'deviceId', label: 'Device' },
+  { key: 'platform', label: 'Platform' },
+  { key: 'label', label: 'Label' },
+  { key: 'role', label: 'Role' },
+  { key: 'tokenMasked', label: 'Token', class: 'mono' },
+  { key: 'status', label: 'Status' },
+  { key: 'approvedAt', label: 'Approved' },
+];
+
+function requestRow(r) {
+  return {
+    deviceId: el('code', { text: r.deviceId }),
+    platform: r.platform || '—',
+    label: r.label || '—',
+    role: r.role || '—',
+    status: chip(r.status || 'pending', 'warn'),
+    createdAt: String(r.createdAt || '').slice(0, 19),
+  };
+}
+
+// A device's paired/expired state is never colour-alone — the chip always
+// carries the word too.
+function deviceRow(d) {
+  const expired = typeof d.expiresAt === 'number' && Date.now() >= d.expiresAt;
+  return {
+    deviceId: el('code', { text: d.deviceId }),
+    platform: d.platform || '—',
+    label: d.label || '—',
+    role: d.role || '—',
+    tokenMasked: d.tokenMasked || '—',
+    status: expired ? chip('expired', 'err') : chip('paired', 'ok'),
+    approvedAt: String(d.approvedAt || '').slice(0, 19),
+  };
+}
+
+export async function render(host) {
+  host.append(phead('Devices', 'Devices paired to this gateway, and requests waiting on lazyclaw nodes approve.'));
+
+  host.append(el('div', { class: 'note-inline' },
+    el('b', { text: 'Two things are called “gateway”. ' }),
+    'The device gateway runs ', el('em', { text: 'inside' }), ' this daemon (',
+    el('code', { text: 'createGateway()' }), ', routed before the shared auth-token gate). ',
+    el('code', { text: 'commands/gateway.mjs' }),
+    ' is a separate long-lived process that runs the channels behind its own pidfile.'));
+
+  let shown = el('div', { class: 'empty', text: 'Loading…' });
+  host.append(shown);
+
+  try {
+    const data = await api('/devices');
+    const requests = Array.isArray(data.requests) ? data.requests : [];
+    const devices = Array.isArray(data.devices) ? data.devices : [];
+    const sse = data.sse || { open: 0, maxGlobal: 0, maxPerDevice: 0 };
+    const frac = sse.maxGlobal ? Math.max(0, Math.min(1, sse.open / sse.maxGlobal)) : 0;
+
+    const body = el('div', {},
+      el('h3', { class: 'dim', style: 'margin:8px 0 4px;', text: 'Pending pairing requests' }),
+      requests.length
+        ? table(REQUEST_COLS, requests.map(requestRow))
+        : el('div', { class: 'empty' }, 'No pairing requests waiting. Pair one with ', el('code', { text: 'lazyclaw nodes pair' }), '.'),
+
+      el('h3', { class: 'dim', style: 'margin:14px 0 4px;', text: 'Paired devices' }),
+      devices.length
+        ? table(DEVICE_COLS, devices.map(deviceRow))
+        : el('div', { class: 'empty', text: 'No devices paired yet.' }),
+
+      el('h3', { class: 'dim', style: 'margin:14px 0 4px;', text: 'Event-stream capacity' }),
+      el('div', { class: 'card' },
+        kvlist([
+          ['Open streams', `${sse.open} / ${sse.maxGlobal}`],
+          ['Per-device cap', String(sse.maxPerDevice)],
+        ]),
+        el('div', { class: 'meter' }, el('i', { class: frac > 0.85 ? 'warn' : '', style: `transform: scaleX(${frac})` }))));
+
+    shown.replaceWith(body);
+    shown = body;
+  } catch (e) {
+    const errNode = el('div', { class: 'empty', text: 'Error: ' + e.message });
+    shown.replaceWith(errNode);
+    shown = errNode;
+  }
 }
