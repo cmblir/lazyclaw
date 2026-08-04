@@ -1,15 +1,19 @@
 // web/dashboard.js — entry point. <script type="module" src="/dashboard.js">
 // Mounts the grouped-sidebar shell. Real panel bodies move here one module
-// per file in dashboard-shell-motion Task 4 (see web/ui/panels/); until then
-// every id renders a placeholder so the shell, hash router, and marker can
-// be exercised end to end.
+// per file in dashboard-shell-motion Task 4 (see web/ui/panels/); ids not
+// yet moved still fall back to a placeholder so every panel renders.
 import { mount } from '/ui/shell.mjs';
 import { el } from '/ui/dom.mjs';
 import { ALL } from '/ui/nav_model.mjs';
+
+import * as chat from '/ui/panels/chat.mjs';
+import * as tasks from '/ui/panels/tasks.mjs';
+import * as sessions from '/ui/panels/sessions.mjs';
 
 const panels = {};
 for (const { id, label } of ALL) {
   panels[id] = { render: (host) => { host.append(el('h2', { text: label })); } };
 }
+Object.assign(panels, { chat, tasks, sessions });
 
 mount({ panels });
