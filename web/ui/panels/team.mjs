@@ -107,8 +107,13 @@ export function render(host) {
   // rather than merely flagging it as not-to-be-acted-on.
   let disposed = false;
   let pendingFrame = 0;
+  // Cancel rather than merely forget the pending handle: `onResize` and
+  // `renderTeamCanvas` call this directly, so simply zeroing `pendingFrame`
+  // on entry would orphan a retry that is still queued — out of cleanup's
+  // reach, and forking a second rAF chain that each further direct call
+  // multiplies again. Cancelling collapses it back to one chain always.
   function drawEdgesUntilMeasured() {
-    pendingFrame = 0;
+    if (pendingFrame) { cancelAnimationFrame(pendingFrame); pendingFrame = 0; }
     if (disposed) return;
     if (!drawEdges(TEAM.team, TEAM.agentsById, tileByName, topologyEl, edgesSvg)) {
       pendingFrame = requestAnimationFrame(drawEdgesUntilMeasured);
