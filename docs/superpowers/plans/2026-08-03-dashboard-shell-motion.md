@@ -2391,6 +2391,34 @@ test('no new payload carries a secret-shaped field', () => {
     }
   }
 });
+
+// Scanning key NAMES is only half the property, and the weaker half. A field
+// called `detail` passes the scan above while carrying 200 characters of a
+// provider's raw HTTP error body — which is exactly what an earlier revision of
+// this plan's provider.error row did, because anthropic.mjs's ApiError builds its
+// message from `body.slice(0, 200)`. These events go over SSE to every connected
+// dashboard, so the VALUES need a bound too.
+test('no payload value is long enough or shaped like a captured response body', () => {
+  _reset();
+  const seen = [];
+  const off = subscribe((e) => seen.push(e));
+  emit('workflow.step', { id: 'sess_x', done: 3, total: 5, node: 'summarise' });
+  emit('cost.tick', { total: 0.83, cap: 5, currency: 'USD' });
+  emit('channel.inbound', { channel: '#ship-it', to: 'orchestrator', team: 'ship-it' });
+  emit('provider.error', { provider: 'anthropic', detail: '429' });
+  off();
+  for (const e of seen) {
+    for (const [k, v] of Object.entries(e)) {
+      if (typeof v !== 'string') continue;
+      // Every field these four events carry is a routing fact: an id, a name, a
+      // channel, a currency, a status. None of them is prose.
+      assert.ok(v.length <= 64,
+        `${e.type}.${k} is ${v.length} chars — routing facts are short, bodies are not`);
+      assert.doesNotMatch(v, /[{}]/,
+        `${e.type}.${k} contains a brace, which means a serialised object got in`);
+    }
+  }
+});
 ```
 
 - [ ] **Step 2: Run it to make sure it fails**
@@ -2407,7 +2435,23 @@ Each is one line at the point the fact becomes true. Import as `import { emit as
 | `workflow/persistent.mjs:236-238` | in `runPersistentInner`'s per-node loop, right after `state.nodes[node.id] = { status: 'success', … }` / `saveState(…)` / `executedNodes.push(node.id)` | `emitEvent('workflow.step', { id: opts.sessionId, done: executedNodes.length, total: nodes.length, node: node.id })` |
 | `daemon/lib/cost.mjs:62-69` | in `makeTeamUsageAccountant`'s returned closure, after `accumulateMetricsFromCost(metrics, usage, cost)` and beside the existing `checkCostCap(metrics, costCap)` | `emitEvent('cost.tick', { total: metrics.costsByCurrency?.[cur], cap: costCap?.[cur] ?? null, currency: cur })` |
 | `daemon/lib/team_inbound.mjs`, just after `if (!agentsById[team.lead]) return null;` | the routing decision, where `channel`, `team.name` and `team.lead` are all live | `emitEvent('channel.inbound', { channel, to: team.lead, team: team.name })` |
-| `daemon/lib/provider.mjs:52-56` | inside the **existing** `onFallback: ({ from, to, err }) => …` callback, beside the `dbg('provider.fallback', …)` already there | `emitEvent('provider.error', { provider: from, detail: err?.code || err?.message || 'failed' })` |
+| `daemon/lib/provider.mjs:52-56` | inside the **existing** `onFallback: ({ from, to, err }) => …` callback, beside the `dbg('provider.fallback', …)` already there | `emitEvent('provider.error', { provider: from, detail: String(err?.code || err?.status || err?.name || 'failed').slice(0, 40) })` |
+
+> **`detail` must never fall back to `err.message`.** An earlier revision of this row said
+> `err?.code || err?.message || 'failed'`, and that leaks. `providers/anthropic.mjs`'s `ApiError`
+> builds its message as `` `anthropic api ${status}: ${body.slice(0, 200)}` `` — **200 characters
+> of the provider's raw HTTP error body**, which is the API's JSON error response and can echo
+> request detail. That would be broadcast over SSE to every connected dashboard.
+>
+> Two things make it worse than it looks. `ApiError` sets `name`, `status` and `body` but **no
+> `code`**, so `err?.code` is `undefined` and the message fallback is the *normal* path for an
+> Anthropic API failure, not a rare one. And the `dbg()` call one line above already truncates to
+> 120 characters — so the debug log would have been more careful than the public broadcast.
+>
+> `code`, `status` and `name` are all non-content routing facts, which is exactly what the rail
+> needs: "anthropic failed, 429". If a provider supplies none of them the detail degrades to
+> `'failed'`, and that is the right trade — the panel and the logs carry the diagnosis, the rail
+> carries the fact.
 
 Two things to get right rather than approximate:
 
