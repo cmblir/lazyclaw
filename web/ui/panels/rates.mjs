@@ -4,7 +4,7 @@ import { el, phead } from '../dom.mjs';
 import { api, apiRaw, apiSoft } from '../api.mjs';
 import { openModal, closeModal } from '../modal.mjs';
 
-export async function render(host) {
+export function render(host) {
   const meta = el('span', { class: 'dim' });
   const filterInput = el('input', { type: 'search', placeholder: 'filter by provider/model' });
   host.append(phead('Rates', null));
@@ -152,6 +152,10 @@ export async function render(host) {
     }
   }
 
-  await load();
+  // render() must return its cleanup synchronously — shell.mjs's activate()
+  // now handles an async render's Promise-wrapped cleanup correctly too, but
+  // there's nothing here that needs the initial load() awaited before the
+  // panel is usable, so keep this the simple shape.
+  load(); // fire-and-forget; failures render inline via the catch above
   return () => clearTimeout(debounceTimer);
 }

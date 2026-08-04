@@ -22,8 +22,29 @@ let burger = null;
 let marker = null;
 let currentId = null;
 let cleanupFn = null;
+let activationSeq = 0;
 
 export function current() { return currentId; }
+
+// Normalize a panel's render(host) return value into a cleanup callback.
+// render() may be sync (returns a function, or nothing) or async (returns a
+// Promise that resolves to a function, or nothing) — a panel author is free
+// to write either, per Task 4. `onCleanup` is invoked with the real
+// function-or-null once it's known: synchronously for the sync shapes,
+// after the Promise settles for the async one. A rejected Promise or a
+// resolved non-function value delivers null rather than throwing, so a
+// panel author's mistake can't crash the shell.
+//
+// Exported (not inlined into activate()) so the async-resolution contract
+// has a test that doesn't need to stub the whole DOM shell to exercise it.
+export function resolveCleanup(renderResult, onCleanup) {
+  const asFn = (v) => (typeof v === 'function' ? v : null);
+  if (renderResult && typeof renderResult.then === 'function') {
+    renderResult.then((v) => onCleanup(asFn(v)), () => onCleanup(null));
+  } else {
+    onCleanup(asFn(renderResult));
+  }
+}
 
 export function mount(opts) {
   panels = opts.panels;
@@ -111,9 +132,19 @@ function activate(id) {
     host.append(el('div', { class: 'empty', text: 'This panel is not wired up yet.' }));
     return;
   }
-  // A panel that throws must not take the shell down with it.
-  try { cleanupFn = panel.render(host) || null; }
-  catch (e) {
+  // A panel that throws must not take the shell down with it. Tag this
+  // activation with a sequence number: if the user has already navigated
+  // away by the time an async render's cleanup resolves, run that cleanup
+  // immediately instead of leaking (a resolved-but-never-stored cleanup is
+  // exactly how Team Live's old SSE unsubscribe could go missing).
+  const seq = ++activationSeq;
+  try {
+    resolveCleanup(panel.render(host), (fn) => {
+      if (!fn) return;
+      if (seq === activationSeq) cleanupFn = fn;
+      else { try { fn(); } catch (_) { /* a stale cleanup must not break anything */ } }
+    });
+  } catch (e) {
     clear(host).append(el('div', { class: 'banner err' },
       el('span', { class: 'ic', 'aria-hidden': 'true', text: '✗' }),
       el('b', { text: 'This panel failed to render. ' }), String(e && e.message || e)));
