@@ -75,3 +75,30 @@ test('reassignment refuses a cycle and refuses moving the lead', () => {
   assert.equal(canReassign(SHIP, AGENTS, 'qa', 'frontend'), true);
   assert.equal(canReassign(SHIP, AGENTS, 'qa', 'nobody'), false, 'not on this roster');
 });
+
+test("the dedicated lead-guard is not redundant with the cycle check", () => {
+  // The assertion above — canReassign(SHIP, ..., 'orchestrator', 'backend')
+  // === false — does not actually pin canReassign's `name === team.lead`
+  // guard: in SHIP, `backend` IS a descendant of `orchestrator` (it reports
+  // straight to it), so the cycle check alone (`!isDescendant(newManager,
+  // name)`) already returns false for that data, guard or no guard.
+  // Deleting the guard would not fail that test.
+  //
+  // To actually exercise the guard we need a newManager the cycle check
+  // does NOT catch: one sitting in a manager cycle disconnected from the
+  // lead, exactly like the tierRows orphan-row fixture above. `a` is
+  // unreachable from `lead` (isDescendant walks a->b->a and terminates via
+  // its own seen-set before ever reaching `lead`), so without the guard
+  // `canReassign(team, cyc, 'lead', 'a')` would fall through to
+  // `!isDescendant(...)` and incorrectly return `true`.
+  const cyc = {
+    lead: { name: 'lead', manager: null },
+    a: { name: 'a', manager: 'b' },
+    b: { name: 'b', manager: 'a' },
+  };
+  const team = { name: 'c', lead: 'lead', agents: ['lead', 'a', 'b'] };
+  assert.equal(isDescendant(team, cyc, 'a', 'lead'), false,
+    'a is unreachable from the lead — the cycle check alone would not block this');
+  assert.equal(canReassign(team, cyc, 'lead', 'a'), false,
+    'only the dedicated lead-guard blocks this; removing it flips the result to true');
+});

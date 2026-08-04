@@ -490,6 +490,14 @@
     #edges path.flow { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
     .tier { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; position: relative; }
     .tier + .tier { margin-top: 30px; }
+    /* Recursive subtree layout: a node is a column (its tile, then a row of
+       its children's own subtrees). Flex centres a column's children over
+       each other by construction, so a manager sits centred over its own
+       reports regardless of how many peers of that manager exist — a flat
+       `.tier` row (above) cannot do this, since a row centres on the whole
+       canvas rather than on the parent whose reports it holds. */
+    .subtree { display: flex; flex-direction: column; align-items: center; }
+    .subtree-kids { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 30px; }
 
     .agent {
       width: 106px; display: flex; flex-direction: column; align-items: center; gap: 6px;

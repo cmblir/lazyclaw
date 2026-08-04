@@ -6,19 +6,28 @@
 // Task 8's command palette needs that module too).
 import { el, phead, clear } from '../dom.mjs';
 import { api } from '../api.mjs';
-import { harnessLabel, avatarGlyph, avatarSrc, tierRows, managerIn, chainOf } from '../team_tree.mjs';
+import { harnessLabel, avatarGlyph, avatarSrc, buildTeamTree, managerIn, chainOf } from '../team_tree.mjs';
 import { subscribe } from '../stream.mjs';
-import { reconcile } from '../reconcile.mjs';
 import { captureRects, playFlip } from '../motion.mjs';
 
 // One curve per manager link, measured from the rendered tiles. The same path
 // is reused for the delegation flow, so a hand-off visibly travels the
 // reporting line rather than cutting across the canvas.
+//
+// Returns whether it actually measured and drew (false only when `topoEl`
+// has no layout yet — a panel rendering into a still-hidden host). The
+// caller retries on false; it must NOT be called from inside
+// `requestAnimationFrame` after `playFlip` starts an animation, because
+// `getBoundingClientRect()` reports the currently-applied CSS transform, not
+// the resting position — a tile mid-FLIP would be measured at its
+// transitional spot and the edge would never be redrawn once the animation
+// settles. Call this before `playFlip`, against the plain (untransformed)
+// post-layout DOM.
 function drawEdges(team, agentsByName, tiles, topoEl, edgesEl) {
   clear(edgesEl);
-  if (!team) return;
+  if (!team) return true; // nothing to draw; not a "not yet measured" failure
   const base = topoEl.getBoundingClientRect();
-  if (!base.width) return;                     // panel not visible yet
+  if (!base.width) return false;                // panel not visible yet — caller retries
   for (const name of team.agents) {
     const agent = agentsByName[name];
     const mgr = managerIn(team, agent);
@@ -36,6 +45,7 @@ function drawEdges(team, agentsByName, tiles, topoEl, edgesEl) {
     p.dataset.to = name;
     edgesEl.append(p);
   }
+  return true;
 }
 
 export function render(host) {
@@ -61,25 +71,50 @@ export function render(host) {
 
   const TEAM = { team: null, agentsById: {}, status: {}, activity: {}, task: null, selected: null };
 
-  // Tier rows are reconciled containers kept for the panel's lifetime and
-  // never recreated, so a tile's Element identity survives a topology
-  // re-render — a reassignment needs each tile's old/new bounding box to
-  // FLIP-animate between them, which only works if the tile itself was not
-  // thrown away and rebuilt. The array grows on demand as tiers appear; a
-  // row is never spliced out, only emptied and detached from the visible
-  // DOM (see renderTeamCanvas), so a later render needing the same depth
-  // again reuses the same row and its tiles keep their identity too.
-  const tierRowEls = [];
-  function tierRowEl(i) {
-    while (tierRowEls.length <= i) tierRowEls.push(el('div', { class: 'tier' }));
-    return tierRowEls[i];
-  }
+  // The tile Map is kept for the panel's lifetime and never recreated, so a
+  // tile's Element identity survives a topology re-render — a reassignment
+  // needs each tile's old/new bounding box to FLIP-animate between them,
+  // which only works if the tile itself was not thrown away and rebuilt.
+  // The tree scaffolding around the tiles (the .subtree/.subtree-kids
+  // wrapper divs below) is NOT persisted — it is a handful of nodes and is
+  // cheap to rebuild every render; only the tiles themselves must persist,
+  // so they live in one Map keyed by agent name rather than one per subtree
+  // container (a subtree container is not stable across renders — an
+  // agent's position in the tree can change depth, which would move it to
+  // a different container and destroy it if the container were the thing
+  // holding identity instead of this Map).
+  const tileByName = new Map();
   const edgesSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   edgesSvg.setAttribute('id', 'edges');
   const topologyEl = el('div', { class: 'topology' }, edgesSvg);
-  let tiles = new Map(); // merged tile map across every tier, keyed by agent name
 
-  function onResize() { drawEdges(TEAM.team, TEAM.agentsById, tiles, topologyEl, edgesSvg); }
+  // drawEdges must run against the settled (untransformed) layout, so it is
+  // called synchronously right after the DOM is rebuilt, before playFlip
+  // starts any animation. The only reason it can still fail is the panel
+  // rendering into a host with no layout yet (zero width) — retry on a
+  // rAF gated on "did not measure successfully yet", not on "we just
+  // rendered", so a resize or a render that DID measure successfully never
+  // schedules a redundant extra frame.
+  //
+  // The retry is a self-rescheduling rAF loop, which outlives a plain
+  // `addEventListener` unless something explicitly stops it: navigating
+  // away while the topology still has zero width (a fast panel switch
+  // right after activation, before layout) leaves the loop measuring a
+  // now-detached node forever, and every later visit to this panel starts
+  // a fresh one stacked on top. `disposed` is checked on every tick so a
+  // frame already in flight when cleanup runs is a no-op; `pendingFrame`
+  // is the handle so cleanup can also cancel the pending frame outright,
+  // rather than merely flagging it as not-to-be-acted-on.
+  let disposed = false;
+  let pendingFrame = 0;
+  function drawEdgesUntilMeasured() {
+    pendingFrame = 0;
+    if (disposed) return;
+    if (!drawEdges(TEAM.team, TEAM.agentsById, tileByName, topologyEl, edgesSvg)) {
+      pendingFrame = requestAnimationFrame(drawEdgesUntilMeasured);
+    }
+  }
+  function onResize() { drawEdgesUntilMeasured(); }
   window.addEventListener('resize', onResize);
 
   function tileStatus(name) { return TEAM.status[name] || 'idle'; }
@@ -100,12 +135,12 @@ export function render(host) {
     if (!TEAM.team) return;
     const chain = chainOf(TEAM.team, TEAM.agentsById, name);
     topologyEl.setAttribute('data-focus', '');
-    for (const [key, node] of tiles) node.toggleAttribute('data-inchain', chain.has(key));
+    for (const [key, node] of tileByName) node.toggleAttribute('data-inchain', chain.has(key));
   }
 
   function clearFocus() {
     topologyEl.removeAttribute('data-focus');
-    for (const node of tiles.values()) node.removeAttribute('data-inchain');
+    for (const node of tileByName.values()) node.removeAttribute('data-inchain');
   }
 
   function createTile(name) {
@@ -149,29 +184,58 @@ export function render(host) {
     if (newBadge) btn.append(newBadge);
   }
 
+  // Get-or-create from the panel-lifetime tile Map, tracking `name` in
+  // `seen` so the caller can drop whatever wasn't touched this render (an
+  // agent that left the roster, or one unreachable from the lead because
+  // its manager chain sits inside a cycle — buildTeamTree's own `seen`
+  // guard already excludes those from the tree, so they must not linger
+  // here either).
+  function getOrCreateTile(name, seen) {
+    seen.add(name);
+    let node = tileByName.get(name);
+    if (node) updateTile(node, name);
+    else { node = createTile(name); tileByName.set(name, node); }
+    return node;
+  }
+
+  // A node renders as a column: its own tile, then (if it has reports) a
+  // row of its children's subtrees. Flex centres a column's children over
+  // each other by default, so a manager ends up centred over its own
+  // reports by construction — unlike a flat `.tier` row, which centres on
+  // the whole canvas regardless of whose reports it holds and so cannot
+  // keep a report under the right manager once two managers are on the
+  // same row (see the bug report this replaced: `qa`/`reviewer` both
+  // report to `backend`, but a shared `.tier` row put one of them under
+  // `frontend` instead, and its edge crossed the canvas to reach it).
+  function buildSubtree(node, seen) {
+    const tile = getOrCreateTile(node.name, seen);
+    if (!node.children.length) return el('div', { class: 'subtree' }, tile);
+    return el('div', { class: 'subtree' }, tile,
+      el('div', { class: 'subtree-kids' }, node.children.map((c) => buildSubtree(c, seen))));
+  }
+
   function renderTeamCanvas() {
     if (!TEAM.team) { canvas.replaceChildren(el('div', { class: 'empty', text: 'No team selected.' })); return; }
-    const rows = tierRows(TEAM.team, TEAM.agentsById);
-    if (!rows.length) { canvas.replaceChildren(el('div', { class: 'empty', text: 'This team has no lead.' })); return; }
+    const tree = buildTeamTree(TEAM.team, TEAM.agentsById);
+    if (!tree) { canvas.replaceChildren(el('div', { class: 'empty', text: 'This team has no lead.' })); return; }
 
-    const before = captureRects(tiles);
-    const merged = new Map();
-    rows.forEach((names, i) => {
-      for (const [k, v] of reconcile(tierRowEl(i), names, (n) => n, createTile, updateTile)) merged.set(k, v);
-    });
-    // Tiers that no longer exist keep their row Element (see the comment by
-    // tierRowEls above) but must be emptied first — otherwise their stale
-    // nodes stay in reconcile's WeakMap and reappear underneath the next
-    // render instead of being recreated cleanly.
-    for (let i = rows.length; i < tierRowEls.length; i += 1) {
-      reconcile(tierRowEls[i], [], (n) => n, createTile, updateTile);
+    const before = captureRects(tileByName);
+
+    const seen = new Set();
+    const root = buildSubtree(tree, seen);
+    for (const name of [...tileByName.keys()]) {
+      if (!seen.has(name)) tileByName.delete(name);
     }
-    tiles = merged;
 
-    topologyEl.replaceChildren(edgesSvg, ...tierRowEls.slice(0, rows.length));
+    topologyEl.replaceChildren(edgesSvg, root);
     canvas.replaceChildren(topologyEl);
-    playFlip(before, tiles);
-    requestAnimationFrame(() => drawEdges(TEAM.team, TEAM.agentsById, tiles, topologyEl, edgesSvg));
+
+    // Measure the settled (untransformed) layout BEFORE playFlip starts its
+    // CSS transform — see drawEdges's own comment for why the reverse order
+    // (a rAF scheduled after playFlip, which this replaces) silently froze
+    // every moved tile's edge at its pre-FLIP position.
+    drawEdgesUntilMeasured();
+    playFlip(before, tileByName);
   }
 
   function selectTeamAgent(name) {
@@ -291,5 +355,10 @@ export function render(host) {
   // which calls `panel.render(host)` without awaiting it).
   const off = subscribe((type, d) => onTeamEvent(type, d));
   load(); // fire-and-forget; failures render inline via the catch above
-  return () => { off(); window.removeEventListener('resize', onResize); };
+  return () => {
+    disposed = true;
+    if (pendingFrame) { cancelAnimationFrame(pendingFrame); pendingFrame = 0; }
+    off();
+    window.removeEventListener('resize', onResize);
+  };
 }
