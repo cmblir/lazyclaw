@@ -2603,7 +2603,11 @@ test('a channel-originated task reports attended:false and its read-only mode', 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('security.unattendedExec=true flips attended', async () => {
+// unattendedExec does NOT change whether a human was in the loop — nobody was,
+// either way. It changes what the task was allowed to do. Asserting both fields
+// here is the point: this is the dangerous combination, and the UI keys its
+// error state off exactly this pair.
+test('security.unattendedExec=true leaves the task unattended but makes it powerful', async () => {
   const dir = tmp();
   registerTask({ title: 'from slack', team: 'ship-it', lead: 'orchestrator',
     slackChannel: '#ship-it' }, dir);
@@ -2611,7 +2615,9 @@ test('security.unattendedExec=true flips attended', async () => {
   await registry.tasksList({ ctx: { readConfig: () => ({ security: { unattendedExec: true } }) },
     gwConfigDir: dir, res });
   const [t] = JSON.parse(res.body);
-  assert.equal(t.attended, true);
+  assert.equal(t.attended, false, 'a channel task is unattended whatever the operator opted into');
+  assert.notEqual(t.permissionMode, 'plan',
+    'and opting in is what lifts it off the fail-closed read-only mode');
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -2660,7 +2666,7 @@ function withPosture(task, cfg) {
   const execEnabled = !!(cfg && cfg.security && cfg.security.unattendedExec === true);
   return {
     ...task,
-    attended: !fromChannel || execEnabled,
+    attended: !fromChannel,
     permissionMode: resolvePermissionModeForSurface(cfg, surface),
   };
 }
@@ -2686,15 +2692,54 @@ function originChip(t) {
 }
 ```
 
-Add per row: `originChip(t)`, then `t.attended ? chip(t.permissionMode, 'ok') : chip('read-only · ' + t.permissionMode, 'warn')`, then the status chip, then a `Transcript` button.
+Add per row: `originChip(t)`, then `permissionChip(t)`, then the status chip, then a `Transcript` button.
+
+> **`attended` means "a human was in the loop", nothing more, and the risk is a SEPARATE
+> question.** An earlier revision of this step computed `attended: !fromChannel || execEnabled`
+> and rendered `attended ? ok : warn`. That inverts the indicator, which is worse than having
+> none. Walk the three cases:
+>
+> | case | in the loop? | effective mode | earlier revision showed | reality |
+> |---|---|---|---|---|
+> | started locally (`lazyclaw task start`) | yes | configured | `✓ ok`, no banner | fine |
+> | arrived from a channel, no opt-in | **no** | `plan` (failed closed) | `! warn` + banner | **safe** — the gate worked |
+> | arrived from a channel, `unattendedExec = true` | **no** | e.g. `bypassPermissions` | `✓ ok`, no banner | **the dangerous one** |
+>
+> So it warned about the case where the system had protected the operator, and stayed silent —
+> indistinguishable from a local CLI task — on the case where an untrusted inbound Slack message
+> could run host commands. The dashboard reassured the operator exactly when it should not have.
+>
+> Two honest fields are enough; do not add a third. `attended` is literally `!fromChannel`, and
+> `permissionMode` carries what the task could actually do. Derive the display from both:
+>
+> ```js
+> // Three states, because there are three. Test the EFFECTIVE mode rather than the
+> // opt-in flag: an operator who opted in but configured 'plan' is still read-only,
+> // and should not be warned at as if they were not.
+> const READ_ONLY = 'plan';
+> function permissionChip(t) {
+>   if (t.attended) return chip(t.permissionMode, 'ok');
+>   if (t.permissionMode === READ_ONLY) return chip('unattended · read-only', '');
+>   return chip('unattended · ' + t.permissionMode, 'err');
+> }
+> ```
+>
+> The middle state takes the neutral tone, not `warn` — its glyph is `○` and its words say what
+> happened. Reserve `err` for the row that can actually write files and run commands with nobody
+> watching.
 
 Add a panel-level banner when any task is unattended:
 
 ```js
-rows.some((t) => !t.attended)
-  ? banner('warn', '!', el('b', { text: 'Some tasks arrived from a channel and ran read-only. ' }),
-      'An inbound surface has no human watching it, so it fails closed until ',
-      el('code', { text: 'security.unattendedExec = true' }), '.')
+// The banner fires for the DANGEROUS combination only — unattended AND able to
+// write or execute. A channel task that failed closed to read-only needs no
+// banner: the gate did its job, and warning about it trains the operator to
+// ignore this strip.
+rows.some((t) => !t.attended && t.permissionMode !== 'plan')
+  ? banner('err', '✗', el('b', { text: 'Channel tasks are running with host access. ' }),
+      'An inbound surface has no human watching it, and ',
+      el('code', { text: 'security.unattendedExec = true' }),
+      ' lets these tasks write files and run commands. Unset it to fail closed.')
   : null
 ```
 
@@ -2710,8 +2755,16 @@ async function transcriptModal(t) {
         el('div', { class: 'val mono', text: t.slackChannel
           ? `${t.slackChannel} · thread ${t.slackThreadTs || '—'}`
           : 'lazyclaw task start · no channel' })),
-      t.attended ? null : banner('warn', '!', el('b', { text: 'Ran read-only. ' }),
-        `permission mode "${t.permissionMode}" — an unattended channel task cannot write files or run commands.`),
+      // Same three-state rule as permissionChip: say what happened for the
+      // read-only case, raise an error for the one that had host access.
+      t.attended ? null
+        : t.permissionMode === 'plan'
+          ? banner('', '○', el('b', { text: 'Ran unattended, read-only. ' }),
+              'No human was in the loop, so the surface failed closed to permission mode '
+              + `"${t.permissionMode}" — it could not write files or run commands.`)
+          : banner('err', '✗', el('b', { text: 'Ran unattended with host access. ' }),
+              `No human was in the loop and permission mode "${t.permissionMode}" allowed `
+              + 'writing files and running commands.'),
       status === 200
         ? el('pre', { class: 'raw', text: typeof body === 'string' ? body : JSON.stringify(body, null, 2) })
         : banner('err', '✗', 'Could not load the transcript (HTTP ' + status + ').'),
