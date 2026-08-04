@@ -169,16 +169,22 @@ export async function teamDelete(c) {
 }
 
 // A task that arrived from a channel ran on an unattended surface: no human
-// was watching an inbound message from a possibly-untrusted sender, so the
-// permission mode fails closed unless the operator opted in. Report the
-// EFFECTIVE posture; never echo cfg.security itself.
+// was watching an inbound message from a possibly-untrusted sender. `attended`
+// answers exactly that question — whether a human was in the loop — and does
+// NOT depend on what the operator opted into; `security.unattendedExec` only
+// changes what the task was ALLOWED to do (permissionMode), never whether
+// anyone was watching. Fix round 1: the original cut here was
+// `attended: !fromChannel || execEnabled`, which flipped attended back to
+// true the moment the operator opted in — so the one case that most needs a
+// visible warning (an inbound, untrusted message now allowed to write files
+// and run host commands) looked identical to a local, human-run task. Report
+// the EFFECTIVE posture; never echo cfg.security itself.
 function withPosture(task, cfg) {
   const fromChannel = !!task.slackChannel;
   const surface = fromChannel ? 'unattended' : 'attended';
-  const execEnabled = !!(cfg && cfg.security && cfg.security.unattendedExec === true);
   return {
     ...task,
-    attended: !fromChannel || execEnabled,
+    attended: !fromChannel,
     permissionMode: resolvePermissionModeForSurface(cfg, surface),
   };
 }

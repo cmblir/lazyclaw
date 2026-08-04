@@ -48,7 +48,16 @@ test('a channel-originated task reports attended:false and its read-only mode', 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('security.unattendedExec=true flips attended', async () => {
+// Fix round 1: the original cut of withPosture computed
+// `attended: !fromChannel || execEnabled`, so this test (as first written)
+// asserted `t.attended === true` here — i.e. it claimed a human was watching
+// an inbound Slack message purely because the operator had opted into
+// unattended execution. That is exactly backwards: nobody was in the loop
+// either way. security.unattendedExec changes what the task is ALLOWED to
+// do (permissionMode), never whether a human was present (attended).
+// resolvePermissionModeForSurface already resolves the effective mode for
+// the opt-in case, so this asserts both fields the UI actually keys off.
+test('security.unattendedExec=true changes the effective mode, not attended', async () => {
   const dir = tmp();
   seedTeam(dir);
   registerTask({ title: 'from slack', team: 'ship-it', lead: 'orchestrator',
@@ -57,7 +66,29 @@ test('security.unattendedExec=true flips attended', async () => {
   await registry.tasksList({ ctx: { readConfig: () => ({ security: { unattendedExec: true } }) },
     gwConfigDir: dir, res });
   const [t] = JSON.parse(res.body);
-  assert.equal(t.attended, true);
+  assert.equal(t.attended, false, 'still nobody was watching — opting in does not add a human');
+  assert.equal(t.permissionMode, 'bypassPermissions', 'opting in changes what the task could do');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// The other half of the same regression: an operator who opts into
+// unattendedExec but leaves permissionMode at "plan" is STILL read-only —
+// the effective mode, not the opt-in flag, is what must gate the UI's danger
+// signal (permissionChip / isUnattendedWithExec in
+// web/ui/panels/tasks.mjs).
+test('unattendedExec=true with permissionMode "plan" still resolves to the safe read-only mode', async () => {
+  const dir = tmp();
+  seedTeam(dir);
+  registerTask({ title: 'from slack', team: 'ship-it', lead: 'orchestrator',
+    slackChannel: '#ship-it' }, dir);
+  const res = mockRes();
+  await registry.tasksList({
+    ctx: { readConfig: () => ({ security: { unattendedExec: true }, chat: { permissionMode: 'plan' } }) },
+    gwConfigDir: dir, res,
+  });
+  const [t] = JSON.parse(res.body);
+  assert.equal(t.attended, false);
+  assert.equal(t.permissionMode, 'plan', 'still read-only — opting in did not grant exec here');
   fs.rmSync(dir, { recursive: true, force: true });
 });
 

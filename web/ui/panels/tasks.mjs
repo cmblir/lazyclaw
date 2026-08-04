@@ -28,12 +28,27 @@ function originChip(t) {
     t.slackChannel);
 }
 
-// The permission posture the task actually ran with. A channel task that has
-// NOT been opted into unattended execution ran read-only — that is the safe
-// case, not a warning; a channel task that CAN write/exec is what deserves
-// the operator's attention.
+// The permission posture the task actually ran with, three states:
+//   - attended (a human started it): ok, whatever mode is configured.
+//   - unattended but still read-only (the fail-closed gate held, mode
+//     "plan"): neutral. This is the SAFE outcome, not a warning — flagging
+//     it would train the operator to ignore the strip color entirely.
+//   - unattended AND allowed to write/exec (the operator opted into
+//     security.unattendedExec): err. This is the one case that deserves
+//     attention — an inbound, untrusted message running with host access —
+//     and fix round 1 caught that the code below used to score it "ok".
 function permissionChip(t) {
-  return t.attended ? chip(t.permissionMode, 'ok') : chip('read-only · ' + t.permissionMode, 'warn');
+  if (t.attended) return chip(t.permissionMode, 'ok');
+  if (t.permissionMode === 'plan') return chip('read-only · ' + t.permissionMode, '');
+  return chip('unattended · ' + t.permissionMode, 'err');
+}
+
+// True only for the dangerous combination this feature exists to surface: no
+// human in the loop AND the task was allowed to write files / run host
+// commands anyway. Shared by the panel banner and the transcript modal so
+// both fire on the exact same condition.
+function isUnattendedWithExec(t) {
+  return !t.attended && t.permissionMode !== 'plan';
 }
 
 function turnsText(t) {
@@ -63,8 +78,8 @@ export async function transcriptModal(t) {
       kvlist([['Origin', t.slackChannel
         ? `${t.slackChannel} · thread ${t.slackThreadTs || '—'}`
         : 'lazyclaw task start · no channel', true]]),
-      t.attended ? null : banner('warn', '!', el('b', { text: 'Ran read-only. ' }),
-        `permission mode "${t.permissionMode}" — an unattended channel task cannot write files or run commands.`),
+      isUnattendedWithExec(t) ? banner('err', '✗', el('b', { text: 'Ran unattended with execution enabled. ' }),
+        `permission mode "${t.permissionMode}" — no human was watching this channel task, and it could write files or run host commands.`) : null,
       status === 200
         ? el('pre', { text })
         : banner('err', '✗', 'Could not load the transcript (HTTP ' + status + ').'),
@@ -80,8 +95,11 @@ export async function render(host) {
   host.append(phead('Tasks', 'Tasks are created via lazyclaw task start.'));
 
   // Cleared and re-populated by load(): a banner appears only while at least
-  // one listed task ran unattended (see withPosture in
-  // daemon/routes/registry.mjs), and disappears again once it doesn't.
+  // one listed task ran unattended AND allowed to write/exec (see
+  // isUnattendedWithExec above and withPosture in
+  // daemon/routes/registry.mjs), and disappears again once it doesn't. A
+  // task that ran unattended but stayed read-only is the safe outcome and
+  // does not trigger this.
   const postureBanner = el('div', {});
   host.append(postureBanner);
 
@@ -141,10 +159,10 @@ export async function render(host) {
           'No tasks yet. Run ', el('code', { text: 'lazyclaw task start --team X --title "..."' }), '.'));
         return;
       }
-      if (arr.some((t) => !t.attended)) {
-        postureBanner.append(banner('warn', '!', el('b', { text: 'Some tasks arrived from a channel and ran read-only. ' }),
-          'An inbound surface has no human watching it, so it fails closed until ',
-          el('code', { text: 'security.unattendedExec = true' }), '.'));
+      if (arr.some(isUnattendedWithExec)) {
+        postureBanner.append(banner('err', '✗', el('b', { text: 'A channel task is running unattended with execution enabled. ' }),
+          'An inbound surface has no human watching it — confirm ',
+          el('code', { text: 'security.unattendedExec = true' }), ' is intentional for this task.'));
       }
       if (shown !== tableWrap) show(tableWrap);
       reconcile(tbody, arr.map((t, i) => ({ ...t, i })), (t) => t.id, createRow, updateRow);
