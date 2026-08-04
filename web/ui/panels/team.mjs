@@ -4,11 +4,39 @@
 // (Task 6) rather than owning its own reader. Pure avatar/tree helpers live
 // in ../team_tree.mjs (kept out of this file for the 500-line size gate;
 // Task 8's command palette needs that module too).
-import { el, phead } from '../dom.mjs';
+import { el, phead, clear } from '../dom.mjs';
 import { api } from '../api.mjs';
-import { harnessLabel, avatarGlyph, avatarSrc, buildTeamTree } from '../team_tree.mjs';
+import { harnessLabel, avatarGlyph, avatarSrc, tierRows, managerIn, chainOf } from '../team_tree.mjs';
 import { subscribe } from '../stream.mjs';
 import { reconcile } from '../reconcile.mjs';
+import { captureRects, playFlip } from '../motion.mjs';
+
+// One curve per manager link, measured from the rendered tiles. The same path
+// is reused for the delegation flow, so a hand-off visibly travels the
+// reporting line rather than cutting across the canvas.
+function drawEdges(team, agentsByName, tiles, topoEl, edgesEl) {
+  clear(edgesEl);
+  if (!team) return;
+  const base = topoEl.getBoundingClientRect();
+  if (!base.width) return;                     // panel not visible yet
+  for (const name of team.agents) {
+    const agent = agentsByName[name];
+    const mgr = managerIn(team, agent);
+    if (!mgr) continue;
+    const from = tiles.get(mgr); const to = tiles.get(name);
+    if (!from || !to) continue;
+    const a = from.getBoundingClientRect(); const b = to.getBoundingClientRect();
+    const x1 = a.left - base.left + a.width / 2; const y1 = a.bottom - base.top - 6;
+    const x2 = b.left - base.left + b.width / 2; const y2 = b.top - base.top + 4;
+    const mid = (y1 + y2) / 2;
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('class', 'edge');
+    p.setAttribute('d', `M${x1} ${y1} C${x1} ${mid} ${x2} ${mid} ${x2} ${y2}`);
+    p.dataset.from = mgr;
+    p.dataset.to = name;
+    edgesEl.append(p);
+  }
+}
 
 export function render(host) {
   host.append(phead('Team Live', null));
@@ -33,30 +61,69 @@ export function render(host) {
 
   const TEAM = { team: null, agentsById: {}, status: {}, activity: {}, task: null, selected: null };
 
-  // The lead tile and the children row are reconciled containers (kept for
-  // the panel's lifetime, never recreated) so a tile's Element identity
-  // survives a topology re-render — Task 8 reassigns an agent's manager and
-  // needs each tile's old/new bounding box to FLIP-animate between them,
-  // which only works if the tile itself was not thrown away and rebuilt.
-  const leadRow = el('div', { class: 'team-row' });
-  const childrenRow = el('div', { class: 'team-row' });
-  const childrenWrap = el('div', { class: 'team-children' }, childrenRow);
+  // Tier rows are reconciled containers kept for the panel's lifetime and
+  // never recreated, so a tile's Element identity survives a topology
+  // re-render — a reassignment needs each tile's old/new bounding box to
+  // FLIP-animate between them, which only works if the tile itself was not
+  // thrown away and rebuilt. The array grows on demand as tiers appear; a
+  // row is never spliced out, only emptied and detached from the visible
+  // DOM (see renderTeamCanvas), so a later render needing the same depth
+  // again reuses the same row and its tiles keep their identity too.
+  const tierRowEls = [];
+  function tierRowEl(i) {
+    while (tierRowEls.length <= i) tierRowEls.push(el('div', { class: 'tier' }));
+    return tierRowEls[i];
+  }
+  const edgesSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  edgesSvg.setAttribute('id', 'edges');
+  const topologyEl = el('div', { class: 'topology' }, edgesSvg);
+  let tiles = new Map(); // merged tile map across every tier, keyed by agent name
+
+  function onResize() { drawEdges(TEAM.team, TEAM.agentsById, tiles, topologyEl, edgesSvg); }
+  window.addEventListener('resize', onResize);
 
   function tileStatus(name) { return TEAM.status[name] || 'idle'; }
+
+  // An agent whose `manager` is set but off this team's roster hangs off the
+  // lead (managerIn's fallback) — this badge is the only thing that explains
+  // why, since the tile otherwise looks like any other direct report.
+  function reassignedBadge(rec) {
+    if (!rec.manager || !TEAM.team || TEAM.team.agents.includes(rec.manager)) return null;
+    return el('span', { class: 'reassigned', text: 'mgr outside team',
+      title: `Manager "${rec.manager}" is not on this team, so the tree hangs this agent off the lead.` });
+  }
+
+  // Hover/focus dimming: data-focus on the topology plus data-inchain on
+  // every tile in the hovered agent's chain (managers above, reports below),
+  // read by `.topology[data-focus] .agent:not([data-inchain])` in the CSS.
+  function focusChain(name) {
+    if (!TEAM.team) return;
+    const chain = chainOf(TEAM.team, TEAM.agentsById, name);
+    topologyEl.setAttribute('data-focus', '');
+    for (const [key, node] of tiles) node.toggleAttribute('data-inchain', chain.has(key));
+  }
+
+  function clearFocus() {
+    topologyEl.removeAttribute('data-focus');
+    for (const node of tiles.values()) node.removeAttribute('data-inchain');
+  }
 
   function createTile(name) {
     const rec = TEAM.agentsById[name] || { name };
     const st = tileStatus(name);
     const img = el('img', { src: avatarSrc(rec), alt: '', onerror: (e) => e.target.remove() });
     return el('button', {
-      class: `tagent ${st}`, 'data-agent': name, role: 'treeitem',
+      class: `tagent agent ${st}`, 'data-agent': name, role: 'treeitem',
       'aria-selected': String(TEAM.selected === name), onclick: () => selectTeamAgent(name),
+      onmouseenter: () => focusChain(name), onmouseleave: clearFocus,
+      onfocus: () => focusChain(name), onblur: clearFocus,
     },
       el('div', { class: 'tagent-avatar', 'aria-hidden': 'true' },
         el('span', { class: 'tagent-glyph', text: avatarGlyph(rec) }), img),
       el('div', { class: 'tagent-name', text: rec.displayName || name }),
       el('div', { class: 'tagent-status', text: st === 'working' ? '● working' : '○ idle' }),
-      el('div', { class: 'harness-badge', text: harnessLabel(rec) }));
+      el('div', { class: 'harness-badge', text: harnessLabel(rec) }),
+      reassignedBadge(rec));
   }
 
   // Refreshes exactly what createTile computed from live state, so a
@@ -68,7 +135,7 @@ export function render(host) {
   function updateTile(btn, name) {
     const rec = TEAM.agentsById[name] || { name };
     const st = tileStatus(name);
-    btn.className = `tagent ${st}`;
+    btn.className = `tagent agent ${st}`;
     btn.setAttribute('aria-selected', String(TEAM.selected === name));
     btn.querySelector('.tagent-name').textContent = rec.displayName || name;
     btn.querySelector('.tagent-status').textContent = st === 'working' ? '● working' : '○ idle';
@@ -76,17 +143,35 @@ export function render(host) {
     btn.querySelector('.tagent-glyph').textContent = avatarGlyph(rec);
     const img = btn.querySelector('.tagent-avatar img');
     if (img) img.src = avatarSrc(rec);
+    const oldBadge = btn.querySelector('.reassigned');
+    if (oldBadge) oldBadge.remove();
+    const newBadge = reassignedBadge(rec);
+    if (newBadge) btn.append(newBadge);
   }
 
   function renderTeamCanvas() {
     if (!TEAM.team) { canvas.replaceChildren(el('div', { class: 'empty', text: 'No team selected.' })); return; }
-    const tree = buildTeamTree(TEAM.team, TEAM.agentsById);
-    if (!tree) { canvas.replaceChildren(el('div', { class: 'empty', text: 'This team has no lead.' })); return; }
-    const flat = [];
-    (function walk(n) { for (const c of n.children) { flat.push(c.name); walk(c); } })(tree);
-    reconcile(leadRow, [tree.name], (n) => n, createTile, updateTile);
-    reconcile(childrenRow, flat, (n) => n, createTile, updateTile);
-    canvas.replaceChildren(leadRow, ...(flat.length ? [childrenWrap] : []));
+    const rows = tierRows(TEAM.team, TEAM.agentsById);
+    if (!rows.length) { canvas.replaceChildren(el('div', { class: 'empty', text: 'This team has no lead.' })); return; }
+
+    const before = captureRects(tiles);
+    const merged = new Map();
+    rows.forEach((names, i) => {
+      for (const [k, v] of reconcile(tierRowEl(i), names, (n) => n, createTile, updateTile)) merged.set(k, v);
+    });
+    // Tiers that no longer exist keep their row Element (see the comment by
+    // tierRowEls above) but must be emptied first — otherwise their stale
+    // nodes stay in reconcile's WeakMap and reappear underneath the next
+    // render instead of being recreated cleanly.
+    for (let i = rows.length; i < tierRowEls.length; i += 1) {
+      reconcile(tierRowEls[i], [], (n) => n, createTile, updateTile);
+    }
+    tiles = merged;
+
+    topologyEl.replaceChildren(edgesSvg, ...tierRowEls.slice(0, rows.length));
+    canvas.replaceChildren(topologyEl);
+    playFlip(before, tiles);
+    requestAnimationFrame(() => drawEdges(TEAM.team, TEAM.agentsById, tiles, topologyEl, edgesSvg));
   }
 
   function selectTeamAgent(name) {
@@ -206,5 +291,5 @@ export function render(host) {
   // which calls `panel.render(host)` without awaiting it).
   const off = subscribe((type, d) => onTeamEvent(type, d));
   load(); // fire-and-forget; failures render inline via the catch above
-  return off;
+  return () => { off(); window.removeEventListener('resize', onResize); };
 }

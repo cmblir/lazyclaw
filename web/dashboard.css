@@ -597,6 +597,17 @@
       font-size: 9px; background: #312e81; color: #c7d2fe; border-radius: 5px; padding: 1px 6px;
       max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
+    /* The tile's only explanation for why an off-roster manager hangs an
+       agent off the lead — reads as a badge, not part of the name, so it
+       needs its own rule rather than falling through to plain inline text.
+       --warn (not colour-alone: the word itself already says why) so it
+       still reads as attention at the 104px tile width the panel keeps
+       down to a 375px viewport. */
+    .reassigned {
+      font-size: 9px; color: var(--warn); background: rgba(245,158,11,.08);
+      border: 1px solid rgba(245,158,11,.38); border-radius: 5px; padding: 1px 6px;
+      max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     .team-detail h3 { margin: 0 0 6px; font-size: 15px; }
     .team-detail .kv { margin: 8px 0; }
     .team-detail .kv .label { color: var(--dim); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
