@@ -2778,15 +2778,50 @@ test('GET /devices never returns a bearer token', async () => {
   await views.devicesList({ gwConfigDir: dir, gateway: { sseClients: new Set() }, res });
   assert.equal(res.code, 200);
   const raw = String(res.body);
-  assert.doesNotMatch(raw, /"token"/, 'no token field may appear');
-  assert.equal(raw.includes(store.tokenFor('sha256:aaa')), false, 'and not the value either');
-
+  const token = store.tokenFor('sha256:aaa');
+  // `"token"` with both quotes deliberately does NOT match `"tokenMasked"`, which
+  // PairingStore.devicesList() does return — see the note below the test.
+  assert.doesNotMatch(raw, /"token"/, 'no raw token field may appear');
+  assert.equal(raw.includes(token), false, 'and not the value either');
+  // Pin the mask's WIDTH, not just its presence. Without this, widening the mask
+  // (or replacing it with the raw token minus one character) still passes both
+  // assertions above, and the property this test exists to protect quietly weakens.
   const body = JSON.parse(raw);
+  assert.match(body.devices[0].tokenMasked, /^.{6}….{4}$/,
+    'the mask stays 6 leading + 4 trailing characters');
+  for (let n = 12; n <= token.length; n += 1) {
+    assert.equal(raw.includes(token.slice(0, n)), false,
+      `no run of ${n} leading token characters may appear`);
+  }
+
   assert.equal(body.devices.length, 1);
   assert.equal(body.devices[0].deviceId, 'sha256:aaa');
   assert.equal(body.devices[0].role, 'approver');
   fs.rmSync(dir, { recursive: true, force: true });
 });
+```
+
+> **Two facts about `PairingStore` that this route has to accommodate.** Both were checked
+> against `gateway/device_auth.mjs`; do not design around a guess.
+>
+> **`devicesList()` does not return `role`.** It returns exactly
+> `{ deviceId, platform, label, approvedAt, tokenMasked }`. `role` — along with `scopes` and
+> `expiresAt` — lives only on `deviceInfo(deviceId)`. So `devicesList` the route cannot simply
+> forward `devicesList()` the method: it must merge each entry with `deviceInfo(entry.deviceId)`
+> to satisfy the `role` assertion above. Take only the fields you need from `deviceInfo` rather
+> than spreading it wholesale, so a future field added to the store does not silently start
+> shipping to every dashboard client.
+>
+> **`devicesList()` already returns `tokenMasked`**, computed as the token's first 6 and last 4
+> characters. Use it as-is; do not hand-roll a second mask, and do not strip it — an operator
+> correlating a device with a token they hold is the reason it exists. The global constraint is
+> that the **token** never leaves the process, and a mask is not the token. But note what the
+> obvious test would and would not have caught: `/"token"/` with both quotes does not match
+> `"tokenMasked"`, and `raw.includes(fullToken)` stays false for any mask, so a later change
+> widening the mask to 20 characters would have passed both. That is why the test above pins the
+> mask's width and scans for leading runs.
+
+```js
 
 test('GET /devices reports pending pairing requests', async () => {
   const dir = tmp();
