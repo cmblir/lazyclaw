@@ -21,7 +21,7 @@
 - **Never return a device bearer token** in any JSON response. `devices.json` stores them in plaintext (mode 0600).
 - **No secrets or PII in event payloads.** Emit routing facts, never message bodies.
 - **Motion tokens (level 3, final):** `--dur-fast: 160ms`, `--dur-mid: 260ms`, `--dur-slow: 460ms`, `--stagger: 46ms`, `--lift: 8px`, `--ambient: 1`.
-- **`prefers-reduced-motion` must zero all of them** and set `* { animation: none !important; }`.
+- **`prefers-reduced-motion` must zero all of them** and set `*, ::before, ::after { animation: none !important; }`. The pseudo-element selectors are load-bearing: `*` alone does NOT match `::before`/`::after`, so without them the two always-on animations (the live-rail sweep on `.liverail::before` and the streaming caret on `#stream-text::after`) keep running under reduced motion. Verified against a real Chromium engine via `page.emulateMedia`.
 - **Status is never colour-alone.** Every state indicator carries a glyph and a word.
 - **Comments and docstrings in English.** Commit messages in English (Global CLAUDE.md §2).
 - **No Claude attribution in commits** (Global CLAUDE.md §5.2).
