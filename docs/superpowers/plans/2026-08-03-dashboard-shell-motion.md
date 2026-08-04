@@ -2293,20 +2293,66 @@ a subsequence, so typing a real prefix never loses to a fuzzy match."
 ## Task 10: Extend the event bus and drive the live rail
 
 **Files:**
-- Modify: `workflow/` runner, `daemon/lib/cost.mjs`, `daemon/routes/conversation.mjs`, `providers/registry.mjs`, `cron.mjs`
+- Modify: `workflow/persistent.mjs`, `daemon/lib/cost.mjs`, `daemon/lib/team_inbound.mjs`, `daemon/lib/provider.mjs`, `web/dashboard.html`
 - Create: `web/ui/liverail.mjs`
 - Test: `tests/f-bus-events.test.mjs`
 
 **Interfaces:**
 - Consumes: `emit` from `mas/events.mjs`, `subscribe` from `stream.mjs`
-- Produces: five new event types; `mountLiveRail() -> void`
+- Produces: **four** new event types; `mountLiveRail() -> void`
+
+> **This step's file list and payloads were rewritten after checking the code.** An earlier
+> revision named `workflow/` generically, `daemon/routes/conversation.mjs`,
+> `providers/registry.mjs`, and `cron.mjs`, and asked for five events. Four of those five
+> pointers were wrong and one of the five events is impossible. What the investigation found:
+>
+> - **`cron.fire` is dropped. There is no site.** `cron.mjs` is config CRUD plus launchd/crontab
+>   installers; the generated plist's `ProgramArguments` is an argv for a *brand-new process*.
+>   `runJob` `spawnSync`s yet another subprocess, and its only caller is the
+>   `lazyclaw cron run <name>` CLI — the thing launchd invokes. `workflow/named_cron.mjs`
+>   installs `['lazyclaw','workflow','run',name]` directly. No `setInterval` anywhere checks a
+>   schedule. So a fire is only ever observable inside a short-lived subprocess, and
+>   `mas/events.mjs`'s own header (lines 9-11) states the consequence: in a one-shot CLI process
+>   with no subscriber, events are buffered locally and dropped on exit. They cannot reach the
+>   daemon's bus or the dashboard's SSE stream. Emitting there would be decoration.
+> - **`workflow.step` has no `name`.** `compileWorkflow` (`workflow/declarative.mjs:95-106`)
+>   reduces every node to `{ id, deps, timeoutMs, retry, execute }`; `spec.type` is discarded and
+>   no node type has a `name` field. Use `node.id`, which exists. And the DAG path
+>   (`runPersistentDag`, `runParallel`) runs whole topological *levels* concurrently via
+>   `Promise.all`, so "step 3 of 5" is undefined there — emit a completed *count*, which is
+>   meaningful in both paths. Note also that `workflow/` currently imports `mas/events.mjs`
+>   nowhere, so this is a new cross-layer dependency, not reuse of an existing one.
+> - **`channel.inbound`'s `to` is not in scope where the old plan pointed.**
+>   `routeInboundToTeam` returns only `{ reply, team, taskId }` — never the resolved agent — so
+>   `daemon/routes/conversation.mjs` cannot know `to`. Emit from inside
+>   `daemon/lib/team_inbound.mjs` instead, just after its `if (!agentsById[team.lead]) return null;`
+>   guard, where `channel`, `team.name` and `team.lead` are all live at once.
+> - **`provider.error` is not in `providers/registry.mjs`.** That file's only `useFallback` is
+>   `resolveTrainer`'s `'provider:model'` config parser. The real runtime mechanism is
+>   `withFallback` in `providers/fallback.mjs`, and it is **already wired**:
+>   `daemon/lib/provider.mjs:52-56` passes `onFallback: ({ from, to, err }) => dbg(...)`. Add the
+>   emit beside that existing debug call. Be aware it is opt-in per request — the chain is only
+>   built when `body.fallback` is a non-empty array.
+> - **`ctx.costCap`, not `cfg.costCap`.** It is a per-currency map (`{ USD: 1.5, EUR: 0.8 }`)
+>   built in `commands/daemon.mjs:278-285` from repeated `--cost-cap-<currency>` flags. The
+>   running total is per-currency too: `metrics.costsByCurrency[cur]`. Inside
+>   `daemon/lib/cost.mjs`, the one place both are already in scope is
+>   `makeTeamUsageAccountant`'s returned closure (lines 62-69), which covers team-routed traffic.
+> - **Nothing in `web/` queries the live rail.** `web/dashboard.html:40` is
+>   `<div class="liverail">` with **no id**, and its id-bearing children `#ticker`,
+>   `#rs-running`, `#rs-cost` are never queried either — the whole widget is static markup
+>   today. Add `id="liverail"` to that div to match its children, and wire all four.
 
 - [ ] **Step 1: Write the failing test**
 
 ```js
-// tests/f-bus-events.test.mjs — the five events the live rail needs beyond the
+// tests/f-bus-events.test.mjs — the four events the live rail needs beyond the
 // MAS team path. Payloads carry routing facts only: a channel message body or
 // a provider key in here would leak into every subscribed dashboard.
+//
+// `emit` spreads the payload into the stamped event ({seq, ts, type, ...payload},
+// mas/events.mjs:24), which is why the forbidden-key scan below can read payload
+// fields straight off `Object.keys(e)`.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { emit, subscribe, recent, _reset } from '../mas/events.mjs';
@@ -2315,18 +2361,20 @@ test('the new event types stamp seq and ts like the existing ones', () => {
   _reset();
   const seen = [];
   const off = subscribe((e) => seen.push(e));
-  emit('workflow.step', { id: 'wf_x', step: 3, total: 5, name: 'summarise' });
+  // `done`/`total`, not `step`/`total`: the DAG runner completes a whole
+  // topological level at once, so a single "current step index" does not exist
+  // there. `node` is the node id — compileWorkflow keeps no name field.
+  emit('workflow.step', { id: 'sess_x', done: 3, total: 5, node: 'summarise' });
   emit('cost.tick', { total: 0.83, cap: 5, currency: 'USD' });
   emit('channel.inbound', { channel: '#ship-it', to: 'orchestrator', team: 'ship-it' });
   emit('provider.error', { provider: 'ollama', detail: 'unreachable' });
-  emit('cron.fire', { name: 'rate-refresh', next: '12:00' });
   off();
-  assert.equal(seen.length, 5);
+  assert.equal(seen.length, 4);
   for (const e of seen) {
     assert.ok(Number.isInteger(e.seq) && e.seq > 0);
     assert.ok(Number.isFinite(e.ts));
   }
-  assert.equal(recent().length, 5);
+  assert.equal(recent().length, 4);
 });
 
 test('no new payload carries a secret-shaped field', () => {
@@ -2350,19 +2398,23 @@ test('no new payload carries a secret-shaped field', () => {
 Run: `node --test tests/f-bus-events.test.mjs`
 Expected: The first test PASSES already (`emit` is generic), the second PASSES too. **This test is a guard, not a driver** — it locks the payload shape so a later edit cannot widen it. Note that in the commit message; do not fabricate a failure.
 
-- [ ] **Step 3: Add the five `emit` calls**
+- [ ] **Step 3: Add the four `emit` calls**
 
-Each is one line at the point the fact becomes true. Import as `import { emit as emitEvent } from '<relative>/mas/events.mjs';` to match the existing call sites.
+Each is one line at the point the fact becomes true. Import as `import { emit as emitEvent } from '<relative>/mas/events.mjs';` to match the existing call sites. Every line and field below was checked against the code; do not relocate them.
 
-| File | Where | Call |
+| File | Where exactly | Call |
 |---|---|---|
-| `workflow/` step runner | after a step completes | `emitEvent('workflow.step', { id, step, total, name })` |
-| `daemon/lib/cost.mjs` | after the running total updates | `emitEvent('cost.tick', { total, cap, currency })` |
-| `daemon/routes/conversation.mjs` `inbound` | after the channel→team routing decision | `emitEvent('channel.inbound', { channel, to, team })` |
-| `providers/registry.mjs` | in the fallback path | `emitEvent('provider.error', { provider, detail })` |
-| `cron.mjs` | when a job fires | `emitEvent('cron.fire', { name, next })` |
+| `workflow/persistent.mjs:236-238` | in `runPersistentInner`'s per-node loop, right after `state.nodes[node.id] = { status: 'success', … }` / `saveState(…)` / `executedNodes.push(node.id)` | `emitEvent('workflow.step', { id: opts.sessionId, done: executedNodes.length, total: nodes.length, node: node.id })` |
+| `daemon/lib/cost.mjs:62-69` | in `makeTeamUsageAccountant`'s returned closure, after `accumulateMetricsFromCost(metrics, usage, cost)` and beside the existing `checkCostCap(metrics, costCap)` | `emitEvent('cost.tick', { total: metrics.costsByCurrency?.[cur], cap: costCap?.[cur] ?? null, currency: cur })` |
+| `daemon/lib/team_inbound.mjs`, just after `if (!agentsById[team.lead]) return null;` | the routing decision, where `channel`, `team.name` and `team.lead` are all live | `emitEvent('channel.inbound', { channel, to: team.lead, team: team.name })` |
+| `daemon/lib/provider.mjs:52-56` | inside the **existing** `onFallback: ({ from, to, err }) => …` callback, beside the `dbg('provider.fallback', …)` already there | `emitEvent('provider.error', { provider: from, detail: err?.code || err?.message || 'failed' })` |
 
-**Pass no message text, no tokens, no config values.** `detail` is a short human string already safe to log.
+Two things to get right rather than approximate:
+
+- **`cost.tick` is per-currency.** `costCap` is a map, and `metrics.costsByCurrency` is a map. Emit for the currency this turn's cost actually used; do not sum across currencies, and do not emit a `cap` of `0` when none is configured — `null` means "no cap", which the rail must render differently from a cap of zero.
+- **`makeTeamUsageAccountant` only covers team-routed traffic** (wired at `daemon/routes/conversation.mjs:203-205`). The plain `/chat` and `/agent` paths call `accountTurnCost` through wrappers that do **not** receive the cap, so `cost.tick` will not fire for them. That is a real coverage limit, not an oversight — say so in the commit body rather than reaching into `conversation.mjs` to widen it. Widening is a separate decision.
+
+**Pass no message text, no tokens, no config values.** `detail` is a short human string already safe to log — prefer `err.code` over `err.message`, and never the whole error object.
 
 - [ ] **Step 4: Write `web/ui/liverail.mjs`**
 
@@ -2385,11 +2437,12 @@ function describe(type, d) {
     case 'agent.status': return [{ b: d.agent }, { t: ' → ' + d.status }];
     case 'task.start': return [{ t: 'task started: ' }, { b: d.title || d.taskId }];
     case 'task.done': return [{ b: d.taskId }, { t: ' ' + (d.status || 'done') }];
-    case 'workflow.step': return [{ b: d.id }, { t: ` step ${d.step} of ${d.total} · ${d.name}` }];
+    case 'workflow.step': return [{ b: d.node }, { t: ` ${d.done} of ${d.total} done` }];
     case 'cost.tick': return [{ t: 'spend today ' }, { b: '$' + Number(d.total).toFixed(2) }];
     case 'channel.inbound': return [{ b: d.channel }, { t: ' routed to ' }, { b: d.to }];
     case 'provider.error': return [{ b: d.provider }, { t: ' ' + d.detail }];
-    case 'cron.fire': return [{ b: d.name }, { t: ' fired' }];
+    // No `cron.fire` case — a fire happens in a subprocess launchd spawns, so the
+    // daemon's bus never sees one. See this task's file-list note.
     case 'exec.approval.requested': return [{ b: d.agentId }, { t: ' wants ' }, { b: d.tool }, { t: ' · awaiting a human' }];
     default: return [{ t: type }];
   }
@@ -2439,7 +2492,7 @@ Expected: PASS
 
 - [ ] **Step 7: Verify end to end**
 
-Start the daemon, run a workflow and let a cron job fire, and watch the rail show `workflow.step` and `cron.fire` without opening those panels.
+Start the daemon and run a workflow, and watch the rail show `workflow.step` without opening the Workflows panel. Then exercise the other three: a Slack-routed inbound message for `channel.inbound`, a team-routed turn with a `--cost-cap-USD` set on the daemon for `cost.tick`, and a request whose `body.fallback` names an unreachable provider first for `provider.error`. Confirm the rail also stays quiet — and the ambient sweep stops — under `prefers-reduced-motion`.
 
 - [ ] **Step 8: Commit**
 
