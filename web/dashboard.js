@@ -18,6 +18,8 @@ import * as trainer from '/ui/panels/trainer.mjs';
 import * as skills from '/ui/panels/skills.mjs';
 import * as recall from '/ui/panels/recall.mjs';
 import * as sandbox from '/ui/panels/sandbox.mjs';
+import * as approvals from '/ui/panels/approvals.mjs';
+import * as gateway from '/ui/panels/gateway.mjs';
 
 const panels = {};
 for (const { id, label } of ALL) {
@@ -25,7 +27,7 @@ for (const { id, label } of ALL) {
 }
 Object.assign(panels, {
   chat, tasks, sessions, agents, teams, team, workflows, scheduling, trainer,
-  skills, recall, sandbox,
+  skills, recall, sandbox, approvals, gateway,
 });
 
 mount({ panels });
