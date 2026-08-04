@@ -326,6 +326,24 @@
                   color: var(--text); padding: 14px 16px; font: inherit; font-size: 14px; }
     #palette #q:focus-visible { outline: none; }
     #results { list-style: none; margin: 0; padding: 6px; overflow-y: auto; flex: 1; }
+    /* Each result row's entrance reuses row-in (defined further down with
+       the other level-3 motion techniques) rather than a second keyframe. */
+    #results li {
+      animation: row-in var(--dur-mid) var(--ease-out) both;
+      animation-delay: calc(var(--i) * var(--stagger));
+    }
+    #results li button {
+      display: flex; align-items: center; gap: 10px; width: 100%;
+      background: none; border: 0; border-radius: 6px; padding: 8px 10px;
+      color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+    }
+    #results li[data-sel] button, #results li button:hover { background: rgba(217, 179, 90, 0.1); }
+    #results .kind {
+      flex: 0 0 auto; padding: 1px 7px; border-radius: 999px; font-size: 10px;
+      text-transform: uppercase; letter-spacing: .06em; color: var(--faint); border: 1px solid var(--border);
+    }
+    #results .path { margin-left: auto; padding-left: 10px; color: var(--dim); font-size: 11.5px; white-space: nowrap; }
+    .pal-empty { padding: 14px 16px; color: var(--dim); font-style: italic; text-align: center; }
     .pal-foot { display: flex; gap: 14px; padding: 8px 16px; border-top: 1px solid var(--border); color: var(--dim); font-size: 11px; }
     .modal { background: var(--card); border: 1px solid var(--border); border-radius: 10px; max-width: min(720px, 96vw); width: 100%; max-height: 86vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
     .modal-head { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }

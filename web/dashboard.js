@@ -1,10 +1,7 @@
 // web/dashboard.js — the dashboard entry. Everything real lives in /ui.
-//
-// palette.mjs (Task 9) doesn't exist yet — its import and mountPalette()
-// call are omitted rather than stubbed, per this task's brief: a stub file
-// left behind is worse than an import added later.
 import { mount } from '/ui/shell.mjs';
 import { connect } from '/ui/stream.mjs';
+import { mountPalette } from '/ui/palette.mjs';
 
 import * as chat from '/ui/panels/chat.mjs';
 import * as tasks from '/ui/panels/tasks.mjs';
@@ -33,4 +30,22 @@ mount({ panels: {
   skills, recall, sandbox, approvals, gateway, providers, rates, metrics,
   doctor, config, status, channels,
 } });
+
+// Team- and agent-specific entries (task-9-brief.md Step 5's `cachedTeams` /
+// `cachedAgents` maps) are not wired in here: they would need a boot-time
+// `GET /teams` + `GET /agents` cache plus exported selectTeam/selectAgent
+// hooks from panels/team.mjs — and a way to hand a "select this one" argument
+// through shell.mjs's `panel.render(host)` contract, which takes no such
+// argument today. None of Tasks 1-8 built that, so wiring it here would be
+// inventing cross-module API on the spot rather than following one that
+// exists; flagged in task-9-report.md instead. The four static actions below
+// need none of that — they just point at panel ids `open()` already handles.
+mountPalette({
+  extraItems: () => [
+    { label: 'Start a task', kind: 'run', hint: 'tasks', go: 'tasks' },
+    { label: 'New team', kind: 'run', hint: 'teams', go: 'teams' },
+    { label: 'Review pending approvals', kind: 'run', hint: 'gateway', go: 'approvals' },
+    { label: 'Rebuild search index', kind: 'run', hint: 'doctor', go: 'doctor' },
+  ],
+});
 connect();

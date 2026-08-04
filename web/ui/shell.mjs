@@ -76,14 +76,29 @@ export function mount(opts) {
   burger.addEventListener('click', () => (rail.hasAttribute('data-open') ? closeDrawer() : openDrawer()));
   railScrim.addEventListener('click', closeDrawer);
   // The drawer is a modal overlay on mobile — Escape is the expected way out.
-  // The modal (a higher stacking layer, see modal.mjs) has its own Escape
-  // listener; when it's open, Escape must close only the modal, so skip the
-  // drawer here rather than closing both layers on one keypress.
+  // The modal (a higher stacking layer, see modal.mjs) and the command
+  // palette (palette.mjs, Task 9 — also a higher stacking layer, stacked
+  // above the drawer but below the modal) each own their own Escape
+  // listener; when either is open, Escape must close only that layer, so
+  // skip the drawer here rather than closing both layers on one keypress.
+  //
+  // Registered with `capture: true` so this runs before modal.mjs's own
+  // (bubble-phase) Escape handler can mutate #modal-scrim. All three
+  // listeners sit on `window`, and bubble-phase listeners on the same
+  // target fire in registration order — initModal() below registers
+  // modal.mjs's handler AFTER this one, so on a keypress that closes the
+  // modal, a bubble-phase version of this check would run second, read
+  // #modal-scrim as already-closed, and wrongly fall through to close the
+  // drawer too. Capture runs before any bubble listener anywhere, so the
+  // read here is always the pre-keypress state. palette.mjs's own Escape
+  // guard needs the same fix for the same reason (it checks #modal-scrim
+  // too, and is registered later still, from dashboard.js).
   window.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (document.getElementById('modal-scrim').hasAttribute('data-open')) return;
+    if (document.getElementById('scrim').hasAttribute('data-open')) return;
     if (rail.hasAttribute('data-open')) closeDrawer();
-  });
+  }, true);
   window.addEventListener('hashchange', onHash);
   window.addEventListener('resize', () => moveMarker(navButtons.get(currentId)));
 
