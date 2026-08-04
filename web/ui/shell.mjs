@@ -9,6 +9,7 @@
 import { el, clear } from './dom.mjs';
 import { GROUPS, ALL } from './nav_model.mjs';
 import { initModal } from './modal.mjs';
+import { watchVisibility } from './motion.mjs';
 
 export { GROUPS, ALL };
 
@@ -69,6 +70,10 @@ export function mount(opts) {
   // the modal's dismissal (× button / backdrop click / Escape) — modal.mjs
   // itself only holds open/close state and dismissal logic, not the wiring.
   initModal();
+  // Ambient motion (the live rail sweep) pauses when the tab is hidden or
+  // reduced motion is on, so a dashboard left open all day isn't animating
+  // in the background for nothing.
+  watchVisibility();
 
   onHash(true);
 }
