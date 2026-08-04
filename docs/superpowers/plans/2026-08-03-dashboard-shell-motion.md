@@ -1945,7 +1945,41 @@ Expected: PASS (7 tests)
 
 - [ ] **Step 5: Render tiers, edges, and focus in `web/ui/panels/team.mjs`**
 
-Replace the flattening `renderTeamCanvas` with tier rows from `tierRows`, then draw one SVG cubic per manager link from the rendered tile rects:
+Replace the flattening `renderTeamCanvas` with a **recursive subtree layout**, then draw one SVG cubic per manager link from the rendered tile rects.
+
+> **Not tier rows.** An earlier revision of this step said to lay the tree out as one flex row
+> per depth, ordered by walking the previous row so "siblings sit under their own manager".
+> The ordering is right and the positioning is not: each row is independently
+> `justify-content: center`, so a row of two centres on the whole canvas regardless of which
+> manager those two belong to. Observed on a real team — `orchestrator` over
+> [`backend`, `frontend`] over [`qa`, `reviewer`], where both `qa` and `reviewer` report to
+> `backend`: `qa` landed under `backend` and `reviewer` under `frontend`, so `reviewer`'s edge
+> travelled the full width of the canvas and crossed the other one. A centred flex row cannot
+> place a child block under its parent.
+>
+> Render each node as a column instead — the tile, then a row of its children's subtrees:
+>
+> ```
+> .subtree        (flex column, align-items: center)
+>   <tile>
+>   .subtree-kids (flex row, justify-content: center, gap)
+>     .subtree …  (one per child, recursively)
+> ```
+>
+> A parent is then centred over its own children by the layout itself, edges are short, and
+> they cannot cross. `buildTeamTree(team, byId)` already returns exactly the
+> `{ name, children[] }` shape this needs — and it is currently dead code, because flattening
+> is what replaced it. Use it.
+>
+> **Tile identity still has to survive a re-render** (that is what Task 7 exists for, and what
+> the FLIP in this step measures). Do not reach for `reconcile` per subtree container: keep one
+> panel-lifetime `Map<agentName, Element>` of tiles, get-or-create per name on each render, and
+> drop the entry when an agent leaves the roster. The tree scaffolding around them is a handful
+> of nodes and can be rebuilt freely; only the tiles must persist. This also removes a defect
+> the tier version had — a tile whose depth changed between two renders was destroyed and
+> recreated, because its `reconcile` host was a different tier row.
+>
+> `tierRows` may end up with no callers. Report that; do not delete it.
 
 ```js
 // One curve per manager link, measured from the rendered tiles. The same path
@@ -1975,7 +2009,22 @@ function drawEdges(team, agentsByName, tiles, topoEl, edgesEl) {
 }
 ```
 
-Call it inside `requestAnimationFrame` **after** the panel is visible, and again on `resize`. Add the hover/focus chain dimming by setting `data-focus` on the topology and `data-inchain` on the tiles in `chainOf`.
+Call it **after the layout has settled and before `playFlip` runs**, and again on `resize`. Add the hover/focus chain dimming by setting `data-focus` on the topology and `data-inchain` on the tiles in `chainOf`.
+
+> **Do not measure inside a `requestAnimationFrame` queued after `playFlip`.** An earlier
+> revision of this step said to, and it is wrong: `getBoundingClientRect()` reports the
+> *transformed* border box, and the animation timeline is advanced before animation-frame
+> callbacks run, so the rect read in that rAF is the tile's **pre-move** position. Proven in
+> a real Chromium engine — a tile whose final `left` is 200px, animating in from a
+> `translate(-120px, 0)` FLIP, measures 80px inside that rAF and 200px once the animation
+> finishes. Every moved tile's edge would be drawn to where the tile used to be and never
+> redrawn. `playFlip`'s transform is purely visual and lands on `transform: none`, so
+> measuring the settled layout first gives the correct end-state geometry.
+>
+> A `requestAnimationFrame` retry is still the right tool for the *other* problem it was
+> covering — a panel that renders into a host with no layout yet, where `drawEdges` bails on
+> zero width. Keep that retry, but gate it on "we have not measured successfully yet", not
+> on "we just rendered".
 
 An agent whose `manager` is set but off-roster gets a badge explaining why it sits under the lead:
 
