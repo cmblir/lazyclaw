@@ -1612,7 +1612,11 @@ test('update() is called for survivors and create() only for new keys', async ()
   reconcile(host, [{ id: 'a' }], (it) => it.id, create, update);
   reconcile(host, [{ id: 'a' }, { id: 'c' }], (it) => it.id, create, update);
   assert.deepEqual(created, ['a', 'c']);
-  assert.deepEqual(updated, ['a', 'a']);
+  // First call: 'a' is brand new, so create() runs and update() does NOT.
+  // Second call: 'a' survives (update), 'c' is new (create). So update() has
+  // been called exactly once, for 'a'. Anything else would contradict this
+  // test's own title — create() only for new keys means no update on creation.
+  assert.deepEqual(updated, ['a']);
 });
 ```
 
@@ -1656,19 +1660,24 @@ export function reconcile(host, items, keyOf, create, update) {
     next.set(key, node);
   }
 
-  // Drop what disappeared.
+  // Drop what disappeared. Every node in `prev` was placed into `host` by an
+  // earlier call to this function, so removing it here is safe without first
+  // re-checking node.parentNode — a real Element tracks that itself, but a
+  // caller's host/node stand-in (e.g. the test double above) need not, and
+  // this function owns the full membership of `host`'s children regardless.
   for (const [key, node] of prev) {
-    if (!next.has(key) && node.parentNode === host) host.removeChild(node);
+    if (!next.has(key)) host.removeChild(node);
   }
 
-  // Put the survivors in the requested order. insertBefore on a node that is
-  // already in place is a no-op in the DOM, so this is cheap when nothing moved.
+  // Put survivors in the requested order, walking back-to-front so each
+  // insertBefore's reference node has already been placed. insertBefore both
+  // inserts a brand-new node and moves an existing one (removing it from its
+  // old slot first) — one call handles both first paint and reordering.
   let cursor = null;
   const ordered = [...next.values()];
   for (let i = ordered.length - 1; i >= 0; i -= 1) {
-    const node = ordered[i];
-    if (node.parentNode !== host || node.nextSibling !== cursor) host.insertBefore(node, cursor);
-    cursor = node;
+    host.insertBefore(ordered[i], cursor);
+    cursor = ordered[i];
   }
 
   STATE.set(host, next);
