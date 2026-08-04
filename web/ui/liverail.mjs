@@ -37,14 +37,34 @@ function nodes(parts) {
 export function mountLiveRail() {
   const ticker = document.getElementById('ticker');
   subscribe((type, d) => {
+    // Backstop: the ticker must hold at most the outgoing tick plus the
+    // incoming one. Every branch below only ever reaches ONE prior node —
+    // `ticker.lastElementChild` — so if an earlier node's exit animation
+    // never completes (hidden tab, some future CSS rename of tick-out's
+    // animation-name, anything), nothing here retries it: the very next
+    // event promotes a NEWER node to `lastElementChild` and the stale one is
+    // never looked at again by this closure. Without an unconditional prune,
+    // a dashboard left open in a background tab — the normal way this
+    // project expects to be used, not an edge case; see Task 5's
+    // watchVisibility() deliberately treating a hidden document as the
+    // ambient-off state — leaks one permanently-orphaned, absolutely
+    // positioned div per event, forever. This loop makes the bound
+    // structural instead of dependent on an animation event firing.
+    while (ticker.childElementCount > 1) ticker.firstElementChild.remove();
+
     // The outgoing tick must finish before the incoming one starts: both are
     // absolutely positioned in a 40px band and overlapping text is unreadable.
     const prev = ticker.lastElementChild;
     if (prev) {
       prev.classList.remove('enter');
       prev.classList.add('exit');
-      prev.addEventListener('animationend', () => prev.remove(), { once: true });
-      if (reduced()) prev.remove();     // animationend never fires when animations are off
+      // A hidden document — the background-tab case above — suspends or
+      // indefinitely delays Chromium's animation event dispatch even though
+      // the animation's own timeline still reports 'finished', so waiting
+      // for animationend here would strand `prev` until the backstop's next
+      // cycle. Remove it synchronously, same as reduced-motion.
+      if (reduced() || document.visibilityState === 'hidden') prev.remove();
+      else prev.addEventListener('animationend', () => prev.remove(), { once: true });
     }
     ticker.append(el('div', { class: 'tick enter' },
       el('span', { class: 'type', text: type }),
