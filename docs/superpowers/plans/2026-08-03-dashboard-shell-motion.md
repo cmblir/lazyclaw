@@ -1731,8 +1731,11 @@ is why this does not justify a rendering library."
 ## Task 8: Team Live — render the hierarchy that already exists
 
 **Files:**
-- Create: `web/ui/team_tree.mjs`
-- Modify: `web/ui/panels/team.mjs`, `web/dashboard.css`
+- Modify: `web/ui/team_tree.mjs` — the file already exists (Task 4 moved `harnessLabel`,
+  `avatarGlyph`, `avatarIndexFor`, `avatarSrc`, and `buildTeamTree` into it). Add the six
+  new pure functions alongside those; do not create a second module.
+- Modify: `web/ui/panels/team.mjs`
+- `web/dashboard.css` — Step 6's rules already landed in Task 5. Verify, do not re-add.
 - Test: `tests/f-team-tree.test.mjs`
 
 **Interfaces:**
@@ -1794,12 +1797,22 @@ test('tiers group by depth and order children under their own manager', () => {
 });
 
 test('a manager cycle terminates instead of hanging', () => {
-  const cyc = { a: { name: 'a', manager: 'b' }, b: { name: 'b', manager: 'a' }, lead: null };
-  const team = { name: 'c', lead: 'a', agents: ['a', 'b'] };
+  // The cycle must not involve the lead: managerIn() returns null for the lead
+  // before it ever looks at `manager`, so a two-agent team whose lead is inside
+  // the cycle has the cycle broken for it and exercises nothing. Keep the lead
+  // out of it, and a->b->a is genuinely unreachable from the root — which is
+  // what the orphan row at the end of tierRows() exists to catch.
+  const cyc = {
+    lead: { name: 'lead', manager: null },
+    a: { name: 'a', manager: 'b' },
+    b: { name: 'b', manager: 'a' },
+  };
+  const team = { name: 'c', lead: 'lead', agents: ['lead', 'a', 'b'] };
   const rows = tierRows(team, cyc);
-  assert.ok(rows.flat().includes('a') && rows.flat().includes('b'),
-    'every member appears exactly once even with a cycle');
-  assert.equal(rows.flat().length, 2);
+  assert.deepEqual(rows[0], ['lead'], 'the root still renders');
+  assert.deepEqual(rows.flat().slice(1).sort(), ['a', 'b'],
+    'the unreachable pair lands in the orphan row');
+  assert.equal(rows.flat().length, 3, 'every member appears exactly once');
 });
 
 test('reportsOf and chainOf walk the in-team line', () => {
