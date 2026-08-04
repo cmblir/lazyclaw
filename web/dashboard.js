@@ -1,10 +1,10 @@
 // web/dashboard.js — the dashboard entry. Everything real lives in /ui.
 //
-// palette.mjs (Task 9) and stream.mjs (Task 6) don't exist yet — their
-// imports and mountPalette()/connect() calls are omitted rather than stubbed,
-// per this task's brief: a stub file left behind is worse than an import
-// added later.
+// palette.mjs (Task 9) doesn't exist yet — its import and mountPalette()
+// call are omitted rather than stubbed, per this task's brief: a stub file
+// left behind is worse than an import added later.
 import { mount } from '/ui/shell.mjs';
+import { connect } from '/ui/stream.mjs';
 
 import * as chat from '/ui/panels/chat.mjs';
 import * as tasks from '/ui/panels/tasks.mjs';
@@ -33,3 +33,4 @@ mount({ panels: {
   skills, recall, sandbox, approvals, gateway, providers, rates, metrics,
   doctor, config, status, channels,
 } });
+connect();

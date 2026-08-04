@@ -1,23 +1,25 @@
 // web/ui/panels/team.mjs — real-time view of an agent team: avatar tiles with
 // status rings + harness badges, click-to-drill-down, and live A→B
-// delegation pulses, driven by GET /events (SSE, read via api.mjs's fetch
-// wrapper rather than EventSource so the bearer token still rides the
-// Authorization header — EventSource cannot set headers). Pure avatar/tree
-// helpers live in ../team_tree.mjs (kept out of this file for the 500-line
-// size gate; Task 8's command palette needs that module too).
+// delegation pulses, driven by the app-level SSE subscription in stream.mjs
+// (Task 6) rather than owning its own reader. Pure avatar/tree helpers live
+// in ../team_tree.mjs (kept out of this file for the 500-line size gate;
+// Task 8's command palette needs that module too).
 import { el, phead } from '../dom.mjs';
-import { api, apiRaw } from '../api.mjs';
+import { api } from '../api.mjs';
 import { harnessLabel, avatarGlyph, avatarSrc, buildTeamTree } from '../team_tree.mjs';
+import { subscribe } from '../stream.mjs';
 
-export async function render(host) {
+export function render(host) {
   host.append(phead('Team Live', null));
 
   const sel = el('select', { 'aria-label': 'Select a team to watch' });
-  const conn = el('span', { class: 'dim', role: 'status', 'aria-live': 'polite', text: '○ connecting…' });
+  // Connection status used to be tracked per-panel (this was the only panel
+  // with a live reader); now stream.mjs owns one shared connection and shows
+  // its state in the topbar (#daemon-state), so there is no local status to
+  // render here.
   host.append(el('div', { class: 'toolbar' },
     el('label', { class: 'dim', text: 'Team' }), sel,
-    el('button', { class: 'btn btn-secondary', type: 'button', text: 'Refresh', onclick: () => load() }),
-    conn));
+    el('button', { class: 'btn btn-secondary', type: 'button', text: 'Refresh', onclick: () => load() })));
 
   const canvas = el('div', { class: 'team-canvas', role: 'tree', 'aria-label': 'Agent team' },
     el('div', { class: 'empty', text: 'Loading…' }));
@@ -28,8 +30,7 @@ export async function render(host) {
   const feed = el('ul', { class: 'team-feed', 'aria-live': 'polite' });
   host.append(el('div', { class: 'team-feed-wrap' }, el('div', { class: 'label', text: 'Live activity' }), feed));
 
-  const TEAM = { team: null, agentsById: {}, status: {}, activity: {}, task: null, selected: null, streaming: false };
-  let streamAbort = null;
+  const TEAM = { team: null, agentsById: {}, status: {}, activity: {}, task: null, selected: null };
 
   function renderAgentTile(name) {
     const rec = TEAM.agentsById[name] || { name };
@@ -149,38 +150,6 @@ export async function render(host) {
     }
   }
 
-  async function startTeamStream() {
-    if (TEAM.streaming) return;
-    TEAM.streaming = true;
-    streamAbort = new AbortController();
-    try {
-      const r = await apiRaw('/events', { signal: streamAbort.signal });
-      if (!r.ok || !r.body) { conn.textContent = '○ events unavailable'; TEAM.streaming = false; return; }
-      conn.textContent = '● live';
-      const reader = r.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        let i;
-        while ((i = buf.indexOf('\n\n')) >= 0) {
-          const frame = buf.slice(0, i); buf = buf.slice(i + 2);
-          let ev = 'message', data = '';
-          for (const line of frame.split('\n')) {
-            if (line.startsWith('event:')) ev = line.slice(6).trim();
-            else if (line.startsWith('data:')) data += line.slice(5).trim();
-          }
-          if (data) { try { onTeamEvent(ev, JSON.parse(data)); } catch { /* skip bad frame */ } }
-        }
-      }
-    } catch (_) {
-      conn.textContent = '○ disconnected';
-    }
-    TEAM.streaming = false;
-  }
-
   async function load() {
     try {
       const [teams, agents] = await Promise.all([api('/teams'), api('/agents')]);
@@ -196,13 +165,18 @@ export async function render(host) {
       TEAM.agentsById = byId;
       renderTeamCanvas();
       renderTeamDetail();
-      startTeamStream(); // idempotent — one persistent SSE reader
     } catch (e) {
       canvas.replaceChildren(el('div', { class: 'empty', text: 'Error: ' + e.message }));
     }
   }
   sel.addEventListener('change', () => load());
 
-  await load();
-  return () => { if (streamAbort) streamAbort.abort(); };
+  // Join the shared app-level SSE subscription (stream.mjs, Task 6) instead
+  // of owning a reader. `render` must stay synchronous so this unsubscribe
+  // is the value the shell captures as its cleanup — an await here would
+  // hand the shell a pending Promise instead (see shell.mjs's `activate`,
+  // which calls `panel.render(host)` without awaiting it).
+  const off = subscribe((type, d) => onTeamEvent(type, d));
+  load(); // fire-and-forget; failures render inline via the catch above
+  return off;
 }
