@@ -18,8 +18,15 @@
          a colour distinct from --ok for "in progress" vs "succeeded". */
       --live: #34d399;
 
-      /* Motion knobs (level 3). Every animated rule reads these, so a change
-         is one block instead of a cascade hunt. */
+      /* Motion knobs (level 3). Every state-transition rule (nav marker,
+         list/table stagger, panel enter, hover/focus transitions) reads
+         these, so a change to those is one block instead of a cascade
+         hunt. The ambient loop (drift 14s) and the indicator loops (caret
+         1.05s, shimmer 2.1s, halo 2.6s) are infinite, always-on animations,
+         not state transitions — a duration token would be the wrong knob
+         for them, so they carry literal durations and are covered instead
+         by the reduced-motion kill switch below (and --ambient, for drift
+         specifically). */
       --dur-fast: 160ms;
       --dur-mid:  260ms;
       --dur-slow: 460ms;
