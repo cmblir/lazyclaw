@@ -32,7 +32,6 @@ export function makeParser(onEvent) {
 }
 
 const subs = new Set();
-let state = 'connecting';
 let running = false;
 
 export function subscribe(fn) {
@@ -46,8 +45,10 @@ function fanOut(type, data) {
   }
 }
 
+// Reflects the socket's state in the topbar. There is no module-level mirror of
+// it: connectionState() was the only reader and went with the dead-code sweep,
+// so keeping a variable nothing reads would just be a second source of truth.
 function setState(next) {
-  state = next;
   const node = document.getElementById('daemon-state');
   if (node) node.textContent = next === 'live' ? 'live' : next === 'retrying' ? 'reconnecting…' : 'connecting…';
 }

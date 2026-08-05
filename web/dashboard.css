@@ -386,7 +386,6 @@
 
     .toolbar .grow { flex: 1; min-width: 140px; }
 
-    .stack { display: flex; flex-direction: column; gap: 8px; }
 
     .chip {
       display: inline-flex; align-items: center; gap: 5px; font: 500 10.5px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
@@ -437,7 +436,6 @@
     @keyframes panel-in { from { opacity: 0; transform: translateY(calc(3px + var(--lift))) scale(.995); } }
 
     @keyframes row-in { from { opacity: 0; transform: translateY(calc(4px + var(--lift))); } }
-    .stack > * { animation: row-in var(--dur-mid) var(--ease-out) both; animation-delay: calc(var(--i) * var(--stagger)); }
     table.tbl tbody tr { animation: row-in var(--dur-mid) var(--ease-out) both; animation-delay: calc(var(--i) * var(--stagger)); }
 
     /* Ambient drift behind the live rail — the signature, and by design the
