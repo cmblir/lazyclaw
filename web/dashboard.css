@@ -494,8 +494,10 @@
 
     /* Team topology: reporting-line edges plus per-agent focus/halo states.
        Consumed by web/ui/panels/team.mjs, which renders the `.topology` div
-       and its `#edges` SVG directly — these selectors are pinned by
-       tests/f-dashboard-motion.test.mjs too, so treat them as live. */
+       and its `#edges` SVG directly — so all of this is live, not scaffolding.
+       Of these, only `#edges` and `#edges path.edge` are additionally pinned by
+       tests/f-dashboard-motion.test.mjs; `.topology` is not, so deleting it
+       would break the layout silently rather than fail a test. */
     .topology { position: relative; padding: 16px 0 4px; }
     /* width/height are required: `inset: 0` alone leaves an <svg> at its
        intrinsic 300x150, which clips every edge away. */
