@@ -167,7 +167,16 @@ lazyclaw dashboard          # local web UI on http://127.0.0.1:19600 (override w
 
 From chat, `/dashboard [--port N]` (or `/dashboard stop`) does the same.
 
-A framework-free SPA over the daemon's JSON API: Chat, Sessions, Workflows, Skills, Providers, Rates, Metrics, Doctor, Config, Status, Agents, Teams, Tasks, **Team Live**, Trainer, Recall, Sandbox, Channels — 18 tabs, dark amber theme. The **Team Live** tab is a real-time org view: avatar tiles with status rings + harness badges (`provider · model`), live agent-A→B delegation, and click-to-drill-down (harness, current task, recent activity), streamed over Server-Sent Events (`GET /events`).
+> [!IMPORTANT]
+> Open it with `lazyclaw dashboard`, not a bare `lazyclaw daemon`. Only `cmdDashboard` sets the loopback-origin allowance the browser needs; Chromium sends an `Origin` header even on the module-script fetch for `dashboard.js` itself, so under a bare daemon that very request 403s and the page never boots — it just sits on "connecting…".
+
+A framework-free, zero-build SPA (`web/` ships as source — native ES modules, no bundler, no `dist/`) over the daemon's JSON API: a grouped sidebar over 21 panels — Work, Agents, Automate, Knowledge, Gateway, System — a **⌘K** / **Ctrl+K** command palette, and a "Live" activity strip under the topbar, all fed by one Server-Sent Events connection (`GET /events`). Motion — the palette, the live rail, reordering rows — respects `prefers-reduced-motion`.
+
+- **Team Live** now draws the real reporting hierarchy: each manager's reports sit under them, joined by edges, instead of a lead plus one flat row. Avatar tiles carry status rings + harness badges (`provider · model`); click one to drill into its harness, current task, and recent activity.
+- **Tasks** shows where a task came from — a Slack channel + thread, or `lazyclaw task start` from the CLI — and the permission mode it actually ran under (attended, unattended-but-read-only, or the unattended-with-execution case worth flagging), plus a transcript viewer; a `task:` hit in Recall links straight to the same transcript.
+- **Approvals** and **Devices** are new panels, both **read-only**: resolving an approval needs a paired device's Ed25519 token, which the dashboard isn't — approve from a paired device or with `lazyclaw nodes`. The Approvals sidebar badge itself only refreshes when you open the Approvals panel; those events don't yet reach the dashboard's SSE stream, so the badge doesn't move while you're on another panel.
+- The live rail picks up four new event types: `workflow.step`, `cost.tick`, `channel.inbound`, `provider.error`. `cost.tick` only fires for team-routed traffic — the plain `/chat` and `/agent` paths never feed the configured cap to the cost accountant. There's no `cron.fire`: a scheduled job runs in whatever subprocess launchd/cron spawns, with no link back to the daemon's event bus, so a fire isn't observable here at all.
+- **⌘K** jumps to any panel plus four fixed actions (start a task, new team, review approvals, rebuild the search index) — it doesn't resolve a team or agent by name.
 
 ## Providers
 

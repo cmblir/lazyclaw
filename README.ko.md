@@ -99,8 +99,14 @@ chat에서 `/orchestrator` (빈 입력 = on/off picker) 또는 `/orchestrator on
 ## 대시보드
 
 ```bash
-lazyclaw dashboard          # http://127.0.0.1:19600 로컬 웹 UI (17 탭, 다크 앰버)
+lazyclaw dashboard          # http://127.0.0.1:19600 로컬 웹 UI (그룹 사이드바 21패널, ⌘K 팔레트)
 ```
+
+> ⚠️ **`lazyclaw dashboard`로 열 것 — 맨 `lazyclaw daemon`은 화면이 안 뜬다.** 루프백 Origin 허용은 `cmdDashboard`에만 있음. 브라우저는 `dashboard.js` 자체를 가져올 때도 `Origin` 헤더를 보내므로, 맨 데몬에서는 그 요청부터 403 — 화면이 "connecting…"에서 멈춘다.
+
+그룹 사이드바(Work·Agents·Automate·Knowledge·Gateway·System, 21 패널) + `⌘K`/`Ctrl+K` 커맨드 팔레트 + 상단바 아래 실시간 이벤트 스트립, 전부 SSE 하나(`GET /events`)로 수신. 모션(팔레트·라이브 스트립·행 재정렬)은 `prefers-reduced-motion` 존중.
+
+**Team Live**는 이제 실제 보고 체계를 그린다 — 매니저 아래 그 리포트들이 엣지로 연결(예전엔 리드 + 평평한 한 줄). **Tasks**는 출처(Slack 채널+스레드, 또는 CLI `lazyclaw task start`)와 실제로 실행된 permission mode, 트랜스크립트 뷰어를 보여준다. **Approvals**·**Devices**는 신규 패널, 둘 다 **읽기 전용** — 승인 처리는 페어링된 기기의 Ed25519 토큰이 필요한데 대시보드는 그 기기가 아니므로, 페어링된 기기나 `lazyclaw nodes`로 승인. Approvals 사이드바 배지는 Approvals 패널을 열 때만 갱신 — 그 이벤트가 아직 대시보드 SSE 스트림까지 오지 않아 다른 패널에 있는 동안은 실시간으로 안 움직인다. 라이브 스트립에 이벤트 4종 추가: `workflow.step`, `cost.tick`, `channel.inbound`, `provider.error`. `cost.tick`은 team 경유 트래픽에만 발생(`/chat`·`/agent` 경로는 설정된 cap을 cost accountant에 전달하지 않음). `cron.fire`는 없음 — 스케줄 작업은 launchd/cron이 띄우는 별도 서브프로세스에서 실행돼 데몬 이벤트 버스와 연결이 없다. `⌘K`는 패널 + 고정 액션 4개(작업 시작·새 팀·승인 검토·색인 재구축)까지만 — 팀/에이전트 이름으로는 아직 못 찾는다.
 
 ## 설정 / 보안
 
