@@ -1,7 +1,7 @@
 // Daemon route handlers (providers), extracted verbatim from makeHandler (D5).
 // Each handler takes the per-request dispatch context `c` and returns the
 // HTTP response. Bodies are unchanged; only the dispatch wrapper is new.
-import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, checkCostCap, accumulateMetricsFromCost, resolveProvider } from './_deps.mjs';
+import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, resolveModelsForProvider, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, checkCostCap, accumulateMetricsFromCost, resolveProvider } from './_deps.mjs';
 import { _resolveAuthKey } from '../../lib/config.mjs';
 
 export async function providersList(c) {
@@ -11,13 +11,20 @@ export async function providersList(c) {
           // / `docs` to render the right pills + tooltips; CLI callers only
           // need `name` / `requiresApiKey` / `suggestedModels` and ignore
           // the extras (additive change, no migration).
+          // suggestedModels/modelsSource resolve through the live model-list
+          // cache (never blocks — see daemon/lib/model_cache.mjs): a fresh
+          // live fetch ('live'), else the generated file or the hand-written
+          // registry list ('builtin'), so the dashboard can tell a fetched
+          // list from a frozen one.
           let out = Object.keys(PROVIDERS).map(name => {
             const meta = PROVIDER_INFO[name] || { name };
+            const { models: suggestedModels, source: modelsSource } = resolveModelsForProvider(name, { cache: c.modelCache });
             return {
               name,
               requiresApiKey: !!meta.requiresApiKey,
               defaultModel: meta.defaultModel || null,
-              suggestedModels: meta.suggestedModels || [],
+              suggestedModels,
+              modelsSource,
               endpoint: meta.endpoint || null,
               docs: meta.docs || null,
               custom: !!meta.custom,

@@ -30,6 +30,10 @@ import * as mcpSpawn from './mcp/server_spawn.mjs';
 import { readTextBody, writeJson, statusForProviderError } from './daemon/lib/respond.mjs';
 import { isAuthorized, isOriginAllowed } from './daemon/lib/auth.mjs';
 import { ROUTES } from './daemon/route_table.mjs';
+// Live model-list cache (feat/live-model-lists) — GET /providers reads this
+// synchronously and never fetches on the request path; see
+// daemon/lib/model_cache.mjs for the TTL/refresh-interval rationale.
+import { createModelListCache, startModelRefreshLoop } from './daemon/lib/model_cache.mjs';
 
 // Re-exported so existing importers (cli.mjs, tests) keep their path.
 export { statusForProviderError };
@@ -48,6 +52,7 @@ export { statusForProviderError };
  *   responseCache?: { maxEntries?: number, ttlMs?: number } | true | null,
  *   logger?: ReturnType<typeof createLogger> | null,
  *   costCap?: Record<string, number> | null,
+ *   modelRefresh?: { ttlMs?: number, intervalMs?: number, initialDelayMs?: number, fetchImpl?: typeof fetch } | true | null,
  * }} ctx
  *
  * `writeConfig` is optional; when omitted the mutation endpoints (POST
@@ -184,8 +189,29 @@ export function makeHandler(ctx) {
   })();
   // Stop MCP servers on graceful shutdown (unregisters their tools too).
   const _stopMcp = () => { mcpSpawn.stopAll().catch(() => { /* best-effort */ }); };
-  process.on('SIGTERM', () => { _nudgeLoop.stop(); _stopMcp(); });
-  process.on('SIGINT', () => { _nudgeLoop.stop(); _stopMcp(); });
+  // Live model-list cache: GET /providers always reads `modelCache`
+  // synchronously (never blocks on a provider's network) and falls back to
+  // the generated/static list when it's empty. The cache itself is always
+  // created (cheap — an empty Map costs nothing), but the background loop
+  // that actually calls the network is opt-in via ctx.modelRefresh, same as
+  // rateLimit/responseCache/costCap above: cmdDashboard/cmdDaemon turn it on;
+  // a bare makeHandler() (every existing unit test) gets none, so tests never
+  // see a surprise network call from a timer they didn't ask for. Both its
+  // timers are unref()'d regardless (see daemon/lib/model_cache.mjs), so even
+  // when enabled it never keeps `lazyclaw --version` or a test process alive.
+  const modelCache = createModelListCache(
+    ctx.modelRefresh && typeof ctx.modelRefresh === 'object' ? { ttlMs: ctx.modelRefresh.ttlMs } : undefined,
+  );
+  const _modelRefreshLoop = ctx.modelRefresh
+    ? startModelRefreshLoop({
+        cache: modelCache,
+        readConfig: ctx.readConfig,
+        logger,
+        ...(typeof ctx.modelRefresh === 'object' ? ctx.modelRefresh : {}),
+      })
+    : { stop() { /* never started */ } };
+  process.on('SIGTERM', () => { _nudgeLoop.stop(); _modelRefreshLoop.stop(); _stopMcp(); });
+  process.on('SIGINT', () => { _nudgeLoop.stop(); _modelRefreshLoop.stop(); _stopMcp(); });
   return async function handler(req, res) {
     // Capture method+path before any handler logic runs; req.url survives
     // the response but capturing now keeps the log line stable even if a
@@ -295,7 +321,7 @@ export function makeHandler(ctx) {
       // its original closure variables intact.
       const c = {
         ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir,
-        nudgeSuggestionsRing, workflowStateDir,
+        nudgeSuggestionsRing, workflowStateDir, modelCache,
         req, res, method, path, route, url,
         sessionMatch, providerMatch, providerTestMatch, sessionExportMatch,
         skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch,
