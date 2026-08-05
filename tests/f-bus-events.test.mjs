@@ -51,28 +51,18 @@ test('no new payload carries a secret-shaped field', () => {
 // from `body.slice(0, 200)` and sets no `code` for the intended branch to find.
 // These events reach every connected dashboard over SSE, so the VALUES need a
 // bound of their own.
-test('no payload value is long enough or shaped like a captured response body', () => {
-  _reset();
-  const seen = [];
-  const off = subscribe((e) => seen.push(e));
-  emit('workflow.step', { id: 'sess_x', done: 3, total: 5, node: 'summarise' });
-  emit('cost.tick', { total: 0.83, cap: 5, currency: 'USD' });
-  emit('channel.inbound', { channel: '#ship-it', to: 'orchestrator', team: 'ship-it' });
-  emit('provider.error', { provider: 'anthropic', detail: '429' });
-  off();
-  assert.equal(seen.length, 4);
-  for (const e of seen) {
-    for (const [k, v] of Object.entries(e)) {
-      if (typeof v !== 'string') continue;
-      // Every field these four events carry is a routing fact: an id, a node
-      // name, a channel, an agent, a currency, a status. None of them is prose.
-      assert.ok(v.length <= 64,
-        `${e.type}.${k} is ${v.length} chars — routing facts are short, bodies are not`);
-      assert.doesNotMatch(v, /[{}]/,
-        `${e.type}.${k} contains a brace, so a serialised object got in`);
-    }
-  }
-});
+//
+// There is deliberately no generic value-length scan across all four event
+// types here. `workflow.step`, `cost.tick` and `channel.inbound` each build
+// their payload inline at their emit call site (workflow/persistent.mjs,
+// daemon/lib/cost.mjs, daemon/lib/team_inbound.mjs) with no derivation logic
+// to extract into a pure function — a scan could only ever run over literals
+// this test authored itself, which is a tautology: it would pass unchanged
+// against the shipped 343-character `provider.error` leak it was meant to
+// catch. `provider.error` is different because `_detailForFallback` below IS
+// an extracted, production-called function, so the test after this comment
+// exercises real behaviour instead of its own fixtures. An acknowledged gap
+// here is more honest than a guard that cannot fail.
 
 // The emit site itself, not just the payload shape. This is the assertion that
 // would have failed on the shipped code: an ApiError carrying a 200-character
