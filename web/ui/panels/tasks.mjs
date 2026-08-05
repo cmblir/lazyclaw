@@ -78,8 +78,17 @@ export async function transcriptModal(t) {
       kvlist([['Origin', t.slackChannel
         ? `${t.slackChannel} · thread ${t.slackThreadTs || '—'}`
         : 'lazyclaw task start · no channel', true]]),
-      isUnattendedWithExec(t) ? banner('err', '✗', el('b', { text: 'Ran unattended with execution enabled. ' }),
-        `permission mode "${t.permissionMode}" — no human was watching this channel task, and it could write files or run host commands.`) : null,
+      // Three states here too, matching permissionChip. The modal is where an
+      // operator inspects one task, so the safe unattended case is worth stating
+      // rather than leaving blank — silence reads as "nothing to know", and
+      // "ran with no human watching, and could not write anything" is something
+      // to know. Only the execution-enabled case escalates to err.
+      isUnattendedWithExec(t)
+        ? banner('err', '✗', el('b', { text: 'Ran unattended with execution enabled. ' }),
+            `permission mode "${t.permissionMode}" — no human was watching this channel task, and it could write files or run host commands.`)
+        : t.attended ? null
+          : banner('', '○', el('b', { text: 'Ran unattended, read-only. ' }),
+              `No human was watching this channel task, so the surface failed closed to permission mode "${t.permissionMode}" — it could not write files or run commands.`),
       status === 200
         ? el('pre', { text })
         : banner('err', '✗', 'Could not load the transcript (HTTP ' + status + ').'),
