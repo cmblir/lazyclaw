@@ -36,6 +36,20 @@ import {
   parsePayload,
 } from './device_auth.mjs';
 import { redactSecrets } from '../mas/redact.mjs';
+// The daemon's in-process event bus, which the dashboard's SSE route subscribes
+// to. createGateway is constructed by daemon.mjs, so this reaches that bus; in a
+// one-shot process with no subscriber emit() is a harmless no-op that buffers and
+// drops (see mas/events.mjs's header).
+import { emit as emitEvent } from '../mas/events.mjs';
+
+// Gateway events the dashboard is allowed to see.
+//
+// broadcast() fans out to device-authenticated SSE clients; the daemon's bus
+// feeds every open dashboard. Those are different audiences, so the crossing is
+// an explicit allowlist rather than a blanket mirror — a future gateway event has
+// to opt in deliberately instead of landing on every dashboard by default. It
+// also keeps the `tick` heartbeat, which is pure keep-alive noise, off the bus.
+const DASHBOARD_MIRRORED = new Set(['exec.approval.requested', 'exec.approval.resolved']);
 
 // Matches the daemon's readTextBody cap (1 MiB) so the Content-Length
 // pre-check and the stream reader agree on the limit.
@@ -314,6 +328,12 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
   // Fan an event out to every live SSE subscriber. Best-effort: a dead
   // socket is dropped, never throws into the caller.
   function broadcast(eventName, data) {
+    if (DASHBOARD_MIRRORED.has(eventName)) {
+      // The same payload GET /approvals already serves the dashboard, so this
+      // exposes nothing new — it only lets the sidebar badge move while the user
+      // is on another panel. emit() never throws into its caller by design.
+      emitEvent(eventName, data ?? {});
+    }
     const frame = `event: ${eventName}\ndata: ${JSON.stringify(data ?? {})}\n\n`;
     for (const entry of sseClients) {
       try { entry.res.write(frame); } catch { sseClients.delete(entry); }
