@@ -18,7 +18,6 @@ const DEVICE_COLS = [
   { key: 'platform', label: 'Platform' },
   { key: 'label', label: 'Label' },
   { key: 'role', label: 'Role' },
-  { key: 'tokenMasked', label: 'Token', class: 'mono' },
   { key: 'status', label: 'Status' },
   { key: 'approvedAt', label: 'Approved' },
 ];
@@ -35,7 +34,11 @@ function requestRow(r) {
 }
 
 // A device's paired/expired state is never colour-alone — the chip always
-// carries the word too.
+// carries the word too. Deliberately no tokenMasked column here: deviceId is
+// already the canonical identifier, so a masked token would add exposure
+// without adding a way to tell devices apart. The field stays in the route's
+// JSON response (see daemon/routes/gateway_views.mjs) — the brief's own test
+// pins its width — it just is not rendered.
 function deviceRow(d) {
   const expired = typeof d.expiresAt === 'number' && Date.now() >= d.expiresAt;
   return {
@@ -43,7 +46,6 @@ function deviceRow(d) {
     platform: d.platform || '—',
     label: d.label || '—',
     role: d.role || '—',
-    tokenMasked: d.tokenMasked || '—',
     status: expired ? chip('expired', 'err') : chip('paired', 'ok'),
     approvedAt: String(d.approvedAt || '').slice(0, 19),
   };
