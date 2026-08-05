@@ -1,7 +1,7 @@
 // web/ui/panels/workflows.mjs — workflow run sessions: filterable list with
 // aggregate stats, a per-session detail modal (node table), and delete.
 import { el, phead, table } from '../dom.mjs';
-import { api, apiRaw } from '../api.mjs';
+import { api } from '../api.mjs';
 import { openModal } from '../modal.mjs';
 import { reconcile } from '../reconcile.mjs';
 
@@ -171,7 +171,10 @@ export function render(host) {
   async function deleteWorkflow(id) {
     if (!confirm(`Delete workflow session "${id}"?\nState file will be permanently removed.`)) return;
     try {
-      await apiRaw('/workflows/' + encodeURIComponent(id), { method: 'DELETE' });
+      // api() throws on a non-ok status, carrying the server's own error text.
+      // apiRaw did not, so a refused delete — including the 400 the route now
+      // returns for a sessionId that escapes the state dir — looked like success.
+      await api('/workflows/' + encodeURIComponent(id), { method: 'DELETE' });
       load();
     } catch (e) {
       alert('Delete failed: ' + e.message);
