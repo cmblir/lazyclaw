@@ -1,21 +1,13 @@
 // web/ui/motion.mjs — the imperative half of the motion system. CSS owns
-// anything expressible as a transition or keyframe; this module owns the
-// three things it cannot do: restarting an animation on a reused node,
-// FLIP across a re-render, and tweening a number.
+// anything expressible as a transition or keyframe; this module owns what
+// CSS cannot: FLIP across a re-render, and toggling the ambient token when
+// the tab is hidden.
 //
-// Every entry point no-ops under prefers-reduced-motion so callers do not
-// each have to remember to check.
+// Every entry point that plays an animation no-ops under prefers-reduced-motion
+// so callers do not each have to remember to check.
 
 const RM = matchMedia('(prefers-reduced-motion: reduce)');
 export function reduced() { return RM.matches; }
-
-// Re-running a CSS animation on a node that was NOT replaced needs the
-// animation cancelled and replayed; toggling a class in one task does not
-// restart it because no style recalc happens in between.
-export function restartEnter(node) {
-  if (reduced()) return;
-  node.getAnimations().forEach((a) => { a.cancel(); a.play(); });
-}
 
 export function captureRects(nodesByKey) {
   const out = new Map();
@@ -40,22 +32,6 @@ export function playFlip(before, nodesByKey) {
       { duration: 420, easing: 'cubic-bezier(.16,1,.3,1)' },
     );
   }
-}
-
-// Count a value up instead of snapping. One rAF chain per call; the easing
-// matches the TUI's ctx-gauge tween so the two surfaces feel the same.
-export function tweenNumber(node, to, { dp = 0, prefix = '', suffix = '', ms = 620 } = {}) {
-  const fmt = (v) => prefix + v.toFixed(dp) + suffix;
-  if (reduced()) { node.textContent = fmt(to); return; }
-  let t0 = null;
-  const step = (ts) => {
-    if (t0 === null) t0 = ts;
-    const p = Math.min(1, (ts - t0) / ms);
-    node.textContent = fmt(to * (1 - Math.pow(1 - p, 3)));
-    if (p < 1) requestAnimationFrame(step);
-  };
-  node.textContent = fmt(0);
-  requestAnimationFrame(step);
 }
 
 // Ambient motion is the only always-on animation. Stop it when the tab is

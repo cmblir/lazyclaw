@@ -35,8 +35,6 @@ const subs = new Set();
 let state = 'connecting';
 let running = false;
 
-export function connectionState() { return state; }
-
 export function subscribe(fn) {
   subs.add(fn);
   return () => subs.delete(fn);

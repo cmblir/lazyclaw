@@ -22,10 +22,10 @@
          list/table stagger, panel enter, hover/focus transitions) reads
          these, so a change to those is one block instead of a cascade
          hunt. The ambient loop (drift 14s) and the indicator loops (caret
-         1.05s, shimmer 2.1s, halo 2.6s) are infinite, always-on animations,
-         not state transitions — a duration token would be the wrong knob
-         for them, so they carry literal durations and are covered instead
-         by the reduced-motion kill switch below (and --ambient, for drift
+         1.05s, shimmer 2.1s) are infinite, always-on animations, not state
+         transitions — a duration token would be the wrong knob for them,
+         so they carry literal durations and are covered instead by the
+         reduced-motion kill switch below (and --ambient, for drift
          specifically). */
       --dur-fast: 160ms;
       --dur-mid:  260ms;
@@ -371,7 +371,7 @@
     .markdown pre { font-size: 12px; }
 
     /* ── Component CSS ported from the reviewed shell/motion prototype ──
-       dom.mjs's shared helpers (chip/phead/table/rowList/kvlist/banner)
+       dom.mjs's shared helpers (chip/phead/table/kvlist/banner)
        emit these classes from every panel that uses them; a class with no
        rule here renders unstyled without ever throwing, so it's a silent
        defect rather than a loud one. Values are taken from the prototype;
@@ -387,15 +387,6 @@
     .toolbar .grow { flex: 1; min-width: 140px; }
 
     .stack { display: flex; flex-direction: column; gap: 8px; }
-    .srow {
-      display: flex; align-items: center; gap: 11px; background: var(--card);
-      border: 1px solid var(--border); border-radius: 9px; padding: 10px 13px;
-      transition: border-color var(--dur-fast) var(--ease);
-    }
-    .srow:hover { border-color: var(--faint); }
-    .srow .who { font-weight: 600; font-size: 13px; }
-    .srow .what { color: var(--dim); font: 11.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .srow .acts { margin-left: auto; display: flex; align-items: center; gap: 6px; flex: none; }
 
     .chip {
       display: inline-flex; align-items: center; gap: 5px; font: 500 10.5px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
@@ -507,14 +498,13 @@
     #edges path.edge { fill: none; stroke: var(--faint); stroke-width: 1.5; transition: stroke var(--dur-mid) var(--ease); }
     #edges path.edge[data-hot] { stroke: var(--dim); stroke-width: 2; }
     #edges path.flow { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
-    .tier { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; position: relative; }
-    .tier + .tier { margin-top: 30px; }
     /* Recursive subtree layout: a node is a column (its tile, then a row of
        its children's own subtrees). Flex centres a column's children over
        each other by construction, so a manager sits centred over its own
        reports regardless of how many peers of that manager exist — a flat
-       `.tier` row (above) cannot do this, since a row centres on the whole
-       canvas rather than on the parent whose reports it holds. */
+       `.tier` row (the old flattened layout) cannot do this, since a row
+       centres on the whole canvas rather than on the parent whose reports
+       it holds. */
     .subtree { display: flex; flex-direction: column; align-items: center; }
     .subtree-kids { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 30px; }
 
@@ -528,24 +518,6 @@
     .agent:hover { background: rgba(217,179,90,.07); }
     .agent[aria-selected="true"] { background: rgba(217,179,90,.12); }
     .topology[data-focus] .agent:not([data-inchain]) { opacity: .3; }
-    .agent.dragging { opacity: .4; cursor: grabbing; }
-    .agent.dropok { background: rgba(52,211,153,.14); outline: 2px dashed var(--live); outline-offset: -2px; }
-    .agent.dropbad { outline: 2px dashed var(--err); outline-offset: -2px; }
-    .agent .face {
-      width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center;
-      font: 600 14px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #1e2130; border: 3px solid var(--faint); color: var(--dim);
-      transition: border-color var(--dur-mid) var(--ease), box-shadow var(--dur-mid) var(--ease), color var(--dur-mid) var(--ease);
-    }
-    .agent[data-state="working"] .face {
-      border-color: var(--live); color: var(--live); box-shadow: 0 0 0 4px rgba(52,211,153,.16);
-      animation: halo 2.6s var(--ease) infinite;
-    }
-    @keyframes halo { 0%,100% { box-shadow: 0 0 0 4px rgba(52,211,153,.16); } 50% { box-shadow: 0 0 0 8px rgba(52,211,153,.06); } }
-    .agent.pinged .face { animation: ping var(--dur-slow) var(--ease-out); }
-    @keyframes ping { from { box-shadow: 0 0 0 0 rgba(217,179,90,.6); } to { box-shadow: 0 0 0 15px rgba(217,179,90,0); } }
-    .agent .nm { font-size: 12px; font-weight: 600; }
-    .agent .st { font: 9.5px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--faint); }
-    .agent[data-state="working"] .st { color: var(--live); }
 
     /* a11y: a visible keyboard focus ring on every interactive control.
        The styled buttons/inputs otherwise relied on the UA default ring,
@@ -577,13 +549,6 @@
       flex: 1 1 280px; min-width: 0;
       background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px;
       font-size: 13px;
-    }
-    /* tree: a lead row on top, a wrapping children row below, with connectors */
-    .team-row { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; }
-    .team-children { position: relative; padding-top: 18px; }
-    .team-children::before {
-      content: ''; position: absolute; top: 0; left: 50%; width: 1px; height: 18px;
-      background: var(--border); transform: translateX(-50%);
     }
     .tagent {
       display: flex; flex-direction: column; align-items: center; gap: 6px;

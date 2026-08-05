@@ -4,7 +4,7 @@
 // flattened every descendant into one row. These cases pin the real rule.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { managerIn, tierRows, reportsOf, chainOf, isDescendant, canReassign }
+import { managerIn, reportsOf, chainOf, isDescendant, canReassign }
   from '../web/ui/team_tree.mjs';
 
 const AGENTS = {
@@ -35,33 +35,6 @@ test('an agent with no manager at all still hangs off the lead', () => {
   assert.equal(managerIn(team, AGENTS.orchestrator), 'analyst');
 });
 
-test('tiers group by depth and order children under their own manager', () => {
-  assert.deepEqual(tierRows(SHIP, AGENTS), [
-    ['orchestrator'],
-    ['backend', 'frontend'],
-    ['qa', 'reviewer'],
-  ]);
-});
-
-test('a manager cycle terminates instead of hanging', () => {
-  // The cycle must not involve the lead: managerIn() returns null for the lead
-  // before it ever looks at `manager`, so a two-agent team whose lead is inside
-  // the cycle has the cycle broken for it and exercises nothing. Keep the lead
-  // out of it, and a->b->a is genuinely unreachable from the root — which is
-  // what the orphan row at the end of tierRows() exists to catch.
-  const cyc = {
-    lead: { name: 'lead', manager: null },
-    a: { name: 'a', manager: 'b' },
-    b: { name: 'b', manager: 'a' },
-  };
-  const team = { name: 'c', lead: 'lead', agents: ['lead', 'a', 'b'] };
-  const rows = tierRows(team, cyc);
-  assert.deepEqual(rows[0], ['lead'], 'the root still renders');
-  assert.deepEqual(rows.flat().slice(1).sort(), ['a', 'b'],
-    'the unreachable pair lands in the orphan row');
-  assert.equal(rows.flat().length, 3, 'every member appears exactly once');
-});
-
 test('reportsOf and chainOf walk the in-team line', () => {
   assert.deepEqual(reportsOf(SHIP, AGENTS, 'backend').sort(), ['qa', 'reviewer']);
   assert.deepEqual([...chainOf(SHIP, AGENTS, 'reviewer')].sort(),
@@ -86,7 +59,7 @@ test("the dedicated lead-guard is not redundant with the cycle check", () => {
   //
   // To actually exercise the guard we need a newManager the cycle check
   // does NOT catch: one sitting in a manager cycle disconnected from the
-  // lead, exactly like the tierRows orphan-row fixture above. `a` is
+  // lead — a two-agent a->b->a loop that never touches the lead. `a` is
   // unreachable from `lead` (isDescendant walks a->b->a and terminates via
   // its own seen-set before ever reaching `lead`), so without the guard
   // `canReassign(team, cyc, 'lead', 'a')` would fall through to

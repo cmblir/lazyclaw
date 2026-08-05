@@ -63,8 +63,9 @@ export function avatarSrc(rec) {
 // The reporting line, as a pure function: `manager` is a property of the
 // AGENT, the lead is the only root, and any other member whose manager is
 // missing or not on this team's roster hangs off the lead. buildTeamTree
-// used to inline this rule; it is the single definition now so a topology
-// render and this legacy tree shape can't quietly disagree.
+// used to inline this rule; it is the single definition now so buildTeamTree
+// and the line-walkers below (reportsOf/chainOf/isDescendant) can't quietly
+// disagree on who reports to whom.
 /** The in-team manager, or null when this agent IS the root (the lead). */
 export function managerIn(team, agent) {
   if (!agent || agent.name === team.lead) return null;
@@ -90,39 +91,6 @@ export function buildTeamTree(team, byId) {
     return { name, children: (kids[name] || []).sort().map((c) => build(c, next)).filter(Boolean) };
   };
   return build(lead, new Set());
-}
-
-/**
- * Rows by depth. Each row is ordered by walking the previous row, so siblings
- * sit under their own manager and the drawn edges stop crossing. A `manager`
- * cycle cannot hang this: anyone unreached lands in a final row.
- */
-export function tierRows(team, agentsByName) {
-  const members = team.agents.map((n) => agentsByName[n]).filter(Boolean);
-  const childrenOf = new Map();
-  const roots = [];
-  for (const m of members) {
-    const mgr = managerIn(team, m);
-    if (!mgr) { roots.push(m.name); continue; }
-    if (!childrenOf.has(mgr)) childrenOf.set(mgr, []);
-    childrenOf.get(mgr).push(m.name);
-  }
-  for (const arr of childrenOf.values()) arr.sort((a, b) => a.localeCompare(b));
-  roots.sort((a, b) => (a === team.lead ? -1 : b === team.lead ? 1 : a.localeCompare(b)));
-
-  const rows = [];
-  const seen = new Set();
-  let level = roots;
-  while (level.length) {
-    const row = level.filter((n) => !seen.has(n));
-    if (!row.length) break;
-    for (const n of row) seen.add(n);
-    rows.push(row);
-    level = row.flatMap((n) => childrenOf.get(n) || []);
-  }
-  const orphans = members.filter((m) => !seen.has(m.name)).map((m) => m.name);
-  if (orphans.length) rows.push(orphans);
-  return rows;
 }
 
 export function reportsOf(team, agentsByName, name) {

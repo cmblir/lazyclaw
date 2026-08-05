@@ -59,17 +59,6 @@ export function table(cols, rows) {
   return el('div', { class: 'scroll' }, el('table', { class: 'tbl' }, thead, tbody));
 }
 
-export function rowList(rows) {
-  if (!rows.length) return el('div', { class: 'empty', text: 'Nothing here yet.' });
-  return el('div', { class: 'stack' }, rows.map((r, i) => el('div', { class: 'srow', '--i': i },
-    el('div', { style: 'min-width:0' },
-      el('div', { class: 'who', text: r.who }),
-      el('div', { class: 'what', text: r.what })),
-    el('div', { class: 'acts' },
-      r.tone !== undefined ? chip(r.state, r.tone) : null,
-      r.acts || []))));
-}
-
 export function kvlist(pairs) {
   return el('dl', { class: 'kvlist' }, pairs.flatMap(([k, v, mono]) =>
     [el('dt', { text: k }), el('dd', { class: mono ? 'mono' : '', text: v })]));
