@@ -17,8 +17,10 @@ export async function approvalsList(c) {
   const pending = (gateway && typeof gateway.pendingApprovals === 'function')
     ? gateway.pendingApprovals()
     : [];
-  // pendingApprovals() already returns approvalView()'s redacted, capped
-  // summary — do not enrich it here.
+  // pendingApprovals() already returns approvalView()'s output, where every
+  // field is bounded: `summary` is redacted and capped at 500 chars, `tool`
+  // and `agentId` are capped at 100 (see gateway/http_gateway.mjs) — do not
+  // enrich it here.
   return writeJson(res, 200, { pending });
 }
 
