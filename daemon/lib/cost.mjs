@@ -1,6 +1,8 @@
 // Cost-cap enforcement + per-handler metrics accumulation for the daemon.
 // Pure — operates only on the passed-in metrics/costCap objects.
 
+import { emit as emitEvent } from '../../mas/events.mjs';
+
 // Has the cumulative cost in any capped currency reached the cap?
 // Returns the offending currency + amount + cap so the caller can
 // surface it cleanly, or null when no cap is breached.
@@ -63,7 +65,15 @@ export function makeTeamUsageAccountant({ metrics, costCap, rates, costFromUsage
     try {
       if (usage && rates && typeof costFromUsage === 'function') {
         const cost = costFromUsage({ provider, model, usage }, rates);
-        if (cost) accumulateMetricsFromCost(metrics, usage, cost);
+        if (cost) {
+          accumulateMetricsFromCost(metrics, usage, cost);
+          // Live-rail spend ticker: per-currency, never summed, and `cap` is
+          // `null` (not 0) when the operator set no --cost-cap-<currency> for
+          // this turn's currency — the rail must tell "no cap" apart from a
+          // cap of zero.
+          const cur = cost.currency || 'USD';
+          emitEvent('cost.tick', { total: metrics.costsByCurrency?.[cur], cap: costCap?.[cur] ?? null, currency: cur });
+        }
       }
       if (typeof onBreach === 'function' && checkCostCap(metrics, costCap)) onBreach();
     } catch { /* best-effort — never break a turn on accounting */ }

@@ -1,13 +1,11 @@
 <!doctype html>
 <!--
-  lazyclaw dashboard — a single-file SPA served by `lazyclaw daemon`.
-  Deliberately framework-free: vanilla DOM, vanilla fetch, no build
-  step. v5 tab set (17 tabs):
-    Chat · Sessions · Workflows · Skills · Providers · Rates · Metrics
-    · Doctor · Config · Status · Agents · Teams · Tasks
-    · Trainer · Recall · Sandbox · Channels
-  Personality / Trajectories / Nodes / SSE bus are deferred to v5.1
-  and remain CLI-only for now.
+  lazyclaw dashboard — a single-file-entry SPA served by `lazyclaw daemon`.
+  Deliberately framework-free: vanilla DOM, vanilla fetch, no build step.
+  The shell is a grouped sidebar (6 groups / 21 panels) with the URL hash as
+  the source of truth for the active panel, plus a mobile drawer under
+  820px. Panel bodies live in web/ui/panels/*.mjs (dashboard-shell-motion
+  Task 4); dashboard.js just mounts the shell.
 -->
 <html lang="en">
 <head>
@@ -21,266 +19,58 @@
   <link rel="icon" href="data:,">
 </head>
 <body>
-  <header>
-    <div class="logo">
-      <span>lazyclaw</span>
+  <div class="shell">
+    <nav class="rail" id="rail" aria-label="Sections">
+      <div id="nav-marker" hidden></div>
+      <div class="brand"><b>lazyclaw</b><span id="version">…</span></div>
+      <div id="nav-groups"></div>
+    </nav>
+
+    <div class="stage">
+      <div class="topbar">
+        <button type="button" class="burger" id="burger" aria-label="Open sections"
+                aria-expanded="false" aria-controls="rail">≡</button>
+        <button type="button" class="omni" id="omni">
+          <span aria-hidden="true">⌕</span> Search panels, teams, or run a command
+          <kbd>⌘K</kbd>
+        </button>
+        <div class="daemon"><span class="beacon" aria-hidden="true"></span> <span id="daemon-state">connecting…</span></div>
+      </div>
+
+      <div class="liverail" id="liverail">
+        <span class="liverail-label">Live</span>
+        <div id="ticker" aria-live="polite" aria-atomic="true"></div>
+        <span class="rail-stat">today <b id="rs-cost">$0.00</b></span>
+      </div>
+
+      <main><div id="host"></div></main>
     </div>
-    <div class="ver" id="version">…</div>
-  </header>
+  </div>
 
-  <nav class="tabs">
-    <button data-tab="chat" class="active">Chat</button>
-    <button data-tab="sessions">Sessions</button>
-    <button data-tab="workflows">Workflows</button>
-    <button data-tab="skills">Skills</button>
-    <button data-tab="providers">Providers</button>
-    <button data-tab="rates">Rates</button>
-    <button data-tab="metrics">Metrics</button>
-    <button data-tab="doctor">Doctor</button>
-    <button data-tab="config">Config</button>
-    <button data-tab="status">Status</button>
-    <button data-tab="agents">Agents</button>
-    <button data-tab="teams">Teams</button>
-    <button data-tab="tasks">Tasks</button>
-    <button data-tab="team">Team Live</button>
-    <button data-tab="trainer">Trainer</button>
-    <button data-tab="recall">Recall</button>
-    <button data-tab="sandbox">Sandbox</button>
-    <button data-tab="channels">Channels</button>
-    <button data-tab="scheduling">Scheduling</button>
-  </nav>
+  <!-- Outside .shell on purpose: inside it this takes the grid's second
+       column and pushes .stage onto a second row. -->
+  <div id="rail-scrim"></div>
 
-  <main>
-    <section id="tab-chat" class="active">
-      <h2>Chat</h2>
-      <div class="toolbar">
-        <select id="chat-assignee"><option value="">(loading…)</option></select>
-        <button class="btn btn-secondary" onclick="resetChat()">Clear</button>
-        <span class="dim" id="chat-meta"></span>
-      </div>
-      <div id="chat-stream"><div class="empty">Type below to start.</div></div>
-      <div class="input-row">
-        <textarea id="chat-input" placeholder="Send a message — Enter to send, Shift+Enter for newline."></textarea>
-        <button class="btn" onclick="sendChat()">Send</button>
-      </div>
-    </section>
+  <div class="scrim" id="scrim" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div id="palette">
+      <input id="q" type="text" placeholder="Search panels, teams, or run a command…"
+             autocomplete="off" spellcheck="false">
+      <ul id="results"></ul>
+      <div class="pal-foot"><span>↑↓ move</span><span>↵ open</span><span>esc close</span></div>
+    </div>
+  </div>
 
-    <section id="tab-sessions">
-      <h2>Sessions</h2>
-      <div id="sessions-list"><div class="empty">Loading…</div></div>
-    </section>
-
-    <section id="tab-skills">
-      <h2>Skills</h2>
-      <div class="toolbar">
-        <button class="btn btn-secondary" onclick="LOADERS.skills()">Refresh</button>
-        <span class="dim" id="skills-meta"></span>
-      </div>
-      <div id="skills-suggestions"></div>
-      <div id="skills-list"><div class="empty">Loading…</div></div>
-    </section>
-
-    <section id="tab-providers">
-      <h2>Providers</h2>
-      <div class="toolbar">
-        <button class="btn" onclick="openAddProviderModal()">+ Add custom OpenAI-compat</button>
-        <button class="btn btn-secondary" onclick="LOADERS.providers()">Refresh</button>
-        <span class="dim" id="providers-meta"></span>
-      </div>
-      <div id="providers-list"><div class="empty">Loading…</div></div>
-    </section>
-
-    <section id="tab-status">
-      <h2>Status</h2>
-      <div id="status-card"><div class="empty">Loading…</div></div>
-    </section>
-
-    <section id="tab-workflows">
-      <h2>Workflows</h2>
-      <div class="toolbar">
-        <select id="wf-status">
-          <option value="">all</option>
-          <option value="running">running</option>
-          <option value="resumable">resumable</option>
-          <option value="failed">failed</option>
-          <option value="done">done</option>
-        </select>
-        <input type="search" id="wf-filter" placeholder="filter by id substring">
-        <button class="btn btn-secondary" onclick="LOADERS.workflows()">Refresh</button>
-        <span class="dim" id="wf-meta"></span>
-      </div>
-      <div id="wf-summary" class="grid"></div>
-      <div id="wf-list"><div class="empty">Loading…</div></div>
-    </section>
-
-    <section id="tab-rates">
-      <h2>Rates</h2>
-      <div class="toolbar">
-        <button class="btn" onclick="openRateCardModal()">+ Add / edit rate card</button>
-        <input type="search" id="rates-filter" placeholder="filter by provider/model">
-        <button class="btn btn-secondary" onclick="LOADERS.rates()">Refresh</button>
-        <span class="dim" id="rates-meta"></span>
-      </div>
-      <div id="rates-validate"></div>
-      <div id="rates-table"><div class="empty">Loading…</div></div>
-    </section>
-
-    <section id="tab-metrics">
-      <h2>Metrics</h2>
-      <div class="toolbar">
-        <button class="btn btn-secondary" onclick="LOADERS.metrics()">Refresh</button>
-        <span class="dim" id="metrics-meta"></span>
-      </div>
-      <div id="metrics-cards" class="grid"></div>
-      <div id="metrics-detail"></div>
-    </section>
-
-    <section id="tab-doctor">
-      <h2>Doctor</h2>
-      <div class="toolbar">
-        <button class="btn btn-secondary" onclick="LOADERS.doctor()">Run</button>
-        <span class="dim" id="doctor-meta"></span>
-      </div>
-      <div id="doctor-card"><div class="empty">Loading…</div></div>
-    </section>
-
-    <section id="tab-config">
-      <h2>Config</h2>
-      <div class="toolbar">
-        <button class="btn" onclick="openConfigEditModal()">+ Set key</button>
-        <button class="btn btn-secondary" onclick="LOADERS.config()">Refresh</button>
-        <span class="dim" id="config-meta"></span>
-      </div>
-      <div id="config-validate"></div>
-      <div id="config-table"><div class="empty">Loading…</div></div>
-      <details style="margin-top:12px;">
-        <summary class="dim" style="cursor:pointer;">Raw JSON</summary>
-        <pre id="config-raw"></pre>
-      </details>
-    </section>
-
-    <section id="tab-agents">
-      <h2>Agents</h2>
-      <div class="toolbar">
-        <button class="btn" onclick="openAgentModal()">+ New agent</button>
-        <button class="btn btn-secondary" onclick="LOADERS.agents()">Refresh</button>
-        <span class="dim" id="agents-meta"></span>
-      </div>
-      <div id="agents-list"><div class="empty">Loading…</div></div>
-    </section>
-
-    <section id="tab-teams">
-      <h2>Teams</h2>
-      <div class="toolbar">
-        <button class="btn" onclick="openTeamModal()">+ New team</button>
-        <button class="btn btn-secondary" onclick="LOADERS.teams()">Refresh</button>
-        <span class="dim" id="teams-meta"></span>
-      </div>
-      <div id="teams-list"><div class="empty">Loading…</div></div>
-    </section>
-
-    <section id="tab-tasks">
-      <h2>Tasks</h2>
-      <div class="toolbar">
-        <button class="btn btn-secondary" onclick="LOADERS.tasks()">Refresh</button>
-        <span class="dim" id="tasks-meta">Tasks are created via <code>lazyclaw task start</code>.</span>
-      </div>
-      <div id="tasks-list"><div class="empty">Loading…</div></div>
-    </section>
-
-    <section id="tab-team">
-      <h2>Team Live</h2>
-      <div class="toolbar">
-        <label for="team-select" class="dim">Team</label>
-        <select id="team-select" aria-label="Select a team to watch"></select>
-        <button class="btn btn-secondary" onclick="LOADERS.team()">Refresh</button>
-        <span class="dim" id="team-conn" role="status" aria-live="polite">○ connecting…</span>
-      </div>
-      <div id="team-live" class="team-live">
-        <div id="team-canvas" class="team-canvas" role="tree" aria-label="Agent team">
-          <div class="empty">Loading…</div>
-        </div>
-        <aside id="team-detail" class="team-detail" aria-live="polite">
-          <div class="empty">Click an agent to see its harness and what it's working on.</div>
-        </aside>
-      </div>
-      <div class="team-feed-wrap">
-        <div class="label">Live activity</div>
-        <ul id="team-feed" class="team-feed" aria-live="polite"></ul>
-      </div>
-    </section>
-
-    <section id="tab-trainer">
-      <h2>Trainer</h2>
-      <div class="toolbar">
-        <button class="btn btn-secondary" onclick="LOADERS.trainer()">Refresh</button>
-        <span class="dim" id="trainer-meta"></span>
-      </div>
-      <div id="trainer-card"><div class="empty">Loading…</div></div>
-    </section>
-
-    <section id="tab-recall">
-      <h2>Recall</h2>
-      <div class="toolbar">
-        <input type="search" id="recall-q" placeholder="search sessions / skills / trajectories / memories" style="flex:1;min-width:240px;">
-        <select id="recall-scope">
-          <option value="all">all scopes</option>
-          <option value="sessions">sessions</option>
-          <option value="skills">skills</option>
-          <option value="trajectories">trajectories</option>
-          <option value="memories">memories</option>
-        </select>
-        <button class="btn" onclick="LOADERS.recall()">Search</button>
-        <span class="dim" id="recall-meta"></span>
-      </div>
-      <div id="recall-list"><div class="empty">Enter a query above.</div></div>
-    </section>
-
-    <section id="tab-sandbox">
-      <h2>Sandbox</h2>
-      <div class="toolbar">
-        <button class="btn btn-secondary" onclick="LOADERS.sandbox()">Refresh</button>
-        <span class="dim" id="sandbox-meta"></span>
-      </div>
-      <div id="sandbox-list"><div class="empty">Loading…</div></div>
-    </section>
-
-    <section id="tab-channels">
-      <h2>Channels</h2>
-      <div class="toolbar">
-        <button class="btn btn-secondary" onclick="LOADERS.channels()">Refresh</button>
-        <span class="dim" id="channels-meta"></span>
-      </div>
-      <div id="channels-list"><div class="empty">Loading…</div></div>
-    </section>
-
-    <section id="tab-scheduling">
-      <h2>Scheduling</h2>
-      <div class="toolbar">
-        <button class="btn btn-secondary" id="sched-refresh">Refresh</button>
-        <span class="dim" id="scheduling-meta"></span>
-      </div>
-      <div id="scheduling-list"><div class="empty">Loading…</div></div>
-    </section>
-  </main>
-
-  <footer>
-    <span>lazyclaw dashboard</span>
-    <span id="footer-url"></span>
-  </footer>
-
-  <!-- Shared modal — opened by openModal({title, bodyHtml, footHtml}). -->
-  <div id="modal-backdrop" class="modal-backdrop" onclick="if(event.target===this)closeModal()">
-    <div class="modal" role="dialog" aria-modal="true">
+  <div class="scrim" id="modal-scrim" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal">
       <div class="modal-head">
         <h3 id="modal-title"></h3>
-        <button class="modal-close" onclick="closeModal()" aria-label="Close">×</button>
+        <button type="button" class="modal-x" id="modal-x" aria-label="Close">×</button>
       </div>
       <div class="modal-body" id="modal-body"></div>
       <div class="modal-foot" id="modal-foot"></div>
     </div>
   </div>
 
-  <script src="/dashboard.js"></script>
+  <script type="module" src="/dashboard.js"></script>
 </body>
 </html>

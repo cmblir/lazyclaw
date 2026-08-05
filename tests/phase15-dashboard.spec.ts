@@ -186,16 +186,26 @@ test.describe('Phase 15 — dashboard daemon routes', () => {
     } finally { await d.stop(); }
   });
 
-  test('GET /dashboard returns the HTML shell that contains the new tabs', async () => {
+  // dashboard-shell-motion Task 3 replaced the flat data-tab="…" buttons with
+  // a grouped sidebar rendered client-side by web/ui/shell.mjs from the
+  // registry in web/ui/nav_model.mjs. A plain fetch() (no browser, no JS
+  // execution) can't see the rendered .nav-item buttons — those don't exist
+  // until shell.mjs runs — so the invariant this test defends ("every panel
+  // is present and reachable") is checked at its actual source of truth:
+  // the served HTML has the skeleton shell.mjs mounts into, and the served
+  // nav_model.mjs module lists every panel id. This is stronger than the old
+  // check (which only pinned 3 of 19 ids): it pins all 21.
+  test('GET /dashboard returns the shell skeleton, and every registered panel is reachable via nav_model.mjs', async () => {
     const cfg = tmpDir('p15-html');
     const d = await startDaemon(cfg);
     try {
       const res = await fetch(d.baseUrl + '/dashboard');
       expect(res.ok).toBe(true);
       const html = await res.text();
-      expect(html).toContain('data-tab="agents"');
-      expect(html).toContain('data-tab="teams"');
-      expect(html).toContain('data-tab="tasks"');
+      // The shell's mount points shell.mjs looks up by id.
+      for (const id of ['rail', 'nav-groups', 'nav-marker', 'host', 'burger', 'modal-scrim', 'modal-x']) {
+        expect(html).toContain(`id="${id}"`);
+      }
       // CSS + JS are split out of the HTML shell (CLAUDE.md §7) and served
       // as same-origin static assets. The references are ABSOLUTE (leading
       // slash): the daemon serves this page at both /dashboard and /dashboard/,
@@ -203,10 +213,18 @@ test.describe('Phase 15 — dashboard daemon routes', () => {
       // leaving the page unstyled (fixed in 9c1bd74).
       expect(html).toContain('href="/dashboard.css"');
       expect(html).toContain('src="/dashboard.js"');
+
+      const navModuleSrc = await (await fetch(d.baseUrl + '/ui/nav_model.mjs')).text();
+      const before19 = ['chat', 'sessions', 'workflows', 'skills', 'providers', 'rates',
+        'metrics', 'doctor', 'config', 'status', 'agents', 'teams', 'tasks', 'team',
+        'trainer', 'recall', 'sandbox', 'channels', 'scheduling'];
+      for (const id of [...before19, 'approvals', 'gateway']) {
+        expect(navModuleSrc).toContain(`id: '${id}'`);
+      }
     } finally { await d.stop(); }
   });
 
-  test('GET /dashboard.css and /dashboard.js serve the split-out assets', async () => {
+  test('GET /dashboard.css and /dashboard.js serve the split-out assets, plus the /ui/*.mjs shell modules', async () => {
     const cfg = tmpDir('p15-assets');
     const d = await startDaemon(cfg);
     try {
@@ -218,7 +236,17 @@ test.describe('Phase 15 — dashboard daemon routes', () => {
       const js = await fetch(d.baseUrl + '/dashboard.js');
       expect(js.ok).toBe(true);
       expect(js.headers.get('content-type')).toContain('javascript');
-      expect(await js.text()).toContain('LOADERS.agents');
+      // dashboard.js is now the shell entry point (Task 3) — it mounts
+      // web/ui/shell.mjs instead of holding the panel loaders itself.
+      expect(await js.text()).toContain("mount(");
+
+      // The shell is served as ES modules under /ui/ (Task 2's route) — these
+      // are part of the shell surface now, not an implementation detail.
+      for (const mod of ['shell.mjs', 'nav_model.mjs', 'dom.mjs', 'modal.mjs']) {
+        const r = await fetch(d.baseUrl + '/ui/' + mod);
+        expect(r.ok, `/ui/${mod} should be served`).toBe(true);
+        expect(r.headers.get('content-type')).toContain('javascript');
+      }
     } finally { await d.stop(); }
   });
 });

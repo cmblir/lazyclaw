@@ -89,10 +89,16 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
 
   // What the device is shown about a pending approval. Args may carry
   // secrets (e.g. a bash command with a token), so the summary is redacted
-  // and capped before it leaves the process.
+  // and capped before it leaves the process. `tool` and `agentId` are both
+  // identifiers, not free text, so a 100-char bound is generous but still
+  // keeps a caller-controlled value from riding this view out unbounded.
   function approvalView(detail = {}) {
     const summary = redactSecrets(String(detail.summary ?? detail.args ?? '')).slice(0, 500);
-    return { tool: detail.tool || '', agentId: detail.agentId || '', summary };
+    return {
+      tool: String(detail.tool || '').slice(0, 100),
+      agentId: String(detail.agentId || '').slice(0, 100),
+      summary,
+    };
   }
 
   function requestApproval(detail = {}, { timeoutMs = APPROVAL_TTL_MS } = {}) {

@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { _readAssetCached, _clearAssetCache, dashboardCss } from '../daemon/routes/meta.mjs';
+import { _readAssetCached, _clearAssetCache, dashboardCss, uiModule } from '../daemon/routes/meta.mjs';
 
 test('_readAssetCached reads a file once until its mtime changes', () => {
   _clearAssetCache();
@@ -53,6 +53,32 @@ test('dashboardCss serves from the asset cache (one disk read across requests)',
     assert.equal(r2.code, 200);
     assert.ok(r1.ended && r1.ended.length > 0);
     assert.equal(cssReads, 1, 'dashboard.css must be read from disk once across two requests');
+  } finally {
+    fs.readFileSync = real;
+  }
+});
+
+// meta.mjs does not export a cache-reset seam (only _clearAssetCache, already
+// imported above), so this mirrors the dashboardCss case directly rather than
+// resetting through a name that doesn't exist.
+test('uiModule serves from the asset cache (one disk read across requests)', async () => {
+  _clearAssetCache();
+  const real = fs.readFileSync;
+  let domReads = 0;
+  fs.readFileSync = (p, ...rest) => { if (String(p).endsWith('dom.mjs')) domReads++; return real(p, ...rest); };
+  const mkRes = () => {
+    const r = {};
+    r.writeHead = (code, headers) => { r.code = code; r.head = headers; };
+    r.end = (body) => { r.ended = body; };
+    return r;
+  };
+  try {
+    const r1 = mkRes(); await uiModule({ req: { method: 'GET' }, res: r1, path: '/ui/dom.mjs' });
+    const r2 = mkRes(); await uiModule({ req: { method: 'GET' }, res: r2, path: '/ui/dom.mjs' });
+    assert.equal(r1.code, 200);
+    assert.equal(r2.code, 200);
+    assert.ok(r1.ended && r1.ended.length > 0);
+    assert.equal(domReads, 1, 'ui/dom.mjs must be read from disk once across two requests');
   } finally {
     fs.readFileSync = real;
   }

@@ -2,6 +2,7 @@
 // Each handler takes the per-request dispatch context `c` and returns the
 // HTTP response. Bodies are unchanged; only the dispatch wrapper is new.
 import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE_CARD_SHAPE, composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill, removeSkill, parseFrontmatter, skillsDefaultConfigDir, indexDb, skillSynth, sandboxListBackends, summarizeState, listWorkflowSessions, loadWorkflowState, aggregateNodeStats, validateConfig, validateRates, fileExists, readJson, readTextBody, writeJson, writeSseHead, writeSse, statusForProviderError, checkCostCap, accumulateMetricsFromCost, resolveProvider } from './_deps.mjs';
+import { resolvePermissionModeForSurface } from '../../lib/permission_mode.mjs';
 
 export async function agentsList(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
@@ -167,10 +168,32 @@ export async function teamDelete(c) {
           }
 }
 
+// A task that arrived from a channel ran on an unattended surface: no human
+// was watching an inbound message from a possibly-untrusted sender. `attended`
+// answers exactly that question — whether a human was in the loop — and does
+// NOT depend on what the operator opted into; `security.unattendedExec` only
+// changes what the task was ALLOWED to do (permissionMode), never whether
+// anyone was watching. Fix round 1: the original cut here was
+// `attended: !fromChannel || execEnabled`, which flipped attended back to
+// true the moment the operator opted in — so the one case that most needs a
+// visible warning (an inbound, untrusted message now allowed to write files
+// and run host commands) looked identical to a local, human-run task. Report
+// the EFFECTIVE posture; never echo cfg.security itself.
+function withPosture(task, cfg) {
+  const fromChannel = !!task.slackChannel;
+  const surface = fromChannel ? 'unattended' : 'attended';
+  return {
+    ...task,
+    attended: !fromChannel,
+    permissionMode: resolvePermissionModeForSurface(cfg, surface),
+  };
+}
+
 export async function tasksList(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
           const mod = await import('../../tasks.mjs');
-          return writeJson(res, 200, mod.listTasks());
+          const cfg = ctx.readConfig();
+          return writeJson(res, 200, mod.listTasks(gwConfigDir).map((t) => withPosture(t, cfg)));
 }
 
 export async function taskTranscript(c) {
@@ -192,9 +215,9 @@ export async function taskGet(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
           const id = url.pathname.split('/').pop();
           const mod = await import('../../tasks.mjs');
-          const t = mod.getTask(id);
+          const t = mod.getTask(id, gwConfigDir);
           if (!t) return writeJson(res, 404, { error: `no task "${id}"` });
-          return writeJson(res, 200, t);
+          return writeJson(res, 200, withPosture(t, ctx.readConfig()));
 }
 
 export async function taskDelete(c) {

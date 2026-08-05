@@ -31,7 +31,7 @@ export function _readAssetCached(filePath) {
 // CORS handling is needed. Returns 404 (not the dashboard's 503 install
 // hint) since a missing asset is a narrower failure.
 function serveWebFile(c, filename, contentType) {
-  const { res } = c;
+  const { res, logger } = c;
   try {
     const here = nodePath.dirname(fileURLToPath(import.meta.url));
     const filePath = nodePath.join(here, '..', '..', 'web', filename);
@@ -39,8 +39,15 @@ function serveWebFile(c, filename, contentType) {
     res.writeHead(200, { 'content-type': contentType, 'cache-control': 'no-cache' });
     return res.end(body);
   } catch (e) {
+    // Never echo the exception into the response. This route (and uiModule /
+    // avatar, which call it too) is reachable WITHOUT a token by design — see
+    // daemon/lib/auth.mjs's static-dashboard allowlist — and Node's ENOENT
+    // message embeds the absolute filesystem path (including the OS username
+    // on macOS), which turns an unauthenticated `GET /ui/<anything>.mjs` into
+    // a path-disclosure oracle. Log the detail server-side instead.
+    logger?.warn?.('web_asset_not_found', { filename, err: e?.message || String(e) });
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-    return res.end(`not found: ${filename} (${e?.message || e})\n`);
+    return res.end('not found\n');
   }
 }
 
@@ -65,6 +72,21 @@ export async function dashboardJs(c) {
   return serveWebFile(c, 'dashboard.js', 'text/javascript; charset=utf-8');
 }
 
+// Serve a dashboard ES module (web/ui/<name>.mjs or web/ui/<dir>/<name>.mjs).
+// The regex is the SAME shape as UI_MODULE_RE in daemon/lib/auth.mjs — keep
+// them in step. Validating here (not just at the auth gate) means the file
+// read can never see a `..`, mirroring how the avatar route is guarded.
+const UI_MODULE_PATH_RE = /^\/ui\/((?:[a-z0-9_-]+\/)?[a-z0-9_-]+\.mjs)$/;
+
+export async function uiModule(c) {
+  const m = UI_MODULE_PATH_RE.exec(c.path || '');
+  if (!m) {
+    c.res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+    return c.res.end('not found\n');
+  }
+  return serveWebFile(c, nodePath.join('ui', m[1]), 'text/javascript; charset=utf-8');
+}
+
 // Serve a custom agent character image (web app: <img src="/agent-avatars/NN">).
 // These are user-supplied photos copied under <configDir>/agent-avatars/ by
 // `lazyclaw agent set-avatar`. Served from the config dir (NOT the package web/
@@ -75,7 +97,7 @@ const _AGENT_AVATAR_CT = {
   '.gif': 'image/gif', '.webp': 'image/webp',
 };
 export async function agentAvatar(c) {
-  const { res } = c;
+  const { res, logger } = c;
   const m = /^\/agent-avatars\/([A-Za-z0-9_.-]+\.(?:png|jpe?g|gif|webp))$/i.exec(c.path || '');
   const file = m && m[1];
   const ct = file && _AGENT_AVATAR_CT[nodePath.extname(file).toLowerCase()];
@@ -89,8 +111,11 @@ export async function agentAvatar(c) {
     res.writeHead(200, { 'content-type': ct, 'cache-control': 'no-cache' });
     return res.end(body);
   } catch (e) {
+    // Same rationale as serveWebFile's catch: don't echo the ENOENT message
+    // (it embeds an absolute path) into the response body.
+    logger?.warn?.('agent_avatar_not_found', { file, err: e?.message || String(e) });
     res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
-    return res.end(`not found: ${file} (${e?.message || e})\n`);
+    return res.end('not found\n');
   }
 }
 

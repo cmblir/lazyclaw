@@ -1,14 +1,59 @@
     :root {
       --bg: #0a0a0a;
       --card: #14141c;
+      /* Rail background: one step darker than --card so the sidebar reads as
+         its own surface against the panel host. */
+      --panel-2: #0e0e14;
       --border: #2a2a36;
       --text: #e8e8ea;
       --dim: #a8a8b8;
+      /* Dimmer than --dim — group headers are structure, not content. */
+      --faint: #6b6b7a;
       --accent: #d9b35a;
       --accent-ink: #1a1610;
       --ok: #4ade80;
       --warn: #f59e0b;
       --err: #ef4444;
+      /* "Live / working" — the team topology and chip tone below both need
+         a colour distinct from --ok for "in progress" vs "succeeded". */
+      --live: #34d399;
+
+      /* Motion knobs (level 3). Every state-transition rule (nav marker,
+         list/table stagger, panel enter, hover/focus transitions) reads
+         these, so a change to those is one block instead of a cascade
+         hunt. The ambient loop (drift 14s) and the indicator loops (caret
+         1.05s, shimmer 2.1s) are infinite, always-on animations, not state
+         transitions — a duration token would be the wrong knob for them,
+         so they carry literal durations and are covered instead by the
+         reduced-motion kill switch below (and --ambient, for drift
+         specifically). */
+      --dur-fast: 160ms;
+      --dur-mid:  260ms;
+      --dur-slow: 460ms;
+      --stagger:  46ms;
+      --lift:     8px;
+      --ambient:  1;
+      --ease:     cubic-bezier(.2, .8, .2, 1);
+      --ease-out: cubic-bezier(.16, 1, .3, 1);
+    }
+
+    /* Placed immediately after :root, ahead of every rule it could otherwise
+       lose to on source order — see the cascade-order note lower in this
+       file. This is the accessibility guarantee: no matter what else in the
+       cascade later touches these custom properties, reduced motion always
+       wins because it is the last writer inside :root's own specificity. */
+    @media (prefers-reduced-motion: reduce) {
+      :root {
+        --dur-fast: 1ms; --dur-mid: 1ms; --dur-slow: 1ms;
+        --stagger: 0ms; --lift: 0px; --ambient: 0;
+      }
+      /* The universal selector does not match generated content — `*` alone
+         never reaches `::before`/`::after`, so `.liverail::before`'s drift
+         sweep and `#stream-text::after`'s caret would keep animating here
+         without the pseudo-element selectors spelled out explicitly. Caught
+         by driving a real Chromium engine with page.emulateMedia() rather
+         than trusting the stylesheet text. */
+      *, ::before, ::after { animation: none !important; }
     }
     * { box-sizing: border-box; }
     body {
@@ -17,50 +62,106 @@
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
-      display: flex;
-      flex-direction: column;
     }
-    header {
-      padding: 14px 22px;
-      border-bottom: 1px solid var(--border);
-      display: flex;
-      align-items: center;
-      gap: 14px;
+
+    /* ── Shell: grouped sidebar + stage ───────────────────────────
+       Rules verbatim from the reviewed shell/motion prototype, plus the
+       surrounding layout (rail contents, topbar, liverail, drawer, palette
+       and modal scrims) needed to make the skeleton in dashboard.html work —
+       the prototype file itself isn't checked into this repo. */
+    .shell { display: grid; grid-template-columns: 210px minmax(0, 1fr); height: 100vh; }
+    .rail { position: relative; border-right: 1px solid var(--border); background: var(--panel-2);
+            padding: 13px 0; overflow-y: auto; }
+    #rail-scrim { display: none; position: fixed; inset: 0; z-index: 55; background: rgba(4, 4, 8, .6); }
+    .nav-item .count.urgent { color: var(--accent-ink); background: var(--accent);
+                              border-radius: 999px; padding: 2px 6px; font-weight: 700; }
+    @media (pointer: coarse) { .nav-item { min-height: 44px; } }
+
+    #nav-marker {
+      position: absolute; left: 0; width: 3px; background: var(--accent);
+      border-radius: 0 3px 3px 0;
+      transition: transform var(--dur-mid) var(--ease-out), height var(--dur-mid) var(--ease-out);
     }
-    .logo { font-weight: 700; font-size: 16px; color: var(--accent); display: flex; align-items: center; gap: 10px; }
-    .ver  { color: var(--dim); font-size: 11px; }
-    nav.tabs {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 2px;
-      padding: 0 14px;
-      border-bottom: 1px solid var(--border);
+    .brand {
+      display: flex; align-items: baseline; gap: 8px; padding: 4px 18px 15px;
+      margin-bottom: 6px; border-bottom: 1px solid var(--border); color: var(--accent);
+      font-size: 15px;
     }
-    nav.tabs button {
-      display: inline-flex;
-      align-items: center;
-      min-height: 44px;
-      background: none;
-      border: 0;
-      color: var(--dim);
-      padding: 10px 16px;
+    #version { color: var(--dim); font-size: 11px; font-weight: 400; }
+    .group { margin-bottom: 14px; }
+    .group h2 {
+      margin: 0 0 4px; padding: 0 18px; font-size: 10px; font-weight: 600;
+      letter-spacing: .08em; text-transform: uppercase; color: var(--faint);
+    }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px; width: 100%;
+      min-height: 34px; padding: 6px 18px; background: none; border: 0;
+      color: var(--dim); font: inherit; font-size: 13px; text-align: left;
       cursor: pointer;
-      font-size: 13px;
-      border-bottom: 2px solid transparent;
-      white-space: nowrap;
     }
-    nav.tabs button:hover { color: var(--text); }
-    nav.tabs button.active {
-      color: var(--accent);
-      border-bottom-color: var(--accent);
+    .nav-item:hover { color: var(--text); }
+    .nav-item[aria-current="page"] { color: var(--accent); font-weight: 600; }
+    .nav-item .glyph { flex: 0 0 18px; text-align: center; opacity: .85; }
+    .nav-item .count {
+      margin-left: auto; padding: 1px 7px; border-radius: 999px; font-size: 11px;
+      background: var(--border); color: var(--dim);
     }
+    @keyframes navbump { 0% { transform: scale(1); } 40% { transform: scale(1.18); } 100% { transform: scale(1); } }
+    .nav-item.navbump .count { animation: navbump var(--dur-mid, 260ms) var(--ease-out, ease); }
+
+    .stage { display: flex; flex-direction: column; min-width: 0; height: 100vh; overflow: hidden; }
+    .topbar {
+      display: flex; align-items: center; gap: 12px; padding: 10px 18px;
+      border-bottom: 1px solid var(--border);
+    }
+    .burger {
+      display: none; width: 34px; height: 34px; background: none;
+      border: 1px solid var(--border); border-radius: 6px; color: var(--text);
+      font-size: 16px; cursor: pointer;
+    }
+    /* Placed after every base rule it overrides (.shell / .rail / .burger
+       above): same-specificity CSS rules resolve by source order regardless
+       of media-query nesting, so a max-width override declared BEFORE an
+       unconditional same-selector rule loses to it even while the query
+       matches. (Caught by an actual ≤820px Playwright viewport test — the
+       sandboxed browser used for manual verification couldn't resize its
+       real viewport, so this shipped broken until that test caught it.) */
+    @media (max-width: 820px) {
+      .shell { grid-template-columns: minmax(0, 1fr); height: auto; }
+      .burger { display: grid; place-items: center; }
+      .rail { position: fixed; z-index: 60; top: 0; bottom: 0; left: 0; width: 250px;
+              transform: translateX(-100%); transition: transform var(--dur-mid) var(--ease-out); }
+      .rail[data-open] { transform: translateX(0); }
+      #rail-scrim[data-open] { display: block; }
+    }
+    .omni {
+      flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0;
+      background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+      padding: 8px 12px; color: var(--dim); font: inherit; font-size: 13px;
+      text-align: left; cursor: pointer;
+    }
+    .omni:hover { border-color: var(--accent); }
+    .omni kbd {
+      margin-left: auto; padding: 2px 6px; border: 1px solid var(--border);
+      border-radius: 4px; font-size: 11px; color: var(--faint);
+    }
+    .daemon { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 12px; white-space: nowrap; }
+    .beacon { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+
+    .liverail {
+      display: flex; align-items: center; gap: 14px; height: 34px; padding: 0 18px;
+      border-bottom: 1px solid var(--border); background: rgba(255, 255, 255, 0.015);
+      font-size: 12px; color: var(--dim);
+    }
+    .liverail-label { color: var(--accent); font-weight: 700; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+    #ticker { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .rail-stat b { color: var(--text); font-variant-numeric: tabular-nums; }
+
     main {
       flex: 1;
       padding: 22px;
       overflow-y: auto;
     }
-    section { display: none; }
-    section.active { display: block; }
     h2 { margin: 0 0 14px; font-size: 18px; }
     .card {
       background: var(--card);
@@ -211,16 +312,44 @@
     .banner.err  { border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.06); }
     .banner ul { margin: 6px 0 0 18px; padding: 0; }
     .banner li { font-size: 12px; }
-    /* Modal — used by session/workflow/skill detail views, the rate-card
-       editor, and the custom-provider form. One stacking layer; only one
-       open at a time. */
-    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: none; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
-    .modal-backdrop.open { display: flex; }
+    /* Modal + command palette — one shared overlay layer (.scrim), only one
+       open at a time. modal.mjs toggles visibility via [data-open] (not a
+       class) so it can't drift from this selector. */
+    .scrim { position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: none; align-items: center; justify-content: center; z-index: 100; padding: 20px; }
+    .scrim[data-open] { display: flex; }
+    #palette {
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      max-width: min(560px, 96vw); width: 100%; max-height: 70vh;
+      display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+    #palette #q { background: var(--bg); border: 0; border-bottom: 1px solid var(--border);
+                  color: var(--text); padding: 14px 16px; font: inherit; font-size: 14px; }
+    #palette #q:focus-visible { outline: none; }
+    #results { list-style: none; margin: 0; padding: 6px; overflow-y: auto; flex: 1; }
+    /* Each result row's entrance reuses row-in (defined further down with
+       the other level-3 motion techniques) rather than a second keyframe. */
+    #results li {
+      animation: row-in var(--dur-mid) var(--ease-out) both;
+      animation-delay: calc(var(--i) * var(--stagger));
+    }
+    #results li button {
+      display: flex; align-items: center; gap: 10px; width: 100%;
+      background: none; border: 0; border-radius: 6px; padding: 8px 10px;
+      color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+    }
+    #results li[data-sel] button, #results li button:hover { background: rgba(217, 179, 90, 0.1); }
+    #results .kind {
+      flex: 0 0 auto; padding: 1px 7px; border-radius: 999px; font-size: 10px;
+      text-transform: uppercase; letter-spacing: .06em; color: var(--faint); border: 1px solid var(--border);
+    }
+    #results .path { margin-left: auto; padding-left: 10px; color: var(--dim); font-size: 11.5px; white-space: nowrap; }
+    .pal-empty { padding: 14px 16px; color: var(--dim); font-style: italic; text-align: center; }
+    .pal-foot { display: flex; gap: 14px; padding: 8px 16px; border-top: 1px solid var(--border); color: var(--dim); font-size: 11px; }
     .modal { background: var(--card); border: 1px solid var(--border); border-radius: 10px; max-width: min(720px, 96vw); width: 100%; max-height: 86vh; display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
     .modal-head { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
     .modal-head h3 { margin: 0; font-size: 16px; font-weight: 600; flex: 1; }
-    .modal-close { background: none; border: 0; color: var(--dim); cursor: pointer; font-size: 20px; line-height: 1; padding: 4px 8px; }
-    .modal-close:hover { color: var(--text); }
+    .modal-x { background: none; border: 0; color: var(--dim); cursor: pointer; font-size: 20px; line-height: 1; padding: 4px 8px; }
+    .modal-x:hover { color: var(--text); }
     .modal-body { padding: 16px 18px; overflow-y: auto; flex: 1; }
     .modal-foot { padding: 12px 18px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; }
     .clickable { cursor: pointer; }
@@ -240,6 +369,154 @@
     button.btn-danger:hover { background: rgba(239,68,68,0.25); }
     .markdown { font-size: 13px; line-height: 1.55; }
     .markdown pre { font-size: 12px; }
+
+    /* ── Component CSS ported from the reviewed shell/motion prototype ──
+       dom.mjs's shared helpers (chip/phead/table/kvlist/banner)
+       emit these classes from every panel that uses them; a class with no
+       rule here renders unstyled without ever throwing, so it's a silent
+       defect rather than a loud one. Values are taken from the prototype;
+       selectors are adapted to this file's existing tokens (--card, not
+       --panel; --bg, not --ground) since Task 3 already picked those names.
+       Placed ahead of every @media block below per the cascade-order rule
+       noted further down this file — none of these selectors are touched
+       by an existing media query, but new rules still default to "before". */
+    .phead { margin-bottom: 13px; }
+    .phead h2 { margin: 0; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+    .phead p { margin: 4px 0 0; color: var(--dim); font-size: 12.5px; max-width: 78ch; }
+
+    .toolbar .grow { flex: 1; min-width: 140px; }
+
+
+    .chip {
+      display: inline-flex; align-items: center; gap: 5px; font: 500 10.5px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      border-radius: 999px; padding: 4px 9px; border: 1px solid var(--border);
+      color: var(--dim); background: var(--panel-2); white-space: nowrap;
+    }
+    .chip.is-live { color: var(--live); border-color: rgba(52,211,153,.38); background: rgba(52,211,153,.08); }
+    .chip.is-ok   { color: var(--ok);   border-color: rgba(74,222,128,.38);  background: rgba(74,222,128,.08); }
+    .chip.is-warn { color: var(--warn); border-color: rgba(245,158,11,.38);  background: rgba(245,158,11,.08); }
+    .chip.is-err  { color: var(--err);  border-color: rgba(239,68,68,.38);   background: rgba(239,68,68,.08); }
+    .chip .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+    .chip .ic { font: 10px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    .scroll { overflow-x: auto; }
+    table.tbl td.mono { font: 11.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--dim); }
+    table.tbl tbody tr:hover td { background: rgba(217,179,90,.04); }
+
+    .banner .ic { font: 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; flex: none; }
+    .banner b { font-weight: 600; }
+
+    .note-inline {
+      border-left: 2px solid var(--accent); background: rgba(217,179,90,.06);
+      padding: 9px 12px; border-radius: 0 8px 8px 0; font-size: 12.5px; color: var(--dim);
+      margin-bottom: 11px;
+    }
+    .note-inline b { color: var(--text); font-weight: 600; }
+    .note-inline code { font: 11.5px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--accent); }
+
+    .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 10px; margin-bottom: 13px; }
+    .tile { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 13px 14px; }
+    .tile .label { font: 600 10px/1 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; letter-spacing: .085em; text-transform: uppercase; color: var(--faint); }
+    .tile .value { margin-top: 7px; font-size: 25px; font-weight: 600; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+    .tile .sub { margin-top: 5px; font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--dim); }
+
+    .meter { height: 8px; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--border); overflow: hidden; margin-top: 9px; }
+    .meter > i { display: block; height: 100%; border-radius: 4px; background: var(--accent); transform-origin: left center; transition: transform var(--dur-slow) var(--ease-out); }
+    .meter > i.warn { background: var(--warn); }
+
+    .kvlist { display: grid; grid-template-columns: max-content 1fr; gap: 7px 14px; font-size: 12.5px; }
+    .kvlist dt { font: 600 10px/1.6 -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); }
+    .kvlist dd { margin: 0; }
+    .kvlist dd.mono { font: 11.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--dim); }
+
+    /* ── Level-3 motion techniques ported from the reviewed prototype ──
+       #nav-marker / .navbump / the drawer transition came over in Task 3;
+       these are the remaining techniques it didn't need yet. */
+    #host { animation: panel-in var(--dur-mid) var(--ease-out) both; }
+    @keyframes panel-in { from { opacity: 0; transform: translateY(calc(3px + var(--lift))) scale(.995); } }
+
+    @keyframes row-in { from { opacity: 0; transform: translateY(calc(4px + var(--lift))); } }
+    table.tbl tbody tr { animation: row-in var(--dur-mid) var(--ease-out) both; animation-delay: calc(var(--i) * var(--stagger)); }
+
+    /* Ambient drift behind the live rail — the signature, and by design the
+       only always-on animation in the shell. Exactly one rule in this file
+       may read the --ambient token (tests/f-dashboard-motion.test.mjs
+       enforces it), so any future ambient effect must gate through this
+       one instead of adding its own reader. */
+    .liverail { position: relative; overflow: hidden; }
+    .liverail::before {
+      content: ''; position: absolute; inset: 0; pointer-events: none;
+      opacity: calc(var(--ambient) * .5);
+      background: linear-gradient(100deg, transparent 20%, rgba(255,179,71,.13) 45%, rgba(224,128,32,.07) 60%, transparent 82%);
+      background-size: 240% 100%; animation: drift 14s linear infinite;
+    }
+    @keyframes drift { from { background-position: 140% 0; } to { background-position: -140% 0; } }
+
+    /* Live ticker (Task 6 wires the SSE source): the two ticks share one
+       40px band, so they must not animate at the same time — overlapping
+       single-line text is unreadable. The outgoing tick leaves first, and
+       the incoming one waits exactly that long before it enters. */
+    .tick {
+      position: absolute; inset: 0; display: flex; align-items: center; gap: 9px;
+      font: 11.5px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .tick .type { color: var(--accent); flex: none; }
+    .tick .body { color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+    .tick .body b { color: var(--text); font-weight: 600; }
+    .tick .arrow { color: var(--live); }
+    .tick.exit { animation: tick-out var(--dur-fast) var(--ease) both; }
+    .tick.enter { animation: tick-in var(--dur-mid) var(--ease-out) both; animation-delay: var(--dur-fast); }
+    @keyframes tick-in { from { opacity: 0; transform: translateY(calc(10px + var(--lift))); } }
+    @keyframes tick-out { to { opacity: 0; transform: translateY(calc(-10px - var(--lift))); } }
+
+    /* Streaming assistant reply: a blinking caret plus a shimmering
+       "thinking" label (Task 6 wires the stream itself). */
+    #stream-text::after { content: '▍'; color: var(--accent); margin-left: 1px; animation: caret 1.05s steps(2) infinite; }
+    @keyframes caret { 50% { opacity: 0; } }
+    .thinking { display: inline-flex; align-items: center; gap: 8px; font: 11.5px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--dim); }
+    .thinking .shimmer {
+      background: linear-gradient(96deg, var(--dim) 20%, #FFD580 42%, #FFB347 52%, var(--dim) 74%);
+      background-size: 280% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+      animation: sweep 2.1s var(--ease) infinite;
+    }
+    @keyframes sweep { from { background-position: 190% 0; } to { background-position: -90% 0; } }
+
+    /* Team topology: reporting-line edges plus per-agent focus/halo states.
+       Consumed by web/ui/panels/team.mjs, which renders the `.topology` div
+       and its `#edges` SVG directly — so all of this is live, not scaffolding.
+       Of these, only `#edges` and `#edges path.edge` are additionally pinned by
+       tests/f-dashboard-motion.test.mjs; `.topology` is not, so deleting it
+       would break the layout silently rather than fail a test. */
+    .topology { position: relative; padding: 16px 0 4px; }
+    /* width/height are required: `inset: 0` alone leaves an <svg> at its
+       intrinsic 300x150, which clips every edge away. */
+    #edges { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+    /* The reporting line is structure, not a gridline — --border disappears
+       against --card, so edges sit at --faint and brighten on focus. */
+    #edges path.edge { fill: none; stroke: var(--faint); stroke-width: 1.5; transition: stroke var(--dur-mid) var(--ease); }
+    #edges path.edge[data-hot] { stroke: var(--dim); stroke-width: 2; }
+    #edges path.flow { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
+    /* Recursive subtree layout: a node is a column (its tile, then a row of
+       its children's own subtrees). Flex centres a column's children over
+       each other by construction, so a manager sits centred over its own
+       reports regardless of how many peers of that manager exist — a flat
+       `.tier` row (the old flattened layout) cannot do this, since a row
+       centres on the whole canvas rather than on the parent whose reports
+       it holds. */
+    .subtree { display: flex; flex-direction: column; align-items: center; }
+    .subtree-kids { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 30px; }
+
+    .agent {
+      width: 106px; display: flex; flex-direction: column; align-items: center; gap: 6px;
+      background: none; border: 0; padding: 7px 4px; border-radius: 10px; color: inherit; font: inherit;
+      cursor: grab; position: relative;
+      transition: background var(--dur-fast) var(--ease), opacity var(--dur-mid) var(--ease);
+      animation: row-in var(--dur-mid) var(--ease-out) both; animation-delay: calc(var(--i) * var(--stagger));
+    }
+    .agent:hover { background: rgba(217,179,90,.07); }
+    .agent[aria-selected="true"] { background: rgba(217,179,90,.12); }
+    .topology[data-focus] .agent:not([data-inchain]) { opacity: .3; }
+
     /* a11y: a visible keyboard focus ring on every interactive control.
        The styled buttons/inputs otherwise relied on the UA default ring,
        which is easy to lose against the dark theme. */
@@ -254,18 +531,9 @@
     }
     @media (max-width: 480px) {
       main { padding: 14px; }
-      header { padding: 12px 16px; }
       .grid { grid-template-columns: 1fr; }
       table.tbl { font-size: 12px; }
       table.tbl th, table.tbl td { padding: 6px 8px; }
-    }
-    footer {
-      padding: 10px 22px;
-      border-top: 1px solid var(--border);
-      color: var(--dim);
-      font-size: 11px;
-      display: flex;
-      justify-content: space-between;
     }
 
     /* ── Team Live tab ─────────────────────────────────────────── */
@@ -279,13 +547,6 @@
       flex: 1 1 280px; min-width: 0;
       background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px;
       font-size: 13px;
-    }
-    /* tree: a lead row on top, a wrapping children row below, with connectors */
-    .team-row { display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; }
-    .team-children { position: relative; padding-top: 18px; }
-    .team-children::before {
-      content: ''; position: absolute; top: 0; left: 50%; width: 1px; height: 18px;
-      background: var(--border); transform: translateX(-50%);
     }
     .tagent {
       display: flex; flex-direction: column; align-items: center; gap: 6px;
@@ -324,6 +585,17 @@
     .tagent.idle .tagent-status    { color: var(--dim); }
     .harness-badge {
       font-size: 9px; background: #312e81; color: #c7d2fe; border-radius: 5px; padding: 1px 6px;
+      max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    /* The tile's only explanation for why an off-roster manager hangs an
+       agent off the lead — reads as a badge, not part of the name, so it
+       needs its own rule rather than falling through to plain inline text.
+       --warn (not colour-alone: the word itself already says why) so it
+       still reads as attention at the 104px tile width the panel keeps
+       down to a 375px viewport. */
+    .reassigned {
+      font-size: 9px; color: var(--warn); background: rgba(245,158,11,.08);
+      border: 1px solid rgba(245,158,11,.38); border-radius: 5px; padding: 1px 6px;
       max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .team-detail h3 { margin: 0 0 6px; font-size: 15px; }
