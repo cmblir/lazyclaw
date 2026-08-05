@@ -5,6 +5,27 @@ import { el } from './dom.mjs';
 import { subscribe } from './stream.mjs';
 import { reduced } from './motion.mjs';
 
+// Formats an amount in the event's OWN currency rather than a hard-coded
+// '$', so a KRW/EUR rate card isn't mislabelled as USD in the topbar.
+function fmtMoney(amount, currency) {
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency: currency || 'USD' }).format(Number(amount) || 0);
+  } catch {
+    // Intl.NumberFormat throws (RangeError) on a currency code it doesn't
+    // recognize — fall back to a plain, labelled number rather than losing
+    // the amount entirely.
+    return `${Number(amount) || 0} ${currency || 'USD'}`;
+  }
+}
+
+// `cap: null` means "no cap configured" for this currency (see
+// daemon/lib/cost.mjs's makeTeamUsageAccountant) and must read differently
+// from a cap of zero — collapsing the two would tell an operator who set a
+// real zero-cap the same thing as one who set no cap at all.
+function capText(cap, currency) {
+  return cap == null ? 'no cap' : 'cap ' + fmtMoney(cap, currency);
+}
+
 function describe(type, d) {
   switch (type) {
     case 'delegate': return [{ b: d.from }, { arrow: true }, { b: d.to }];
@@ -14,7 +35,7 @@ function describe(type, d) {
     case 'task.start': return [{ t: 'task started: ' }, { b: d.title || d.taskId }];
     case 'task.done': return [{ b: d.taskId }, { t: ' ' + (d.status || 'done') }];
     case 'workflow.step': return [{ b: d.node }, { t: ` ${d.done} of ${d.total} done` }];
-    case 'cost.tick': return [{ t: 'spend today ' }, { b: '$' + Number(d.total).toFixed(2) }];
+    case 'cost.tick': return [{ t: 'spend today ' }, { b: fmtMoney(d.total, d.currency) }, { t: ' · ' + capText(d.cap, d.currency) }];
     case 'channel.inbound': return [{ b: d.channel }, { t: ' routed to ' }, { b: d.to }];
     case 'provider.error': return [{ b: d.provider }, { t: ' ' + d.detail }];
     // No `cron.fire` case — a fire happens in a subprocess launchd spawns, so
@@ -71,7 +92,7 @@ export function mountLiveRail() {
       el('span', { class: 'body' }, d.team ? [el('b', { text: d.team }), ' · '] : null, nodes(describe(type, d)))));
 
     if (type === 'cost.tick') {
-      document.getElementById('rs-cost').textContent = '$' + Number(d.total).toFixed(2);
+      document.getElementById('rs-cost').textContent = fmtMoney(d.total, d.currency) + ' · ' + capText(d.cap, d.currency);
     }
   });
 }

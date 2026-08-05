@@ -10,6 +10,7 @@ import { el, clear } from './dom.mjs';
 import { GROUPS, ALL } from './nav_model.mjs';
 import { initModal } from './modal.mjs';
 import { watchVisibility } from './motion.mjs';
+import { api } from './api.mjs';
 
 export { GROUPS, ALL };
 
@@ -110,6 +111,14 @@ export function mount(opts) {
   // reduced motion is on, so a dashboard left open all day isn't animating
   // in the background for nothing.
   watchVisibility();
+
+  // Status / version (always shown in the brand). A failed fetch — or a
+  // response with no `.version` — leaves the "…" placeholder from the HTML
+  // in place rather than writing "vundefined".
+  api('/version').then((v) => {
+    const versionEl = document.getElementById('version');
+    if (versionEl && v && v.version) versionEl.textContent = `v${v.version}`;
+  }).catch(() => {});
 
   onHash(true);
 }
