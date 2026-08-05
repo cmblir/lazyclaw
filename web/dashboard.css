@@ -493,10 +493,9 @@
     @keyframes sweep { from { background-position: 190% 0; } to { background-position: -90% 0; } }
 
     /* Team topology: reporting-line edges plus per-agent focus/halo states.
-       Not consumed by team.mjs yet (it still renders the tree layout below
-       under the old .tagent/.team-* names) — these selectors are pinned by
-       tests/f-dashboard-motion.test.mjs so a future topology rework has the
-       rules ready rather than reinvented. */
+       Consumed by web/ui/panels/team.mjs, which renders the `.topology` div
+       and its `#edges` SVG directly — these selectors are pinned by
+       tests/f-dashboard-motion.test.mjs too, so treat them as live. */
     .topology { position: relative; padding: 16px 0 4px; }
     /* width/height are required: `inset: 0` alone leaves an <svg> at its
        intrinsic 300x150, which clips every edge away. */
