@@ -7,12 +7,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { topologicalLevels, retryWithBackoff, runWithTimeout, settleWithConcurrency } from './executor.mjs';
+// statePath owns the containment guard that keeps a sessionId inside the state
+// dir; re-exported below so existing importers of this module keep working.
+import { statePath, DEFAULT_DIR } from './state_path.mjs';
 // Workflow state can carry transcript content; persist it owner-only (0600).
 import { writeJsonSecure } from '../secure_write.mjs';
 import { acquireSessionLock } from './session_lock.mjs';
 import { isTimeout, errorPolicy } from './error_policy.mjs';
 
-const DEFAULT_DIR = '.workflow-state';
+// Re-exported so every existing importer of this module keeps working after the
+// split — callers should not have to know the guard moved house.
+export { statePath, DEFAULT_DIR };
+
 
 /** @typedef {'pending'|'running'|'success'|'failed'|'skipped'} NodeStatus */
 
@@ -34,13 +40,6 @@ const DEFAULT_DIR = '.workflow-state';
  * @property {number} updatedAt
  */
 
-/**
- * @param {string} sessionId
- * @param {string} [dir]
- */
-export function statePath(sessionId, dir = DEFAULT_DIR) {
-  return path.join(dir, `${sessionId}.json`);
-}
 
 /**
  * @param {string} sessionId
