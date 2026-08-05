@@ -145,7 +145,9 @@ export async function render(host) {
 
   async function deleteSkill(name) {
     if (!confirm(`Remove skill "${name}"?`)) return;
-    try { await apiRaw('/skills/' + encodeURIComponent(name), { method: 'DELETE' }); load(); }
+    // api() throws on a non-ok status; apiRaw returned the Response and this
+    // discarded it, so a failed removal was reported to the user as done.
+    try { await api('/skills/' + encodeURIComponent(name), { method: 'DELETE' }); load(); }
     catch (e) { alert('Delete failed: ' + e.message); }
   }
 

@@ -13,7 +13,26 @@ export async function render(host) {
   host.append(card);
 
   async function load() {
-    const r = await apiSoft('/doctor');
+    // Two failure modes had to be told apart, and neither was handled before.
+    // apiSoft swallows a JSON parse error but does NOT wrap its own fetch, so a
+    // stopped daemon rejected here with no catch and left the panel reading
+    // "Running…" forever. And a non-ok response left `d` empty, which rendered
+    // as an error banner saying "0 issues" — the shape of a clean run, with the
+    // real problem nowhere on screen.
+    let r;
+    try {
+      r = await apiSoft('/doctor');
+    } catch (e) {
+      card.replaceWith(card = banner('err', '✗', el('strong', { text: 'Could not reach the daemon. ' }),
+        String(e?.message || e)));
+      return;
+    }
+    if (!r.ok) {
+      card.replaceWith(card = banner('err', '✗',
+        el('strong', { text: `Doctor could not run (HTTP ${r.status}). ` }),
+        (r.body && typeof r.body.error === 'string') ? r.body.error : 'The daemon returned no detail.'));
+      return;
+    }
     const d = r.body || {};
     meta.textContent = d.timestamp ? new Date(d.timestamp).toLocaleString() : '';
     const issues = d.issues || [];

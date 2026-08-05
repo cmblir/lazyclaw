@@ -97,7 +97,10 @@ export async function render(host) {
   async function deleteSession(id) {
     if (!confirm(`Delete session "${id}"?\nTurn log will be permanently removed.`)) return;
     try {
-      await apiRaw('/sessions/' + encodeURIComponent(id), { method: 'DELETE' });
+      // api() throws on a non-ok status; apiRaw does not, and fetch itself only
+      // rejects on a network failure — so the old apiRaw call reported success
+      // for a 403 or a 500 and the user was told a delete happened that had not.
+      await api('/sessions/' + encodeURIComponent(id), { method: 'DELETE' });
       load();
     } catch (e) {
       alert('Delete failed: ' + e.message);
