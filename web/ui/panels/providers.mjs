@@ -4,6 +4,19 @@ import { el, phead } from '../dom.mjs';
 import { api, apiRaw } from '../api.mjs';
 import { openModal, closeModal } from '../modal.mjs';
 
+// Summarize a provider's suggestedModels for the card view: the first six,
+// joined, plus an explicit "(N of M)" when the full list is longer. A live
+// fetch can return hundreds of models (openrouter: 338, nim: 102) — a table
+// cell truncating to six is fine, presenting six as if it were the whole
+// list is not (the same class of bug the chat picker's old cap had). Pure —
+// no DOM — so it's unit-testable without a browser stub.
+export function formatModelsSummary(suggestedModels) {
+  const total = Array.isArray(suggestedModels) ? suggestedModels.length : 0;
+  const shown = (suggestedModels || []).slice(0, 6);
+  if (!shown.length) return null;
+  return shown.join(' · ') + (total > shown.length ? ` (${shown.length} of ${total})` : '');
+}
+
 export async function render(host) {
   const meta = el('span', { class: 'dim' });
   host.append(phead('Providers', null));
@@ -23,7 +36,7 @@ export async function render(host) {
         const tag = p.requiresApiKey ? el('span', { class: 'pill warn', text: 'api key' }) : el('span', { class: 'pill ok', text: 'no key' });
         const customTag = p.custom ? el('span', { class: 'pill', style: 'background:rgba(217,179,90,0.18);color:var(--accent);', text: 'custom' }) : null;
         const builtinCompat = p.builtinOpenAICompat ? el('span', { class: 'pill', style: 'background:rgba(74,222,128,0.12);color:var(--ok);', text: 'openai-compat' }) : null;
-        const models = (p.suggestedModels || []).slice(0, 6).join(' · ') || null;
+        const models = formatModelsSummary(p.suggestedModels);
         const out = el('div', { class: 'dim', 'data-test-result': '', style: 'margin-top:6px;font-size:11px;' });
         return el('div', { class: 'card' },
           el('div', { class: 'row', style: 'border:0;padding:0;' },

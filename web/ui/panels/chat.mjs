@@ -3,8 +3,38 @@
 // GET /status's configured default; sending posts { prompt, provider, model }
 // to POST /agent, which is one-shot, so prior turns are flattened into the
 // prompt text (buildAgentPrompt) rather than sent as a message array.
-import { el, phead } from '../dom.mjs';
+import { el, phead, chip } from '../dom.mjs';
 import { api } from '../api.mjs';
+
+// Build the ordered {value, label, isDefault} options for one provider's
+// models. Pure — no DOM — so it's unit-testable without a browser stub (see
+// tests/f-chat-model-options.test.mjs).
+//
+// No cap here: a native <select> handles hundreds of options fine (a single
+// live-fetched provider can return 300+), and a fixed slice(0, N) silently
+// discarded a provider's own defaultModel along with its newest models the
+// moment suggestedModels stopped being a short curated list. The caller
+// groups these into an <optgroup> per provider so a long list stays
+// navigable instead of one giant flat run.
+//
+// The provider's own `defaultModel` (a fact the registry already gives us)
+// is pinned first and labelled " (default)" rather than resorting the rest
+// of the list — guessing "newest" by parsing version numbers out of model
+// ids is exactly the kind of heuristic that ages badly the moment a vendor
+// changes its naming scheme.
+export function buildModelOptions(provider) {
+  const name = provider?.name || '';
+  const models = Array.isArray(provider?.suggestedModels) ? provider.suggestedModels : [];
+  const defaultModel = provider?.defaultModel || null;
+  const ordered = (defaultModel && models.includes(defaultModel))
+    ? [defaultModel, ...models.filter((m) => m !== defaultModel)]
+    : models;
+  return ordered.map((m) => ({
+    value: `${name}:${m}`,
+    label: `${name}  ·  ${m}${m === defaultModel ? ' (default)' : ''}`,
+    isDefault: m === defaultModel,
+  }));
+}
 
 export async function render(host) {
   host.append(phead('Chat', 'Send a one-shot prompt to a provider/model.'));
@@ -12,12 +42,26 @@ export async function render(host) {
   // [{role, text}] — local to this render; resets when the panel is left and
   // reopened, since the shell tears down and rebuilds the host on navigation.
   let chatHistory = [];
+  // providerId -> 'live' | 'builtin', from GET /providers's modelsSource.
+  // Lets the picker show whether the currently selected provider's model
+  // list came from a live fetch or the frozen builtin/generated one —
+  // without it a stale list looks identical to a fresh one.
+  const modelSourceByProvider = new Map();
 
   const meta = el('span', { class: 'dim' });
   const select = el('select', {}, el('option', { value: '', text: '(loading…)' }));
-  host.append(el('div', { class: 'toolbar' }, select,
+  const sourceTag = el('span', {});
+  host.append(el('div', { class: 'toolbar' }, select, sourceTag,
     el('button', { class: 'btn btn-secondary', type: 'button', text: 'Clear', onclick: () => resetChat() }),
     meta));
+
+  function updateSourceTag() {
+    const provName = select.value.includes(':') ? select.value.split(':', 2)[0] : select.value;
+    const source = modelSourceByProvider.get(provName) || null;
+    if (source) sourceTag.replaceChildren(chip(source, source === 'live' ? 'live' : ''));
+    else sourceTag.replaceChildren();
+  }
+  select.addEventListener('change', updateSourceTag);
 
   const stream = el('div', { id: 'chat-stream' }, el('div', { class: 'empty', text: 'Type below to start.' }));
   host.append(stream);
@@ -111,11 +155,12 @@ export async function render(host) {
     const defaultModel = defaultStatus?.model || null;
     const defaultValue = defaultProv && defaultModel ? `${defaultProv}:${defaultModel}` : defaultProv;
     for (const p of arr) {
+      modelSourceByProvider.set(p.name, p.modelsSource || 'builtin');
       const ms = p.suggestedModels || [];
       if (!ms.length) { select.append(el('option', { value: p.name, text: p.name })); continue; }
-      for (const m of ms.slice(0, 6)) {
-        select.append(el('option', { value: `${p.name}:${m}`, text: `${p.name}  ·  ${m}` }));
-      }
+      const options = buildModelOptions(p);
+      select.append(el('optgroup', { label: p.name },
+        options.map((o) => el('option', { value: o.value, text: o.label }))));
     }
     if (defaultValue) {
       // Exact match first (provider:model); fall back to any option starting
@@ -129,6 +174,7 @@ export async function render(host) {
         if (byProv) select.value = byProv.value;
       }
     }
+    updateSourceTag();
   } catch (e) {
     meta.textContent = '⚠ ' + e.message;
   }

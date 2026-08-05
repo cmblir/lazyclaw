@@ -145,6 +145,10 @@ export async function cmdDashboard(flags = {}) {
     responseCache: null,
     logger: null,
     costCap: null,
+    // Live model-list cache (feat/live-model-lists): the dashboard is the
+    // primary consumer of GET /providers's suggestedModels, so this is the
+    // one place the background refresh loop should always be on.
+    modelRefresh: true,
   };
   let d;
   try {
@@ -313,6 +317,9 @@ export async function cmdDaemon(flags) {
       responseCache,
       logger,
       costCap: costCapOrNull,
+      // Same live model-list cache the dashboard gets — a bare `lazyclaw
+      // daemon` still serves GET /providers, so it should too.
+      modelRefresh: true,
     });
   } catch (err) {
     // `lazyclaw daemon` exits cleanly on EADDRINUSE with a readable

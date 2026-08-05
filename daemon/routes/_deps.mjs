@@ -8,6 +8,7 @@ import nodePath from 'node:path';
 export { fs, nodePath };
 
 export { PROVIDERS, PROVIDER_INFO, maskApiKey } from '../../providers/registry.mjs';
+export { resolveModelsForProvider } from '../lib/model_cache.mjs';
 export { costFromUsage, RATE_CARD_SHAPE } from '../../providers/rates.mjs';
 export {
   composeSystemPrompt, listSkills, loadSkill, skillPath, installSkill,
