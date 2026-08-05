@@ -177,6 +177,7 @@ A framework-free, zero-build SPA (`web/` ships as source — native ES modules, 
 - **Approvals** and **Devices** are new panels, both **read-only**: resolving an approval needs a paired device's Ed25519 token, which the dashboard isn't — approve from a paired device or with `lazyclaw nodes`. The Approvals sidebar badge itself only refreshes when you open the Approvals panel; those events don't yet reach the dashboard's SSE stream, so the badge doesn't move while you're on another panel.
 - The live rail picks up four new event types: `workflow.step`, `cost.tick`, `channel.inbound`, `provider.error`. `cost.tick` only fires for team-routed traffic — the plain `/chat` and `/agent` paths never feed the configured cap to the cost accountant. There's no `cron.fire`: a scheduled job runs in whatever subprocess launchd/cron spawns, with no link back to the daemon's event bus, so a fire isn't observable here at all.
 - **⌘K** jumps to any panel plus four fixed actions (start a task, new team, review approvals, rebuild the search index) — it doesn't resolve a team or agent by name.
+- **Chat**'s model picker lists each provider's live model catalogue when one is reachable (grouped per provider, since a live fetch can return hundreds), instead of a fixed curated set, and tags the picker `live`/`builtin` so a fetched list is never mistaken for a frozen one. Without a live fetch it falls back to `npm run models:sync`'s last run, then the hand-written defaults — so the list is never empty just because a credential isn't configured on this machine.
 
 ## Providers
 

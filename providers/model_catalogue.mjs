@@ -62,6 +62,15 @@ export async function fetchAnthropicModels({ apiKey, oauthToken, fetchImpl } = {
   const auth = apiKey
     ? { 'x-api-key': apiKey }
     : { 'authorization': `Bearer ${oauthToken}`, 'anthropic-beta': 'oauth-2025-04-20' };
+  // No AbortController/signal here — a genuinely hanging endpoint (not just
+  // an HTTP error, an actual non-responding connection) leaves this call
+  // pending indefinitely. daemon/lib/model_cache.mjs's background refresh
+  // applies each provider's result independently as it settles, so a hang
+  // here only ever delays THIS provider's own cache entry, never another's
+  // or GET /providers itself — but it would leave that one refresh tick's
+  // own promise unresolved until the connection eventually times out at the
+  // OS/TCP level. Worth a real timeout here as a follow-up if that's ever
+  // observed in practice.
   const res = await f('https://api.anthropic.com/v1/models?limit=1000', {
     method: 'GET',
     headers: { ...auth, 'anthropic-version': '2023-06-01', 'accept': 'application/json' },
@@ -85,6 +94,11 @@ export async function fetchAnthropicModels({ apiKey, oauthToken, fetchImpl } = {
 export async function fetchGeminiModels({ apiKey, fetchImpl } = {}) {
   if (!apiKey) throw new Error('gemini model listing requires an api key (set GEMINI_API_KEY or configure the provider)');
   const f = fetchImpl || globalThis.fetch;
+  // Same caveat as fetchAnthropicModels above: no signal/timeout, so a
+  // genuinely hanging endpoint leaves this call pending indefinitely — bounded
+  // in effect (daemon/lib/model_cache.mjs applies each provider's result as it
+  // settles, so this only ever delays gemini's own cache entry) but not
+  // eliminated. See that comment for the full reasoning.
   const res = await f(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&key=${encodeURIComponent(apiKey)}`, {
     method: 'GET',
     headers: { 'accept': 'application/json' },
