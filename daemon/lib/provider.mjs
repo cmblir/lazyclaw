@@ -21,6 +21,24 @@ import { emit as emitEvent } from '../../mas/events.mjs';
 //
 // Returns { provider } on success or { error } when the primary or any
 // listed fallback name is unknown.
+/**
+ * The `detail` a provider.error event may carry — a routing fact, never text.
+ *
+ * Deliberately does NOT consider err.message. Every connected dashboard receives
+ * this over SSE, and providers/anthropic.mjs's ApiError builds its message as
+ * `anthropic api ${status}: ${body.slice(0, 200)}` — 200 characters of the
+ * provider's raw HTTP error body. ApiError also sets no `code`, so a message
+ * fallback would be the NORMAL path for an Anthropic failure rather than a rare
+ * one. code / status / name are non-content, which is all the live rail needs:
+ * "anthropic failed, 429". Exported so the rule is unit-tested rather than
+ * trusted inside a callback.
+ * @param {unknown} err
+ * @returns {string}
+ */
+export function _detailForFallback(err) {
+  return String(err?.code || err?.status || err?.name || 'failed').slice(0, 40);
+}
+
 export function resolveProvider(body, providerName, cachedByName, logger) {
   if (!PROVIDERS[providerName]) return { error: `unknown provider: ${providerName}` };
   // The decorator callbacks emit one debug line each — useful for ops who
@@ -55,8 +73,9 @@ export function resolveProvider(body, providerName, cachedByName, logger) {
         dbg('provider.fallback', {
           from, to, errorCode: err?.code || null, errorMsg: String(err?.message || err).slice(0, 120),
         });
-        // Live-rail routing fact: which provider failed, never the full error.
-        emitEvent('provider.error', { provider: from, detail: err?.code || err?.message || 'failed' });
+        // Live-rail routing fact: which provider failed, never the error text.
+        // See _detailForFallback's docstring for why err.message is excluded.
+        emitEvent('provider.error', { provider: from, detail: _detailForFallback(err) });
       },
     });
   }
