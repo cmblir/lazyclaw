@@ -82,7 +82,7 @@ pompos channels enable|disable slack
 pompos channels install discord     # installs discord.js into ~/.pompos and enables the channel
 ```
 
-A listener is a thin forwarder: it owns the channel socket (Slack Socket Mode needs no public URL, just an app-level `xapp-` token) and POSTs each message to the daemon's `/inbound`, which binds the conversation to a persistent session and runs the provider. It needs a reachable daemon (`pompos service install`, or `pompos daemon`); override the target with `--daemon-url` / `LAZYCLAW_DAEMON_URL`. Set it all up from the wizard's channel step, or `/channels` in chat.
+A listener is a thin forwarder: it owns the channel socket (Slack Socket Mode needs no public URL, just an app-level `xapp-` token) and POSTs each message to the daemon's `/inbound`, which binds the conversation to a persistent session and runs the provider. It needs a reachable daemon (`pompos service install`, or `pompos daemon`); override the target with `--daemon-url` / `POMPOS_DAEMON_URL`. Set it all up from the wizard's channel step, or `/channels` in chat.
 
 ## Run it always-on
 
@@ -157,7 +157,7 @@ The REPL also animates when your terminal supports it: a launch reveal + wordmar
 
 | Env var | Effect |
 |---|---|
-| `LAZYCLAW_NO_MOTION` | `1` disables every terminal animation (launch intro, streaming spinner, gauge tween, error flash). Animation is also off automatically without a TTY, under `NO_COLOR`, and on `TERM=dumb`. |
+| `POMPOS_NO_MOTION` | `1` disables every terminal animation (launch intro, streaming spinner, gauge tween, error flash). Animation is also off automatically without a TTY, under `NO_COLOR`, and on `TERM=dumb`. |
 
 ## The dashboard
 
@@ -203,11 +203,11 @@ A framework-free, zero-build SPA (`web/` ships as source — native ES modules, 
 - **Default-on confinement** — sensitive tools (`bash`, `python_exec`/`node_exec`, `git_*`, the `os` tools) run confined by default: writes are limited to the workspace + temp, secret dirs (`~/.ssh`, `~/.aws`, the config dir, …) are unreadable, and the secret-scrubbed env still applies. macOS uses `seatbelt`, Linux uses `bubblewrap`/`firejail` (auto-detected). Network is allowed; opt out with `cfg.sandbox.confine=false`. Run `pompos sandbox status` to see the effective posture.
 - **Sandboxes** — `local` / `docker` / `ssh` / `singularity` / `modal` / `daytona` behind one API; pluggable backends for heavier isolation (containers, remote hosts) layered on top of the default local confinement.
 - **MCP** — stdio MCP servers in `cfg.mcp.servers` boot with the daemon; their tools register as `mcp:<server>:<tool>` (always approval-gated). Manage them from the CLI: `pompos mcp list` / `mcp add <name> --command <cmd> [--args "…"] [--allow-glob <glob>]` / `mcp remove <name>` / `mcp call <server> <tool> [--args-json '{…}']` (spawns the server, runs one tool, tears it down).
-- **Daemon lifecycle** — `pompos daemon status | stop | logs` over a pidfile; `maxTokens` in config raises the output cap; `LAZYCLAW_REQUEST_TIMEOUT_MS` sets the per-provider idle timeout (default 120s).
+- **Daemon lifecycle** — `pompos daemon status | stop | logs` over a pidfile; `maxTokens` in config raises the output cap; `POMPOS_REQUEST_TIMEOUT_MS` sets the per-provider idle timeout (default 120s).
 
 ## Configuration & security
 
-Config is plain JSON at `~/.pompos/config.json` — parsed with `JSON.parse`, no shell or code execution; channel + provider secrets live in `~/.pompos/.env` (written 0600, never logged). Move the dir with `LAZYCLAW_CONFIG_DIR=/path`.
+Config is plain JSON at `~/.pompos/config.json` — parsed with `JSON.parse`, no shell or code execution; channel + provider secrets live in `~/.pompos/.env` (written 0600, never logged). Move the dir with `POMPOS_CONFIG_DIR=/path`.
 
 Sensitive tools deny by default unless an approval hook grants them; `config.json` and workflow state are written owner-only; secrets are scrubbed from the `bash` tool's child env and redacted from trajectories and synthesised skills.
 
@@ -215,11 +215,22 @@ Sensitive tools deny by default unless an approval hook grants them; `config.jso
 
 ```bash
 npm install -g pompos                 # install
-git clone https://github.com/cmblir/lazyclaw && cd pompos && npm install && npm link   # hack
+git clone https://github.com/cmblir/lazyclaw && cd lazyclaw && npm install && npm link  # hack
 node --test tests/*.test.mjs            # run the suite
 ```
 
 Requires **Node 18+** (Node 22+ for Slack Socket Mode). macOS / Linux / WSL are first-class.
+
+## Coming from lazyclaw
+
+This tool was `lazyclaw` through 6.10.0. Nothing you have set up needs changing:
+
+- **Your state stays where it is.** An existing `~/.lazyclaw` keeps being used in place — nothing is moved or copied. To adopt the new path, `mv ~/.lazyclaw ~/.pompos`; it is picked up automatically.
+- **`LAZYCLAW_*` variables still work.** Each is mirrored to its `POMPOS_*` name at startup, so shell profiles, CI secrets and unit files keep taking effect. Whichever name you set explicitly wins.
+- **The `lazyclaw` command still works**, so installed launchd plists, systemd units and crontab lines that invoke it by name keep running, as do schedules created before the rename.
+- **The dashboard keeps you signed in** — a token saved under the old key is read and carried forward.
+
+`npm install -g pompos` installs both commands. Releases now publish to the `pompos` package, so the `lazyclaw` package stays at the 6.9.3 already on npm.
 
 ## Docs
 

@@ -47,7 +47,7 @@ pompos channels                                # 설정된 채널 보기
 pompos channels enable|disable slack
 ```
 
-리스너는 thin forwarder: 채널 소켓을 소유(Slack Socket Mode는 공개 URL 불요, app-level `xapp-` 토큰)하고 각 메시지를 데몬 `/inbound`로 POST → 데몬이 영속 세션에 바인딩 후 provider 실행. **데몬이 떠 있어야 함**(`pompos service install` 또는 `pompos daemon`); 타깃은 `--daemon-url`/`LAZYCLAW_DAEMON_URL`로 override. 위저드 채널 단계나 chat `/channels`로 설정.
+리스너는 thin forwarder: 채널 소켓을 소유(Slack Socket Mode는 공개 URL 불요, app-level `xapp-` 토큰)하고 각 메시지를 데몬 `/inbound`로 POST → 데몬이 영속 세션에 바인딩 후 provider 실행. **데몬이 떠 있어야 함**(`pompos service install` 또는 `pompos daemon`); 타깃은 `--daemon-url`/`POMPOS_DAEMON_URL`로 override. 위저드 채널 단계나 chat `/channels`로 설정.
 
 ## 상시 가동 (always-on)
 
@@ -110,8 +110,19 @@ pompos dashboard          # http://127.0.0.1:19600 로컬 웹 UI (그룹 사이�
 
 ## 설정 / 보안
 
-설정은 `~/.pompos/config.json`(plain JSON), 시크릿은 `~/.pompos/.env`(0600, 로그 안 남김). 디렉터리 이동 `LAZYCLAW_CONFIG_DIR=/path`.
+설정은 `~/.pompos/config.json`(plain JSON), 시크릿은 `~/.pompos/.env`(0600, 로그 안 남김). 디렉터리 이동 `POMPOS_CONFIG_DIR=/path`.
 
 > ⚠️ `config.json`은 shell rc처럼 신뢰 코드 — `$(...)` 값은 로드 시 실행됨. 신뢰 못 할 스니펫 붙여넣기 금지. 민감 tool(shell/write/network)은 기본 fail-closed(승인 hook 필요).
 
 Node 18+ (Slack Socket Mode는 22+). macOS / Linux / WSL 1급.
+
+## lazyclaw에서 넘어오기
+
+6.10.0까지는 `lazyclaw`였다. 기존에 설정한 것을 바꿀 필요는 없다.
+
+- **상태는 그 자리에 남는다.** `~/.lazyclaw`가 있으면 그대로 계속 쓴다 — 이동·복사 없음. 새 경로로 옮기려면 `mv ~/.lazyclaw ~/.pompos`, 자동으로 인식된다.
+- **`LAZYCLAW_*` 변수는 그대로 동작한다.** 시작 시 `POMPOS_*` 이름으로 미러링되므로 shell 프로필·CI 시크릿·유닛 파일이 계속 적용된다. 명시적으로 설정한 이름이 우선한다.
+- **`lazyclaw` 명령도 유지된다.** 이름으로 호출하는 launchd plist·systemd 유닛·crontab, 그리고 개명 전에 만든 스케줄이 계속 돈다.
+- **대시보드 로그인이 유지된다** — 옛 키에 저장된 토큰을 읽어 새 키로 옮긴다.
+
+`npm install -g pompos`가 두 명령을 모두 설치한다. 릴리스는 이제 `pompos` 패키지로 게시되므로 `lazyclaw` 패키지는 npm에 있는 6.9.3에 머문다.
