@@ -198,3 +198,51 @@ test('the new key wins when both are present, and an absent token is empty', asy
   withStubbedStorage({});
   assert.equal(getToken(), '', 'no token at all must read as empty, not null');
 });
+
+// --- cron jobs scheduled before the rename ---------------------------------
+// resolveCommand above covers the stored argv. This covers the other half: the
+// plist launchd already has loaded. os.homedir() honours $HOME, so a temp HOME
+// with a planted LaunchAgents file exercises the real resolver.
+
+function cronLabelWith(home, planted = []) {
+  fs.mkdirSync(path.join(home, 'Library', 'LaunchAgents'), { recursive: true });
+  for (const f of planted) fs.writeFileSync(path.join(home, 'Library', 'LaunchAgents', f), '<plist/>');
+  const code = "import { plistLabel, plistPath } from './cron.mjs';"
+    + " process.stdout.write(JSON.stringify([plistLabel('nightly'), plistPath('nightly')]));";
+  const out = execFileSync(process.execPath, ['--input-type=module', '-e', code],
+    { cwd: ROOT, env: { ...process.env, HOME: home }, encoding: 'utf8' });
+  return JSON.parse(out);
+}
+
+test('a cron job whose plist predates the rename keeps its own label', () => {
+  const home = tmpHome();
+  const [label, plist] = cronLabelWith(home, ['com.lazyclaw.nightly.plist']);
+  assert.equal(label, 'com.lazyclaw.nightly',
+    'rewriting it under the new label would leave the loaded one firing too');
+  assert.equal(plist, path.join(home, 'Library', 'LaunchAgents', 'com.lazyclaw.nightly.plist'));
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('a new cron job gets the new label, and the new plist wins over a leftover old one', () => {
+  const fresh = tmpHome();
+  assert.equal(cronLabelWith(fresh)[0], 'com.pompos.nightly');
+  fs.rmSync(fresh, { recursive: true, force: true });
+
+  const both = tmpHome();
+  assert.equal(cronLabelWith(both, ['com.lazyclaw.nightly.plist', 'com.pompos.nightly.plist'])[0],
+    'com.pompos.nightly', 'once a current plist exists it is the one that counts');
+  fs.rmSync(both, { recursive: true, force: true });
+});
+
+test('cron log paths follow the configured directory instead of a hardcoded one', () => {
+  // They were pinned to ~/.lazyclaw/logs, so an operator who moved their config
+  // dir got cron logs somewhere else entirely.
+  const home = tmpHome();
+  const code = "import { buildPlist } from './cron.mjs';"
+    + " process.stdout.write(buildPlist('nightly', '0 9 * * *', ['pompos', 'agent', 'x']));";
+  const out = execFileSync(process.execPath, ['--input-type=module', '-e', code],
+    { cwd: ROOT, env: { ...process.env, HOME: home, POMPOS_CONFIG_DIR: '/tmp/cfgx', LAZYCLAW_CONFIG_DIR: '' }, encoding: 'utf8' });
+  assert.match(out, /<string>\/tmp\/cfgx\/logs\/cron-nightly\.out\.log<\/string>/);
+  assert.match(out, /<string>\/tmp\/cfgx\/logs\/cron-nightly\.err\.log<\/string>/);
+  fs.rmSync(home, { recursive: true, force: true });
+});

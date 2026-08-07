@@ -14,6 +14,7 @@ import {
   installService,
   uninstallService,
   serviceStatus,
+  resolveServicePaths,
 } from '../lib/service_install.mjs';
 
 const SPEC = {
@@ -239,4 +240,83 @@ test('cmdService._buildSpec: wraps `daemon` with flags + injects config dir', as
   assert.equal(spec.workingDir, '/w');
   assert.equal(spec.env.LAZYCLAW_CONFIG_DIR, '/cfg');
   assert.equal(spec.name, 'daemon');
+});
+
+// ── pre-rename installs ─────────────────────────────────────────────
+// A service installed as lazyclaw is a file on disk that launchd or systemd
+// already has loaded under the old label. The OS knows nothing about the new
+// one, so an operation that looks only at the new name does not fail loudly —
+// it silently acts on nothing while the old unit keeps running.
+
+function fsWith(present) {
+  const set = new Set(present);
+  return { existsSync: (p) => set.has(p), readFileSync: () => '', writeFileSync: () => {},
+           mkdirSync: () => {}, rmSync: () => {} };
+}
+
+const HOME = { home: '/home/u', configDir: '/home/u/.pompos' };
+const NEW_PLIST = '/home/u/Library/LaunchAgents/com.pompos.daemon.plist';
+const OLD_PLIST = '/home/u/Library/LaunchAgents/com.lazyclaw.daemon.plist';
+const NEW_UNIT = '/home/u/.config/systemd/user/pompos-daemon.service';
+const OLD_UNIT = '/home/u/.config/systemd/user/lazyclaw-daemon.service';
+
+test('a launchd service installed before the rename is adopted at its own label', () => {
+  const p = resolveServicePaths('daemon', { ...HOME, backend: 'launchd' }, { fs: fsWith([OLD_PLIST]) });
+  assert.equal(p.launchd, OLD_PLIST);
+  assert.equal(p.label, 'com.lazyclaw.daemon',
+    'the label must match the file, or launchctl and the filename disagree');
+});
+
+test('a fresh install gets the new label, and the new one wins when both exist', () => {
+  const fresh = resolveServicePaths('daemon', { ...HOME, backend: 'launchd' }, { fs: fsWith([]) });
+  assert.equal(fresh.launchd, NEW_PLIST);
+  assert.equal(fresh.label, 'com.pompos.daemon');
+  const both = resolveServicePaths('daemon', { ...HOME, backend: 'launchd' },
+    { fs: fsWith([NEW_PLIST, OLD_PLIST]) });
+  assert.equal(both.launchd, NEW_PLIST, 'never prefer the legacy file once a current one exists');
+});
+
+test('the same holds for a pre-rename systemd unit', () => {
+  const p = resolveServicePaths('daemon', { ...HOME, backend: 'systemd' }, { fs: fsWith([OLD_UNIT]) });
+  assert.equal(p.systemd, OLD_UNIT);
+  assert.equal(p.unit, 'lazyclaw-daemon.service', 'systemctl is given the unit that exists');
+  const fresh = resolveServicePaths('daemon', { ...HOME, backend: 'systemd' }, { fs: fsWith([]) });
+  assert.equal(fresh.unit, 'pompos-daemon.service');
+});
+
+test('uninstall removes the pre-rename plist instead of reporting success over a live one', () => {
+  const removed = [];
+  const unloaded = [];
+  const fs = { ...fsWith([OLD_PLIST]), rmSync: (p) => removed.push(p) };
+  const out = uninstallService({ name: 'daemon', backend: 'launchd', ...HOME },
+    { fs, spawnSync: (cmd, argv) => { unloaded.push(argv.join(' ')); return { status: 0 }; } });
+  assert.deepEqual(removed, [OLD_PLIST], 'the file that exists is the file that is deleted');
+  assert.ok(unloaded.some((a) => a.includes(OLD_PLIST)), 'and it is unloaded from launchd first');
+  assert.equal(out.removed, OLD_PLIST);
+});
+
+test('status reports a pre-rename service as installed, and queries its real label', () => {
+  const asked = [];
+  const out = serviceStatus({ name: 'daemon', backend: 'launchd', ...HOME }, {
+    fs: fsWith([OLD_PLIST]),
+    spawnSync: (cmd, argv) => { asked.push(argv.join(' ')); return { status: 0, stdout: '"PID" = 4242;' }; },
+    isAlive: () => true,
+  });
+  assert.equal(out.installed, true, 'a running pre-rename service must not report installed:false');
+  assert.equal(out.pid, 4242);
+  assert.ok(asked.some((a) => a === 'list com.lazyclaw.daemon'),
+    'launchctl must be asked about the label it actually has loaded');
+});
+
+test('install rewrites the pre-rename unit in place rather than adding a second one', () => {
+  // Writing the new name here is what would give the operator two copies of the
+  // same always-on service, both loaded, neither removable from the CLI.
+  const written = [];
+  const fs = { ...fsWith([OLD_PLIST]), writeFileSync: (p, body) => written.push([p, body]) };
+  installService({ ...SPEC, backend: 'launchd', ...HOME },
+    { fs, spawnSync: () => ({ status: 0 }) });
+  assert.equal(written.length, 1);
+  assert.equal(written[0][0], OLD_PLIST, 'one service, one file');
+  assert.match(written[0][1], /<string>com\.lazyclaw\.daemon<\/string>/,
+    'and the Label inside it stays the one launchd has loaded');
 });

@@ -26,6 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
+import { defaultConfigDir } from './lib/config_dir.mjs';
 
 const MARKER_PREFIX = '# lazyclaw-cron:';
 
@@ -260,11 +261,31 @@ export function pickBackend() {
   return 'crontab';
 }
 
-export function plistPath(name) {
-  return path.join(os.homedir(), 'Library', 'LaunchAgents', `com.lazyclaw.${name}.plist`);
+// A job scheduled before the rename is a plist that launchd ALREADY HAS LOADED
+// under com.lazyclaw.<name>. Installing the new label alongside it would leave
+// the old one loaded and firing, so `sync` would give the operator the same job
+// scheduled twice; removing the new label would delete nothing and report
+// success while the real job kept running. So: adopt the plist that exists, and
+// give a new job the new label.
+function launchAgentsDir() {
+  return path.join(os.homedir(), 'Library', 'LaunchAgents');
 }
 
-export function buildPlist(name, schedule, command) {
+export function plistLabel(name) {
+  const current = `com.pompos.${name}`;
+  const legacy = `com.lazyclaw.${name}`;
+  const at = (label) => path.join(launchAgentsDir(), `${label}.plist`);
+  try {
+    if (!fs.existsSync(at(current)) && fs.existsSync(at(legacy))) return legacy;
+  } catch { /* unreadable LaunchAgents: use the current name */ }
+  return current;
+}
+
+export function plistPath(name) {
+  return path.join(launchAgentsDir(), `${plistLabel(name)}.plist`);
+}
+
+export function buildPlist(name, schedule, command, { label, logDir } = {}) {
   const parsed = parseCronSpec(schedule);
   const min   = expandField(parsed.minute, { min: 0,  max: 59 });
   const hour  = expandField(parsed.hour,   { min: 0,  max: 23 });
@@ -306,10 +327,14 @@ export function buildPlist(name, schedule, command) {
     return dict;
   });
   const programArguments = resolveCommand(command);
-  const stdoutPath = path.join(os.homedir(), '.lazyclaw', 'logs', `cron-${name}.out.log`);
-  const stderrPath = path.join(os.homedir(), '.lazyclaw', 'logs', `cron-${name}.err.log`);
+  // Logs went to a hardcoded ~/.lazyclaw/logs, which ignored an operator's
+  // configured directory entirely. Routed through the resolver, so it follows
+  // POMPOS_CONFIG_DIR and lands beside the rest of their state.
+  const logs = logDir || path.join(defaultConfigDir(), 'logs');
+  const stdoutPath = path.join(logs, `cron-${name}.out.log`);
+  const stderrPath = path.join(logs, `cron-${name}.err.log`);
   return renderPlist({
-    label: `com.lazyclaw.${name}`,
+    label: label || plistLabel(name),
     programArguments,
     intervals,
     stdoutPath,
@@ -424,10 +449,14 @@ export function uninstallCrontabJob(name) {
 // ── launchd backend (macOS) ─────────────────────────────────────
 
 export function installLaunchdJob(name, schedule, command) {
-  const text = buildPlist(name, schedule, command);
-  const dst = plistPath(name);
+  // One resolution for the whole install, so the filename, the Label inside it
+  // and the log paths cannot disagree with each other.
+  const label = plistLabel(name);
+  const logDir = path.join(defaultConfigDir(), 'logs');
+  const text = buildPlist(name, schedule, command, { label, logDir });
+  const dst = path.join(launchAgentsDir(), `${label}.plist`);
   fs.mkdirSync(path.dirname(dst), { recursive: true });
-  fs.mkdirSync(path.join(os.homedir(), '.lazyclaw', 'logs'), { recursive: true });
+  fs.mkdirSync(logDir, { recursive: true });
   fs.writeFileSync(dst, text);
   // Try to load the agent so it takes effect now. If launchctl
   // refuses (already loaded, no GUI session), surface the error
