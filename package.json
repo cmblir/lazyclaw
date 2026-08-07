@@ -15,15 +15,15 @@
     "workflow",
     "agent"
   ],
-  "homepage": "https://github.com/cmblir/lazyclaw#readme",
+  "homepage": "https://github.com/cmblir/pompos#readme",
   "bugs": {
-    "url": "https://github.com/cmblir/lazyclaw/issues"
+    "url": "https://github.com/cmblir/pompos/issues"
   },
   "license": "MIT",
   "author": "cmblir",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cmblir/lazyclaw.git"
+    "url": "git+https://github.com/cmblir/pompos.git"
   },
   "type": "module",
   "main": "cli.mjs",

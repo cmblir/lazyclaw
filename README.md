@@ -215,7 +215,7 @@ Sensitive tools deny by default unless an approval hook grants them; `config.jso
 
 ```bash
 npm install -g pompos                 # install
-git clone https://github.com/cmblir/lazyclaw && cd lazyclaw && npm install && npm link  # hack
+git clone https://github.com/cmblir/pompos && cd pompos && npm install && npm link    # hack
 node --test tests/*.test.mjs            # run the suite
 ```
 
@@ -242,4 +242,4 @@ This tool was `lazyclaw` through 6.10.0. Nothing you have set up needs changing:
 
 ## License
 
-[MIT](./LICENSE) · Source & issues: [cmblir/pompos](https://github.com/cmblir/lazyclaw)
+[MIT](./LICENSE) · Source & issues: [cmblir/pompos](https://github.com/cmblir/pompos)
