@@ -29,7 +29,7 @@ export function _renderMascotTiny() {
 // figlet "standard" "lazy", trimmed of leading blank line. Each row
 // is left-padded by two spaces inside the box, and every row is then
 // padded to INNER_W cells.
-// Compact letter art for the retired-v4-style box that _renderBanner still
+// Compact letter banner for the retired-v4-style box that _renderBanner still
 // draws. `figlet -f mini pompos` lands at exactly the 20-column slot
 // _INNER_W budgets for; the standard font needs 39 and would overflow it.
 const _LAZY_STANDARD = [
@@ -56,7 +56,7 @@ export function _renderBanner(version) {
 }
 
 // v5 hero banner assets — ANSI Shadow POMPOS wordmark stacked on top of the
-// braille sloth (tui/banner.generated.mjs + tui/wordmark.mjs). Lazy-loaded and
+// braille banner (tui/banner.generated.mjs + tui/wordmark.mjs). Lazy-loaded and
 // cached so the missing-asset fallback only probes the dynamic import once.
 let _bannerAssetsCache = null;
 export async function _loadBannerAssets() {

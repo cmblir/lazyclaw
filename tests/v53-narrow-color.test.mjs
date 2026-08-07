@@ -4,7 +4,7 @@
 // per-row coloring behind `cols >= WORDMARK_BREAKPOINT`, so anything in
 // the NARROW (45..89) and MEDIUM (90..139) tiers rendered with the
 // terminal's default foreground (visually white on most themes). The
-// user-visible bug: at cols=80 the panel border, sloth, section
+// user-visible bug: at cols=80 the panel border, banner, section
 // headers, and compact headline all came out white instead of amber.
 //
 // This test pins the fix: at cols=80 the Splash element tree must
@@ -70,7 +70,7 @@ test('NARROW tier at cols=80: at least N rows have theme.fg color', () => {
     return collectTextRows(el);
   });
   const colored = rows.filter((r) => r.color === theme.fg);
-  // Expectation: sloth banner (35 rows) + panel top + panel bottom +
+  // Expectation: banner banner (35 rows) + panel top + panel bottom +
   // ~all panel side rows ('│ ... │') + section headers + compact
   // headline + summary line. Even a conservative lower bound is well
   // over the pre-fix value of 0.
@@ -112,14 +112,14 @@ test('NARROW tier at cols=80: compact headline "pompos 5.3.0" is amber', () => {
   assert.equal(headline.color, theme.fg, 'compact headline must be amber');
 });
 
-test('NARROW tier at cols=80: sloth banner rows are amber', () => {
+test('NARROW tier at cols=80: banner rows are amber', () => {
   const rows = withColumns(80, () => collectTextRows(Splash(fixture)));
-  // The sloth banner uses braille (⣿ and friends). Any row containing
+  // The banner banner uses braille (⣿ and friends). Any row containing
   // braille glyphs in the NARROW output must be colored.
-  const slothRows = rows.filter((r) => /[⠀-⣿]/.test(r.content));
-  assert.ok(slothRows.length > 0, 'expected braille sloth rows at cols=80');
-  for (const r of slothRows) {
-    assert.equal(r.color, theme.fg, 'every braille sloth row must be amber');
+  const bannerRows = rows.filter((r) => /[⠀-⣿]/.test(r.content));
+  assert.ok(bannerRows.length > 0, 'expected braille banner rows at cols=80');
+  for (const r of bannerRows) {
+    assert.equal(r.color, theme.fg, 'every braille banner row must be amber');
   }
 });
 

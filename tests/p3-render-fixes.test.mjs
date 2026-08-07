@@ -1,7 +1,7 @@
 // tests/p3-render-fixes.test.mjs — v5.5 rendering fixes:
 //   · ScrollbackItem is memoized so committed lines don't re-render on every
 //     keystroke (the typing flicker).
-//   · the alt-buffer scrollback keeps the splash (sloth + manual) and pins the
+//   · the alt-buffer scrollback keeps the splash (banner + manual) and pins the
 //     newest content to the bottom (justifyContent flex-end), so the splash
 //     scrolls off naturally instead of being force-dropped after one command.
 

@@ -166,8 +166,8 @@ export function _attachGhostAutocomplete(rl) {
 // pickers-local state and stay close to the wizard that prints them.
 
 // v5 hero banner — ANSI Shadow POMPOS wordmark stacked on top of the
-// braille sloth (tui/banner.generated.mjs + tui/wordmark.mjs). Left-aligned
-// with a 2-cell margin so wide terminals don't push the art to the right.
+// braille banner (tui/banner.generated.mjs + tui/wordmark.mjs). Left-aligned
+// with a 2-cell margin so wide terminals don't push the banner to the right.
 // Opt out with LAZYCLAW_LEGACY_MENU=1 to fall back to the v4 figlet box.
 export async function _renderV5Banner(version) {
   const a = await _loadBannerAssets();
@@ -194,7 +194,7 @@ export async function _renderV5Banner(version) {
 export async function _printChatBanner(activeProvName, activeModel, version) {
   if (!process.stdout.isTTY) return;
   // Single-hue header: labels dim-orange, values/emphasis full-orange. Uses
-  // the v5 sloth splash (NOT the retired v4 figlet box — see _renderV5Banner;
+  // the v5 braille splash (NOT the retired v4 figlet box — see _renderV5Banner;
   // figlet remains only as the missing-asset last resort).
   const dimOrange = (s) => `\x1b[2m\x1b[38;2;${_ORANGE_RGB}m${s}\x1b[0m`;
   const orange = _orange;

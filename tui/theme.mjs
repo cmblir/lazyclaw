@@ -1,10 +1,10 @@
 // tui/theme.mjs — single source of truth for pompos v5 color tokens.
 // The amber hex is also stamped into tui/banner.generated.mjs so the
-// sloth gutter and the prompt accent stay visually paired.
+// banner gutter and the prompt accent stay visually paired.
 //
 // v5.5: added `border` token for the chat-input frame (Claude-CLI-style
 // rounded box around the editor). Kept subtly grayer than `amber` so the
-// frame doesn't compete with the accent `›` or the sloth gutter.
+// frame doesn't compete with the accent `›` or the banner gutter.
 import chalk from 'chalk';
 
 const AMBER_HEX = '#FFB347';

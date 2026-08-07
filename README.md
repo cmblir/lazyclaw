@@ -20,7 +20,7 @@ npx pompos          # first run walks you through setup, then drops into chat
 
 ## What it is
 
-pompos is a single-binary-feel Node CLI in the "claw" family (Hermes → OpenClaw → nanoclaw). It is **TUI-first**: `pompos` with no arguments opens a chat REPL with a sloth splash, slash commands, and ghost-text autocomplete. Underneath, every turn feeds a learning loop, and the same agent answers from any messaging channel you connect.
+pompos is a single-binary-feel Node CLI in the "claw" family (Hermes → OpenClaw → nanoclaw). It is **TUI-first**: `pompos` with no arguments opens a chat REPL with a braille splash, slash commands, and ghost-text autocomplete. Underneath, every turn feeds a learning loop, and the same agent answers from any messaging channel you connect.
 
 You can read the whole thing. No hosted service, no telemetry, config in plain JSON at `~/.pompos/`, secrets in `~/.pompos/.env` (0600).
 

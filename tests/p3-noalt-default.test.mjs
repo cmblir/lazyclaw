@@ -52,7 +52,7 @@ test('default chat (no env) shows the splash and never enters the alt-buffer', a
   try {
     await wait(50);
     assert.ok(!io.frames().includes(ALT_ENTER), 'must NOT enter the alt-buffer by default');
-    assert.match(io.frames(), /subcommand/i, 'splash (sloth + manual) visible by default');
+    assert.match(io.frames(), /subcommand/i, 'splash (art + manual) visible by default');
     // and it survives a committed command (Static keeps it)
     io.stdin.write('/zzcmd'); await wait(30); io.stdin.write('\r'); await wait(120);
     assert.match(io.frames(), /subcommand/i, 'splash still visible after a command');

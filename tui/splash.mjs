@@ -3,9 +3,9 @@
 //
 // Layout (terminal-width responsive across four tiers):
 //
-//   WIDE     (cols >= 140) — full wordmark + panel + sloth side-by-side
-//   MEDIUM   ( 90 <= cols < 140) — compact headline, sloth side-by-side, wrapped right column
-//   NARROW   ( 45 <= cols <  90) — sloth STACKED above full-width panel, wrapped verbs
+//   WIDE     (cols >= 140) — full wordmark + panel + banner side-by-side
+//   MEDIUM   ( 90 <= cols < 140) — compact headline, banner side-by-side, wrapped right column
+//   NARROW   ( 45 <= cols <  90) — banner STACKED above full-width panel, wrapped verbs
 //   MINIMAL  (cols <  45)  — headline + provider + cwd + /help line only
 import React from 'react';
 import { Box, Text } from 'ink';
@@ -17,13 +17,14 @@ import { wordmark } from './wordmark.mjs';
 const LMARGIN = '  ';
 const TITLE = ' trainer-split · FTS5 recall · 6-backend sandbox ';
 
-// Tier breakpoints. Wordmark is 120 cols wide + LMARGIN(2)*2 = 124 minimum;
-// the user constraint pins WIDE at >=140 to give comfortable slack. Below
-// 90 the sloth (48 cols) cannot share a row with a usable right column,
-// so NARROW stacks the sloth ABOVE a full-width wrapped panel. Below 45
-// even a stacked sloth overflows, so MINIMAL absorbs that range.
+// Tier breakpoints. The wordmark is 84 cols + LMARGIN(2)*2 = 88 minimum, so it
+// is not what sets this floor: the user constraint pins WIDE at >=140 so the
+// wordmark, panel and banner sit side-by-side with slack. Below
+// 90 the banner (48 cols) cannot share a row with a usable right column,
+// so NARROW stacks the banner ABOVE a full-width wrapped panel. Below 45
+// even a stacked banner overflows, so MINIMAL absorbs that range.
 export const WORDMARK_BREAKPOINT = 140;  // drop wordmark below this
-const MEDIUM_BREAKPOINT   = 90;   // side-by-side sloth+panel above this; stacked below
+const MEDIUM_BREAKPOINT   = 90;   // side-by-side banner+panel above this; stacked below
 const NARROW_BREAKPOINT   = 45;   // headline-only fallback below this
 
 // Subcommand catalog — grouped for the splash so a new user sees the surface
@@ -110,8 +111,8 @@ function wrapVerbs(label, verbs, maxWidth) {
 function renderWide(props, cols) {
   const PANEL_W = cols - LMARGIN.length * 2;
   const INNER = PANEL_W - 4;
-  const SLOTH_W = banner.width;
-  const RIGHT_W = Math.max(40, INNER - SLOTH_W - 2);
+  const BANNER_W = banner.width;
+  const RIGHT_W = Math.max(40, INNER - BANNER_W - 2);
 
   const lines = [];
 
@@ -145,12 +146,12 @@ function renderWide(props, cols) {
   const subcmdCount = SUBCOMMAND_GROUPS.reduce((n, [, v]) => n + v.length, 0);
   right.push(`${subcmdCount} subcommands · ${tools.length} tool groups · ${skills.length} skills · /help for commands`);
 
-  const sloth = banner.rows.slice();
-  while (sloth.length < right.length) sloth.push(' '.repeat(SLOTH_W));
-  while (right.length < sloth.length) right.push('');
+  const art = banner.rows.slice();
+  while (art.length < right.length) art.push(' '.repeat(BANNER_W));
+  while (right.length < art.length) right.push('');
 
-  for (let i = 0; i < sloth.length; i++) {
-    const l = sloth[i] || ' '.repeat(SLOTH_W);
+  for (let i = 0; i < art.length; i++) {
+    const l = art[i] || ' '.repeat(BANNER_W);
     const r = fit(right[i] || '', RIGHT_W);
     lines.push(`${LMARGIN}│ ${l}  ${r} │`);
   }
@@ -175,12 +176,12 @@ function renderWide(props, cols) {
   return lines;
 }
 
-// Medium tier — no wordmark, compact panel title, sloth + wrapped right column.
+// Medium tier — no wordmark, compact panel title, banner + wrapped right column.
 function renderMedium(props, cols) {
   const PANEL_W = cols - LMARGIN.length * 2;
   const INNER = PANEL_W - 4;
-  const SLOTH_W = banner.width;
-  const RIGHT_W = Math.max(20, INNER - SLOTH_W - 2);
+  const BANNER_W = banner.width;
+  const RIGHT_W = Math.max(20, INNER - BANNER_W - 2);
 
   const lines = [];
 
@@ -227,12 +228,12 @@ function renderMedium(props, cols) {
     right.push(summary);
   }
 
-  const sloth = banner.rows.slice();
-  while (sloth.length < right.length) sloth.push(' '.repeat(SLOTH_W));
-  while (right.length < sloth.length) right.push('');
+  const art = banner.rows.slice();
+  while (art.length < right.length) art.push(' '.repeat(BANNER_W));
+  while (right.length < art.length) right.push('');
 
-  for (let i = 0; i < sloth.length; i++) {
-    const l = sloth[i] || ' '.repeat(SLOTH_W);
+  for (let i = 0; i < art.length; i++) {
+    const l = art[i] || ' '.repeat(BANNER_W);
     // pad (no ellipsis) — wrapVerbs already guarantees width <= RIGHT_W
     const raw = right[i] || '';
     const r = raw + ' '.repeat(Math.max(0, RIGHT_W - stringWidth(raw)));
@@ -256,19 +257,19 @@ function renderMedium(props, cols) {
   return lines;
 }
 
-// Narrow tier — sloth STACKED above a full-width panel; verb lists wrap
+// Narrow tier — banner STACKED above a full-width panel; verb lists wrap
 // onto multiple rows instead of being truncated. Used for 45 <= cols < 90.
 function renderNarrow(props, cols) {
   const PANEL_W = cols - LMARGIN.length * 2;
   const INNER = PANEL_W - 4;
-  const SLOTH_W = banner.width;
+  const BANNER_W = banner.width;
   const lines = [];
 
-  // 1) sloth banner CENTERED above panel (stacked layout).
-  //    Only emit if the sloth itself fits within the terminal; otherwise
+  // 1) banner banner CENTERED above panel (stacked layout).
+  //    Only emit if the banner itself fits within the terminal; otherwise
   //    skip it (MINIMAL absorbs the truly tiny case below NARROW_BREAKPOINT).
-  if (cols >= SLOTH_W + LMARGIN.length * 2) {
-    const leftPad = ' '.repeat(Math.max(0, Math.floor((cols - SLOTH_W) / 2)));
+  if (cols >= BANNER_W + LMARGIN.length * 2) {
+    const leftPad = ' '.repeat(Math.max(0, Math.floor((cols - BANNER_W) / 2)));
     for (const r of banner.rows) lines.push(leftPad + r);
     lines.push('');
   }
@@ -367,22 +368,22 @@ export function Splash(props) {
   const palette = wordmark.palette;
   const gradient = wordmark.gradient;
   const showWordmark = cols >= WORDMARK_BREAKPOINT;
-  // Sloth banner is emitted at the TOP of NARROW output (45..89) only when
+  // Banner is emitted at the TOP of NARROW output (45..89) only when
   // it fits inside the terminal width — see renderNarrow() guard.
-  const showSlothNarrow =
+  const showBannerNarrow =
     cols >= NARROW_BREAKPOINT && cols < MEDIUM_BREAKPOINT &&
     cols >= banner.width + LMARGIN.length * 2;
 
-  // Per-tier sloth row range [start, end). MEDIUM interleaves the sloth
+  // Per-tier banner row range [start, end). MEDIUM interleaves the banner
   // inside panel rows, so it gets colored via the border regex below — no
   // dedicated band is needed for that tier.
-  let slothStart = -1, slothEnd = -1;
+  let bannerStart = -1, bannerEnd = -1;
   if (showWordmark) {
-    slothStart = wordmark.height + 1 + 1; // wordmark + blank + panel-top
-    slothEnd   = slothStart + banner.height;
-  } else if (showSlothNarrow) {
-    slothStart = 0; // sloth is the first thing emitted
-    slothEnd   = banner.height;
+    bannerStart = wordmark.height + 1 + 1; // wordmark + blank + panel-top
+    bannerEnd   = bannerStart + banner.height;
+  } else if (showBannerNarrow) {
+    bannerStart = 0; // the banner is the first thing emitted
+    bannerEnd   = banner.height;
   }
 
   // Section headers / summary / compact headline on NARROW that should be
@@ -405,8 +406,8 @@ export function Splash(props) {
       const trimmed = line.trim();
       if (showWordmark && i < wordmark.height) {
         color = palette[gradient[i] ?? 1]; // wordmark gradient
-      } else if (i >= slothStart && i < slothEnd) {
-        color = theme.fg; // sloth band — any tier that stacks the sloth
+      } else if (i >= bannerStart && i < bannerEnd) {
+        color = theme.fg; // banner band — any tier that stacks the banner
       } else if (BORDER_RE.test(line)) {
         color = theme.fg; // panel borders + status separators
       } else if (ACCENT_HEADERS.has(trimmed)) {

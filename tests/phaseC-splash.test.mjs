@@ -84,7 +84,7 @@ test('WIDE tier at cols=140 renders wordmark + full panel title chain', () => {
   const out = renderSplashToString(responsiveFixture, { columns: 140 });
   // The wordmark's own first row, read from the module — not a glyph that happens
   // to be in the current lettering. The previous form asserted on '_____', which
-  // silently stopped testing anything the moment the wordmark art changed.
+  // silently stopped testing anything the moment the wordmark banner changed.
   assert.ok(out.includes(wordmark.rows[0].trimEnd()),
     'expected wordmark to be present at WIDE tier');
   assert.ok(out.includes('trainer-split · FTS5 recall · 6-backend sandbox'),
@@ -96,7 +96,7 @@ test('WIDE tier at cols=140 renders wordmark + full panel title chain', () => {
   }
 });
 
-test('MEDIUM tier at cols=100 drops wordmark but keeps panel + sloth, wraps not truncates', () => {
+test('MEDIUM tier at cols=100 drops wordmark but keeps panel + art, wraps not truncates', () => {
   const out = renderSplashToString(responsiveFixture, { columns: 100 });
   // No wordmark (uses backslash + underscore characters).
   assert.ok(!out.includes('_____'), 'wordmark must be dropped at MEDIUM tier');
@@ -112,7 +112,7 @@ test('MEDIUM tier at cols=100 drops wordmark but keeps panel + sloth, wraps not 
   }
 });
 
-test('NARROW tier at cols=80 keeps sloth (stacked) + panel and WRAPS verb lists (no truncation)', () => {
+test('NARROW tier at cols=80 keeps the banner (stacked) + panel and WRAPS verb lists (no truncation)', () => {
   const out = renderSplashToString(responsiveFixture, { columns: 80 });
   assert.ok(!out.includes('_____'), 'wordmark must be absent at NARROW tier');
   // Panel border characters PRESENT in the new stacked-NARROW layout.
@@ -146,7 +146,7 @@ test('MINIMAL tier at cols=44 emits headline + provider + cwd + /help only', () 
 
 test('tier boundaries are exact', () => {
   // Identify the wordmark by its own first row rather than by a glyph inside the
-  // art, so this keeps testing the tier boundary when the lettering changes.
+  // banner, so this keeps testing the tier boundary when the lettering changes.
   const mark = wordmark.rows[0].trimEnd();
   // cols=140 → WIDE (wordmark present)
   assert.ok(renderSplashToString(responsiveFixture, { columns: 140 }).includes(mark),
@@ -158,7 +158,7 @@ test('tier boundaries are exact', () => {
   // cols=90 → MEDIUM (panel present)
   assert.ok(renderSplashToString(responsiveFixture, { columns: 90 }).includes('╭'),
     'cols=90 must keep panel border (MEDIUM tier)');
-  // cols=89 → NARROW (panel still present, sloth stacked)
+  // cols=89 → NARROW (panel still present, banner stacked)
   const at89 = renderSplashToString(responsiveFixture, { columns: 89 });
   assert.ok(at89.includes('╭'), 'cols=89 must keep panel border (NARROW tier, stacked)');
   assert.match(at89, /Subcommands/);

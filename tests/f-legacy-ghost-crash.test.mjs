@@ -51,6 +51,6 @@ test('legacy chat banner renders the v5 splash, not the v4 figlet box', async ()
     const out = writes.join('');
     assert.ok(out.includes('provider ·'), 'banner printed');
     assert.ok(!out.includes('__,_/___'), 'figlet "lazy" art is gone');
-    assert.ok(/[⠀-⣿]/.test(out) || out.includes('pompos v'), 'v5 splash (braille sloth / wordmark) shown');
+    assert.ok(/[⠀-⣿]/.test(out) || out.includes('pompos v'), 'v5 splash (braille banner / wordmark) shown');
   });
 });
