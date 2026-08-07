@@ -94,3 +94,50 @@ test('fetchModelsForProvider routes anthropic/gemini to the native fetchers', as
   // truly catalogue-less providers keep the honest error
   await assert.rejects(() => fetchModelsForProvider(deps('orchestrator')), /does not expose/);
 });
+
+// ── hanging endpoints ───────────────────────────────────────────────
+// These calls had no signal, so a non-responding endpoint (not an HTTP error —
+// an actual dead connection) left them pending until the OS gave up on the TCP
+// socket, holding a model-cache refresh tick's promise unresolved for minutes.
+//
+// Split into two assertions rather than waiting out the real timeout: that an
+// abortable signal is handed to fetch at all, and that an abort is translated
+// into a message naming the provider. A test that slept 10s would be the same
+// coverage at 10s a run.
+
+test('both live fetchers pass an abortable signal to fetch', async () => {
+  const seen = [];
+  const capture = async (url, init) => {
+    seen.push(init?.signal);
+    return { ok: true, json: async () => ({ data: [], models: [] }) };
+  };
+  await fetchAnthropicModels({ apiKey: 'k', fetchImpl: capture });
+  await fetchGeminiModels({ apiKey: 'k', fetchImpl: capture });
+  assert.equal(seen.length, 2);
+  for (const sig of seen) {
+    assert.ok(sig, 'a fetch with no signal cannot be interrupted');
+    assert.equal(typeof sig.addEventListener, 'function', 'must be an AbortSignal');
+    assert.equal(sig.aborted, false, 'and not already aborted');
+  }
+});
+
+test('an aborted fetch reports which provider timed out, not a bare DOMException', async () => {
+  // What AbortSignal.timeout actually throws: name TimeoutError, and a message
+  // that names neither the provider nor the duration.
+  const aborts = async () => {
+    const e = new Error('The operation was aborted due to timeout');
+    e.name = 'TimeoutError';
+    throw e;
+  };
+  await assert.rejects(
+    () => fetchAnthropicModels({ apiKey: 'k', fetchImpl: aborts }),
+    /anthropic \/v1\/models timed out after \d+ms/);
+  await assert.rejects(
+    () => fetchGeminiModels({ apiKey: 'k', fetchImpl: aborts }),
+    /gemini models list timed out after \d+ms/);
+});
+
+test('a non-timeout fetch failure is not relabelled as a timeout', async () => {
+  const boom = async () => { throw new Error('ECONNREFUSED'); };
+  await assert.rejects(() => fetchAnthropicModels({ apiKey: 'k', fetchImpl: boom }), /ECONNREFUSED/);
+});

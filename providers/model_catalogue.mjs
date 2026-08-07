@@ -46,6 +46,30 @@ export function supportsLiveFetch(meta, providerId) {
     || !!m.builtinOpenAICompat;
 }
 
+// A hanging endpoint used to leave these calls pending until the OS gave up on
+// the TCP connection. The blast radius was already bounded — model_cache.mjs
+// applies each provider's result independently as it settles, so one hang only
+// ever delayed that provider's own cache entry — but the refresh tick's own
+// promise stayed unresolved for minutes. Ten seconds is far above any healthy
+// /v1/models response and far below an OS-level connect timeout.
+//
+// AbortSignal.timeout needs Node 17.3+; this project requires 18+.
+const MODELS_FETCH_TIMEOUT_MS = 10_000;
+
+// A timed-out fetch rejects with a DOMException named TimeoutError, whose
+// message ("The operation was aborted due to timeout") names neither the
+// provider nor the timeout. Callers surface these strings, so translate it.
+async function fetchWithTimeout(f, url, init, label) {
+  try {
+    return await f(url, { ...init, signal: AbortSignal.timeout(MODELS_FETCH_TIMEOUT_MS) });
+  } catch (err) {
+    if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+      throw new Error(`${label} timed out after ${MODELS_FETCH_TIMEOUT_MS}ms`);
+    }
+    throw err;
+  }
+}
+
 /**
  * Live-list Anthropic models via the native Models API. Surfaces newly
  * released models (e.g. claude-fable-5) the day they ship instead of waiting
@@ -62,19 +86,10 @@ export async function fetchAnthropicModels({ apiKey, oauthToken, fetchImpl } = {
   const auth = apiKey
     ? { 'x-api-key': apiKey }
     : { 'authorization': `Bearer ${oauthToken}`, 'anthropic-beta': 'oauth-2025-04-20' };
-  // No AbortController/signal here — a genuinely hanging endpoint (not just
-  // an HTTP error, an actual non-responding connection) leaves this call
-  // pending indefinitely. daemon/lib/model_cache.mjs's background refresh
-  // applies each provider's result independently as it settles, so a hang
-  // here only ever delays THIS provider's own cache entry, never another's
-  // or GET /providers itself — but it would leave that one refresh tick's
-  // own promise unresolved until the connection eventually times out at the
-  // OS/TCP level. Worth a real timeout here as a follow-up if that's ever
-  // observed in practice.
-  const res = await f('https://api.anthropic.com/v1/models?limit=1000', {
+  const res = await fetchWithTimeout(f, 'https://api.anthropic.com/v1/models?limit=1000', {
     method: 'GET',
     headers: { ...auth, 'anthropic-version': '2023-06-01', 'accept': 'application/json' },
-  });
+  }, 'anthropic /v1/models');
   if (!res.ok) throw new Error(`anthropic /v1/models returned HTTP ${res.status}`);
   const obj = await res.json();
   const ids = (Array.isArray(obj?.data) ? obj.data : [])
@@ -94,15 +109,10 @@ export async function fetchAnthropicModels({ apiKey, oauthToken, fetchImpl } = {
 export async function fetchGeminiModels({ apiKey, fetchImpl } = {}) {
   if (!apiKey) throw new Error('gemini model listing requires an api key (set GEMINI_API_KEY or configure the provider)');
   const f = fetchImpl || globalThis.fetch;
-  // Same caveat as fetchAnthropicModels above: no signal/timeout, so a
-  // genuinely hanging endpoint leaves this call pending indefinitely — bounded
-  // in effect (daemon/lib/model_cache.mjs applies each provider's result as it
-  // settles, so this only ever delays gemini's own cache entry) but not
-  // eliminated. See that comment for the full reasoning.
-  const res = await f(`https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&key=${encodeURIComponent(apiKey)}`, {
+  const res = await fetchWithTimeout(f, `https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000&key=${encodeURIComponent(apiKey)}`, {
     method: 'GET',
     headers: { 'accept': 'application/json' },
-  });
+  }, 'gemini models list');
   if (!res.ok) throw new Error(`gemini models list returned HTTP ${res.status}`);
   const obj = await res.json();
   const ids = (Array.isArray(obj?.models) ? obj.models : [])
