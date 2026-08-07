@@ -4,6 +4,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { defaultConfigDir as resolveConfigDir } from '../lib/config_dir.mjs';
 
 const BUILTIN = {
   'coding-min':  { tools: ['bash', 'read', 'write', 'edit', 'patch', 'grep', 'git_status', 'git_diff'] },
@@ -15,7 +16,7 @@ const BUILTIN = {
 };
 
 function configFile(opts) {
-  const dir = opts?.configDir || process.env.LAZYCLAW_CONFIG_DIR || path.join(process.env.HOME || '.', '.pompos');
+  const dir = opts?.configDir || resolveConfigDir();
   fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, 'toolsets.json');
 }

@@ -11,13 +11,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { defaultConfigDir as resolveConfigDir } from '../lib/config_dir.mjs';
 
 const DEFAULT_TAIL = 200;
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;   // 5 min
 const DEFAULT_MIN_COUNT = 3;
 
 export function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
+  return resolveConfigDir();
 }
 
 function recentPath(configDir) {

@@ -14,9 +14,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { defaultConfigDir as resolveConfigDir } from '../lib/config_dir.mjs';
 
 function loadDotenv() {
-  const p = path.join(process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos'), '.env');
+  const p = path.join(resolveConfigDir(), '.env');
   if (!fs.existsSync(p)) return;
   for (const line of fs.readFileSync(p, 'utf8').split(/\r?\n/)) {
     if (!line || line.trimStart().startsWith('#')) continue;

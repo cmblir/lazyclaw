@@ -30,6 +30,7 @@ import {
   buildRecallSQL, RECALL_SCOPES, scopedStmt,
 } from './index_scope.mjs';
 import { embeddingKey } from './embedding_keys.mjs';
+import { defaultConfigDir as resolveConfigDir } from '../lib/config_dir.mjs';
 
 // Re-exported so callers/tests keep importing these from index_db.mjs
 // (their historical location) even though the impls now live in index_failures.
@@ -46,7 +47,7 @@ const SCHEMA_VERSION = 3;
 const _handles = new Map();   // configDir → { db, stmts }
 
 function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
+  return resolveConfigDir();
 }
 
 function dbPath(configDir) {

@@ -22,9 +22,10 @@ import path from 'node:path';
 import os from 'node:os';
 import { reindexAll } from '../mas/index_db.mjs';
 import { parseFrontmatter } from '../skills.mjs';
+import { defaultConfigDir as resolveConfigDir } from '../lib/config_dir.mjs';
 
 function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
+  return resolveConfigDir();
 }
 
 function tsStamp() {

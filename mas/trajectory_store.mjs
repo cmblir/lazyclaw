@@ -18,6 +18,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { redactSecrets } from './redact.mjs';
 import { indexTrajectory as _indexTrajectory } from './index_db.mjs';
+import { defaultConfigDir as resolveConfigDir } from '../lib/config_dir.mjs';
 
 export const OUTCOME_ENUM = Object.freeze(['done', 'failed', 'abandoned']);
 
@@ -25,7 +26,7 @@ const _cache = new Map();   // id → record (capped at CACHE_MAX entries)
 const CACHE_MAX = 256;
 
 function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
+  return resolveConfigDir();
 }
 
 function trajectoriesDir(configDir) {

@@ -18,6 +18,7 @@ import os from 'node:os';
 
 import { runTextCompletion } from './provider_adapters.mjs';
 import { redactSecrets, neutralizeRoleLabels } from './redact.mjs';
+import { defaultConfigDir as resolveConfigDir } from '../lib/config_dir.mjs';
 
 export const DEFAULT_MAX_CHARS = 12 * 1024;
 const AGENTS_MEM_DIR = path.join('memory', 'agents');
@@ -31,7 +32,7 @@ export class AgentMemoryError extends Error {
 }
 
 export function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
+  return resolveConfigDir();
 }
 
 export function memoryPath(name, configDir = defaultConfigDir()) {

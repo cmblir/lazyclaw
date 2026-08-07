@@ -19,6 +19,7 @@ import os from 'node:os';
 import { openIndex, recall as indexRecall } from '../index_db.mjs';
 import { sameFamily } from '../confidence.mjs';
 import { parseFrontmatter as sharedParseFrontmatter } from '../frontmatter.mjs';
+import { defaultConfigDir as resolveConfigDir } from '../../lib/config_dir.mjs';
 
 export const NAME = 'recall';
 export const DESCRIPTION =
@@ -51,7 +52,7 @@ const DEFAULT_SCOPES = ['sessions', 'skills', 'trajectories', 'memories'];
 const MAX_K = 50;
 
 function _defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
+  return resolveConfigDir();
 }
 
 // Read config.json from the tool's own configDir (not the env), so hybrid

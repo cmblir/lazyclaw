@@ -19,6 +19,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { withKeyedLockSync } from '../lib/config_dir.mjs';
+import { defaultConfigDir as resolveConfigDir } from '../lib/config_dir.mjs';
 
 const GATEWAY_DIRNAME = 'gateway';
 const DEVICES_FILENAME = 'devices.json';
@@ -32,7 +33,7 @@ const FIELD_SEP = '|';
 export const DEFAULT_MAX_SKEW_MS = 120_000;
 
 export function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
+  return resolveConfigDir();
 }
 
 export function gatewayDir(configDir = defaultConfigDir()) {

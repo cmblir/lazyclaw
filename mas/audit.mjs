@@ -11,13 +11,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
+import { defaultConfigDir as resolveConfigDir } from '../lib/config_dir.mjs';
 
 export class AuditError extends Error {
   constructor(message) { super(message); this.name = 'AuditError'; }
 }
 
 export function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
+  return resolveConfigDir();
 }
 
 export function auditPath(taskId, configDir = defaultConfigDir()) {

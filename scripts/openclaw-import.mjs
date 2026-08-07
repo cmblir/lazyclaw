@@ -5,10 +5,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { defaultConfigDir as resolveConfigDir } from '../lib/config_dir.mjs';
 
 export function defaultOpenclawDir() { return path.join(os.homedir(), '.openclaw'); }
 export function defaultCfgDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
+  return resolveConfigDir();
 }
 
 function injectTrainedBy(content, value) {

@@ -17,13 +17,14 @@ import os from 'node:os';
 
 import { runTextCompletion } from './provider_adapters.mjs';
 import { redactSecrets, neutralizeRoleLabels } from './redact.mjs';
+import { defaultConfigDir as resolveConfigDir } from '../lib/config_dir.mjs';
 
 const USER_MD_REL = path.join('memory', 'USER.md');
 const MAX_TRANSCRIPT_CHARS = 16 * 1024;
 const MAX_USER_MD_BYTES = 32 * 1024;
 
 export function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
+  return resolveConfigDir();
 }
 
 export function userModelPath(configDir = defaultConfigDir()) {

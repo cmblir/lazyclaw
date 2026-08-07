@@ -246,3 +246,60 @@ test('cron log paths follow the configured directory instead of a hardcoded one'
   assert.match(out, /<string>\/tmp\/cfgx\/logs\/cron-nightly\.err\.log<\/string>/);
   fs.rmSync(home, { recursive: true, force: true });
 });
+
+// --- one resolver, not seventeen ------------------------------------------
+// This is the trap the whole adoption design walked into once. Sixteen modules
+// re-derived the config directory themselves as
+//   process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos')
+// so an operator whose state was in ~/.lazyclaw had config.json and agents read
+// correctly while the search index, trajectories, agent memory, audit log and
+// device-auth store were CREATED under ~/.pompos. That directory existing then
+// made rule 2 fire on the next run, and the whole tool switched to the empty new
+// directory — agents, teams, config and secrets all apparently gone.
+
+test('no module re-derives the config directory instead of calling the resolver', () => {
+  const skip = new Set(['lib/config_dir.mjs']);   // the resolver itself
+  const offenders = [];
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === 'node_modules' || e.name === '.git' || e.name === 'tests') continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) { walk(full); continue; }
+      if (!e.name.endsWith('.mjs')) continue;
+      const rel = path.relative(ROOT, full);
+      if (skip.has(rel)) continue;
+      const src = fs.readFileSync(full, 'utf8');
+      // Joining a home directory with a literal config-dir name is the shape
+      // that bypasses adoption. Only the resolver may do it.
+      if (/(os\.homedir\(\)|process\.env\.HOME[^)]*)\s*,\s*['"]\.(pompos|lazyclaw)['"]/.test(src)) {
+        offenders.push(rel);
+      }
+    }
+  };
+  walk(ROOT);
+  assert.deepEqual(offenders, [],
+    'these must call defaultConfigDir() — a private copy silently skips legacy adoption');
+});
+
+test('every resolver agrees on a pre-rename install, and none of them creates the new dir', () => {
+  const home = tmpHome();
+  fs.mkdirSync(path.join(home, '.lazyclaw'));
+  const code = `
+    const seen = new Set();
+    for (const m of ['./mas/agent_memory.mjs','./mas/audit.mjs','./mas/nudge.mjs',
+                     './mas/user_modeler.mjs','./sessions.mjs']) {
+      const x = await import(m);
+      if (typeof x.defaultConfigDir === 'function') seen.add(x.defaultConfigDir());
+    }
+    const c = await import('./lib/config.mjs');
+    seen.add(require('node:path').dirname(c.configPath()));
+    process.stdout.write(JSON.stringify([...seen]));
+  `.replace("require('node:path')", "(await import('node:path')).default");
+  const out = execFileSync(process.execPath, ['--input-type=module', '-e', code],
+    { cwd: ROOT, env: { ...process.env, HOME: home, POMPOS_CONFIG_DIR: '', LAZYCLAW_CONFIG_DIR: '' }, encoding: 'utf8' });
+  assert.deepEqual(JSON.parse(out), [path.join(home, '.lazyclaw')],
+    'all of them must land on the one directory that has the operator\'s state');
+  assert.equal(fs.existsSync(path.join(home, '.pompos')), false,
+    'creating it would make rule 2 fire next run and orphan everything');
+  fs.rmSync(home, { recursive: true, force: true });
+});

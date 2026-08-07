@@ -16,11 +16,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { defaultConfigDir as resolveConfigDir } from '../lib/config_dir.mjs';
 
 export const FORMATS = Object.freeze(['atropos', 'axolotl', 'openai-ft', 'jsonl']);
 
 function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
+  return resolveConfigDir();
 }
 
 function trajectoriesDir(configDir) {

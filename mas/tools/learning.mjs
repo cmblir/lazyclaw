@@ -6,9 +6,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as skills from '../../skills.mjs';
 import { parseFrontmatter as sharedParseFrontmatter } from '../frontmatter.mjs';
+import { defaultConfigDir } from '../../lib/config_dir.mjs';
 
 function resolveConfigDir(ctx) {
-  return ctx?.configDir || process.env.LAZYCLAW_CONFIG_DIR || path.join(process.env.HOME || '.', '.pompos');
+  return ctx?.configDir || defaultConfigDir();
 }
 
 function memoryDir(ctx) { return path.join(resolveConfigDir(ctx), 'memory'); }
