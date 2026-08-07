@@ -7,6 +7,9 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { SlackChannel } from '../channels/slack.mjs';
 import { makeInboundHandler } from '../lib/inbound_client.mjs';
 
@@ -62,4 +65,80 @@ test('end-to-end: all three channels pass senderId into postInbound', async () =
   const hm = mkHandler('matrix');
   assert.equal(await hm({ threadId: 'r', text: 'x', senderId: PAIRED }), 'ok');
   assert.equal(await hm({ threadId: 'r', text: 'x', senderId: '@stranger:s' }), null);
+});
+
+// ── handler errors must not reach the channel ────────────────────────
+// _simulateInbound echoed `(error: ${err.message})` into Slack. A provider's
+// ApiError message is built from the upstream response body — see
+// providers/anthropic.mjs: `anthropic api ${status}: ${body.slice(0, 200)}` — so
+// an upstream payload was being shown to whoever was talking to the bot.
+// telegram.mjs and matrix.mjs already replied a generic notice and logged the
+// detail; Slack was the one that did not.
+
+function apiErrorLike() {
+  const err = new Error('anthropic api 400: {"type":"error","error":{"message":"x-api-key sk-ant-SECRET is invalid"}}');
+  err.name = 'AnthropicApiError';
+  err.status = 400;
+  return err;
+}
+
+test('a provider error is not echoed into the Slack channel', async () => {
+  const ch = mkSlack();
+  const sent = [];
+  ch.send = async (_thread, text) => { sent.push(text); };
+  const logged = [];
+  await ch.start(async () => { throw apiErrorLike(); }, { logger: (l) => logged.push(l) });
+
+  await ch._simulateInbound('hi', 'C1:ts', 'U1');
+
+  assert.deepEqual(sent, ['(internal error)'], 'the channel gets a generic notice only');
+  for (const bad of [/sk-ant-SECRET/, /anthropic api 400/, /x-api-key/]) {
+    assert.doesNotMatch(sent.join(''), bad, `upstream detail ${bad} must not reach the channel`);
+  }
+  // The operator still needs the real reason.
+  assert.match(logged.join(''), /\[slack\] handler error:/);
+  assert.match(logged.join(''), /sk-ant-SECRET/, 'full detail goes to the diagnostic sink');
+});
+
+test('a gate denial is still surfaced — that reason is ours and safe', async () => {
+  const ch = mkSlack();
+  const sent = [];
+  ch.send = async (_thread, text) => { sent.push(text); };
+  const gated = new Error('rate_limited');
+  gated.code = 'CHANNEL_GATED';
+  await ch.start(async () => { throw gated; });
+  await ch._simulateInbound('hi', 'C1:ts', 'U1');
+  assert.deepEqual(sent, ['(gated: rate_limited)'],
+    'ChannelGated carries our own text, not an upstream body');
+});
+
+test('a failure to deliver the notice is logged, not thrown', async () => {
+  const ch = mkSlack();
+  ch.send = async () => { throw new Error('slack send failed: channel_not_found'); };
+  const logged = [];
+  await ch.start(async () => { throw apiErrorLike(); }, { logger: (l) => logged.push(l) });
+  await ch._simulateInbound('hi', 'C1:ts', 'U1');   // must not reject
+  assert.match(logged.join(''), /failed to deliver error notice/);
+});
+
+test('no channel adapter sends a raw error message to the remote party', () => {
+  // Slack diverged from its two siblings for as long as this existed, which is
+  // how the leak survived. Pin the invariant across the directory so the next
+  // adapter cannot reintroduce it.
+  const dir = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'channels');
+  const offenders = [];
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.endsWith('.mjs')) continue;
+    const src = fs.readFileSync(path.join(dir, name), 'utf8');
+    for (const line of src.split('\n')) {
+      // A send() whose payload interpolates an error object. `(gated: ...)` is
+      // exempt: ChannelGated carries our own reason ('rate_limited' /
+      // 'unauthorized'), which is a user-facing condition by design.
+      if (!/\.send\(/.test(line)) continue;
+      if (/\(gated:/.test(line)) continue;
+      if (/\$\{\s*(err|error|e)\b[^}]*\}/.test(line)) offenders.push(`${name}: ${line.trim()}`);
+    }
+  }
+  assert.deepEqual(offenders, [],
+    'reply a generic notice and log the detail to the diagnostic sink instead');
 });
