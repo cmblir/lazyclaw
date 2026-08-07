@@ -10,7 +10,7 @@ import {
 } from '../mas/index_db.mjs';
 
 function tmp() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-idx-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-idx-'));
 }
 
 test('openIndex creates the db file and runs PRAGMA integrity_check', () => {

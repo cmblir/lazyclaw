@@ -1,5 +1,5 @@
 // web/ui/panels/gateway.mjs — paired devices for the companion-node gateway.
-// Read-only: approve/revoke/rotate happen via `lazyclaw nodes`, never here —
+// Read-only: approve/revoke/rotate happen via `pompos nodes`, never here —
 // see daemon/routes/gateway_views.mjs for why.
 import { el, phead, chip, table, kvlist } from '../dom.mjs';
 import { api } from '../api.mjs';
@@ -52,7 +52,7 @@ function deviceRow(d) {
 }
 
 export async function render(host) {
-  host.append(phead('Devices', 'Devices paired to this gateway, and requests waiting on lazyclaw nodes approve.'));
+  host.append(phead('Devices', 'Devices paired to this gateway, and requests waiting on pompos nodes approve.'));
 
   host.append(el('div', { class: 'note-inline' },
     el('b', { text: 'Two things are called “gateway”. ' }),
@@ -75,7 +75,7 @@ export async function render(host) {
       el('h3', { class: 'dim', style: 'margin:8px 0 4px;', text: 'Pending pairing requests' }),
       requests.length
         ? table(REQUEST_COLS, requests.map(requestRow))
-        : el('div', { class: 'empty' }, 'No pairing requests waiting. Pair one with ', el('code', { text: 'lazyclaw nodes pair' }), '.'),
+        : el('div', { class: 'empty' }, 'No pairing requests waiting. Pair one with ', el('code', { text: 'pompos nodes pair' }), '.'),
 
       el('h3', { class: 'dim', style: 'margin:14px 0 4px;', text: 'Paired devices' }),
       devices.length

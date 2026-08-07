@@ -7,7 +7,7 @@
 //
 // Auth is whatever `codex` is signed into — a ChatGPT Plus/Pro/Business
 // session bound to ~/.codex/auth — so no OPENAI_API_KEY is required and
-// no key lands in the lazyclaw config. This is the CLI counterpart to
+// no key lands in the pompos config. This is the CLI counterpart to
 // providers/openai.mjs (which talks to api.openai.com and needs an API
 // key).
 //
@@ -22,7 +22,7 @@
 // are skipped — they're internal thought summaries, not the visible
 // answer. Usage from turn.completed is surfaced via onUsage.
 //
-// Why `--skip-git-repo-check` is hard-coded: lazyclaw orchestrator
+// Why `--skip-git-repo-check` is hard-coded: pompos orchestrator
 // runs workers from scratch dirs (often /tmp) that aren't git repos,
 // and codex's default git-repo gate would reject every such spawn.
 // The flag is a UX shim for headless invocation, not a security

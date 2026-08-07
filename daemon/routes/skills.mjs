@@ -121,7 +121,7 @@ export async function skillsSynth(c) {
 
 export async function skillsSearch(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
-          // Mirror of `lazyclaw skills search`. ?q=<query> required;
+          // Mirror of `pompos skills search`. ?q=<query> required;
           // ?regex=true switches to regex mode. Returns
           //   { query, regex, matches: [{ name, bytes, matchCount, excerpt }] }
           // — same shape the CLI prints. A dashboard skill picker can

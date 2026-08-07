@@ -44,7 +44,7 @@ export function render(host) {
       }
       if (entries.length === 0) {
         list.replaceWith(list = el('div', { class: 'empty' },
-          'No rate cards configured. Add one with ', el('code', { text: 'lazyclaw rates set <provider/model> --in <usd> --out <usd>' }), '.'));
+          'No rate cards configured. Add one with ', el('code', { text: 'pompos rates set <provider/model> --in <usd> --out <usd>' }), '.'));
         return;
       }
       const rows = entries.map(([key, card]) => {
@@ -82,7 +82,7 @@ export function render(host) {
       body: [
         el('div', { class: 'dim', style: 'margin-bottom:12px;font-size:12px;' },
           'Cost per 1M tokens (input / output / optional cache pricing). Same shape as ',
-          el('code', { text: 'lazyclaw rates set' }), '. Saving the same key overwrites the existing card.'),
+          el('code', { text: 'pompos rates set' }), '. Saving the same key overwrites the existing card.'),
         el('div', { class: 'form-row' }, el('label', { text: 'Provider / model key' }), keyInput),
         el('div', { class: 'grid', style: 'grid-template-columns:1fr 1fr;gap:10px;margin-bottom:0;' },
           el('div', { class: 'form-row' }, el('label', { text: 'Input (USD / 1M)' }), inInput),

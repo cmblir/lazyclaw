@@ -106,19 +106,19 @@ export async function cmdOnboard(flags) {
 
 export function cmdHelp(name) {
   if (!name) {
-    process.stdout.write('lazyclaw — terminal AI assistant + workflow engine\n\n');
+    process.stdout.write('pompos — terminal AI assistant + workflow engine\n\n');
     process.stdout.write('Subcommands:\n');
     for (const sub of SUBCOMMANDS) {
       const summary = HELP_SUMMARIES[sub] || '';
       process.stdout.write(`  ${sub.padEnd(12)}${summary}\n`);
     }
-    process.stdout.write('\nlazyclaw help <subcommand>   detailed usage\n');
+    process.stdout.write('\npompos help <subcommand>   detailed usage\n');
     return;
   }
   const detail = HELP_DETAILS[name];
   if (!detail) {
     process.stderr.write(`unknown subcommand: ${name}\n`);
-    process.stderr.write(`run \`lazyclaw help\` to see the list\n`);
+    process.stderr.write(`run \`pompos help\` to see the list\n`);
     process.exit(2);
   }
   process.stdout.write(detail + '\n');
@@ -145,7 +145,7 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
 
   // Per-step gating: `--only a,b` runs ONLY those; `--skip a,b` runs all but
   // those. Steps: provider verify channel workspace skill webhook orchestrator.
-  // e.g. `lazyclaw setup --only channel` re-runs just the channel step.
+  // e.g. `pompos setup --only channel` re-runs just the channel step.
   const onlySet = flags.only ? new Set(String(flags.only).toLowerCase().split(',').map((s) => s.trim()).filter(Boolean)) : null;
   const skipSet = new Set(String(flags.skip || '').toLowerCase().split(',').map((s) => s.trim()).filter(Boolean));
   const want = (step) => (onlySet ? onlySet.has(step) : !skipSet.has(step));
@@ -174,7 +174,7 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
   cfgAfterOnboard = readConfig();
   if (!cfgAfterOnboard.provider) {
     process.stdout.write(`\n  ${warn('Setup not completed — provider was not configured.')}\n`);
-    process.stdout.write(`  ${dim('Run `lazyclaw setup` again when ready, or pick "Onboard" from the menu for a single-step picker.')}\n\n`);
+    process.stdout.write(`  ${dim('Run `pompos setup` again when ready, or pick "Onboard" from the menu for a single-step picker.')}\n\n`);
     return;
   }
   process.stdout.write(`\n  ${ok('✓ provider:')} ${cfgAfterOnboard.provider}  ${dim('model:')} ${cfgAfterOnboard.model || '(default)'}\n\n`);
@@ -192,7 +192,7 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
   // Hermes rule: get a clean reply before layering on channels/skills.
   if (want('verify') && cfgAfterOnboard.provider) {
   process.stdout.write(`  ${accent('Step 2/7 ·')} ${bold('Verify the provider responds')}\n`);
-  process.stdout.write(`  ${dim('Sends a 1-token "ping" via `lazyclaw providers test`. Confirm a clean reply before layering on channels/skills.')}\n\n`);
+  process.stdout.write(`  ${dim('Sends a 1-token "ping" via `pompos providers test`. Confirm a clean reply before layering on channels/skills.')}\n\n`);
   const wantPing = !flags['skip-test'] && await _pickYesNo('Test the provider now?', { subtitle: 'sends a 1-token ping to confirm a clean reply', yesLabel: 'Test now', noLabel: 'Skip', defaultYes: true });
   if (wantPing) {
     try {
@@ -202,7 +202,7 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
       const { probeProvider } = await import('../providers/probe.mjs');
       const r = await probeProvider({ name: cfgAfterOnboard.provider, model: cfgAfterOnboard.model || undefined });
       if (r.ok) process.stdout.write(`  ${ok('✓ ' + (r.reply || 'ok'))}  ${dim(`· ${r.model || cfgAfterOnboard.provider} · ${r.durationMs}ms`)}\n`);
-      else process.stdout.write(`  ${warn('✗ ' + (r.error || 'no reply'))}  ${dim(`· retry: lazyclaw providers test ${cfgAfterOnboard.provider}`)}\n`);
+      else process.stdout.write(`  ${warn('✗ ' + (r.error || 'no reply'))}  ${dim(`· retry: pompos providers test ${cfgAfterOnboard.provider}`)}\n`);
     } catch (e) {
       process.stdout.write(`  ${warn('test errored:')} ${e?.message || e}\n`);
     }
@@ -229,7 +229,7 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
       const ws = await import('../workspace.mjs');
       const dir = ws.initWorkspace(cfgDir, wsName);
       process.stdout.write(`  ${ok('✓ workspace created:')} ${dir}\n`);
-      process.stdout.write(`  ${dim('Edit AGENTS.md / SOUL.md / TOOLS.md any time. Use with: lazyclaw chat --workspace ' + wsName)}\n\n`);
+      process.stdout.write(`  ${dim('Edit AGENTS.md / SOUL.md / TOOLS.md any time. Use with: pompos chat --workspace ' + wsName)}\n\n`);
     } catch (e) {
       process.stdout.write(`  ${warn('skipped:')} ${e?.message || e}\n\n`);
     }
@@ -279,13 +279,13 @@ export async function cmdSetup(_sub, _positional, flags = {}) {
   // ── Wrap up ─────────────────────────────────────────────────
   process.stdout.write('\n');
   process.stdout.write(`  ${ok(bold('🎉 Setup complete.'))}\n`);
-  process.stdout.write(`  ${dim('Run')} ${bold('lazyclaw')} ${dim('any time to open the menu, or jump in directly:')}\n`);
-  process.stdout.write(`    ${dim('•')} lazyclaw chat                ${dim('— REPL with the configured provider')}\n`);
-  process.stdout.write(`    ${dim('•')} lazyclaw agent "..."          ${dim('— one-shot prompt')}\n`);
-  process.stdout.write(`    ${dim('•')} lazyclaw doctor              ${dim('— diagnostic JSON')}\n`);
-  process.stdout.write(`    ${dim('•')} lazyclaw setup               ${dim('— re-run this wizard any time')}\n\n`);
+  process.stdout.write(`  ${dim('Run')} ${bold('pompos')} ${dim('any time to open the menu, or jump in directly:')}\n`);
+  process.stdout.write(`    ${dim('•')} pompos chat                ${dim('— REPL with the configured provider')}\n`);
+  process.stdout.write(`    ${dim('•')} pompos agent "..."          ${dim('— one-shot prompt')}\n`);
+  process.stdout.write(`    ${dim('•')} pompos doctor              ${dim('— diagnostic JSON')}\n`);
+  process.stdout.write(`    ${dim('•')} pompos setup               ${dim('— re-run this wizard any time')}\n\n`);
 
-  // Release stdin so `lazyclaw setup` returns to the shell instead of hanging
+  // Release stdin so `pompos setup` returns to the shell instead of hanging
   // at "Setup complete". The interactive prompts (_arrowMenu / _quickPrompt)
   // resume()+ref() stdin to read input; without an unref the ref'd handle keeps
   // the event loop alive after the last step. When setup is invoked from the

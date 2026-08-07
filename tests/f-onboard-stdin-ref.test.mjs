@@ -2,7 +2,7 @@
 // process.stdin before it reads from it.
 //
 // This is the SECOND instance of one bug class. tui/pickers.mjs's _arrowMenu
-// unrefs process.stdin in its cleanup (deliberately, so `lazyclaw setup` can
+// unrefs process.stdin in its cleanup (deliberately, so `pompos setup` can
 // exit instead of hanging). libuv's unref is sticky: neither resume() nor
 // attaching a listener re-references the handle, and — verified against the
 // real node:readline — `readline.createInterface()` calls input.resume() but

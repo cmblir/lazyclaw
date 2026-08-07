@@ -2,7 +2,7 @@
 // "doctor" checks (provider available, key works) — this is purely
 // about shape: types, known providers, rate-card form.
 //
-// Shared between `lazyclaw config validate` (CLI) and
+// Shared between `pompos config validate` (CLI) and
 // `GET /config/validate` (daemon) so both produce bit-for-bit
 // identical output.
 

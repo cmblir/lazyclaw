@@ -11,7 +11,7 @@ import path from 'node:path';
 import { readConfig, ConfigError } from '../lib/config.mjs';
 
 function mkTmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-cfg-corrupt-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-cfg-corrupt-'));
 }
 
 test('readConfig returns {} when config.json is missing (fresh install)', () => {

@@ -18,7 +18,7 @@ lead a chance to write a short reflection back into each participating
 agent's memory file.
 
 The user can also read/edit the memory directly — these are plain
-markdown files under `~/.lazyclaw/memory/`, the same root the existing
+markdown files under `~/.pompos/memory/`, the same root the existing
 `/dream` and `/memory` commands already manage.
 
 ---
@@ -26,7 +26,7 @@ markdown files under `~/.lazyclaw/memory/`, the same root the existing
 ## 2. Storage
 
 ```
-~/.lazyclaw/memory/
+~/.pompos/memory/
 ├── core.md              ← existing (user/LLM curated, project-wide)
 ├── recent.jsonl         ← existing (session turn log)
 ├── episodic/<topic>.md  ← existing (dream() output)
@@ -87,7 +87,7 @@ Two triggers, controlled by `agent.memoryWrite`:
 | value | behavior |
 |---|---|
 | `auto` (default) | router invokes `reflectAgent(agent, task)` for every participating agent when a task transitions to `done`. Each call is one extra LLM turn that asks the agent to summarise what it learned, prepended to its memory file. |
-| `manual` | router never writes. User runs `lazyclaw agent reflect <name> --task <id>` explicitly. |
+| `manual` | router never writes. User runs `pompos agent reflect <name> --task <id>` explicitly. |
 | `off` | the agent's memory file is read but never written. Useful for "stable persona" agents whose system prompt is the source of truth. |
 
 `reflectAgent` prompt template (auto mode):
@@ -115,10 +115,10 @@ The router prepends the response under a dated heading (`## <iso-date>
 CLI:
 
 ```
-lazyclaw agent memory show <name>          # cat ~/.lazyclaw/memory/agents/<name>.md
-lazyclaw agent memory edit <name>          # $EDITOR
-lazyclaw agent memory clear <name>         # rm (with confirm)
-lazyclaw agent reflect <name> --task <id>  # explicit reflection (manual mode)
+pompos agent memory show <name>          # cat ~/.pompos/memory/agents/<name>.md
+pompos agent memory edit <name>          # $EDITOR
+pompos agent memory clear <name>         # rm (with confirm)
+pompos agent reflect <name> --task <id>  # explicit reflection (manual mode)
 ```
 
 Daemon HTTP:
@@ -142,7 +142,7 @@ textarea bound to PUT `/agents/<name>/memory`.
 | 2 | Reflection budget = **one LLM call per agent, capped at 6 bullets** |
 | 3 | Read truncation = **12 KB / ~3000 tokens, newest-first** |
 | 4 | `stoppedBy='budget'` ticks **skip auto-reflection** — only terminal `done` fires the reflection LLM call |
-| 5 | `lazyclaw agent reflect` **runs the same LLM prompt as auto mode** (use `agent memory edit` for hand-written entries) |
+| 5 | `pompos agent reflect` **runs the same LLM prompt as auto mode** (use `agent memory edit` for hand-written entries) |
 | 6 | Existing agents (no `memoryWrite` field) default to **`auto`** — the feature lights up without an explicit edit; flip to `off` for a stable persona |
 
 Phase 18b implementation begins immediately.

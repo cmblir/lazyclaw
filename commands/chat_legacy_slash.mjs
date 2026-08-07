@@ -128,7 +128,7 @@ export function makeLegacySlashHandler(ctx) {
             return true;
           }
           await _pauseChatForSubMenu(rl, _ghost, async () => {
-            const chosen = await _pickModelInteractive(ctx.getActiveProvName(), { titlePrefix: 'LazyClaw chat —' });
+            const chosen = await _pickModelInteractive(ctx.getActiveProvName(), { titlePrefix: 'Pompos chat —' });
             if (chosen === 'CANCEL' || chosen === 'BACK' || !chosen) return;
             ctx.setActiveModel(chosen);
             process.stdout.write(`model → ${ctx.getActiveModel()}\n`);
@@ -625,7 +625,7 @@ export function makeLegacySlashHandler(ctx) {
           const { openThreads } = await import('../channels/threads.mjs');
           const { runHandoff } = await import('../channels/handoff.mjs');
           const threads = openThreads(cfgDir);
-          const replState = globalThis.__lazyclawReplState || {};
+          const replState = globalThis.__pomposReplState || {};
           const cur = replState.channel && replState.externalId
             ? threads.findByExternal(replState.channel, replState.externalId)
             : null;

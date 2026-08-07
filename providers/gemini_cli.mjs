@@ -7,7 +7,7 @@
 //
 // Auth is whatever `gemini` is already signed into on the host —
 // Google account / Vertex / AI Studio session — so no GEMINI_API_KEY
-// is required and no key lands in the lazyclaw config. This is the
+// is required and no key lands in the pompos config. This is the
 // CLI counterpart to providers/gemini.mjs (which talks to the
 // Generative Language API and needs an API key).
 //
@@ -20,7 +20,7 @@
 // non-streaming is transparent to callers.
 //
 // The trusted-folder bypass (`--skip-trust` + GEMINI_CLI_TRUST_WORKSPACE) is
-// enabled by default because lazyclaw orchestrator / workflow subprocesses
+// enabled by default because pompos orchestrator / workflow subprocesses
 // commonly run from /tmp or scratch dirs that gemini's trusted-folder policy
 // rejects in headless -p mode. It is a genuine trust bypass, now consolidated
 // behind one switch (opts.trustWorkspace, default true) — see geminiArgs/geminiEnv.
@@ -117,7 +117,7 @@ function extractUsage(stats) {
   return { inputTokens: input, outputTokens: output, cacheReadInputTokens: cached, totalCostUsd: 0 };
 }
 
-// The gemini trusted-folder bypass — needed because lazyclaw runs gemini from
+// The gemini trusted-folder bypass — needed because pompos runs gemini from
 // scratch dirs (/tmp, worker cwds) that gemini's trusted-folder policy would
 // otherwise reject in headless -p mode. It is a GENUINE trust bypass, so it
 // lives behind ONE switch: opts.trustWorkspace (default true) gates BOTH the
@@ -138,7 +138,7 @@ export function geminiEnv(opts = {}) {
   return {
     ...process.env,
     ...(opts.trustWorkspace !== false ? { GEMINI_CLI_TRUST_WORKSPACE: 'true' } : {}),
-    // Forward a lazyclaw-stored key as GEMINI_API_KEY so the "paste an API key"
+    // Forward a pompos-stored key as GEMINI_API_KEY so the "paste an API key"
     // connect path authenticates the subprocess (the gemini CLI reads this env
     // var). Omitted when blank so a Google-OAuth login is unaffected.
     ...(opts.apiKey ? { GEMINI_API_KEY: String(opts.apiKey) } : {}),

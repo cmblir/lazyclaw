@@ -34,7 +34,7 @@ const sink = () => ({ buf: '', write(x) { this.buf += x; } });
 // Regression: promptWithBack must RE-REFERENCE stdin, not just resume it.
 //
 // tui/pickers.mjs's _arrowMenu unrefs process.stdin in its cleanup so that
-// `lazyclaw setup` can exit instead of hanging. libuv's unref is sticky:
+// `pompos setup` can exit instead of hanging. libuv's unref is sticky:
 // neither resume() nor attaching a 'data' listener re-references the handle.
 // So a backPrompt running straight after an arrow menu — which is exactly the
 // setup wizard's context-window step followed by the permission step — attached

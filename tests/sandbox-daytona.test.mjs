@@ -4,12 +4,12 @@ import { DaytonaSandbox, buildDaytonaArgv } from '../sandbox/daytona.mjs';
 
 test('buildDaytonaArgv targets daytona ssh <workspace> -- <cmd>', () => {
   const argv = buildDaytonaArgv(
-    { workspace: 'lazyclaw-w1', persistent: true },
+    { workspace: 'pompos-w1', persistent: true },
     ['claude', '-p', 'x'],
   );
   assert.equal(argv[0], 'daytona');
   assert.equal(argv[1], 'ssh');
-  assert.equal(argv[2], 'lazyclaw-w1');
+  assert.equal(argv[2], 'pompos-w1');
   const sepIdx = argv.indexOf('--');
   assert.ok(sepIdx > 0);
   assert.deepEqual(argv.slice(sepIdx + 1), ['claude', '-p', 'x']);

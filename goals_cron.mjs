@@ -12,11 +12,11 @@ export async function attachGoalCron({ readConfig, writeConfig, cron, name, sche
   const cfg = readConfig();
   const jobName = `goal-${name}`;
   // Persist the LOGICAL command so config.json stays portable/readable and
-  // machine-independent. The bare "lazyclaw" token is resolved to an absolute
+  // machine-independent. The bare "pompos" token is resolved to an absolute
   // node + CLI entry only where the OS scheduler actually consumes it — inside
   // cron.mjs buildPlist / buildCrontabLine / runJob (resolveCommand) — which
   // is where the minimal, shell-less PATH would otherwise break it.
-  const cmd = ['lazyclaw', 'goal', 'tick', name];
+  const cmd = ['pompos', 'goal', 'tick', name];
   cron.upsertJob(cfg, jobName, schedule, cmd);
   writeConfig(cfg);
   if (process.env.LAZYCLAW_SKIP_CRON_INSTALL) return { jobName, skipped: true };

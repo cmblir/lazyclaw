@@ -1,6 +1,6 @@
 // Bash tool — runs a shell command, captures stdout/stderr/exit.
 //
-// The command runs with cwd defaulted to the lazyclaw process cwd, but this
+// The command runs with cwd defaulted to the pompos process cwd, but this
 // is NOT an OS sandbox — absolute paths and `cd` escape it. Two real
 // protections apply instead: (1) bash is a `sensitive` tool, so the
 // fail-closed approval gate in tool_runner requires operator confirmation

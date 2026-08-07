@@ -30,7 +30,7 @@ const BUDGETS = {
 };
 
 function tmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-bench-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-bench-'));
 }
 
 function nowMs() {

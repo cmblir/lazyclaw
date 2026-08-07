@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test';
 
-// lazyclaw acceptance suite. The `tests/phase*` specs exercise the
+// pompos acceptance suite. The `tests/phase*` specs exercise the
 // CLI, the workflow engine, the providers, the daemon and the web
 // demo directly under the `@playwright/test` runner so
 // `npx playwright test` covers the published surface end-to-end.

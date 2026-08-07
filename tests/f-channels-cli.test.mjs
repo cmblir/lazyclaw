@@ -1,5 +1,5 @@
 // tests/f-channels-cli.test.mjs — coverage for the surfaces that were
-// previously untested: the `lazyclaw channels` CLI command (commands/channels.mjs
+// previously untested: the `pompos channels` CLI command (commands/channels.mjs
 // cmdChannels) and the legacy (non-Ink) REPL slash path, where the dispatcher
 // runs with a ctx that has NO readConfig/writeConfig and must fall back to disk.
 

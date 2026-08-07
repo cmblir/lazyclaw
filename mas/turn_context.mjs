@@ -42,7 +42,7 @@ export function extractMentions(text, teamAgents, speaker = null) {
 // Render task.turns into a single string. Each turn becomes:
 //   "[agentName] text..."
 // The "user" pseudo-agent maps to "User"; the "system" pseudo-agent maps
-// to "System" (the kickoff turn lazyclaw seeds during task start).
+// to "System" (the kickoff turn pompos seeds during task start).
 export function renderTranscript(turns) {
   if (!Array.isArray(turns) || turns.length === 0) return '(no turns yet)';
   return turns.map((t) => {

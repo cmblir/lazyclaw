@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { wordmark } from '../tui/wordmark.mjs';
 import { renderSplashToString } from '../tui/splash.mjs';
 import stringWidth from 'string-width';
 
@@ -8,7 +9,7 @@ const fixture = {
   model: 'sonnet-4.7',
   trainer: { provider: 'claude-cli', model: 'haiku-4.5' },
   sessionId: '7af9abcd',
-  cwd: '/Users/o/code/lazyclaw',
+  cwd: '/Users/o/code/pompos',
   tools: [
     { category: 'fs', sensitive: false, verbs: ['read','write','edit','glob','grep'] },
     { category: 'exec', sensitive: false, verbs: ['bash','spawn','kill'] },
@@ -41,7 +42,7 @@ test('shows chat + trainer provider/model line', () => {
 
 test('shows welcome + tip lines', () => {
   const out = renderSplashToString(fixture, { columns: 120 });
-  assert.match(out, /Welcome to lazyclaw/);
+  assert.match(out, /Welcome to pompos/);
   assert.match(out, /Type your message or \/help for commands/);
 });
 
@@ -81,8 +82,11 @@ const responsiveFixture = {
 
 test('WIDE tier at cols=140 renders wordmark + full panel title chain', () => {
   const out = renderSplashToString(responsiveFixture, { columns: 140 });
-  // First wordmark row must appear verbatim (with LMARGIN prefix).
-  assert.ok(out.includes('_____'), 'expected wordmark to be present at WIDE tier');
+  // The wordmark's own first row, read from the module — not a glyph that happens
+  // to be in the current lettering. The previous form asserted on '_____', which
+  // silently stopped testing anything the moment the wordmark art changed.
+  assert.ok(out.includes(wordmark.rows[0].trimEnd()),
+    'expected wordmark to be present at WIDE tier');
   assert.ok(out.includes('trainer-split · FTS5 recall · 6-backend sandbox'),
     'expected TITLE chain in panel top row at WIDE tier');
   // No truncation in the right column when terminal is wide.
@@ -97,7 +101,7 @@ test('MEDIUM tier at cols=100 drops wordmark but keeps panel + sloth, wraps not 
   // No wordmark (uses backslash + underscore characters).
   assert.ok(!out.includes('_____'), 'wordmark must be dropped at MEDIUM tier');
   // Compact headline replaces it.
-  assert.match(out, /lazyclaw 5\.0\.9/);
+  assert.match(out, /pompos 5\.0\.9/);
   // Panel title is compact (no TITLE chain).
   assert.ok(!out.includes('trainer-split · FTS5 recall'),
     'compact panel must omit TITLE chain at MEDIUM tier');
@@ -127,7 +131,7 @@ test('NARROW tier at cols=80 keeps sloth (stacked) + panel and WRAPS verb lists 
 
 test('MINIMAL tier at cols=44 emits headline + provider + cwd + /help only', () => {
   const out = renderSplashToString(responsiveFixture, { columns: 44 });
-  assert.match(out, /lazyclaw 5\.0\.9/);
+  assert.match(out, /pompos 5\.0\.9/);
   assert.match(out, /claude-cli/);
   assert.match(out, /\/help/);
   assert.ok(!out.includes('Subcommands'), 'MINIMAL must drop section headers');
@@ -141,12 +145,15 @@ test('MINIMAL tier at cols=44 emits headline + provider + cwd + /help only', () 
 });
 
 test('tier boundaries are exact', () => {
+  // Identify the wordmark by its own first row rather than by a glyph inside the
+  // art, so this keeps testing the tier boundary when the lettering changes.
+  const mark = wordmark.rows[0].trimEnd();
   // cols=140 → WIDE (wordmark present)
-  assert.ok(renderSplashToString(responsiveFixture, { columns: 140 }).includes('_____'),
+  assert.ok(renderSplashToString(responsiveFixture, { columns: 140 }).includes(mark),
     'cols=140 must render WIDE with wordmark');
   // cols=139 → MEDIUM (no wordmark, panel present)
   const at139 = renderSplashToString(responsiveFixture, { columns: 139 });
-  assert.ok(!at139.includes('_____'), 'cols=139 must drop wordmark');
+  assert.ok(!at139.includes(mark), 'cols=139 must drop wordmark');
   assert.ok(at139.includes('╭'), 'cols=139 must keep panel border');
   // cols=90 → MEDIUM (panel present)
   assert.ok(renderSplashToString(responsiveFixture, { columns: 90 }).includes('╭'),

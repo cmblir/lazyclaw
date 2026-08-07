@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { registerAgent, patchAgent, getAgent, AgentError } from '../agents.mjs';
 import { teamTree } from '../teams.mjs';
 
-function tmp() { return fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-hier-')); }
+function tmp() { return fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-hier-')); }
 const CLI = new URL('../cli.mjs', import.meta.url).pathname;
 
 test('CLI: agent add --manager persists the manager (hierarchy from the command line)', () => {

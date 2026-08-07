@@ -132,7 +132,7 @@ export async function inbound(c) {
           // Generic inbound bridge — a stable, channel-agnostic relay
           // target so ANY platform (a Discord/WhatsApp/etc. bot the user
           // runs elsewhere) can forward a message in and get one reply,
-          // without lazyclaw shipping that platform's SDK. Auth-token
+          // without pompos shipping that platform's SDK. Auth-token
           // gated like every non-gateway route; additionally pairing-gated
           // on senderId when a pairing allowlist is configured.
           const breach = checkCostCap(metrics, costCap);

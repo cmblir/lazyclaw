@@ -41,7 +41,7 @@ export async function render(host) {
         }
       }
       if (keys.length === 0) {
-        list.replaceWith(list = el('div', { class: 'empty' }, 'No config yet. Run ', el('code', { text: 'lazyclaw onboard' }), '.'));
+        list.replaceWith(list = el('div', { class: 'empty' }, 'No config yet. Run ', el('code', { text: 'pompos onboard' }), '.'));
         return;
       }
       const rows = keys.sort().map((k) => {
@@ -70,7 +70,7 @@ export async function render(host) {
   function openConfigEditModal(existingKey = '', existingValue = '') {
     // Stringify for the editor; objects/arrays become JSON, primitives stay
     // raw. Submitter parses JSON when the value looks like JSON, else sends
-    // a string verbatim — same behaviour as `lazyclaw config set`.
+    // a string verbatim — same behaviour as `pompos config set`.
     let display = '';
     if (typeof existingValue === 'string') display = existingValue;
     else if (existingValue != null) display = JSON.stringify(existingValue, null, 2);
@@ -81,7 +81,7 @@ export async function render(host) {
       title: existingKey ? `Edit config — ${existingKey}` : 'Set config key',
       body: [
         el('div', { class: 'dim', style: 'margin-bottom:12px;font-size:12px;' },
-          'Mirrors ', el('code', { text: 'lazyclaw config set <key> <value>' }),
+          'Mirrors ', el('code', { text: 'pompos config set <key> <value>' }),
           '. Values that look like JSON (start with {, [, ", true, false, or a number) are parsed; ' +
           'everything else is stored as a plain string. Nested stores (customProviders, rates, authProfiles) ' +
           'have their own tabs — this form rejects them.'),

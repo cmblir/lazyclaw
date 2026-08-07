@@ -1,12 +1,12 @@
 // Workspace — OpenClaw-parity convention for project-rooted system
 // prompts. A workspace is a directory at
 //
-//   ~/.lazyclaw/workspaces/<name>/
+//   ~/.pompos/workspaces/<name>/
 //     ├─ AGENTS.md   — what the assistant should DO
 //     ├─ SOUL.md     — how the assistant should THINK / behave
 //     ├─ TOOLS.md    — what tools / commands it can reach for
 //
-// `lazyclaw chat --workspace foo` (or `agent --workspace foo`) reads
+// `pompos chat --workspace foo` (or `agent --workspace foo`) reads
 // the three files and synthesises a single system prompt. Skill
 // composition still works alongside — workspace lives at the head,
 // then any --skill content. Missing files are skipped silently so
@@ -16,7 +16,7 @@
 // convention separates concerns so reviewers / teammates can edit
 // the "what" (AGENTS) without churning the "how" (SOUL) — and the
 // TOOLS file commonly comes from a generator (read from
-// `lazyclaw providers list` etc).
+// `pompos providers list` etc).
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -39,9 +39,9 @@ export function workspaceDir(cfgDir, name) {
   return path.join(workspaceRoot(cfgDir), name);
 }
 
-// List every workspace under ~/.lazyclaw/workspaces/. Returns
+// List every workspace under ~/.pompos/workspaces/. Returns
 // metadata (which of the three files are present, total size) so
-// `lazyclaw workspace list` can show the user at a glance which
+// `pompos workspace list` can show the user at a glance which
 // workspaces are populated vs scaffolded-but-empty.
 export function listWorkspaces(cfgDir) {
   const root = workspaceRoot(cfgDir);
@@ -105,9 +105,9 @@ How the assistant should BEHAVE — voice, defaults, hard rules.
 
 What the assistant can reach for, and how to invoke each one.
 
-- \`lazyclaw browse <url>\` — fetch + markdown-ify a page
-- \`lazyclaw message send <name> <text>\` — Slack / Discord webhook
-- \`lazyclaw agent ...\` — one-shot LLM call
+- \`pompos browse <url>\` — fetch + markdown-ify a page
+- \`pompos message send <name> <text>\` — Slack / Discord webhook
+- \`pompos agent ...\` — one-shot LLM call
 
 Add project-specific tools below.
 `,
@@ -116,11 +116,11 @@ Add project-specific tools below.
 
 Proactive routines the assistant runs on a schedule — the things it
 should do WITHOUT being asked. Wire each to a real trigger with
-\`lazyclaw cron add <name> --schedule "<cron>"\` (or a goal's --cron).
+\`pompos cron add <name> --schedule "<cron>"\` (or a goal's --cron).
 
 - Every morning: summarise overnight changes and post to #standup.
 - Hourly: check the deploy queue; alert on a stuck job.
-- When idle: review recently-used skills (\`lazyclaw skills curate\`).
+- When idle: review recently-used skills (\`pompos skills curate\`).
 
 Keep routines reversible and cheap; a heartbeat that mutates state
 should ask first or operate on a dry-run by default.

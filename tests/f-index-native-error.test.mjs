@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { _isNativeAbiError, _warnIndexFailure, _resetNativeHint } from '../mas/index_db.mjs';
 
 // The exact message better-sqlite3 raises when node_modules was built against a
-// different Node.js ABI than the one running lazyclaw (the user's report).
+// different Node.js ABI than the one running pompos (the user's report).
 const abiErr = new Error(
-  "The module '/Users/o/prj/lazyclaw/node_modules/better-sqlite3/build/Release/better_sqlite3.node'\n" +
+  "The module '/Users/o/prj/pompos/node_modules/better-sqlite3/build/Release/better_sqlite3.node'\n" +
   'was compiled against a different Node.js version using\n' +
   'NODE_MODULE_VERSION 141. This version of Node.js requires\nNODE_MODULE_VERSION 137.');
 

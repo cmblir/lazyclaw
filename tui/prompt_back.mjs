@@ -40,7 +40,7 @@ export function promptWithBack(label, opts = {}) {
     try { input.setRawMode(true); } catch { /* ignore */ }
     input.resume();
     // resume() does NOT re-reference an unref'd handle, and _arrowMenu's
-    // cleanup unrefs process.stdin (tui/pickers.mjs) so `lazyclaw setup` can
+    // cleanup unrefs process.stdin (tui/pickers.mjs) so `pompos setup` can
     // exit rather than hang. Without this ref() a backPrompt that follows an
     // arrow menu — the wizard's context-window step into the permission step —
     // attaches its listener to an unreferenced handle, the event loop drains,

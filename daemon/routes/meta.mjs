@@ -89,7 +89,7 @@ export async function uiModule(c) {
 
 // Serve a custom agent character image (web app: <img src="/agent-avatars/NN">).
 // These are user-supplied photos copied under <configDir>/agent-avatars/ by
-// `lazyclaw agent set-avatar`. Served from the config dir (NOT the package web/
+// `pompos agent set-avatar`. Served from the config dir (NOT the package web/
 // dir) since they're per-install user data. The filename is constrained to
 // `<word>.<ext>` so no path traversal escapes the agent-avatars directory.
 const _AGENT_AVATAR_CT = {
@@ -121,8 +121,8 @@ export async function agentAvatar(c) {
 
 export async function dashboard(c) {
   const { res } = c;
-          // Serve the lazyclaw-only web dashboard (a single static
-          // HTML in src/lazyclaw/web/). Co-resident with the JSON
+          // Serve the pompos-only web dashboard (a single static
+          // HTML in src/pompos/web/). Co-resident with the JSON
           // API so a single port handles both — no CORS song and
           // dance, no separate static server. Falls back to a
           // helpful text response when the file is missing (someone
@@ -139,8 +139,8 @@ export async function dashboard(c) {
           } catch (e) {
             res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' });
             return res.end(
-              `lazyclaw daemon is up but the dashboard HTML wasn't found.\n` +
-              `Try \`lazyclaw version\` to confirm install integrity, or hit any /api endpoint directly.\n\n` +
+              `pompos daemon is up but the dashboard HTML wasn't found.\n` +
+              `Try \`pompos version\` to confirm install integrity, or hit any /api endpoint directly.\n\n` +
               `error: ${e?.message || e}\n`,
             );
           }

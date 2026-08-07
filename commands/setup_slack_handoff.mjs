@@ -27,7 +27,7 @@ import { resolvePort } from '../lib/ports.mjs';
 export function buildAnnounce({ provider, model, paired }) {
   const who = `${provider || 'the configured provider'}${model ? ` · ${model}` : ''}`;
   return [
-    '✅ lazyclaw is connected.',
+    '✅ pompos is connected.',
     `Running ${who}.`,
     'Message me here and I answer in-thread.',
     paired ? '' : '⚠️ No paired senders — anyone who can message me gets an answer.',
@@ -44,7 +44,7 @@ async function _pairOperator({ cfg, identity, io, deps }) {
   const yes = await io.confirm(`  Pair you (${suggested}${label ? ` — ${label}` : ''}) so only you can drive the agent?`);
   if (!yes) {
     io.write('  Not paired. Anyone who can message the bot will get an answer from it.\n');
-    io.write('  Add yourself later with: lazyclaw pairing add <your-slack-id>\n');
+    io.write('  Add yourself later with: pompos pairing add <your-slack-id>\n');
     return false;
   }
   try {
@@ -62,7 +62,7 @@ async function _pairOperator({ cfg, identity, io, deps }) {
 async function _startGateway({ cfg, io, deps }) {
   const yes = await io.confirm('  Start the gateway now so the bot is live?');
   if (!yes) {
-    io.write('  Not started. Run it later with: lazyclaw gateway   (or /gateway start)\n');
+    io.write('  Not started. Run it later with: pompos gateway   (or /gateway start)\n');
     return null;
   }
   let port = resolvePort('gateway', {}, cfg);
@@ -85,7 +85,7 @@ async function _startGateway({ cfg, io, deps }) {
   const res = await deps.spawnGateway({ port });
   if (!res || !res.ok) {
     io.write(`  Gateway did not start: ${(res && res.reason) || 'unknown reason'}\n`);
-    io.write('  Run `lazyclaw gateway` in a terminal to see the full output.\n');
+    io.write('  Run `pompos gateway` in a terminal to see the full output.\n');
     return null;
   }
   io.write(`  ✓ gateway running (pid ${res.pid}) on port ${res.port ?? port}\n`);

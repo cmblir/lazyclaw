@@ -7,7 +7,7 @@ import { resolveSandbox, listBackends } from '../sandbox/index.mjs';
 import { pickAvailableConfiner } from '../sandbox/spawn.mjs';
 
 export async function cmdBrowse(url, flags = {}) {
-  if (!url) { console.error('Usage: lazyclaw browse <url> [--max-bytes <N>] [--timeout-ms <N>] [--meta]'); process.exit(2); }
+  if (!url) { console.error('Usage: pompos browse <url> [--max-bytes <N>] [--timeout-ms <N>] [--meta]'); process.exit(2); }
   const { browse } = await import('../browse.mjs');
   const opts = {};
   if (flags['max-bytes'] !== undefined) opts.maxBytes = parseInt(flags['max-bytes'], 10);
@@ -55,7 +55,7 @@ export async function cmdSandbox(args, flags = {}) {
 
   if (sub === 'test') {
     const name = args[1];
-    if (!name) { process.stderr.write('usage: lazyclaw sandbox test <kind|profile>\n'); return 2; }
+    if (!name) { process.stderr.write('usage: pompos sandbox test <kind|profile>\n'); return 2; }
     const cfg = _sandboxLoadConfigOrEmpty();
     // If `name` looks like a known kind, route to that kind. If it
     // is not a known kind AND not a profile in cfg, treat as an
@@ -83,8 +83,8 @@ export async function cmdSandbox(args, flags = {}) {
     }
     const sess = await sb.open();
     try {
-      const r = await sess.exec(['echo', 'lazyclaw-sandbox-test']);
-      if (r.code !== 0 || !/lazyclaw-sandbox-test/.test(r.stdout)) {
+      const r = await sess.exec(['echo', 'pompos-sandbox-test']);
+      if (r.code !== 0 || !/pompos-sandbox-test/.test(r.stdout)) {
         process.stderr.write(`fail ${name}: exit=${r.code} stdout=${r.stdout}\n`); return 1;
       }
       process.stdout.write(`ok ${name}\n`);
@@ -94,7 +94,7 @@ export async function cmdSandbox(args, flags = {}) {
 
   if (sub === 'add') {
     const name = args[1];
-    if (!name) { process.stderr.write('usage: lazyclaw sandbox add <name> --kind <kind> [...]\n'); return 2; }
+    if (!name) { process.stderr.write('usage: pompos sandbox add <name> --kind <kind> [...]\n'); return 2; }
     const opts = {};
     if (flags.kind) opts.kind = flags.kind;
     if (flags.image) opts.image = flags.image;
@@ -117,7 +117,7 @@ export async function cmdSandbox(args, flags = {}) {
 
   if (sub === 'use') {
     const name = args[1];
-    if (!name) { process.stderr.write('usage: lazyclaw sandbox use <profile>\n'); return 2; }
+    if (!name) { process.stderr.write('usage: pompos sandbox use <profile>\n'); return 2; }
     const cfg = _sandboxLoadConfigOrEmpty();
     const prof = cfg.sandbox && cfg.sandbox.profiles && cfg.sandbox.profiles[name];
     if (!prof) { process.stderr.write(`no profile "${name}"\n`); return 1; }

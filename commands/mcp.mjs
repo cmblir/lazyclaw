@@ -1,4 +1,4 @@
-// commands/mcp.mjs — `lazyclaw mcp <list|add|remove|call>`.
+// commands/mcp.mjs — `pompos mcp <list|add|remove|call>`.
 //
 // MCP servers are stored in cfg.mcp.servers[] (stdio transport only; an entry
 // is { name, command, args[], env{}, allowGlob }). They are spawned at daemon
@@ -56,7 +56,7 @@ export async function cmdMcp(sub, positional = [], flags = {}) {
       const name = positional[0];
       const command = flags.command;
       if (!name || !command || command === true) {
-        console.error('Usage: lazyclaw mcp add <name> --command <cmd> [--args "<a b c>"] [--allow-glob <glob>] [--env "K=V ..."]');
+        console.error('Usage: pompos mcp add <name> --command <cmd> [--args "<a b c>"] [--allow-glob <glob>] [--env "K=V ..."]');
         process.exit(2);
       }
       if (!NAME_RE.test(name)) {
@@ -86,7 +86,7 @@ export async function cmdMcp(sub, positional = [], flags = {}) {
     case 'rm':
     case 'delete': {
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw mcp remove <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos mcp remove <name>'); process.exit(2); }
       if (!servers.find((s) => s.name === name)) {
         console.error(`mcp remove: no configured server "${name}"`);
         process.exit(2);
@@ -102,12 +102,12 @@ export async function cmdMcp(sub, positional = [], flags = {}) {
       const server = positional[0];
       const toolName = positional[1];
       if (!server || !toolName) {
-        console.error('Usage: lazyclaw mcp call <server> <tool> [--args-json \'{"k":"v"}\']');
+        console.error('Usage: pompos mcp call <server> <tool> [--args-json \'{"k":"v"}\']');
         process.exit(2);
       }
       const sconf = servers.find((s) => s.name === server);
       if (!sconf) {
-        console.error(`mcp call: no configured server "${server}" — add it with 'lazyclaw mcp add ${server} --command <cmd>'`);
+        console.error(`mcp call: no configured server "${server}" — add it with 'pompos mcp add ${server} --command <cmd>'`);
         process.exit(2);
       }
       let args = {};
@@ -144,7 +144,7 @@ export async function cmdMcp(sub, positional = [], flags = {}) {
     }
 
     default:
-      console.error('Usage: lazyclaw mcp <list|add|remove|call> ...');
+      console.error('Usage: pompos mcp <list|add|remove|call> ...');
       process.exit(2);
   }
 }

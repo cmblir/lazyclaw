@@ -26,7 +26,7 @@ export const SLASH_COMMANDS = [
   { cmd: '/hud',         help: 'toggle the HUD status row (usage · models · cost): /hud on|off' },
   { cmd: '/trainer',     help: 'view or set trainer provider/model: /trainer show|set <p:m>|clear' },
   { cmd: '/personality', help: 'pick a personality (or sub: list|show|install|remove|use)' },
-  { cmd: '/dashboard',   help: 'open the lazyclaw web UI in your browser: /dashboard [--port N] · stop|kill' },
+  { cmd: '/dashboard',   help: 'open the pompos web UI in your browser: /dashboard [--port N] · stop|kill' },
   { cmd: '/gateway',     help: 'gateway: status · start [--port N] (background) · stop · port [N] (get/set the persisted port)' },
   { cmd: '/menu',        help: 'browse the full subcommand catalog (command palette)' },
   { cmd: '/setup',       help: 'first-run / full re-setup: leave chat and run every wizard step' },

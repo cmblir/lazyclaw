@@ -1,4 +1,4 @@
-// Real Anthropic Messages API streaming provider for LazyClaw chat.
+// Real Anthropic Messages API streaming provider for Pompos chat.
 //
 // Why a separate file from registry.mjs:
 //   - registry.mjs hosts the *interface* and the offline mock used by the

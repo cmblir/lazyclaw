@@ -1,6 +1,6 @@
 // tests/f-mcp-cli.test.mjs
 //
-// `lazyclaw mcp` shipped read-only (`list` only); add/remove were "config JSON
+// `pompos mcp` shipped read-only (`list` only); add/remove were "config JSON
 // by hand" and there was no way to invoke a tool from the CLI. These pin the
 // follow-up: `mcp add/remove/list/call`. add/remove mutate cfg.mcp.servers
 // (atomic 0600 writeConfig); list shows configured + connected; call spawns the
@@ -17,7 +17,7 @@ import { cmdMcp } from '../commands/mcp.mjs';
 import * as mcpClient from '../mcp/client.mjs';
 
 const CLI = fileURLToPath(new URL('../cli.mjs', import.meta.url));
-const tmpCfgDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-mcpcli-'));
+const tmpCfgDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-mcpcli-'));
 const runCli = (args, dir) => spawnSync(process.execPath, [CLI, ...args], {
   env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir }, encoding: 'utf8',
 });

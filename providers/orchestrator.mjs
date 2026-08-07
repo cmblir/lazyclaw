@@ -17,7 +17,7 @@
 // the model part is omitted, the worker's defaultModel from
 // PROVIDER_INFO is used.
 //
-// Config (~/.lazyclaw/config.json):
+// Config (~/.pompos/config.json):
 //   {
 //     "orchestrator": {
 //       "planner": "claude-cli:claude-opus-4-7",
@@ -33,7 +33,7 @@
 //   }
 //
 // Defaults: planner = the user's currently configured `cfg.provider`
-// (so `lazyclaw onboard --provider claude-cli` works without any extra
+// (so `pompos onboard --provider claude-cli` works without any extra
 // step), workers = [planner] (degenerates to a single-agent chain that
 // still benefits from plan + synthesis structure).
 
@@ -81,7 +81,7 @@ import {
  * yields markdown chunks describing plan + subtasks + synthesis.
  *
  * @param {Object} [opts]
- * @param {() => Record<string, unknown>} [opts.cfgGetter] reads ~/.lazyclaw/config.json
+ * @param {() => Record<string, unknown>} [opts.cfgGetter] reads ~/.pompos/config.json
  * @param {(cfg, provider) => string} [opts.keyResolver] returns api-key for a worker provider (mirrors cli.mjs::_resolveAuthKey)
  */
 export function makeOrchestratorProvider(opts = {}) {
@@ -116,7 +116,7 @@ export function makeOrchestratorProvider(opts = {}) {
           return;
         }
         yield `> Orchestrator not configured — using single-shot \`${direct.name}${direct.model ? ':' + direct.model : ''}\`. ` +
-          `Run \`lazyclaw orchestrator set-planner ${fallbackSpec}\` then \`lazyclaw orchestrator workers add <provider:model>\` to enable multi-agent.\n\n`;
+          `Run \`pompos orchestrator set-planner ${fallbackSpec}\` then \`pompos orchestrator workers add <provider:model>\` to enable multi-agent.\n\n`;
         for await (const chunk of direct.prov.sendMessage(messages, {
           apiKey: keyResolver(cfg, direct.name),
           model: direct.model || undefined,

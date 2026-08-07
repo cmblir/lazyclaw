@@ -13,9 +13,10 @@ blob-report/
 
 # Local runtime state written by the CLI
 .lazyclaw/
+.pompos/
 
 # Secrets — never commit .env files (they hold tokens). Use .env.example
-# in the repo and put real values under ~/.lazyclaw/.env on the host.
+# in the repo and put real values under ~/.pompos/.env on the host.
 .env
 *.env
 !.env.example

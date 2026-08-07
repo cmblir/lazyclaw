@@ -1,4 +1,4 @@
-// Engine for `/loop` REPL command and `lazyclaw loop` detached subcommand.
+// Engine for `/loop` REPL command and `pompos loop` detached subcommand.
 //
 // Repeats one prompt against the active provider up to N times, stopping
 // early when (a) an `--until` regex matches the latest assistant turn, or

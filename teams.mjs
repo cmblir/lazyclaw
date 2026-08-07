@@ -1,4 +1,4 @@
-// Persistent team registry for `/team` REPL command and `lazyclaw team`
+// Persistent team registry for `/team` REPL command and `pompos team`
 // subcommand. Backs the Phase 10 piece of docs/multi-agent.md.
 //
 // Storage under <configDir>/teams/<name>.json. A team is a named set of
@@ -44,7 +44,7 @@ function validateAgentRefs(agents, lead, configDir) {
   }
   for (const a of agents) {
     if (!getAgent(a, configDir)) {
-      throw new TeamError(`agent "${a}" is not registered — run 'lazyclaw agent add ${a}' first`, 'TEAM_BAD_AGENT');
+      throw new TeamError(`agent "${a}" is not registered — run 'pompos agent add ${a}' first`, 'TEAM_BAD_AGENT');
     }
   }
   if (lead && !agents.includes(lead)) {

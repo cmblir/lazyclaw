@@ -1,6 +1,6 @@
 // tui/slash_gateway.mjs — `/gateway status|start|stop|port` for the chat REPL.
 //
-// `lazyclaw gateway` has always been a top-level CLI command, so the only way
+// `pompos gateway` has always been a top-level CLI command, so the only way
 // to check on it — or change the port it binds — was to leave the session.
 // This exposes those operations in-chat. Everything external (pidfile probe,
 // health fetch, child spawn, port-listening check) is injectable so the
@@ -102,7 +102,7 @@ function _portInUse(reason) {
 // Cheap liveness probe for `/gateway port <N>`'s validation: is some OTHER
 // process already listening on the port the user wants to move the gateway
 // to? A raw TCP connect (not a health fetch — the occupant need not be a
-// lazyclaw process) with a short timeout, mirroring tui/slash_dashboard.mjs's
+// pompos process) with a short timeout, mirroring tui/slash_dashboard.mjs's
 // _portIsListening. Injectable via deps so tests never touch a real socket.
 function _isPortListening(port, timeoutMs = 200) {
   return new Promise((resolve) => {
@@ -194,14 +194,14 @@ async function _start(cfgDir, cfg, d, overridePort) {
     return [
       `gateway: failed to start — ${reason}`,
       ...(_portInUse(reason) ? [
-        `  Something else holds that port. \`lazyclaw daemon status\` and \`lsof -nP -iTCP:${effectivePort} -sTCP:LISTEN\` will name it,`,
+        `  Something else holds that port. \`pompos daemon status\` and \`lsof -nP -iTCP:${effectivePort} -sTCP:LISTEN\` will name it,`,
         '  or move the gateway with `/gateway port <N>` (persists), or one-off it with `/gateway start --port <N>`.',
       ] : []),
     ].join('\n');
   }
   return [
     `gateway: spawned but did not come up within ${Math.round(START_TIMEOUT_MS / 1000)}s${exited ? ` (it exited${exited.code != null ? ` with code ${exited.code}` : ''} without explaining why)` : ''}.`,
-    '  Run `lazyclaw gateway` in a terminal to see why (config guard, port in use, channel creds).',
+    '  Run `pompos gateway` in a terminal to see why (config guard, port in use, channel creds).',
   ].join('\n');
 }
 

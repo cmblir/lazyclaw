@@ -37,14 +37,14 @@ test.describe('Phase 4 — /goal × cron', () => {
     // goal file is present
     expect(fs.existsSync(path.join(cfg, 'goals', 'x.json'))).toBe(true);
 
-    // cron config carries goal-x and points at `lazyclaw goal tick x`
+    // cron config carries goal-x and points at `pompos goal tick x`
     const list = runCli(['cron', 'list'], cfg);
     expect(list.status).toBe(0);
     const out = JSON.parse(list.stdout);
     const job = out.jobs.find((j: any) => j.name === 'goal-x');
     expect(job).toBeTruthy();
     expect(job.schedule).toBe('* * * * *');
-    expect(job.command).toEqual(['lazyclaw', 'goal', 'tick', 'x']);
+    expect(job.command).toEqual(['pompos', 'goal', 'tick', 'x']);
   });
 
   test('goal tick --force runs one iteration and stores a check-in', () => {

@@ -74,7 +74,7 @@ export function isAuthorized(req, expectedToken) {
  *   - `Origin` set → must be in `allowedOrigins`. Empty allowlist
  *     means "reject all browser-originated requests" — the default,
  *     because the daemon is designed for CLI/script callers.
- *   - `allowLoopback: true` (set by `lazyclaw dashboard`) additionally
+ *   - `allowLoopback: true` (set by `pompos dashboard`) additionally
  *     accepts any `Origin` that looks like loopback (`http://127.0.0.1:*`,
  *     `http://localhost:*`, `http://[::1]:*`). Safe because the daemon
  *     binds only to 127.0.0.1, so an attacker can't reach us with a

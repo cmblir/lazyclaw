@@ -32,7 +32,7 @@ export async function cmdRates(sub, positional, flags = {}) {
     case 'set': {
       const key = positional[0];
       if (!key || !key.includes('/')) {
-        console.error('Usage: lazyclaw rates set <provider/model> --input <N> --output <N> [--cache-read <N>] [--cache-create <N>] [--currency USD]');
+        console.error('Usage: pompos rates set <provider/model> --input <N> --output <N> [--cache-read <N>] [--cache-create <N>] [--currency USD]');
         process.exit(2);
       }
       const inputPer1M = flags.input !== undefined ? Number(flags.input) : null;
@@ -56,7 +56,7 @@ export async function cmdRates(sub, positional, flags = {}) {
     case 'delete':
     case 'unset': {
       const key = positional[0];
-      if (!key) { console.error('Usage: lazyclaw rates delete <provider/model>'); process.exit(2); }
+      if (!key) { console.error('Usage: pompos rates delete <provider/model>'); process.exit(2); }
       const cfg = readConfig();
       const had = !!(cfg.rates && cfg.rates[key]);
       if (cfg.rates) delete cfg.rates[key];
@@ -81,7 +81,7 @@ export async function cmdRates(sub, positional, flags = {}) {
       const src = positional[0];
       const dst = positional[1];
       if (!src || !dst || !src.includes('/') || !dst.includes('/')) {
-        console.error('Usage: lazyclaw rates copy <src-provider/model> <dst-provider/model> [--force]');
+        console.error('Usage: pompos rates copy <src-provider/model> <dst-provider/model> [--force]');
         process.exit(2);
       }
       const cfg = readConfig();
@@ -113,18 +113,18 @@ export async function cmdRates(sub, positional, flags = {}) {
       process.exit(result.ok ? 0 : 1);
     }
     default:
-      console.error('Usage: lazyclaw rates <list|set <key>|delete <key>|shape|validate>');
+      console.error('Usage: pompos rates <list|set <key>|delete <key>|shape|validate>');
       process.exit(2);
   }
 }
 
 // Loads on first use to avoid paying the import cost when the user
-// only ran `lazyclaw chat` or similar; cli.mjs is already a 2700-line
+// only ran `pompos chat` or similar; cli.mjs is already a 2700-line
 // hot path and we don't need every helper paged in.
 
 
 
-// `lazyclaw memory <show|dream|edit> [args]`
+// `pompos memory <show|dream|edit> [args]`
 //
 // show core|recent|episodic [topic]    print contents to stdout
 // dream                                consolidate recent into episodic
@@ -162,7 +162,7 @@ export async function cmdProviders(sub, positional, flags = {}) {
     }
     case 'info': {
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw providers info <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos providers info <name>'); process.exit(2); }
       const meta = getRegistry().PROVIDER_INFO[name];
       if (!meta) {
         console.error(`unknown provider: ${name} (registered: ${Object.keys(getRegistry().PROVIDERS).join(', ')})`);
@@ -257,7 +257,7 @@ export async function cmdProviders(sub, positional, flags = {}) {
       // Mirrors the picker's "+ Add custom" flow but scriptable, so users
       // can wire NIM / OpenRouter / vLLM into config without entering the
       // arrow-key UI.
-      //   lazyclaw providers add nim \
+      //   pompos providers add nim \
       //     --base-url https://integrate.api.nvidia.com/v1 \
       //     --api-key nvapi-xxx \
       //     [--default-model meta/llama-3.1-70b] \
@@ -266,7 +266,7 @@ export async function cmdProviders(sub, positional, flags = {}) {
       const baseUrl = flags['base-url'] || flags.baseUrl;
       const apiKey = flags['api-key'] || flags.apiKey || '';
       if (!name || !baseUrl) {
-        console.error('Usage: lazyclaw providers add <name> --base-url <url> [--api-key <key>] [--default-model <id>] [--no-probe]');
+        console.error('Usage: pompos providers add <name> --base-url <url> [--api-key <key>] [--default-model <id>] [--no-probe]');
         process.exit(2);
       }
       let validName;
@@ -318,7 +318,7 @@ export async function cmdProviders(sub, positional, flags = {}) {
     }
     case 'remove': {
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw providers remove <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos providers remove <name>'); process.exit(2); }
       const cfg = readConfig();
       const list = Array.isArray(cfg.customProviders) ? cfg.customProviders : [];
       const before = list.length;
@@ -338,10 +338,10 @@ export async function cmdProviders(sub, positional, flags = {}) {
       // Fetch + print the live model list from a provider's /v1/models.
       // Works for any registered OpenAI-compatible endpoint (custom +
       // openai + ollama). Used by the picker but useful standalone too:
-      //   lazyclaw providers models nim
-      //   lazyclaw providers models openai --filter gpt-4
+      //   pompos providers models nim
+      //   pompos providers models openai --filter gpt-4
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw providers models <name> [--filter <substr>]'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos providers models <name> [--filter <substr>]'); process.exit(2); }
       if (!getRegistry().PROVIDERS[name]) {
         console.error(`unknown provider: ${name}`);
         process.exit(2);
@@ -361,14 +361,14 @@ export async function cmdProviders(sub, positional, flags = {}) {
       }
     }
     default:
-      console.error('Usage: lazyclaw providers <list|info <name>|test <name>|add <name> --base-url <url> [--api-key <k>]|remove <name>|models <name>>');
+      console.error('Usage: pompos providers <list|info <name>|test <name>|add <name> --base-url <url> [--api-key <k>]|remove <name>|models <name>>');
       process.exit(2);
   }
 }
 
-// `lazyclaw orchestrator` — read/write the cfg.orchestrator section
-// without editing config.json by hand. Mirrors the shape `lazyclaw
-// providers` / `lazyclaw rates` already use.
+// `pompos orchestrator` — read/write the cfg.orchestrator section
+// without editing config.json by hand. Mirrors the shape `pompos
+// providers` / `pompos rates` already use.
 //
 // Subcommands:
 //   status                        Print current planner / workers / maxSubtasks as JSON.
@@ -420,7 +420,7 @@ export async function cmdOrchestrator(sub, positional, _flags = {}) {
       cf.orchestratorEnable(cfg, sub === 'on');
       writeConfig(cfg);
       const w = Array.isArray(orch.workers) ? orch.workers.length : 0;
-      console.log(JSON.stringify({ ok: true, enabled: sub === 'on', provider: cfg.provider, ...(sub === 'on' && w === 0 ? { warning: 'no workers configured — add one: lazyclaw orchestrator workers add <provider[:model]>' } : {}) }, null, 2));
+      console.log(JSON.stringify({ ok: true, enabled: sub === 'on', provider: cfg.provider, ...(sub === 'on' && w === 0 ? { warning: 'no workers configured — add one: pompos orchestrator workers add <provider[:model]>' } : {}) }, null, 2));
       return;
     }
     case 'set-planner': {
@@ -464,7 +464,7 @@ export async function cmdOrchestrator(sub, positional, _flags = {}) {
           return;
         }
         default: {
-          console.error('Usage: lazyclaw orchestrator workers <add <spec> | remove <spec> | clear | set <spec,spec,...>>');
+          console.error('Usage: pompos orchestrator workers <add <spec> | remove <spec> | clear | set <spec,spec,...>>');
           process.exit(2);
         }
       }
@@ -482,14 +482,14 @@ export async function cmdOrchestrator(sub, positional, _flags = {}) {
     default: {
       console.error(
         'Usage:\n' +
-        '  lazyclaw orchestrator status\n' +
-        '  lazyclaw orchestrator set-planner <provider[:model]>\n' +
-        '  lazyclaw orchestrator workers add <provider[:model]>\n' +
-        '  lazyclaw orchestrator workers remove <provider[:model]>\n' +
-        '  lazyclaw orchestrator workers set <provider[:model],...>\n' +
-        '  lazyclaw orchestrator workers clear\n' +
-        '  lazyclaw orchestrator set-max-subtasks <N>\n' +
-        '  lazyclaw orchestrator clear'
+        '  pompos orchestrator status\n' +
+        '  pompos orchestrator set-planner <provider[:model]>\n' +
+        '  pompos orchestrator workers add <provider[:model]>\n' +
+        '  pompos orchestrator workers remove <provider[:model]>\n' +
+        '  pompos orchestrator workers set <provider[:model],...>\n' +
+        '  pompos orchestrator workers clear\n' +
+        '  pompos orchestrator set-max-subtasks <N>\n' +
+        '  pompos orchestrator clear'
       );
       process.exit(2);
     }

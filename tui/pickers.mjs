@@ -165,7 +165,7 @@ export function _attachGhostAutocomplete(rl) {
 // splash composer and chat header below still live here because they read
 // pickers-local state and stay close to the wizard that prints them.
 
-// v5 hero banner — ANSI Shadow LAZYCLAW wordmark stacked on top of the
+// v5 hero banner — ANSI Shadow POMPOS wordmark stacked on top of the
 // braille sloth (tui/banner.generated.mjs + tui/wordmark.mjs). Left-aligned
 // with a 2-cell margin so wide terminals don't push the art to the right.
 // Opt out with LAZYCLAW_LEGACY_MENU=1 to fall back to the v4 figlet box.
@@ -187,7 +187,7 @@ export async function _renderV5Banner(version) {
   a.wordmark.rows.forEach((r, i) => rows.push(tint(gradient[i] ?? 1, '  ' + r)));
   rows.push('');
   for (const r of a.banner.rows) rows.push(_orange('  ' + r));
-  rows.push(_orange('  ' + `lazyclaw v${v}`));
+  rows.push(_orange('  ' + `pompos v${v}`));
   return rows;
 }
 
@@ -230,7 +230,7 @@ export async function _printChatBanner(activeProvName, activeModel, version) {
 export async function _arrowMenu({ title, subtitle, footer, items, defaultIdx = 0, searchable = false }) {
   if (!process.stdout.isTTY || !process.stdin.isTTY) {
     // Non-TTY fallback: print the labels on stderr and read a single
-    // line of stdin. Used when somebody pipes input to `lazyclaw
+    // line of stdin. Used when somebody pipes input to `pompos
     // setup` — the wizard still works, just without arrows.
     process.stderr.write(`${title}\n`);
     items.forEach((it, i) => process.stderr.write(`  ${i + 1}. ${it.label}${it.desc ? ' — ' + it.desc : ''}\n`));
@@ -490,7 +490,7 @@ export async function _pickProviderInteractive() {
         };
       });
     const picked = await _arrowMenu({
-      title: 'LazyClaw setup — Step 1 of 3:  pick how you want to auth',
+      title: 'Pompos setup — Step 1 of 3:  pick how you want to auth',
       subtitle: 'API: bring your own key  ·  CLI/Local: use what\'s already on this machine  ·  Mock: offline test',
       items: familyItems,
     });
@@ -540,7 +540,7 @@ export async function _pickProviderInteractive() {
         break;
       }
       const picked = await _arrowMenu({
-        title: `LazyClaw setup — Step 2 of 3:  pick a ${family.label} provider`,
+        title: `Pompos setup — Step 2 of 3:  pick a ${family.label} provider`,
         subtitle: `Showing ${provItems.length} ${family.label.toLowerCase()} option(s). Type to filter.`,
         items: provItems,
         searchable: true,
@@ -565,10 +565,10 @@ export async function _pickProviderInteractive() {
     // (orchestrator is filtered out of _providerFamilies above), so this
     // step is just the regular model picker. The orchestrator wizard
     // (_setupOrchestratorInteractive) stays reachable via the dedicated
-    // `lazyclaw orchestrator …` subcommand and an explicit
+    // `pompos orchestrator …` subcommand and an explicit
     // `--provider orchestrator` invocation.
     const picked = await _pickModelInteractive(provider.id, {
-      titlePrefix: 'LazyClaw setup — Step 3 of 3:',
+      titlePrefix: 'Pompos setup — Step 3 of 3:',
       onBack: 'restart',
     });
     if (picked === 'CANCEL') return null;
@@ -767,7 +767,7 @@ export async function _addCustomProviderInteractive() {
       process.stdout.write(
         paint(2, `Note: "${name}" is a built-in OpenAI-compatible provider; ` +
         `your custom entry will override the built-in baseUrl/api-key for this install. ` +
-        `Remove with: lazyclaw providers remove ${name}`) + '\n'
+        `Remove with: pompos providers remove ${name}`) + '\n'
       );
     }
     break;
@@ -804,7 +804,7 @@ export async function _addCustomProviderInteractive() {
   process.stdout.write('\n');
   process.stdout.write(`  ${ok(bold('✓ custom provider saved:'))} ${entry.name}  ${dim('→')} ${entry.baseUrl}\n`);
   process.stdout.write(probeMsg);
-  process.stdout.write(dim(`  Removable any time via:  lazyclaw providers remove ${name}\n`));
+  process.stdout.write(dim(`  Removable any time via:  pompos providers remove ${name}\n`));
   await _quickPrompt('  press Enter to continue ');
   return { name };
 }

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 test('readConfig is mtime-cached but hands out independent, mutation-safe clones', async () => {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-cfgcache-'));
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-cfgcache-'));
   process.env.LAZYCLAW_CONFIG_DIR = d;
   const { readConfig, writeConfig, _invalidateConfigCache } = await import('../lib/config.mjs');
   _invalidateConfigCache();

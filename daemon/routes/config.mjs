@@ -6,7 +6,7 @@ import { redactConfigTree } from '../../mas/redact.mjs';
 
 export async function configValidate(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
-          // Mirror of v3.39's `lazyclaw config validate`. Same shape
+          // Mirror of v3.39's `pompos config validate`. Same shape
           // (single source of truth in config-validate.mjs). HTTP
           // status reflects ok/issues so a UI's "config status"
           // badge can branch on HTTP code: 200 = ok, 422 = issues
@@ -24,7 +24,7 @@ export async function configValidate(c) {
 
 export async function configGet(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
-          // Mirror of `lazyclaw config list`. Returns every stored key with
+          // Mirror of `pompos config list`. Returns every stored key with
           // ALL credential material masked — a shallow copy that masked only
           // the top-level 'api-key' leaked customProviders[].apiKey,
           // authProfiles key material, and channel bot tokens in cleartext to
@@ -36,7 +36,7 @@ export async function configGet(c) {
 
 export async function configKeyGet(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
-          // Mirror of `lazyclaw config get <key>`. The `!== 'validate'`
+          // Mirror of `pompos config get <key>`. The `!== 'validate'`
           // guard ensures the literal GET /config/validate case (above)
           // is never shadowed by this dynamic handler.
           const key = configKeyMatch[1];
@@ -55,7 +55,7 @@ export async function configKeyGet(c) {
 export async function configKeyPut(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
           // PUT /config/<key>  body: { value: <any> }
-          // Mirror of `lazyclaw config set <key> <value>`. Re-validates the
+          // Mirror of `pompos config set <key> <value>`. Re-validates the
           // whole config after the write so we never persist a broken state.
           // Nested cargo (customProviders / rates / authProfiles) goes
           // through its own dedicated endpoint — guarded here so a
@@ -85,7 +85,7 @@ export async function configKeyPut(c) {
 
 export async function configKeyDelete(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
-          // DELETE /config/<key> — same as `lazyclaw config delete`.
+          // DELETE /config/<key> — same as `pompos config delete`.
           // Idempotent: 200 with `removed: false` when the key wasn't
           // present.
           if (typeof ctx.writeConfig !== 'function') {

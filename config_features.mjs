@@ -5,8 +5,8 @@
 // stores a separate file.
 //
 // All four were called out as OpenClaw parity gaps; we implement
-// them as plain config keys here so the SAME `lazyclaw config get`
-// flow keeps working and `lazyclaw export | jq` already covers
+// them as plain config keys here so the SAME `pompos config get`
+// flow keeps working and `pompos export | jq` already covers
 // backups without us writing a second exporter.
 
 // Auth profiles ────────────────────────────────────────────────
@@ -132,7 +132,7 @@ export function pairingHas(cfg, id) {
 //
 // CLI side of `openclaw nodes` — the actual mobile companion apps
 // aren't in scope here, but the registration table lets a future
-// app (or just `curl`) authenticate against `lazyclaw daemon`.
+// app (or just `curl`) authenticate against `pompos daemon`.
 // Platform is free-form ('macos' / 'ios' / 'android' / 'web' /
 // 'cli') so we don't constrain future surfaces.
 
@@ -216,7 +216,7 @@ export function messageRemove(cfg, name) {
 export async function messageSend(cfg, name, text, opts = {}) {
   const map = (cfg.messaging || {}).webhooks || {};
   const hook = map[name];
-  if (!hook) throw new Error(`no "${name}" channel is configured. Set up Slack with \`lazyclaw setup\` (channel step), or add a webhook: \`lazyclaw message add ${name} <webhook-url>\``);
+  if (!hook) throw new Error(`no "${name}" channel is configured. Set up Slack with \`pompos setup\` (channel step), or add a webhook: \`pompos message add ${name} <webhook-url>\``);
   const fetchFn = opts.fetch || globalThis.fetch;
   if (!fetchFn) throw new Error('no fetch implementation');
 

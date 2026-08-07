@@ -137,7 +137,7 @@ test('rejects unknown format', async () => {
   );
 });
 
-test('CLI: lazyclaw trajectories export --format jsonl writes file', () => {
+test('CLI: pompos trajectories export --format jsonl writes file', () => {
   const dir = tmpDir();
   // seed with one record using the same module via a tiny inline script
   const seedScript = `

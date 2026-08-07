@@ -62,7 +62,7 @@ function fakeCtx(body) {
   return {
     ctx: {
       readConfig: () => ({ provider: TOOLSTREAM, model: 'x' }),
-      sessionsDirGetter: () => '/tmp/lazyclaw-typed-streaming-test',
+      sessionsDirGetter: () => '/tmp/pompos-typed-streaming-test',
       // No sessionId in body → sessionsMod is never touched.
       sessionsMod: { loadTurns: () => [], appendTurn: () => {} },
     },
@@ -184,7 +184,7 @@ test('(d) TUI run_turn renders tool_use + thinking events distinctly while still
   const runTurn = makeRunTurn({
     ctx: {
       cfg: { chat: { recall: false } },
-      cfgDir: '/tmp/lazyclaw-typed-streaming-test',
+      cfgDir: '/tmp/pompos-typed-streaming-test',
       sandboxSpec: null,
       syntheticChatSessionId: 'sess1',
       getMessages: () => messages,

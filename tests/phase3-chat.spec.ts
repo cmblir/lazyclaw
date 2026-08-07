@@ -8,7 +8,7 @@ let server: Server;
 let baseUrl: string;
 
 test.beforeAll(async () => {
-  const root = path.resolve(process.cwd(), 'dist-lazyclaw');
+  const root = path.resolve(process.cwd(), 'dist-pompos');
   const r = await startStaticServer(root);
   server = r.server;
   baseUrl = r.url;

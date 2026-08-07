@@ -15,7 +15,7 @@ import path from 'node:path';
 import { openIndex, closeIndex, indexSessionTurn, recall, backfillEmbeddings } from '../mas/index_db.mjs';
 import { __setEmbedder } from '../mas/embedder.mjs';
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-hyb-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-hyb-'));
 
 // Deterministic fake embedder: a doc/query maps to a one-hot vector by the
 // animal keyword it contains, so cosine similarity is controllable in a test.

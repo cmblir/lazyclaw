@@ -196,7 +196,7 @@ export async function runAgentTurn({
     if (!trajectoryRef) return;
     // Defence-in-depth: callers that don't pass configDir (legacy unit
     // tests of the tool-use loop) shouldn't see a side-effect on
-    // ~/.lazyclaw. The canonical post-task funnel (mas/learning.mjs)
+    // ~/.pompos. The canonical post-task funnel (mas/learning.mjs)
     // always passes configDir, so production paths still persist.
     if (!configDir) return;
     try {

@@ -120,7 +120,7 @@ function renderWide(props, cols) {
   lines.push('');
 
   // 2) panel top with inset title
-  const versionLabel = ` lazyclaw ${props.version || ''} ·${TITLE} `;
+  const versionLabel = ` pompos ${props.version || ''} ·${TITLE} `;
   const dashLeft = '─'.repeat(8);
   const dashRight = '─'.repeat(Math.max(2, PANEL_W - 2 - dashLeft.length - stringWidth(versionLabel)));
   lines.push(`${LMARGIN}╭${dashLeft}${versionLabel}${dashRight}╮`);
@@ -165,7 +165,7 @@ function renderWide(props, cols) {
   lines.push(`${LMARGIN}${shortCwd(cwd || process.cwd())}`);
   if (sessionId) lines.push(`${LMARGIN}Session: ${sessionId}`);
   lines.push('');
-  lines.push(`${LMARGIN}Welcome to lazyclaw. Type your message or /help for commands.`);
+  lines.push(`${LMARGIN}Welcome to pompos. Type your message or /help for commands.`);
   lines.push(`${LMARGIN}+ ${pickSplashTip({ provider, trainer })}`);
   // v5.4.3 — the baked-in status row that used to live here duplicated
   // ReplApp's real <StatusBar/> (tui/repl.mjs:476). Removing it cuts 4
@@ -185,11 +185,11 @@ function renderMedium(props, cols) {
   const lines = [];
 
   // 1) compact headline (no wordmark)
-  lines.push(`${LMARGIN}lazyclaw ${props.version || ''}`.trimEnd());
+  lines.push(`${LMARGIN}pompos ${props.version || ''}`.trimEnd());
   lines.push('');
 
   // 2) compact panel top — drop the TITLE chain, just version
-  const versionLabel = ` lazyclaw ${props.version || ''} `;
+  const versionLabel = ` pompos ${props.version || ''} `;
   const dashLeft = '─'.repeat(4);
   const dashRight = '─'.repeat(Math.max(2, PANEL_W - 2 - dashLeft.length - stringWidth(versionLabel)));
   lines.push(`${LMARGIN}╭${dashLeft}${versionLabel}${dashRight}╮`);
@@ -249,7 +249,7 @@ function renderMedium(props, cols) {
   lines.push(`${LMARGIN}${shortCwd(cwd || process.cwd())}`);
   if (sessionId) lines.push(`${LMARGIN}Session: ${sessionId}`);
   lines.push('');
-  lines.push(`${LMARGIN}Welcome to lazyclaw. Type your message or /help for commands.`);
+  lines.push(`${LMARGIN}Welcome to pompos. Type your message or /help for commands.`);
   lines.push(`${LMARGIN}+ ${pickSplashTip({ provider, trainer })}`);
   // v5.4.3 — baked-in status row removed; ReplApp renders the real one.
 
@@ -274,11 +274,11 @@ function renderNarrow(props, cols) {
   }
 
   // 2) compact headline (no wordmark — too wide).
-  lines.push(`${LMARGIN}lazyclaw ${props.version || ''}`.trimEnd());
+  lines.push(`${LMARGIN}pompos ${props.version || ''}`.trimEnd());
   lines.push('');
 
   // 3) panel top — version label only, dashes fill remainder.
-  const versionLabel = ` lazyclaw ${props.version || ''} `;
+  const versionLabel = ` pompos ${props.version || ''} `;
   const dashLeft = '─'.repeat(2);
   const dashRight = '─'.repeat(Math.max(2, PANEL_W - 2 - dashLeft.length - stringWidth(versionLabel)));
   lines.push(`${LMARGIN}╭${dashLeft}${versionLabel}${dashRight}╮`);
@@ -332,7 +332,7 @@ function renderNarrow(props, cols) {
   lines.push(fit(`${LMARGIN}${shortCwd(cwd || process.cwd())}`, cols).trimEnd());
   if (sessionId) lines.push(fit(`${LMARGIN}Session: ${sessionId}`, cols).trimEnd());
   lines.push('');
-  lines.push(fit(`${LMARGIN}Welcome to lazyclaw. /help for commands.`, cols).trimEnd());
+  lines.push(fit(`${LMARGIN}Welcome to pompos. /help for commands.`, cols).trimEnd());
   // v5.4.3 — baked-in status row removed; ReplApp renders the real one.
 
   return lines;
@@ -342,7 +342,7 @@ function renderNarrow(props, cols) {
 function renderMinimal(props) {
   const { version, provider, model, sessionId, cwd } = props;
   const lines = [];
-  lines.push(`lazyclaw ${version || ''}`.trimEnd());
+  lines.push(`pompos ${version || ''}`.trimEnd());
   lines.push(`${provider} · ${model}`);
   lines.push(shortCwd(cwd || process.cwd()));
   if (sessionId) lines.push(`Session: ${sessionId}`);
@@ -391,8 +391,8 @@ export function Splash(props) {
   // Panel border / status separator glyphs (leading box-drawing after
   // optional whitespace). Catches ╭ ╰ │ as well as ─ separators.
   const BORDER_RE = /^\s*[╭╰│├┤┬┴┼─╮╯]/;
-  // NARROW compact headline (e.g. "  lazyclaw 5.3.0").
-  const HEADLINE_RE = /^\s*lazyclaw\s+\S/;
+  // NARROW compact headline (e.g. "  pompos 5.3.0").
+  const HEADLINE_RE = /^\s*pompos\s+\S/;
   // NARROW summary line ("N subcmds · M tools · K skills · /help" or its
   // wrapped variant). Also catches "/help for commands".
   const SUMMARY_RE = /(subcmds\s+·|tools\s+·\s+\d+\s+skills|\/help\s+for\s+commands)/;
@@ -412,7 +412,7 @@ export function Splash(props) {
       } else if (ACCENT_HEADERS.has(trimmed)) {
         color = theme.fg; // section headers
       } else if (!showWordmark && HEADLINE_RE.test(line) && /\d/.test(line)) {
-        color = theme.fg; // narrow/medium compact headline ("lazyclaw 5.x.y")
+        color = theme.fg; // narrow/medium compact headline ("pompos 5.x.y")
       } else if (!showWordmark && SUMMARY_RE.test(line)) {
         color = theme.fg; // narrow/medium summary line
       }

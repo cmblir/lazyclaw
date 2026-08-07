@@ -257,7 +257,7 @@ test.describe('Phase 18 — agent memory', () => {
     await mock2.close();
   });
 
-  test('lazyclaw agent memory show / clear works against the on-disk file', async () => {
+  test('pompos agent memory show / clear works against the on-disk file', async () => {
     const cfg = tmpDir('p18-cli-memory');
     const mod = await loadMem();
     mod.prependEntry('planner', { taskId: 't_x', title: 'x', body: '- a\n- b' }, cfg);
@@ -275,7 +275,7 @@ test.describe('Phase 18 — agent memory', () => {
     expect(show2.stderr).toMatch(/no memory/);
   });
 
-  test('lazyclaw agent reflect runs an LLM call and prepends the result', async () => {
+  test('pompos agent reflect runs an LLM call and prepends the result', async () => {
     const mock = await startMockAnthropic();
     mock.queue.push({
       json: { id: 'm1', type: 'message', role: 'assistant', content: [{ type: 'text', text: '- explicit lesson\n- another' }], stop_reason: 'end_turn' },

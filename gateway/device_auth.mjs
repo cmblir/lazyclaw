@@ -32,7 +32,7 @@ const FIELD_SEP = '|';
 export const DEFAULT_MAX_SKEW_MS = 120_000;
 
 export function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
+  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
 }
 
 export function gatewayDir(configDir = defaultConfigDir()) {

@@ -367,7 +367,7 @@ test.describe('Phase 13 — mention router', () => {
     await mock.close();
   });
 
-  test('lazyclaw task tick wires the router from the CLI', async () => {
+  test('pompos task tick wires the router from the CLI', async () => {
     const mock = await startMockAnthropic();
     mock.queue.push({ json: { id: 'm1', type: 'message', role: 'assistant', content: [{ type: 'text', text: 'on it [[TASK_DONE]]' }], stop_reason: 'end_turn' } });
 

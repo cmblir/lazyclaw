@@ -28,13 +28,13 @@ const splashProps = {
   cwd: '/tmp/proj', tools: [], skills: [],
 };
 
-// "Welcome to lazyclaw." is emitted verbatim by every splash tier (wide,
+// "Welcome to pompos." is emitted verbatim by every splash tier (wide,
 // medium, narrow) that a 100-column mount renders under — confirmed by
 // reading tui/splash.mjs (renderWide:168, renderMedium:252, renderNarrow:335)
 // and by grepping the repo: it appears nowhere else in tui/*.mjs, so a count
 // of 1 unambiguously means "the splash is on screen" and not a coincidental
 // substring of conversation text.
-const SPLASH_MARKER = 'Welcome to lazyclaw.';
+const SPLASH_MARKER = 'Welcome to pompos.';
 const PRIOR_TURN = 'PRIOR_TURN_TEXT_BEFORE_CLEAR';
 
 // Build a screen snapshot from everything the harness has emitted so far.

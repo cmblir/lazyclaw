@@ -1,7 +1,7 @@
 // Read tool — reads a file (UTF-8) from the agent's workspace.
 //
 // Paths are resolved relative to the workspace cwd. Absolute paths are
-// allowed (the user opted into "lazyclaw 모든 권한"). Use the bash tool
+// allowed (the user opted into "pompos 모든 권한"). Use the bash tool
 // to read binary blobs.
 
 import fs from 'node:fs';

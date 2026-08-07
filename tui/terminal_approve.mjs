@@ -1,5 +1,5 @@
 // terminal_approve.mjs — default human-in-the-loop approval hook for the
-// bare (non-Ink) CLI path, e.g. `lazyclaw task tick` on a TTY.
+// bare (non-Ink) CLI path, e.g. `pompos task tick` on a TTY.
 //
 // The tool runner is fail-closed: a sensitive tool (bash / write / web /
 // browser / delegate) runs only behind an approve({tool,args,agent}) →

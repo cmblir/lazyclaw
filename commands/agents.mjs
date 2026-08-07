@@ -53,7 +53,7 @@ export async function cmdAgent(prompt, flags) {
   // --workspace <name> stitches AGENTS.md / SOUL.md / TOOLS.md from
   // <configDir>/workspaces/<name>/ at the head of the system prompt.
   // Workspace + skill compose: workspace block first, skill block
-  // after — same order as `lazyclaw workspace show` so the user can
+  // after — same order as `pompos workspace show` so the user can
   // preview exactly what the LLM will see.
   const workspaceName = flags.workspace || cfg.workspace || '';
   const promptParts = [];
@@ -206,7 +206,7 @@ export async function cmdTask(sub, positional, flags = {}) {
       const teamName = flags.team;
       const title = flags.title;
       if (!teamName || !title) {
-        console.error('Usage: lazyclaw task start --team <team> --title "..." [--description "..."] [--lead <agent>]');
+        console.error('Usage: pompos task start --team <team> --title "..." [--description "..."] [--lead <agent>]');
         process.exit(2);
       }
       try {
@@ -247,7 +247,7 @@ export async function cmdTask(sub, positional, flags = {}) {
       return;
     }
     case 'show': {
-      if (!idOrFirst) { console.error('Usage: lazyclaw task show <id>'); process.exit(2); }
+      if (!idOrFirst) { console.error('Usage: pompos task show <id>'); process.exit(2); }
       const t = tasksMod.getTask(idOrFirst, cfgDir);
       if (!t) { console.error(`task show: no task "${idOrFirst}"`); process.exit(2); }
       emitJson(t);
@@ -256,7 +256,7 @@ export async function cmdTask(sub, positional, flags = {}) {
     case 'tick': {
       const id = idOrFirst;
       const userMsg = positional.slice(1).join(' ').trim() || flags.message || '';
-      if (!id) { console.error('Usage: lazyclaw task tick <id> [<user message>]'); process.exit(2); }
+      if (!id) { console.error('Usage: pompos task tick <id> [<user message>]'); process.exit(2); }
       const task = tasksMod.getTask(id, cfgDir);
       if (!task) { console.error(`task tick: no task "${id}"`); process.exit(2); }
       const team = teamsMod.getTeam(task.team, cfgDir);
@@ -339,7 +339,7 @@ export async function cmdTask(sub, positional, flags = {}) {
     }
     case 'abandon':
     case 'done': {
-      if (!idOrFirst) { console.error(`Usage: lazyclaw task ${sub} <id>`); process.exit(2); }
+      if (!idOrFirst) { console.error(`Usage: pompos task ${sub} <id>`); process.exit(2); }
       const target = sub === 'done' ? 'done' : 'abandoned';
       try {
         const next = tasksMod.patchTask(idOrFirst, { status: target }, cfgDir);
@@ -370,7 +370,7 @@ export async function cmdTask(sub, positional, flags = {}) {
       return;
     }
     case 'transcript': {
-      if (!idOrFirst) { console.error('Usage: lazyclaw task transcript <id> [--format text|md|json]'); process.exit(2); }
+      if (!idOrFirst) { console.error('Usage: pompos task transcript <id> [--format text|md|json]'); process.exit(2); }
       const t = tasksMod.getTask(idOrFirst, cfgDir);
       if (!t) { console.error(`task transcript: no task "${idOrFirst}"`); process.exit(2); }
       const fmt = String(flags.format || 'text');
@@ -381,13 +381,13 @@ export async function cmdTask(sub, positional, flags = {}) {
     case 'remove':
     case 'rm':
     case 'delete': {
-      if (!idOrFirst) { console.error('Usage: lazyclaw task remove <id>'); process.exit(2); }
+      if (!idOrFirst) { console.error('Usage: pompos task remove <id>'); process.exit(2); }
       try { emitJson(tasksMod.removeTask(idOrFirst, cfgDir)); }
       catch (err) { console.error(`task remove: ${err?.message || err}`); process.exit(2); }
       return;
     }
     default:
-      console.error('Usage: lazyclaw task <start|tick|list|show|transcript|abandon|done|remove> ...');
+      console.error('Usage: pompos task <start|tick|list|show|transcript|abandon|done|remove> ...');
       process.exit(2);
   }
 }
@@ -418,7 +418,7 @@ export async function cmdTeam(sub, positional, flags = {}) {
       return;
     }
     case 'add': {
-      if (!name) { console.error('Usage: lazyclaw team add <name> --agents a,b,c [--lead X] [--channel #shop|Cxxx] [--display "..."]'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos team add <name> --agents a,b,c [--lead X] [--channel #shop|Cxxx] [--display "..."]'); process.exit(2); }
       const agents = teamsMod.parseListFlag(flags.agents) || [];
       try {
         const channel = await resolveChannel(flags.channel || '');
@@ -437,14 +437,14 @@ export async function cmdTeam(sub, positional, flags = {}) {
       return;
     }
     case 'show': {
-      if (!name) { console.error('Usage: lazyclaw team show <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos team show <name>'); process.exit(2); }
       const t = teamsMod.getTeam(name, cfgDir);
       if (!t) { console.error(`team show: no team "${name}"`); process.exit(2); }
       emitJson(t);
       return;
     }
     case 'edit': {
-      if (!name) { console.error('Usage: lazyclaw team edit <name> [--agents a,b,c] [--lead X] [--channel ...] [--display "..."]'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos team edit <name> [--agents a,b,c] [--lead X] [--channel ...] [--display "..."]'); process.exit(2); }
       const patch = {};
       if (flags.display !== undefined)         patch.displayName = String(flags.display);
       if (flags['display-name'] !== undefined) patch.displayName = String(flags['display-name']);
@@ -462,13 +462,13 @@ export async function cmdTeam(sub, positional, flags = {}) {
     case 'remove':
     case 'rm':
     case 'delete': {
-      if (!name) { console.error('Usage: lazyclaw team remove <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos team remove <name>'); process.exit(2); }
       try { emitJson(teamsMod.removeTeam(name, cfgDir)); }
       catch (err) { console.error(`team remove: ${err?.message || err}`); process.exit(2); }
       return;
     }
     default:
-      console.error('Usage: lazyclaw team <add|list|show|edit|remove> ...');
+      console.error('Usage: pompos team <add|list|show|edit|remove> ...');
       process.exit(2);
   }
 }
@@ -477,7 +477,7 @@ export async function cmdTeam(sub, positional, flags = {}) {
 // file-size gate. Re-exported here so cli.mjs's named import is unchanged.
 export { cmdAgentRegistry } from './agents_registry.mjs';
 
-// Best-effort .env loader for ~/.lazyclaw/.env. Only sets keys that are
+// Best-effort .env loader for ~/.pompos/.env. Only sets keys that are
 // not already present in process.env (so a shell-level export wins).
 // Lines starting with '#' are comments; values are taken verbatim and
 // stripped of surrounding double-quotes if present.

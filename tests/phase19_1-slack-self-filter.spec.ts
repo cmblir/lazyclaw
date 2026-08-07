@@ -49,7 +49,7 @@ test.describe('Phase 19.1 — Slack inbound self-message filter', () => {
     }, { selfBotId: 'B0SELF' })).toBe(false);
     expect(shouldDispatchEvent({
       type: 'message', text: 'x', channel: 'C1', ts: '1700.3',
-      bot_profile: { id: 'B0SELF', name: 'lazyclaw' },
+      bot_profile: { id: 'B0SELF', name: 'pompos' },
     }, { selfBotId: 'B0SELF' })).toBe(false);
   });
 
@@ -71,7 +71,7 @@ test.describe('Phase 19.1 — Slack inbound self-message filter', () => {
     const { shouldDispatchEvent } = await loadSlack();
     expect(shouldDispatchEvent({
       type: 'message',
-      text: 'hi @lazyclaw',
+      text: 'hi @pompos',
       channel: 'C1',
       ts: '1700.7',
       user: 'U_human',

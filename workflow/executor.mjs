@@ -1,4 +1,4 @@
-// LazyClaw sequential workflow executor (phase 1).
+// Pompos sequential workflow executor (phase 1).
 // Plain ESM so it runs under bare node (CLI) and under @playwright/test (TS-aware).
 
 import { performance } from 'node:perf_hooks';

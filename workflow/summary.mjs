@@ -1,5 +1,5 @@
 // Pure transformations over persisted workflow state.
-// Lifted out of the CLI so both `lazyclaw inspect` and the daemon's
+// Lifted out of the CLI so both `pompos inspect` and the daemon's
 // /workflows endpoint can produce the same shape — a single source
 // of truth for what "workflow progress" looks like over the wire.
 //

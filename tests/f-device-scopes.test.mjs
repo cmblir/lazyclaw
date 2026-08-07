@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PairingStore } from '../gateway/device_auth.mjs';
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-scope-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-scope-'));
 
 test('role + scopes flow from requestPairing through approve to the device record', () => {
   const store = new PairingStore(tmp());

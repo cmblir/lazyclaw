@@ -18,7 +18,7 @@ export const CHAT_WINDOW_TOKEN_BUDGET = Number(process.env.LAZYCLAW_CHAT_WINDOW_
 
 // Approximate token count of a messages[] array (4 chars/token, same heuristic
 // the window cap uses). Drives the status-bar context gauge so it reflects the
-// conversation history lazyclaw actually holds — NOT a provider's self-reported
+// conversation history pompos actually holds — NOT a provider's self-reported
 // usage, which for CLI providers (codex/claude/gemini) includes their own
 // system prompt + tool defs per call and has nothing to do with this budget.
 export function estimateMessagesTokens(messages) {

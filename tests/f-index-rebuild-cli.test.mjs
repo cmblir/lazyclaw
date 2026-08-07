@@ -1,6 +1,6 @@
-// tests/f-index-rebuild-cli.test.mjs — the `lazyclaw index rebuild` CLI command.
+// tests/f-index-rebuild-cli.test.mjs — the `pompos index rebuild` CLI command.
 //
-// mas/index_db.mjs documents recovery "via lazyclaw index rebuild" and the
+// mas/index_db.mjs documents recovery "via pompos index rebuild" and the
 // doctor/failure-log points operators to it, but the `index` subcommand was
 // absent from lib/args.mjs SUBCOMMANDS, so following the code's own
 // instructions yielded the generic "unknown subcommand" usage + exit 2.
@@ -71,7 +71,7 @@ test('index with no sub exits 2 with an index-specific usage message', () => {
   const dir = tmpCfg();
   const r = runCli(['index'], dir);
   assert.equal(r.status, 2, `expected exit 2, got ${r.status}; stdout=${r.stdout}`);
-  assert.match(r.stderr, /Usage: lazyclaw index <rebuild\|embed>/);
+  assert.match(r.stderr, /Usage: pompos index <rebuild\|embed>/);
 });
 
 // (b) a bad sub is rejected the same way.
@@ -79,5 +79,5 @@ test('index with a bad sub exits 2 with an index-specific usage message', () => 
   const dir = tmpCfg();
   const r = runCli(['index', 'bogus'], dir);
   assert.equal(r.status, 2, `expected exit 2, got ${r.status}; stdout=${r.stdout}`);
-  assert.match(r.stderr, /Usage: lazyclaw index <rebuild\|embed>/);
+  assert.match(r.stderr, /Usage: pompos index <rebuild\|embed>/);
 });

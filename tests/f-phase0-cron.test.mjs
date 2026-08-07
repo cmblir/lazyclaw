@@ -7,8 +7,8 @@
 // drops it. LAZYCLAW_CONFIG_DIR isolates config.json to a temp dir and
 // LAZYCLAW_SKIP_CRON_INSTALL keeps the test off the real launchd/crontab.
 //
-// BUG 2: scheduled goal ticks stored command=["lazyclaw",...], but launchd /
-// crontab run with a minimal PATH and no shell, so the bare "lazyclaw" token
+// BUG 2: scheduled goal ticks stored command=["pompos",...], but launchd /
+// crontab run with a minimal PATH and no shell, so the bare "pompos" token
 // never resolves. The command must be baked to an absolute node + CLI entry.
 //
 // BUG 3: FIELD_RANGES capped day-of-week at 6, so "0 9 * * 7" (Sunday) threw
@@ -74,8 +74,8 @@ test('cron tools round-trip against the REAL cron.mjs backend (add -> list -> re
 
 // ── BUG 2: absolute node + CLI entry baked into the scheduled command ────────
 
-test('resolveCommand rewrites a bare "lazyclaw" token to absolute node + CLI entry', () => {
-  const out = resolveCommand(['lazyclaw', 'goal', 'tick', 'sweep']);
+test('resolveCommand rewrites a bare "pompos" token to absolute node + CLI entry', () => {
+  const out = resolveCommand(['pompos', 'goal', 'tick', 'sweep']);
   assert.equal(out[0], process.execPath, 'argv[0] must be the absolute node binary');
   assert.ok(path.isAbsolute(out[1]), 'argv[1] must be an absolute CLI entry path');
   assert.ok(out[1].endsWith('cli.mjs'), `CLI entry should be cli.mjs, got ${out[1]}`);
@@ -99,14 +99,14 @@ test('attachGoalCron persists the LOGICAL command; resolution to absolute happen
     const cmd = store.cron['goal-sweep'].command;
     // config.json stays portable/machine-independent: the logical token, not
     // a host-specific absolute path.
-    assert.deepEqual(cmd, ['lazyclaw', 'goal', 'tick', 'sweep']);
+    assert.deepEqual(cmd, ['pompos', 'goal', 'tick', 'sweep']);
     // The absolute node + CLI entry is applied only where the OS scheduler
     // consumes it — resolveCommand, called inside buildPlist / buildCrontabLine
     // / runJob — so the bare-token PATH bug is fixed at the consumption boundary.
     const resolved = cronReal.resolveCommand(cmd);
     assert.equal(resolved[0], process.execPath, 'resolved command must start with the node binary');
     assert.ok(resolved[1].endsWith('cli.mjs'), 'resolved command must carry the CLI entry');
-    assert.ok(!resolved.includes('lazyclaw'), 'bare "lazyclaw" token gone after resolution');
+    assert.ok(!resolved.includes('pompos'), 'bare "pompos" token gone after resolution');
   } finally {
     if (prevSkip === undefined) delete process.env.LAZYCLAW_SKIP_CRON_INSTALL; else process.env.LAZYCLAW_SKIP_CRON_INSTALL = prevSkip;
   }

@@ -190,7 +190,7 @@ test('an unknown subcommand lists the valid ones', async () => {
 // port 19600) exits within a second with a one-line reason on stderr. The
 // original implementation spawned with stdio:'ignore', so that reason was
 // discarded and the user got "spawned but did not come up within 6s — run
-// `lazyclaw gateway` in a terminal to see why", which is the tool asking the
+// `pompos gateway` in a terminal to see why", which is the tool asking the
 // user to do its job. Capture the child's stderr and report it.
 test('start surfaces the child\'s own failure reason instead of a generic timeout', async () => {
   const listeners = {};

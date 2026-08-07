@@ -4,7 +4,7 @@
 // environment keeps working. Must precede every other import — see the module's
 // own comment for why the ordering is load-bearing and not merely tidy.
 import './lib/env_compat_boot.mjs';
-// LazyClaw CLI — workflow + config commands.
+// Pompos CLI — workflow + config commands.
 import path from 'node:path';
 // Phase D2 — config IO + key/url resolution + version lookup, extracted to
 // lib/ so the per-domain command modules can share them.
@@ -48,15 +48,15 @@ async function main() {
   const cmd = argv[0];
   const rest = parseArgs(argv.slice(1));
   // No subcommand at all: drop into chat REPL (v5.0.6 default). The
-  // arrow-key launcher menu is still available via `lazyclaw menu`.
+  // arrow-key launcher menu is still available via `pompos menu`.
   // Non-TTY callers (pipes, scripts) get the historical usage line.
   if (cmd === undefined) {
     if (process.stdin.isTTY && process.stdout.isTTY) {
       process.argv.splice(2, 0, 'chat');
       return main();
     }
-    console.error('Usage: lazyclaw <' + SUBCOMMANDS.join('|') + '> ...');
-    console.error('Run `lazyclaw help` for a one-line summary of each subcommand.');
+    console.error('Usage: pompos <' + SUBCOMMANDS.join('|') + '> ...');
+    console.error('Run `pompos help` for a one-line summary of each subcommand.');
     console.error('Tip: launch in an interactive terminal to drop into chat.');
     process.exit(2);
   }
@@ -83,21 +83,21 @@ async function main() {
         (await import('./commands/config.mjs')).cmdConfigGet(undefined);
       } else if (sub === 'delete' || sub === 'unset') {
         const key = rest.positional[1];
-        if (!key) { console.error('Usage: lazyclaw config delete <key>'); process.exit(2); }
+        if (!key) { console.error('Usage: pompos config delete <key>'); process.exit(2); }
         const cfg = readConfig();
         const had = Object.prototype.hasOwnProperty.call(cfg, key);
         delete cfg[key];
         writeConfig(cfg);
         console.log(JSON.stringify({ ok: true, key, removed: had }));
       } else if (sub === 'path') {
-        // Useful for shell pipelines: `cat $(lazyclaw config path)`.
+        // Useful for shell pipelines: `cat $(pompos config path)`.
         console.log(configPath());
       } else if (sub === 'edit') {
         await (await import('./commands/config.mjs')).cmdConfigEdit();
       } else if (sub === 'validate') {
         await (await import('./commands/config.mjs')).cmdConfigValidate();
       } else {
-        console.error('Usage: lazyclaw config set|get|list|delete|path|edit|validate <key> [value]'); process.exit(2);
+        console.error('Usage: pompos config set|get|list|delete|path|edit|validate <key> [value]'); process.exit(2);
       }
       break;
     }
@@ -107,8 +107,8 @@ async function main() {
       break;
     }
     case 'migrate': {
-      // Phase A baseline accepts `lazyclaw migrate v5`; Phase G adds the
-      // bare `lazyclaw migrate` and `lazyclaw migrate rollback` forms.
+      // Phase A baseline accepts `pompos migrate v5`; Phase G adds the
+      // bare `pompos migrate` and `pompos migrate rollback` forms.
       const target = rest.positional[0];
       if (target === 'rollback') {
         const mod = await import('./scripts/migrate-v5.mjs');
@@ -143,7 +143,7 @@ async function main() {
     case 'hermes': {
       // Phase G: import a Hermes Agent install (spec §10).
       if (rest.positional[0] !== 'import') {
-        console.error('Usage: lazyclaw hermes import [--from <dir>]');
+        console.error('Usage: pompos hermes import [--from <dir>]');
         process.exit(2);
       }
       const from = rest.flags.from;
@@ -159,7 +159,7 @@ async function main() {
     case 'openclaw': {
       // Phase G: import an OpenClaw install (spec §10).
       if (rest.positional[0] !== 'import') {
-        console.error('Usage: lazyclaw openclaw import [--from <dir>]');
+        console.error('Usage: pompos openclaw import [--from <dir>]');
         process.exit(2);
       }
       const from = rest.flags.from;
@@ -173,10 +173,10 @@ async function main() {
     }
     case 'trajectories': {
       // Phase H1: read-only trajectory exporter (spec §2.7).
-      // Usage: lazyclaw trajectories export --format <atropos|axolotl|openai-ft|jsonl>
+      // Usage: pompos trajectories export --format <atropos|axolotl|openai-ft|jsonl>
       //          [--since 7d] [--filter "outcome=done"] [--out ./dir]
       if (rest.positional[0] !== 'export') {
-        console.error('Usage: lazyclaw trajectories export --format <atropos|axolotl|openai-ft|jsonl> [--since 7d] [--filter "outcome=done"] [--out <dir>]');
+        console.error('Usage: pompos trajectories export --format <atropos|axolotl|openai-ft|jsonl> [--since 7d] [--filter "outcome=done"] [--out <dir>]');
         process.exit(2);
       }
       const mod = await import('./mas/trajectory_export.mjs');
@@ -220,7 +220,7 @@ async function main() {
         }
       }
       if (indexSub !== 'rebuild') {
-        console.error('Usage: lazyclaw index <rebuild|embed>');
+        console.error('Usage: pompos index <rebuild|embed>');
         process.exit(2);
       }
       try {
@@ -454,7 +454,7 @@ async function main() {
         process.stderr.write(`unknown command "${name}"`);
         const guess = nearest(name, SUBCOMMANDS);
         process.stderr.write(guess ? ` — did you mean "${guess}"?\n` : `\n`);
-        process.stderr.write('run `lazyclaw help` to see the list\n');
+        process.stderr.write('run `pompos help` to see the list\n');
         process.exit(2);
       }
       // Known subcommand: prefer the rich HELP_DETAILS entry. cmdHelp exits 2
@@ -487,8 +487,8 @@ async function main() {
       const guess = nearest(cmd, SUBCOMMANDS);
       if (guess) console.error(`unknown command "${cmd}" — did you mean "${guess}"?`);
       else console.error(`unknown command "${cmd}"`);
-      console.error('Usage: lazyclaw <' + SUBCOMMANDS.join('|') + '> ...');
-      console.error('Run `lazyclaw help` for a one-line summary of each subcommand.');
+      console.error('Usage: pompos <' + SUBCOMMANDS.join('|') + '> ...');
+      console.error('Run `pompos help` for a one-line summary of each subcommand.');
       process.exit(2);
     }
   }

@@ -1,4 +1,4 @@
-// tests/f-config-set-nested.test.mjs — `lazyclaw config set <key> <value>` got
+// tests/f-config-set-nested.test.mjs — `pompos config set <key> <value>` got
 // a dotted key wrong: `config set chat.recall false` stored a literal flat key
 // "chat.recall": "false" (string) instead of nesting it as chat: { recall:
 // false } (boolean). cmdConfigSet now writes the nested path AND coerces the
@@ -14,7 +14,7 @@ import { readConfig } from '../lib/config.mjs';
 import { cmdConfigSet } from '../commands/config.mjs';
 
 function withTmpConfig(fn) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-cfg-set-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-cfg-set-'));
   const prev = process.env.LAZYCLAW_CONFIG_DIR;
   process.env.LAZYCLAW_CONFIG_DIR = dir;
   // cmdConfigSet logs a JSON line on success; swallow it to keep test output clean.

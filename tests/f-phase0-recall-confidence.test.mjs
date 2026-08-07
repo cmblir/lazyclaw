@@ -18,7 +18,7 @@ import { openIndex, closeIndex, indexSkill, indexSessionTurn, recall } from '../
 import { DEFAULT_CROSS_CLI_DAMPEN } from '../mas/confidence.mjs';
 import * as recallTool from '../mas/tools/recall.mjs';
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-p0conf-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-p0conf-'));
 
 // Write a skill .md with the given frontmatter fields, then index its body so
 // it is recallable. Keeps the on-disk frontmatter (confidence/trained_by) as

@@ -1,6 +1,6 @@
 // tests/f-config-slash-splash.test.mjs — the /config slash (re-run setup from
 // chat) and the shared splash props that make the setup wizard render the same
-// lazyclaw splash the chat REPL does.
+// pompos splash the chat REPL does.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';

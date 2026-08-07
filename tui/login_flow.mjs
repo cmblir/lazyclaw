@@ -74,7 +74,7 @@ export async function maybeLoginForCli(ctx, provName, { promptText, statusDeps }
     ctx.requestLogin = { provider: provName, mode: 'apikey', apiKey: key };
     return { exit: true };
   }
-  // gemini: save the key in lazyclaw; the provider injects it as GEMINI_API_KEY.
+  // gemini: save the key in pompos; the provider injects it as GEMINI_API_KEY.
   if (typeof ctx.readConfig === 'function' && typeof ctx.writeConfig === 'function') {
     const next = setAuthKey({ readConfig: ctx.readConfig, writeConfig: ctx.writeConfig, provider: provName, key });
     if (ctx.cfg && next) { ctx.cfg.authProfiles = next.authProfiles; ctx.cfg.authActiveProfile = next.authActiveProfile; }

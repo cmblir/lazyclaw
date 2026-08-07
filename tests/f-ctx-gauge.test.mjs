@@ -1,5 +1,5 @@
 // tests/f-ctx-gauge.test.mjs — the status-bar context gauge tracks the
-// conversation history lazyclaw holds, not a provider's self-reported usage.
+// conversation history pompos holds, not a provider's self-reported usage.
 // CLI providers (codex/claude/gemini) report tens of thousands of input tokens
 // per call (their own system prompt + tool defs), which used to be shown over
 // the 8000-token history budget — `ctx 49467/8000` on a one-line chat.

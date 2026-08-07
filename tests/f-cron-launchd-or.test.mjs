@@ -19,7 +19,7 @@ function intervalsOf(xml) {
 }
 
 test('buildPlist uses OR semantics when both day-of-month and day-of-week are restricted', () => {
-  const ivs = intervalsOf(buildPlist('job', '0 9 13 * 5', ['lazyclaw', 'tick']));
+  const ivs = intervalsOf(buildPlist('job', '0 9 13 * 5', ['pompos', 'tick']));
   assert.ok(ivs.some((i) => i.Day === 13 && i.Weekday === undefined), 'must fire on the 13th regardless of weekday');
   assert.ok(ivs.some((i) => i.Weekday === 5 && i.Day === undefined), 'must fire on Fridays regardless of date');
   assert.ok(!ivs.some((i) => i.Day !== undefined && i.Weekday !== undefined), 'must NOT AND day-of-month with weekday');

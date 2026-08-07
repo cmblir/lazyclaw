@@ -4,7 +4,7 @@
 //
 // Deliberately NO create endpoint: scheduling a job installs a launchd/crontab
 // entry that runs a command, and this daemon is loopback-but-unauthenticated by
-// default (`lazyclaw dashboard` mints no token), so creation stays in the
+// default (`pompos dashboard` mints no token), so creation stays in the
 // trusted CLI. The one mutation exposed is DELETE /cron/<name> — removing a
 // schedule only ever reduces what runs, is reversible from the CLI, and is
 // guarded by ctx.writeConfig so a read-only daemon refuses it.

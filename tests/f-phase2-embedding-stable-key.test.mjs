@@ -19,7 +19,7 @@ import {
 } from '../mas/index_db.mjs';
 import { __setEmbedder } from '../mas/embedder.mjs';
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-esk-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-esk-'));
 
 // Deterministic fake embedder: one-hot by the animal keyword the text contains.
 const VECS = { cats: [1, 0, 0], dogs: [0, 1, 0], cars: [0, 0, 1] };

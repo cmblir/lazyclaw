@@ -126,7 +126,7 @@ export function render(host) {
       );
       if (sessions.length === 0) {
         showList(el('div', { class: 'empty' },
-          'No workflow runs yet. Run one with ', el('code', { text: 'lazyclaw run <id> ./flow.mjs' }), '.'));
+          'No workflow runs yet. Run one with ', el('code', { text: 'pompos run <id> ./flow.mjs' }), '.'));
         return;
       }
       if (list !== tableWrap) showList(tableWrap);

@@ -5,7 +5,7 @@
 // /chat, /sessions, /workflows, /skills, the dashboard SPA …) and a
 // byte-identical refactor is high-risk. Instead, this adapter wraps
 // daemon.mjs.startDaemon so callers that want a uniform Channel handle
-// (start/send/stop) get one, while the regression path (`lazyclaw
+// (start/send/stop) get one, while the regression path (`pompos
 // daemon` with no --channels flag) stays untouched.
 //
 // `send(threadId, text)` is a no-op for HTTP: the daemon's response is

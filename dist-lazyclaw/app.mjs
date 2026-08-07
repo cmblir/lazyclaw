@@ -1,4 +1,4 @@
-// LazyClaw chat front-end. Settings persist via localStorage.
+// Pompos chat front-end. Settings persist via localStorage.
 // Provider streaming is consumed via async iteration so the bot bubble
 // grows incrementally character by character.
 

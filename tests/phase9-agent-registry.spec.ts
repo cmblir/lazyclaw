@@ -128,7 +128,7 @@ test.describe('Phase 9 — agent registry', () => {
     expect(r2.stderr).toMatch(/no agent/);
   });
 
-  test('lazyclaw agent "<prompt>" still works (legacy one-shot path is intact)', async () => {
+  test('pompos agent "<prompt>" still works (legacy one-shot path is intact)', async () => {
     const cfg = tmpDir('p9-legacy');
     expect(runCli(['config', 'set', 'provider', 'mock'], cfg).status).toBe(0);
     // The string "hello" is NOT in AGENT_REG_SUBS, so dispatch must fall

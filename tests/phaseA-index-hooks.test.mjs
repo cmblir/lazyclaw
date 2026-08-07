@@ -10,7 +10,7 @@ import { put as trajPut } from '../mas/trajectory_store.mjs';
 import { openIndex, recall, closeIndex } from '../mas/index_db.mjs';
 
 function tmp() {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-hooks-'));
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-hooks-'));
   process.env.LAZYCLAW_CONFIG_DIR = d;
   return d;
 }

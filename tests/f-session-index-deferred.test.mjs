@@ -17,7 +17,7 @@ import path from 'node:path';
 import { appendTurn, loadTurns } from '../sessions.mjs';
 import * as idx from '../mas/index_db.mjs';
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-sidx-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-sidx-'));
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r)); };
 
 test('appendTurn writes the JSONL log synchronously (durable source of truth)', () => {

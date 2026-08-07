@@ -15,7 +15,7 @@ import { _injectRecall } from '../tui/run_turn.mjs';
 import { recalledLayer } from '../mas/prompt_stack.mjs';
 import { openIndex, indexSessionTurn, closeIndex } from '../mas/index_db.mjs';
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-ptr-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-ptr-'));
 
 test('prepends the recall layer to the last user message as a transient copy', () => {
   const messages = [

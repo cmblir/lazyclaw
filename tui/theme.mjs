@@ -1,4 +1,4 @@
-// tui/theme.mjs — single source of truth for lazyclaw v5 color tokens.
+// tui/theme.mjs — single source of truth for pompos v5 color tokens.
 // The amber hex is also stamped into tui/banner.generated.mjs so the
 // sloth gutter and the prompt accent stay visually paired.
 //

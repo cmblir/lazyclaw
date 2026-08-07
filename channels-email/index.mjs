@@ -1,4 +1,4 @@
-// @lazyclaw/channel-email
+// @pompos/channel-email
 //
 // IMAP IDLE for inbound, nodemailer for outbound. threadId is the
 // In-Reply-To / Message-ID chain root so replies stay in the same
@@ -93,7 +93,7 @@ export class EmailChannel extends Channel {
     }
     // threadId here is the recipient address; the daemon supplies it.
     await this._transporter.sendMail({
-      from: this._from, to: String(threadId), subject: 'lazyclaw', text: String(text),
+      from: this._from, to: String(threadId), subject: 'pompos', text: String(text),
     });
   }
 

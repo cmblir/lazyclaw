@@ -34,7 +34,7 @@ export async function _status(_args, ctx) {
 
 export async function _version(_args, ctx) {
   const v = ctx.version || '0.0.0';
-  return `lazyclaw ${v} (node ${process.version}, ${process.platform})`;
+  return `pompos ${v} (node ${process.version}, ${process.platform})`;
 }
 
 export async function _usage(_args, ctx) {

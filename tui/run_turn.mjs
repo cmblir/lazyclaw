@@ -47,7 +47,7 @@ function _errorHint(err) {
   const status = err?.status;
   const code = err?.code;
   if (status === 401 || status === 403 || /\b(401|403|unauthorized|forbidden|invalid[ _-]?api[ _-]?key|authentication|no api key|missing api key)\b/i.test(msg)) {
-    return 'hint: set a key with /provider, or `lazyclaw auth add <provider>`';
+    return 'hint: set a key with /provider, or `pompos auth add <provider>`';
   }
   if (status === 404 || /\b(404|model[ _-]?not[ _-]?found|no such model|unknown model|model .* does not exist|not_found_error)\b/i.test(msg)) {
     return 'hint: run /model to pick a valid model';

@@ -32,7 +32,7 @@ let redirecting = false;
 // Liveness probe: set by a proxy write, checked after inkWriter returns.
 let sawInkWrite = false;
 
-const INK_PROXY = Symbol.for('lazyclaw.inkStdout');
+const INK_PROXY = Symbol.for('pompos.inkStdout');
 
 /**
  * One of the streams Ink renders into — pass it as BOTH the `stdout` and the

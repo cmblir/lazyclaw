@@ -29,7 +29,7 @@ function _daemonTarget(flags) {
 
 export async function cmdSlack(sub, positional, flags = {}) {
   if (sub !== 'listen') {
-    console.error('Usage: lazyclaw slack listen [--provider X] [--model Y]');
+    console.error('Usage: pompos slack listen [--provider X] [--model Y]');
     process.exit(2);
   }
   await ensureRegistry();
@@ -76,7 +76,7 @@ export async function cmdSlack(sub, positional, flags = {}) {
   });
 }
 
-// `lazyclaw telegram listen` — zero-install mobile control surface.
+// `pompos telegram listen` — zero-install mobile control surface.
 // Long-polls the Telegram Bot API (no public URL / webhook needed) and
 // pipes each inbound message through the active provider, replying in
 // the same chat. Mirrors `slack listen`. Access is gated by the existing
@@ -84,7 +84,7 @@ export async function cmdSlack(sub, positional, flags = {}) {
 // means "reply to anyone who can reach the bot".
 export async function cmdTelegram(sub, positional, flags = {}) {
   if (sub !== 'listen') {
-    console.error('Usage: lazyclaw telegram listen [--provider X] [--model Y]\n  Long-polls the Telegram Bot API. Set TELEGRAM_BOT_TOKEN in ~/.lazyclaw/.env.\n  Restrict who can talk to it with `lazyclaw pairing add <telegram-user-id>`.');
+    console.error('Usage: pompos telegram listen [--provider X] [--model Y]\n  Long-polls the Telegram Bot API. Set TELEGRAM_BOT_TOKEN in ~/.pompos/.env.\n  Restrict who can talk to it with `pompos pairing add <telegram-user-id>`.');
     process.exit(2);
   }
   await ensureRegistry();
@@ -135,12 +135,12 @@ export async function cmdTelegram(sub, positional, flags = {}) {
   });
 }
 
-// `lazyclaw matrix listen` — Matrix inbound over the client-server API's
+// `pompos matrix listen` — Matrix inbound over the client-server API's
 // long-poll /sync (no SDK). Mirrors `telegram listen`. Set MATRIX_HOMESERVER
-// + MATRIX_ACCESS_TOKEN (+ MATRIX_USER_ID for self-filtering) in ~/.lazyclaw/.env.
+// + MATRIX_ACCESS_TOKEN (+ MATRIX_USER_ID for self-filtering) in ~/.pompos/.env.
 export async function cmdMatrix(sub, positional, flags = {}) {
   if (sub !== 'listen') {
-    console.error('Usage: lazyclaw matrix listen [--provider X] [--model Y]\n  Long-polls the Matrix /sync API. Set MATRIX_HOMESERVER + MATRIX_ACCESS_TOKEN (+ MATRIX_USER_ID) in ~/.lazyclaw/.env.\n  Restrict who can talk to it with `lazyclaw pairing add <@user:server>`.');
+    console.error('Usage: pompos matrix listen [--provider X] [--model Y]\n  Long-polls the Matrix /sync API. Set MATRIX_HOMESERVER + MATRIX_ACCESS_TOKEN (+ MATRIX_USER_ID) in ~/.pompos/.env.\n  Restrict who can talk to it with `pompos pairing add <@user:server>`.');
     process.exit(2);
   }
   await ensureRegistry();
@@ -189,10 +189,10 @@ export async function cmdMatrix(sub, positional, flags = {}) {
   });
 }
 
-// `lazyclaw channels [list|enable <name>|disable <name>|install <pkg>|remove <pkg>]`
+// `pompos channels [list|enable <name>|disable <name>|install <pkg>|remove <pkg>]`
 // list   — configured built-in channels (cfg.channels.<name>) + installed plugins.
 // enable/disable — toggle cfg.channels.<name>.enabled (view/edit the setting).
-// install/remove — manage @lazyclaw/channel-* plugin packages.
+// install/remove — manage @pompos/channel-* plugin packages.
 export async function cmdChannels(sub, positional = [], flags = {}) {
   const cfgDir = path.dirname(configPath());
   const { createLoader, listInstalled } = await import('../channels/loader.mjs');
@@ -200,9 +200,9 @@ export async function cmdChannels(sub, positional = [], flags = {}) {
 
   if (sub === 'install') {
     const name = positional[0];
-    if (!name) { process.stderr.write('usage: lazyclaw channels install <name>   (e.g. discord, email, whatsapp)\n'); process.exit(2); }
+    if (!name) { process.stderr.write('usage: pompos channels install <name>   (e.g. discord, email, whatsapp)\n'); process.exit(2); }
     const { isPluginName } = await import('../channels/loader.mjs');
-    // Back-compat: an explicit @lazyclaw/channel-* spec still routes through the
+    // Back-compat: an explicit @pompos/channel-* spec still routes through the
     // legacy plugin loader (for anyone shipping a real published package).
     if (isPluginName(name)) {
       const info = await loader.install(name);
@@ -214,11 +214,11 @@ export async function cmdChannels(sub, positional = [], flags = {}) {
     if (!spec) { process.stderr.write(`unknown channel: ${name} (known: ${KNOWN_CHANNELS.join(', ')})\n`); process.exit(2); }
     if (spec.builtin) { process.stdout.write(`channel ${spec.name} is built in — no install needed.\n`); return; }
     if (spec.binary && (!spec.deps || !spec.deps.length)) {
-      process.stderr.write(`channel ${spec.name} needs the external "${spec.binary}" binary on your PATH (not an npm package). Install it from its project, then: lazyclaw channels enable ${spec.name}\n`);
+      process.stderr.write(`channel ${spec.name} needs the external "${spec.binary}" binary on your PATH (not an npm package). Install it from its project, then: pompos channels enable ${spec.name}\n`);
       process.exit(2);
     }
     const deps = spec.deps || [];
-    if (!deps.length) { process.stdout.write(`channel ${spec.name} needs no runtime package — set creds with \`lazyclaw setup\`, then \`lazyclaw channels enable ${spec.name}\`.\n`); return; }
+    if (!deps.length) { process.stdout.write(`channel ${spec.name} needs no runtime package — set creds with \`pompos setup\`, then \`pompos channels enable ${spec.name}\`.\n`); return; }
     // Install the in-tree adapter's runtime deps INTO the config dir; the
     // gateway resolves them from there (commands/gateway.mjs _loadPluginChannel).
     const { spawnSync } = await import('node:child_process');
@@ -238,14 +238,14 @@ export async function cmdChannels(sub, positional = [], flags = {}) {
   }
   if (sub === 'remove' || sub === 'uninstall') {
     const name = positional[0];
-    if (!name) { process.stderr.write('usage: lazyclaw channels remove <@lazyclaw/channel-name>\n'); process.exit(2); }
+    if (!name) { process.stderr.write('usage: pompos channels remove <@pompos/channel-name>\n'); process.exit(2); }
     await loader.remove(name);
     process.stdout.write(`removed ${name}\n`);
     return;
   }
   if (sub === 'test') {
     const name = (positional[0] || '').toLowerCase();
-    if (!name) { process.stderr.write('usage: lazyclaw channels test <name>\n'); process.exit(2); }
+    if (!name) { process.stderr.write('usage: pompos channels test <name>\n'); process.exit(2); }
     const { verifyChannel } = await import('./setup_channels.mjs');
     try { (await import('../dotenv_min.mjs')).loadDotenvIfAny(cfgDir); } catch { /* best-effort */ }
     const r = await verifyChannel(name);
@@ -257,7 +257,7 @@ export async function cmdChannels(sub, positional = [], flags = {}) {
   }
   if (sub === 'enable' || sub === 'disable') {
     const name = (positional[0] || '').toLowerCase();
-    if (!name) { process.stderr.write(`usage: lazyclaw channels ${sub} <name>\n`); process.exit(2); }
+    if (!name) { process.stderr.write(`usage: pompos channels ${sub} <name>\n`); process.exit(2); }
     const cfg = readConfig();
     // Reject unknown names so a typo can't silently create a bogus
     // cfg.channels.<name> section that then leaks into the list view.
@@ -283,7 +283,7 @@ export async function cmdChannels(sub, positional = [], flags = {}) {
   }
   process.stdout.write('configured channels:\n');
   if (configured.length === 0) {
-    process.stdout.write('  (none — run `lazyclaw setup` or `/config` in chat to add one)\n');
+    process.stdout.write('  (none — run `pompos setup` or `/config` in chat to add one)\n');
   } else {
     for (const ch of configured) {
       const agent = ch.boundAgent ? ` · agent: ${ch.boundAgent}` : '';
@@ -291,7 +291,7 @@ export async function cmdChannels(sub, positional = [], flags = {}) {
     }
   }
   process.stdout.write(`plugins: ${plugins.length ? plugins.map((p) => `${p.name}@${p.version}`).join(', ') : '(none installed)'}\n`);
-  process.stdout.write('\ntoggle: lazyclaw channels <enable|disable> <name>  ·  add creds: lazyclaw setup\n');
+  process.stdout.write('\ntoggle: pompos channels <enable|disable> <name>  ·  add creds: pompos setup\n');
 }
 
 

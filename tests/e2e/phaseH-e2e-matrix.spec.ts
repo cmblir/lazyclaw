@@ -8,14 +8,14 @@ const CLI = path.resolve(process.cwd(), 'cli.mjs');
 
 // Hermetic config dir per-test: HOME and LAZYCLAW_CONFIG_DIR both repointed.
 function freshHome(): { home: string; env: NodeJS.ProcessEnv } {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-e2e-'));
-  fs.mkdirSync(path.join(home, '.lazyclaw'), { recursive: true });
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-e2e-'));
+  fs.mkdirSync(path.join(home, '.pompos'), { recursive: true });
   return {
     home,
     env: {
       ...process.env,
       HOME: home,
-      LAZYCLAW_CONFIG_DIR: path.join(home, '.lazyclaw'),
+      LAZYCLAW_CONFIG_DIR: path.join(home, '.pompos'),
       LAZYCLAW_MOCK_PROVIDER: '1',
       LAZYCLAW_NO_INK: '1',
       LAZYCLAW_NO_NETWORK: '1',
@@ -76,7 +76,7 @@ for (const provider of PROVIDERS) {
             test.skip(true, 'pending: Phase D sandbox run --backend subcommand');
           }
           if (flow === 'export-roundtrip') {
-            test.skip(true, 'pending: Phase H1 scripts/trajectory-export.mjs wrapper (today: lazyclaw trajectories export)');
+            test.skip(true, 'pending: Phase H1 scripts/trajectory-export.mjs wrapper (today: pompos trajectories export)');
           }
           if (flow === 'multi-agent-task') {
             test.skip(true, 'pending: Phase A codex-cli/gemini-cli provider registration');
@@ -94,7 +94,7 @@ for (const provider of PROVIDERS) {
             trainer: { provider, model: 'claude-haiku-4-5', schedule: 'manual' },
           };
           fs.writeFileSync(
-            path.join(home, '.lazyclaw', 'config.json'),
+            path.join(home, '.pompos', 'config.json'),
             JSON.stringify(cfg, null, 2),
           );
 
@@ -128,7 +128,7 @@ for (const provider of PROVIDERS) {
             case 'cross-cli-handoff': {
               // Install a skill trained by the *other* provider and recall it.
               const other = provider === 'claude-cli' ? 'codex-cli' : 'claude-cli';
-              const skillsDir = path.join(home, '.lazyclaw', 'skills');
+              const skillsDir = path.join(home, '.pompos', 'skills');
               fs.mkdirSync(skillsDir, { recursive: true });
               fs.writeFileSync(path.join(skillsDir, 'cross.md'),
                 `---\nname: cross\ndescription: t\nversion: 1\ngroup: dev\ntrained_by: ${other}\nconfidence: 0.9\n---\n\nbody\n`);
@@ -146,8 +146,8 @@ for (const provider of PROVIDERS) {
               expect(r.status).toBe(0);
               break;
             case 'persona-activate':
-              fs.mkdirSync(path.join(home, '.lazyclaw', 'personalities'), { recursive: true });
-              fs.writeFileSync(path.join(home, '.lazyclaw', 'personalities', 'p.md'),
+              fs.mkdirSync(path.join(home, '.pompos', 'personalities'), { recursive: true });
+              fs.writeFileSync(path.join(home, '.pompos', 'personalities', 'p.md'),
                 '---\nname: p\ndescription: t\n---\nbody\n');
               r = runCli(['persona', 'use', 'p'], env);
               expect(r.status).toBe(0);
@@ -162,7 +162,7 @@ for (const provider of PROVIDERS) {
               expect([0, 2]).toContain(r.status);
               break;
             case 'export-roundtrip': {
-              const trajDir = path.join(home, '.lazyclaw', 'trajectories', '2026-06-04');
+              const trajDir = path.join(home, '.pompos', 'trajectories', '2026-06-04');
               fs.mkdirSync(trajDir, { recursive: true });
               const rec = {
                 id: '01HZW9KQ8N000000000000000X', taskId: 't', agentName: 'a',
@@ -176,7 +176,7 @@ for (const provider of PROVIDERS) {
               const outDir = path.join(home, 'export-out');
               r = spawnSync(process.execPath,
                 [path.resolve(process.cwd(), 'scripts/trajectory-export.mjs'),
-                 '--format', 'openai-ft', '--root', path.join(home, '.lazyclaw'),
+                 '--format', 'openai-ft', '--root', path.join(home, '.pompos'),
                  '--out', outDir],
                 { env, encoding: 'utf8' });
               expect(r.status).toBe(0);

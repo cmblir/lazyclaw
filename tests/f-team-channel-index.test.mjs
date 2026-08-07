@@ -15,7 +15,7 @@ import path from 'node:path';
 import { registerAgent } from '../agents.mjs';
 import { registerTeam, patchTeam, teamForChannelCached } from '../teams.mjs';
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-tidx-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-tidx-'));
 
 test('teamForChannelCached resolves the team bound to a channel', () => {
   const d = tmp();

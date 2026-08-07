@@ -16,7 +16,7 @@ export async function render(host) {
 
   function cronSection(cron) {
     if (!cron.length) {
-      return el('div', { class: 'empty' }, 'No cron jobs. Add one with ', el('code', { text: 'lazyclaw cron add' }), '.');
+      return el('div', { class: 'empty' }, 'No cron jobs. Add one with ', el('code', { text: 'pompos cron add' }), '.');
     }
     const rows = cron.map((j) => el('tr', {},
       el('td', {}, el('strong', { text: j.name })),
@@ -28,7 +28,7 @@ export async function render(host) {
 
   function goalsSection(goals) {
     if (!goals.length) {
-      return el('div', { class: 'empty' }, 'No goals. Add one with ', el('code', { text: 'lazyclaw goal add' }), '.');
+      return el('div', { class: 'empty' }, 'No goals. Add one with ', el('code', { text: 'pompos goal add' }), '.');
     }
     return goals.map((g) => el('div', { class: 'card' },
       el('div', { class: 'row', style: 'border:0;padding:0;' },
@@ -40,7 +40,7 @@ export async function render(host) {
 
   function loopsSection(loops) {
     if (!loops.length) {
-      return el('div', { class: 'empty' }, 'No loop runs. Start one with ', el('code', { text: 'lazyclaw loop' }), '.');
+      return el('div', { class: 'empty' }, 'No loop runs. Start one with ', el('code', { text: 'pompos loop' }), '.');
     }
     return loops.map((l) => el('div', { class: 'card' },
       el('div', { class: 'row', style: 'border:0;padding:0;' },

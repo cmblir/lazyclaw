@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { parseDashboardUrl } from '../tui/slash_dispatcher.mjs';
 
 test('parseDashboardUrl extracts the bound URL from the daemon stdout line', () => {
-  const line = '🦞 LazyClaw dashboard listening at http://127.0.0.1:51234/dashboard\n';
+  const line = '🦞 Pompos dashboard listening at http://127.0.0.1:51234/dashboard\n';
   assert.equal(parseDashboardUrl(line), 'http://127.0.0.1:51234/dashboard');
 });
 
@@ -24,7 +24,7 @@ test('parseDashboardUrl tolerates partial buffers / extra noise and returns null
   assert.equal(parseDashboardUrl('booting...\nstill warming up'), null);
   // url spread is found even with leading noise
   assert.equal(
-    parseDashboardUrl('warming\n🦞 LazyClaw dashboard listening at http://127.0.0.1:8080/dashboard\nready'),
+    parseDashboardUrl('warming\n🦞 Pompos dashboard listening at http://127.0.0.1:8080/dashboard\nready'),
     'http://127.0.0.1:8080/dashboard',
   );
 });

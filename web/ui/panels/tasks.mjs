@@ -1,5 +1,5 @@
 // web/ui/panels/tasks.mjs — read-mostly task list with done/abandon actions.
-// Tasks are created via the CLI (`lazyclaw task start`), not from here.
+// Tasks are created via the CLI (`pompos task start`), not from here.
 import { el, phead, chip, banner, clear, kvlist } from '../dom.mjs';
 import { api, apiRaw } from '../api.mjs';
 import { openModal, closeModal } from '../modal.mjs';
@@ -77,7 +77,7 @@ export async function transcriptModal(t) {
     body: [
       kvlist([['Origin', t.slackChannel
         ? `${t.slackChannel} · thread ${t.slackThreadTs || '—'}`
-        : 'lazyclaw task start · no channel', true]]),
+        : 'pompos task start · no channel', true]]),
       // Three states here too, matching permissionChip. The modal is where an
       // operator inspects one task, so the safe unattended case is worth stating
       // rather than leaving blank — silence reads as "nothing to know", and
@@ -101,7 +101,7 @@ export async function transcriptModal(t) {
 }
 
 export async function render(host) {
-  host.append(phead('Tasks', 'Tasks are created via lazyclaw task start.'));
+  host.append(phead('Tasks', 'Tasks are created via pompos task start.'));
 
   // Cleared and re-populated by load(): a banner appears only while at least
   // one listed task ran unattended AND allowed to write/exec (see
@@ -165,7 +165,7 @@ export async function render(host) {
       clear(postureBanner);
       if (arr.length === 0) {
         show(el('div', { class: 'empty' },
-          'No tasks yet. Run ', el('code', { text: 'lazyclaw task start --team X --title "..."' }), '.'));
+          'No tasks yet. Run ', el('code', { text: 'pompos task start --team X --title "..."' }), '.'));
         return;
       }
       if (arr.some(isUnattendedWithExec)) {

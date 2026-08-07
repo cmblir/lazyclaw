@@ -1,4 +1,4 @@
-// @lazyclaw/channel-whatsapp
+// @pompos/channel-whatsapp
 //
 // whatsapp-web.js (browser automation). First-run prints a QR via
 // qrcode-terminal; subsequent runs reuse LocalAuth session in

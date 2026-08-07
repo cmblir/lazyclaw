@@ -82,7 +82,7 @@ export async function sessionsList(c) {
 
 export async function sessionsSearch(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
-          // Mirror of `lazyclaw sessions search <query> [--regex]`.
+          // Mirror of `pompos sessions search <query> [--regex]`.
           // ?q=<query> required; ?regex=true switches to regex mode.
           // Returns { query, regex, matches: [{ id, mtime, matchCount, excerpt }] }
           // — same shape the CLI prints. A dashboard rendering the
@@ -134,7 +134,7 @@ export async function sessionsSearch(c) {
 export async function sessionExport(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
           // GET /sessions/<id>/export?format=md|json|text — same body
-          // the CLI's `lazyclaw sessions export <id> --format ...`
+          // the CLI's `pompos sessions export <id> --format ...`
           // produces, with the appropriate content-type. The dashboard
           // can offer a "download as ..." button without spawning the
           // CLI.

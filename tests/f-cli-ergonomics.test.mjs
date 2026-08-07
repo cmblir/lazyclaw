@@ -4,7 +4,7 @@
 //   1. An unknown top-level subcommand (typo) printed a generic usage dump
 //      with no "did you mean" suggestion. `nearest()` over SUBCOMMANDS now
 //      computes the closest known command and cli.mjs surfaces it.
-//   2. `lazyclaw help <name>` errored (exit 2) for many real subcommands that
+//   2. `pompos help <name>` errored (exit 2) for many real subcommands that
 //      lacked a HELP_DETAILS entry (loop/goal/memory/slack/team/task/mcp/...).
 //      cli.mjs now resolves a usage hint for ANY known subcommand (exit 0) and
 //      a "did you mean" for unknown ones, before delegating to cmdHelp.

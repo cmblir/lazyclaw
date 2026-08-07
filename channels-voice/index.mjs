@@ -1,4 +1,4 @@
-// @lazyclaw/channel-voice
+// @pompos/channel-voice
 //
 // v5.0 scope per spec §0.2: TRANSCRIBE-ONLY. No TTS reply (deferred to v5.1).
 //

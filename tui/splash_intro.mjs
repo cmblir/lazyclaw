@@ -1,5 +1,5 @@
 // tui/splash_intro.mjs — the launch animation: the splash reveals top-to-
-// bottom, then the LAZYCLAW wordmark's gradient sweeps once, then the screen
+// bottom, then the POMPOS wordmark's gradient sweeps once, then the screen
 // is cleared and Ink mounts and draws the settled splash.
 //
 // Why before Ink and not inside it: on the primary buffer the splash is
@@ -19,7 +19,7 @@ export const SHIMMER_MS = 800;
 export const FPS = 30;
 // Visible screen only — deliberately NOT \x1b[3J. That extra final would wipe
 // the terminal's SCROLLBACK buffer, i.e. everything the user was doing in this
-// terminal before they typed `lazyclaw`, on every single chat launch. Nobody
+// terminal before they typed `pompos`, on every single chat launch. Nobody
 // asked the intro to do that. Overpainting the visible screen is enough to hand
 // Ink a clean canvas, and prior output stays recoverable by scrolling up.
 // (`/clear` keeps its own 3J — see tui/repl_reset.mjs — because there the user

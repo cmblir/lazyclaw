@@ -1,4 +1,4 @@
-// Phase G — `lazyclaw personality` CLI list/show/install/remove/use (spec §9, decision C7).
+// Phase G — `pompos personality` CLI list/show/install/remove/use (spec §9, decision C7).
 // Ported to node:test (playwright not installed in this worktree).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

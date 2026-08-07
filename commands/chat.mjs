@@ -76,7 +76,7 @@ export async function cmdChat(flags = {}) {
   // keyless claude-cli, but say so instead of switching silently.
   if (!activeProvName) {
     if (process.stdout.isTTY) {
-      process.stdout.write('  setup not completed — defaulting to claude-cli (keyless subscription). Run `lazyclaw setup` to configure a provider/model, workspace, and skills.\n');
+      process.stdout.write('  setup not completed — defaulting to claude-cli (keyless subscription). Run `pompos setup` to configure a provider/model, workspace, and skills.\n');
     }
     activeProvName = 'claude-cli';
   }
@@ -90,7 +90,7 @@ export async function cmdChat(flags = {}) {
     const _meta = (getRegistry().PROVIDER_INFO || {})[activeProvName] || {};
     if (_meta.requiresApiKey && !_resolveAuthKey(cfg, activeProvName)) {
       process.stdout.write(`  ⚠ no API key found for ${activeProvName} — the first message will fail until you set one.\n`);
-      process.stdout.write(`    fix: /provider (pick + paste a key) · or  lazyclaw auth add ${activeProvName}\n`);
+      process.stdout.write(`    fix: /provider (pick + paste a key) · or  pompos auth add ${activeProvName}\n`);
     }
   }
 
@@ -420,7 +420,7 @@ export async function cmdChat(flags = {}) {
     .split(',').map(s => s.trim()).filter(Boolean);
   // --workspace <name> sits at the head of the system prompt, then
   // any --skill block. The two compose with the same `\n---\n`
-  // separator the agent path uses, so `lazyclaw workspace show` is
+  // separator the agent path uses, so `pompos workspace show` is
   // a faithful preview.
   const workspaceName = flags.workspace || cfg.workspace || '';
   const sysParts = [];
@@ -645,7 +645,7 @@ export async function cmdChat(flags = {}) {
 // daemon on a fixed default port (override with --port), then opens
 // the dashboard URL in the user's default browser.
 //
-// Why a separate command: typing `lazyclaw daemon` works too, but
+// Why a separate command: typing `pompos daemon` works too, but
 // `dashboard` is the discoverable name and it auto-opens the browser
 // (which the bare daemon doesn't, since most daemon callers are
 // scripts).
@@ -656,7 +656,7 @@ export async function cmdChat(flags = {}) {
 
 // sandbox subcommands — list/test/add/use (Phase D).
 
-// Interactive launcher — fired when the user types `lazyclaw` with
+// Interactive launcher — fired when the user types `pompos` with
 // no subcommand AND we're attached to a TTY. OpenClaw's launcher
 // pattern: ASCII banner + provider/model status + arrow-key menu of
 // every common action. Selecting a row drops the user into the
@@ -670,7 +670,7 @@ export async function cmdChat(flags = {}) {
 // "n" on yes-no). Re-runnable safely: existing state is reused, not
 // clobbered, except when the user explicitly opts in.
 //
-// `lazyclaw setup` exposes this directly so users can re-run the
+// `pompos setup` exposes this directly so users can re-run the
 // wizard any time. The first-run code path also funnels through it
 // so a fresh install sees the same flow whether they typed
-// `lazyclaw` or `lazyclaw setup`.
+// `pompos` or `pompos setup`.

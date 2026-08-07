@@ -52,7 +52,7 @@ export function avatarIndexFor(rec) {
   return 1; // generic PM look
 }
 
-// A user-supplied custom image (set via `lazyclaw agent set-avatar`) wins
+// A user-supplied custom image (set via `pompos agent set-avatar`) wins
 // over the picked/inferred built-in sprite. rec.avatarImage is already a
 // ready-to-use src (a remote URL or a daemon-served /agent-avatars/ path).
 export function avatarSrc(rec) {

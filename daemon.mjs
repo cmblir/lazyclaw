@@ -1,4 +1,4 @@
-// Local-only HTTP daemon for LazyClaw — the OpenClaw "gateway" shape,
+// Local-only HTTP daemon for Pompos — the OpenClaw "gateway" shape,
 // scoped down to what this CLI actually offers.
 //
 // Always binds 127.0.0.1 (loopback). The endpoints are read-only inspection
@@ -58,14 +58,14 @@ export { statusForProviderError };
  * `writeConfig` is optional; when omitted the mutation endpoints (POST
  * /providers, DELETE /providers/<name>, PUT/DELETE /rates/<key>, PUT
  * /config/<key>) reject with 405 Method Not Allowed. The CLI's
- * `cmdDashboard` always supplies it; bare `lazyclaw daemon --once` callers
+ * `cmdDashboard` always supplies it; bare `pompos daemon --once` callers
  * can opt out by leaving it undefined.
  */
 export function makeHandler(ctx) {
   const authToken = ctx.authToken || null;
   const allowedOrigins = Array.isArray(ctx.allowedOrigins) ? ctx.allowedOrigins : [];
   // dashboard subcommand opts in so the browser tab it just opened can
-  // actually call its own daemon. Bare `lazyclaw daemon` leaves this off
+  // actually call its own daemon. Bare `pompos daemon` leaves this off
   // and the explicit allowlist (or no-browser default) stays in force.
   const allowLoopback = !!ctx.allowLoopbackOrigin;
   // Default state dir matches the CLI's default. Callers can override
@@ -198,7 +198,7 @@ export function makeHandler(ctx) {
   // a bare makeHandler() (every existing unit test) gets none, so tests never
   // see a surprise network call from a timer they didn't ask for. Both its
   // timers are unref()'d regardless (see daemon/lib/model_cache.mjs), so even
-  // when enabled it never keeps `lazyclaw --version` or a test process alive.
+  // when enabled it never keeps `pompos --version` or a test process alive.
   const modelCache = createModelListCache(
     ctx.modelRefresh && typeof ctx.modelRefresh === 'object' ? { ttlMs: ctx.modelRefresh.ttlMs } : undefined,
   );
@@ -284,7 +284,7 @@ export function makeHandler(ctx) {
       // daemon over an SSH tunnel and lock down the open port.
       if (authToken && !isAuthorized(req, authToken)) {
         return writeJson(res, 401, { error: 'unauthorized' }, {
-          'www-authenticate': 'Bearer realm="lazyclaw"',
+          'www-authenticate': 'Bearer realm="pompos"',
         });
       }
       // Rate limit gate — *after* auth so the budget is per authenticated

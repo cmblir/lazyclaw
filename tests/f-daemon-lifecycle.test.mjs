@@ -26,7 +26,7 @@ import {
 import { serviceStatus } from '../lib/service_install.mjs';
 
 function tmpCfgDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-daemon-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-daemon-'));
 }
 
 // ---- PART A: pure pidfile/status/stop helpers ----
@@ -103,8 +103,8 @@ function launchdDeps({ loaded, pid }) {
     spawnSync: () => {
       if (!loaded) return { status: 1, stdout: '', stderr: 'Could not find service' };
       const out = pid != null
-        ? `{\n\t"PID" = ${pid};\n\t"Label" = "com.lazyclaw.daemon";\n};`
-        : `{\n\t"Label" = "com.lazyclaw.daemon";\n};`;
+        ? `{\n\t"PID" = ${pid};\n\t"Label" = "com.pompos.daemon";\n};`
+        : `{\n\t"Label" = "com.pompos.daemon";\n};`;
       return { status: 0, stdout: out, stderr: '' };
     },
   };

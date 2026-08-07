@@ -2,7 +2,7 @@
 //
 // Landlock is enforced from *inside* the process via the
 // landlock_create_ruleset() syscall, which needs a native binding / preloader
-// shim that lazyclaw does not ship yet. The previous implementation returned
+// shim that pompos does not ship yet. The previous implementation returned
 // the argv UNCHANGED, so selecting `confiner: landlock` ran the command with
 // ZERO confinement while reporting itself available — a false security
 // guarantee that is worse than `none`. Until a real enforcer ships we report

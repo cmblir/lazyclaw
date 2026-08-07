@@ -19,7 +19,7 @@ test('PERMISSION_MODES lists the claude-cli choices', () => {
   for (const m of ['default', 'acceptEdits', 'bypassPermissions', 'plan']) assert.ok(PERMISSION_MODES.includes(m));
 });
 
-test('resolvePermissionMode: unset → bypassPermissions (lazyclaw is an autonomous-agent CLI)', () => {
+test('resolvePermissionMode: unset → bypassPermissions (pompos is an autonomous-agent CLI)', () => {
   assert.equal(resolvePermissionMode(undefined), 'bypassPermissions');
   assert.equal(resolvePermissionMode({}), 'bypassPermissions');
   assert.equal(resolvePermissionMode({ chat: {} }), 'bypassPermissions');

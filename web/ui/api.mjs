@@ -8,7 +8,7 @@
 // token in localStorage and attach it as `Authorization: Bearer` on
 // every API call. A loopback daemon with no auth never sends a token —
 // the header is simply absent and calls work unchanged.
-const TOKEN_KEY = 'lazyclaw_token';
+const TOKEN_KEY = 'pompos_token';
 export function getToken() {
   try { return localStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; }
 }

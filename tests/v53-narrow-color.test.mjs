@@ -105,10 +105,10 @@ test('NARROW tier at cols=80: section headers are amber', () => {
   }
 });
 
-test('NARROW tier at cols=80: compact headline "lazyclaw 5.3.0" is amber', () => {
+test('NARROW tier at cols=80: compact headline "pompos 5.3.0" is amber', () => {
   const rows = withColumns(80, () => collectTextRows(Splash(fixture)));
-  const headline = rows.find((r) => /^\s*lazyclaw\s+5\.3\.0\s*$/.test(r.content));
-  assert.ok(headline, 'expected a row matching "lazyclaw 5.3.0"');
+  const headline = rows.find((r) => /^\s*pompos\s+5\.3\.0\s*$/.test(r.content));
+  assert.ok(headline, 'expected a row matching "pompos 5.3.0"');
   assert.equal(headline.color, theme.fg, 'compact headline must be amber');
 });
 

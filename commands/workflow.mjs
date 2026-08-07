@@ -133,7 +133,7 @@ async function cmdClear(sessionId, opts = {}) {
 
 // Static validation of a workflow file. No execution — pure shape +
 // topology check. Useful for CI:
-//   $ lazyclaw validate ./flow.mjs && lazyclaw run job ./flow.mjs
+//   $ pompos validate ./flow.mjs && pompos run job ./flow.mjs
 //
 // Checks (in order; the first hard failure short-circuits the rest
 // for a fast CI signal, but soft warnings collect into `warnings`):
@@ -143,7 +143,7 @@ async function cmdClear(sessionId, opts = {}) {
 //   4. deps reference known ids (warn by default — unknown deps are treated
 //      as satisfied edges by topologicalLevels, so this is not fatal but
 //      almost always a typo. --strict promotes it to a HARD failure so a CI
-//      step catches the typo: `lazyclaw validate --strict ./flow.mjs`)
+//      step catches the typo: `pompos validate --strict ./flow.mjs`)
 //   5. no cycles (hard — `topologicalLevels` returns `leftover` non-empty)
 //
 // Output JSON includes:
@@ -159,7 +159,7 @@ async function cmdClear(sessionId, opts = {}) {
 //   1 — hard failure
 //   2 — file path / import error (couldn't read or eval the file)
 async function cmdValidate(file, opts = {}) {
-  if (!file) { console.error('Usage: lazyclaw validate <workflow.mjs> [--strict]'); process.exit(2); }
+  if (!file) { console.error('Usage: pompos validate <workflow.mjs> [--strict]'); process.exit(2); }
   let nodes;
   try {
     nodes = await importWorkflow(file);
@@ -270,7 +270,7 @@ export async function dispatch(cmd, rest) {
   switch (cmd) {
     case 'run': {
       const [sessionId, file] = rest.positional;
-      if (!sessionId || !file) { console.error('Usage: lazyclaw run <session-id> <workflow.mjs> [--parallel | --parallel-persistent] [--concurrency <N>]'); process.exit(2); }
+      if (!sessionId || !file) { console.error('Usage: pompos run <session-id> <workflow.mjs> [--parallel | --parallel-persistent] [--concurrency <N>]'); process.exit(2); }
       // --concurrency caps in-flight nodes within a single level for
       // both --parallel and --parallel-persistent. Sequential mode
       // ignores it (only one node runs at a time anyway).
@@ -287,7 +287,7 @@ export async function dispatch(cmd, rest) {
     }
     case 'resume': {
       const [sessionId, file] = rest.positional;
-      if (!sessionId || !file) { console.error('Usage: lazyclaw resume <session-id> <workflow.mjs> [--parallel-persistent] [--concurrency <N>]'); process.exit(2); }
+      if (!sessionId || !file) { console.error('Usage: pompos resume <session-id> <workflow.mjs> [--parallel-persistent] [--concurrency <N>]'); process.exit(2); }
       const concurrency = rest.flags.concurrency !== undefined
         ? Math.max(0, parseInt(rest.flags.concurrency, 10) || 0)
         : undefined;
@@ -318,7 +318,7 @@ export async function dispatch(cmd, rest) {
     }
     case 'clear': {
       const [sessionId] = rest.positional;
-      if (!sessionId) { console.error('Usage: lazyclaw clear <session-id> [--dir <state-dir>]'); process.exit(2); }
+      if (!sessionId) { console.error('Usage: pompos clear <session-id> [--dir <state-dir>]'); process.exit(2); }
       await cmdClear(sessionId, { dir: rest.flags.dir });
       break;
     }

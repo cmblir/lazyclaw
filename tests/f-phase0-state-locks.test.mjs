@@ -21,7 +21,7 @@ import { registerTeam } from '../teams.mjs';
 import { registerAgent } from '../agents.mjs';
 
 function tmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-locks-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-locks-'));
 }
 
 test('defaultConfigDir honors LAZYCLAW_CONFIG_DIR override', () => {
@@ -35,11 +35,11 @@ test('defaultConfigDir honors LAZYCLAW_CONFIG_DIR override', () => {
   }
 });
 
-test('defaultConfigDir falls back to ~/.lazyclaw', () => {
+test('defaultConfigDir falls back to ~/.pompos', () => {
   const prev = process.env.LAZYCLAW_CONFIG_DIR;
   try {
     delete process.env.LAZYCLAW_CONFIG_DIR;
-    assert.equal(defaultConfigDir(), path.join(os.homedir(), '.lazyclaw'));
+    assert.equal(defaultConfigDir(), path.join(os.homedir(), '.pompos'));
   } finally {
     if (prev !== undefined) process.env.LAZYCLAW_CONFIG_DIR = prev;
   }

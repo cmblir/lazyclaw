@@ -1,6 +1,6 @@
 <!doctype html>
 <!--
-  lazyclaw dashboard — a single-file-entry SPA served by `lazyclaw daemon`.
+  pompos dashboard — a single-file-entry SPA served by `pompos daemon`.
   Deliberately framework-free: vanilla DOM, vanilla fetch, no build step.
   The shell is a grouped sidebar (6 groups / 21 panels) with the URL hash as
   the source of truth for the active panel, plus a mobile drawer under
@@ -11,7 +11,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LazyClaw</title>
+  <title>Pompos</title>
   <!-- Absolute paths: the daemon serves this page at /dashboard AND /dashboard/
        (and /), so a relative href would resolve to /dashboard/dashboard.css and
        404 — leaving the page unstyled with every tab stuck on "Loading…". -->
@@ -22,7 +22,7 @@
   <div class="shell">
     <nav class="rail" id="rail" aria-label="Sections">
       <div id="nav-marker" hidden></div>
-      <div class="brand"><b>lazyclaw</b><span id="version">…</span></div>
+      <div class="brand"><b>pompos</b><span id="version">…</span></div>
       <div id="nav-groups"></div>
     </nav>
 

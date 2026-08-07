@@ -1,6 +1,6 @@
 // tests/f-nodes-rotate-cli.test.mjs
 //
-// Roadmap #6b — `lazyclaw nodes rotate <deviceId>` re-issues a device's token
+// Roadmap #6b — `pompos nodes rotate <deviceId>` re-issues a device's token
 // in place (no new pairing handshake). Like approve, it NEVER prints the token
 // (the device re-fetches it on its next /gateway/connect); the old token stops
 // authenticating immediately.
@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { PairingStore } from '../gateway/device_auth.mjs';
 
 const CLI = fileURLToPath(new URL('../cli.mjs', import.meta.url));
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-noderot-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-noderot-'));
 const runCli = (args, dir) => spawnSync(process.execPath, [CLI, ...args], { env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir }, encoding: 'utf8' });
 
 test('nodes rotate re-issues a token without printing it; the old token is revoked', () => {

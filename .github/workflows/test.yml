@@ -1,4 +1,4 @@
-name: Test lazyclaw
+name: Test pompos
 
 # Two-tier gate — BOTH hard:
 #   - node:       the node:test unit suite (tests/*.test.mjs).

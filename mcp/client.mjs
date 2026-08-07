@@ -35,7 +35,7 @@ async function realTransport({ command, args, env }) {
   const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
   const { StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js');
   const transport = new StdioClientTransport({ command, args: args || [], env });
-  const client = new Client({ name: 'lazyclaw', version: '5.0.0' }, { capabilities: {} });
+  const client = new Client({ name: 'pompos', version: '5.0.0' }, { capabilities: {} });
   await client.connect(transport);
   return {
     listTools: () => client.listTools(),

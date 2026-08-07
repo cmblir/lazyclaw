@@ -27,7 +27,7 @@ async function getBackend() {
   };
   return {
     add: async ({ name, spec, command }) => {
-      // Persist the LOGICAL command; cron.mjs resolves a bare "lazyclaw" to an
+      // Persist the LOGICAL command; cron.mjs resolves a bare "pompos" to an
       // absolute node + CLI launcher at install/run time (buildPlist /
       // buildCrontabLine / runJob call resolveCommand), so config.json stays
       // portable and machine-independent.

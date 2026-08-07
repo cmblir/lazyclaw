@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 // m11 — when a write-through hook fails, append a structured entry to
-// <configDir>/index-failures.jsonl so `lazyclaw doctor` can surface
+// <configDir>/index-failures.jsonl so `pompos doctor` can surface
 // recent failures (last 24h) and the operator can rebuild before the
 // silent stale-index problem compounds. Best-effort: any error during
 // the append itself is swallowed (we don't want to spam stderr from a
@@ -30,7 +30,7 @@ export function _logIndexFailure(configDir, scope, err) {
 }
 
 // The native better-sqlite3 addon fails to load when node_modules was built
-// against a different Node.js ABI than the one running lazyclaw (a Node switch
+// against a different Node.js ABI than the one running pompos (a Node switch
 // via nvm/brew, or copied node_modules). Every index op then throws the same
 // thing — so instead of dumping the raw stack on each write, recognise it and
 // print ONE actionable hint, then stay quiet. Chat is unaffected; only recall /
@@ -43,7 +43,7 @@ export function _isNativeAbiError(e) {
 }
 export function _warnIndexFailure(label, e) {
   // Index internals stay off the user's screen: recorded in index-failures.jsonl
-  // (+ surfaced by `lazyclaw doctor`); echoed to the console only when an
+  // (+ surfaced by `pompos doctor`); echoed to the console only when an
   // operator sets LAZYCLAW_DEBUG. End users never see DB error codes.
   if (!process.env.LAZYCLAW_DEBUG) return;
   if (_isNativeAbiError(e)) {

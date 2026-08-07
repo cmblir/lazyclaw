@@ -103,7 +103,7 @@ test('no token configured -> everything is authorized (loopback default)', () =>
 test('web/ui/api.mjs attaches a bearer token from localStorage', () => {
   const src = fs.readFileSync(API_MJS, 'utf8');
   // Reads/stores the token under the agreed localStorage key.
-  assert.match(src, /lazyclaw_token/, 'should reference the lazyclaw_token localStorage key');
+  assert.match(src, /pompos_token/, 'should reference the pompos_token localStorage key');
   assert.match(src, /localStorage\.getItem/, 'should read the token from localStorage');
   assert.match(src, /localStorage\.setItem/, 'should persist the token to localStorage');
   // Sends an Authorization: Bearer header when a token is known.

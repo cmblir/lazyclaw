@@ -1,4 +1,4 @@
-// tests/f-export-secret-redaction.test.mjs — SECURITY regression: `lazyclaw
+// tests/f-export-secret-redaction.test.mjs — SECURITY regression: `pompos
 // export` promises secrets are redacted unless --include-secrets, but the
 // pre-fix code only masked cfg['api-key']. It left
 // cfg.authProfiles[<provider>] = [{ label, key }] (per-provider keys written

@@ -1,6 +1,6 @@
 // tui/splash_props.mjs — gather the dynamic props the splash panel needs
 // (tool groups + skill groups), shared by the chat REPL and the setup wizard
-// so both surfaces render the same lazyclaw splash instead of drifting apart
+// so both surfaces render the same pompos splash instead of drifting apart
 // (the setup wizard used to show a small figlet banner instead).
 import path from 'node:path';
 import { configPath } from '../lib/config.mjs';

@@ -72,7 +72,7 @@ export class Sandbox {
     throw new SandboxError(`${this.constructor.name}.open() not implemented`, 'SANDBOX_NOT_IMPL');
   }
 
-  /** Short human label for `lazyclaw sandbox list`. */
+  /** Short human label for `pompos sandbox list`. */
   describe() { return `${this.spec.kind}`; }
 }
 

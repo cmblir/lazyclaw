@@ -3,9 +3,9 @@
 // Unlike the API-based adapters, this one wraps the official `claude`
 // CLI (Claude Code). The CLI runs the *entire* tool-use loop inside
 // itself — bash, edit, read, write, grep, etc. — and emits a single
-// final text answer. From lazyclaw's mention-router perspective every
+// final text answer. From pompos's mention-router perspective every
 // call resolves to `{ kind: 'final', text }` after one iteration, so
-// the multi-agent handoff still works (we just lose lazyclaw's audit
+// the multi-agent handoff still works (we just lose pompos's audit
 // log for tools claude ran on its own; the CLI keeps its own log).
 //
 // Wiring choices:
@@ -16,7 +16,7 @@
 //     destructive-pattern confirmation OFF by default. Audit log
 //     still captures every tool the CLI runs (via the CLI's own
 //     telemetry — we don't double-write here).
-//   - --tools maps the lazyclaw whitelist into claude's built-in
+//   - --tools maps the pompos whitelist into claude's built-in
 //     names (bash → Bash, etc.). When the whitelist is empty we pass
 //     `""` so tools are fully disabled.
 //   - --system-prompt carries the agent role + memory + team metadata
@@ -46,7 +46,7 @@ export class ClaudeCliToolUseError extends Error {
   }
 }
 
-// The schemas value from listToolSchemas comes in lazyclaw form; claude
+// The schemas value from listToolSchemas comes in pompos form; claude
 // expects a comma-separated string of its OWN built-in tool names.
 // Returning a string rather than an array lets us pass it as a single
 // CLI argument unchanged. An empty string is meaningful — it disables
@@ -198,14 +198,14 @@ export function buildToolUseArgs({ prompt, model, system, tools = [], permission
   }
   // Bound Claude Code's internal autonomous loop. This adapter DOES let the
   // agent use tools (--tools whitelist below), but the internal loop was
-  // otherwise uncapped (lazyclaw's own maxIterations is a no-op for claude-cli).
+  // otherwise uncapped (pompos's own maxIterations is a no-op for claude-cli).
   const cap = maxTurns == null ? 16 : maxTurns;
   if (cap > 0) args.push('--max-turns', String(cap));
   if (model) args.push('--model', model);
   if (system && String(system).trim()) {
     args.push('--system-prompt', String(system));
   }
-  // Phase 19: pass the lazyclaw whitelist through to claude's --tools even when
+  // Phase 19: pass the pompos whitelist through to claude's --tools even when
   // empty (an empty string explicitly disables every tool).
   args.push('--tools', toClaudeTools(tools));
   return args;

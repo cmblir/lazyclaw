@@ -1,6 +1,6 @@
 // Persistent claude stream-json session.
 //
-// lazyclaw's default claude-cli path spawns a fresh `claude -p` per turn, so the
+// pompos's default claude-cli path spawns a fresh `claude -p` per turn, so the
 // Claude Code agent harness cold-boots and re-loads its base context EVERY turn
 // (measured ~1.6-2.7s + ~24k tokens per spawn). Claude Code also supports a
 // realtime streaming-input mode (`--input-format stream-json`): keep ONE child

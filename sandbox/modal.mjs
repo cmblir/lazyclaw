@@ -16,7 +16,7 @@ export function buildModalArgv(spec, argv) {
 export function idleWakeUrl(spec) {
   const app = encodeURIComponent(spec.app || '');
   const tok = encodeURIComponent(spec.token || '');
-  const host = spec.host || 'lazyclaw-edge.modal.run';
+  const host = spec.host || 'pompos-edge.modal.run';
   return `https://${host}/wake?app=${app}&token=${tok}`;
 }
 

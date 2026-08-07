@@ -3,7 +3,7 @@
 // Activation of hybrid recall: the agent-facing recall TOOL embeds the query
 // (when cfg.recall.embeddings is enabled) and passes the vector to index_db so
 // candidates re-rank by semantic similarity. Default/off → pure FTS5, unchanged.
-// `lazyclaw index embed` backfills doc vectors (no-op when off).
+// `pompos index embed` backfills doc vectors (no-op when off).
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -17,7 +17,7 @@ import { __setEmbedder } from '../mas/embedder.mjs';
 import * as recallTool from '../mas/tools/recall.mjs';
 
 const CLI = fileURLToPath(new URL('../cli.mjs', import.meta.url));
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-rth-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-rth-'));
 
 // Explicit content/query → vector map so cosine ordering is deterministic.
 const MAP = {

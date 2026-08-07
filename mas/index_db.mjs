@@ -6,7 +6,7 @@
 //
 // Index failure NEVER propagates — see spec §4.4: write-through hooks
 // log and swallow so a corrupt index can't break the session-write
-// path. Recovery is via `lazyclaw index rebuild`.
+// path. Recovery is via `pompos index rebuild`.
 
 import Database from 'better-sqlite3';
 import fs from 'node:fs';
@@ -46,7 +46,7 @@ const SCHEMA_VERSION = 3;
 const _handles = new Map();   // configDir → { db, stmts }
 
 function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
+  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
 }
 
 function dbPath(configDir) {

@@ -31,7 +31,7 @@ interface Daemon { baseUrl: string; child: ChildProcessWithoutNullStreams; stop:
 // send `Origin` for `<script type="module">` / dynamic import() fetches,
 // even same-origin (unlike classic scripts). Without this, dashboard.js and
 // every /ui/*.mjs import 403 in a real browser and the shell never mounts;
-// `lazyclaw dashboard` avoids this by setting allowLoopbackOrigin
+// `pompos dashboard` avoids this by setting allowLoopbackOrigin
 // unconditionally, but the bare `daemon` command (what this spec drives)
 // requires an explicit --allow-origin, by design (see commands/daemon.mjs).
 // Small TOCTOU race between closing this probe socket and the daemon

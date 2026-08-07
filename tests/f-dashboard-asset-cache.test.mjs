@@ -15,7 +15,7 @@ import { _readAssetCached, _clearAssetCache, dashboardCss, uiModule } from '../d
 
 test('_readAssetCached reads a file once until its mtime changes', () => {
   _clearAssetCache();
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-asset-'));
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-asset-'));
   const f = path.join(d, 'a.bin');
   fs.writeFileSync(f, 'one');
   const real = fs.readFileSync;

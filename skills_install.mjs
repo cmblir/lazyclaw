@@ -3,12 +3,12 @@
 // Resolves an OpenClaw-style spec into a set of locally-installed
 // skills:
 //
-//   lazyclaw skills install <user>/<repo>           — main branch
-//   lazyclaw skills install <user>/<repo>@<ref>     — branch / tag / sha
-//   lazyclaw skills install <user>/<repo>@<ref>:<path>
+//   pompos skills install <user>/<repo>           — main branch
+//   pompos skills install <user>/<repo>@<ref>     — branch / tag / sha
+//   pompos skills install <user>/<repo>@<ref>:<path>
 //                                                    — only files under <path>
 //
-// The "registry" is just GitHub. `lazyclaw skills install
+// The "registry" is just GitHub. `pompos skills install
 // anthropic-skills/code-review@v1.2` fetches the tarball at
 //   https://codeload.github.com/anthropic-skills/code-review/tar.gz/v1.2
 // and installs every `.md` it finds at the repo root and under
@@ -21,7 +21,7 @@
 // We deliberately do NOT auto-execute anything — skills are .md
 // files whose content goes into the LLM's system prompt. No code
 // runs. The worst-case ingest is "the prompt makes the model
-// behave oddly", which is recoverable by `lazyclaw skills remove`.
+// behave oddly", which is recoverable by `pompos skills remove`.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -86,7 +86,7 @@ export async function fetchAndExtract(spec, opts = {}) {
   let res;
   try {
     res = await fetchFn(url, {
-      headers: { 'user-agent': 'lazyclaw-skills/1.0' },
+      headers: { 'user-agent': 'pompos-skills/1.0' },
       redirect: 'follow',
       signal: ac.signal,
     });
@@ -99,8 +99,8 @@ export async function fetchAndExtract(spec, opts = {}) {
 
   // Stream the tarball into a temp dir using the system `tar` binary.
   // Cheaper than pulling a Node tar dependency, and `tar` is on PATH
-  // wherever lazyclaw runs (macOS / Linux / WSL / modern Windows).
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-skill-'));
+  // wherever pompos runs (macOS / Linux / WSL / modern Windows).
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-skill-'));
   const child = spawn('tar', ['-xz', '-C', tmp], {
     stdio: ['pipe', 'inherit', 'pipe'],
   });
