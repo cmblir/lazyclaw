@@ -68,8 +68,10 @@ Versioning: [SemVer](https://semver.org/).
   - The dashboard reads a token saved under the old `lazyclaw_token`
     localStorage key and carries it forward, instead of silently logging
     everyone out.
-  - Releases now publish to the `pompos` npm package; `lazyclaw` stays at the
-    6.9.3 already on npm.
+  - Releases now publish to the `@cmblir/pompos` npm package — npm refuses the
+    bare name `pompos` as too similar to the existing `prompts` package, and a
+    scoped name is what npm itself suggests in that case. `lazyclaw` stays at
+    the 6.9.3 already on npm.
 
   Docs split by whether they instruct or record: the READMEs and the `docs/*.md`
   guides use the new name, while `docs/superpowers/` specs, plans and QA reports

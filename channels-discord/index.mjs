@@ -6,8 +6,11 @@
 //
 // In-tree dev import: this file imports from '../channels/base.mjs' so the
 // per-plugin test can load it directly without going through node_modules.
-// Published packages will rewrite the import to 'pompos/channels/base.mjs'
-// via a prepublishOnly script (out of scope for v5.0 plumbing).
+// Published packages will rewrite the import to
+// '@cmblir/pompos/channels/base.mjs' via a prepublishOnly script (out of scope
+// for v5.0 plumbing). Scoped, matching the peerDependency: the bare `pompos`
+// name is permanently unavailable on npm (refused as too close to `prompts`),
+// so an unscoped rewrite target could never resolve on a user machine.
 
 import { Channel } from '../channels/base.mjs';
 

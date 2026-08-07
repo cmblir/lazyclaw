@@ -11,7 +11,7 @@ name: Publish pompos to npm
 # job manually if the auto-run skipped publish (e.g. CI flake).
 #
 # Required repo secret: NPM_TOKEN — granular access token with
-# "Bypass 2FA for publishing" enabled, scoped to the pompos
+# "Bypass 2FA for publishing" enabled, scoped to the @cmblir/pompos
 # package, since CI can't satisfy interactive 2FA.
 
 on:
@@ -118,7 +118,7 @@ jobs:
             echo "     compare the byte-count above to what npmjs.com showed when"
             echo "     you created it"
             echo "  4. Token belongs to a different npm account that doesn't own"
-            echo "     the pompos package"
+            echo "     the @cmblir/pompos package"
             echo ""
             echo "To verify locally without exposing the token in logs:"
             echo '  echo "//registry.npmjs.org/:_authToken=<paste-token>" > /tmp/npmrc.test'
@@ -128,7 +128,7 @@ jobs:
             echo "If the local check returns your username, re-paste the token"
             echo "into the GitHub Secret cleanly. If it also 401s, create a fresh"
             echo "granular access token at npmjs.com → Access Tokens → Granular"
-            echo "with: Packages = pompos (read & write, Bypass 2FA enabled),"
+            echo "with: Packages = @cmblir/pompos (read & write, Bypass 2FA enabled),"
             echo "Expiration ≥ 30 days, then update the GitHub Secret."
             exit 1
           fi
@@ -149,6 +149,6 @@ jobs:
           else
             npm publish --access public
           fi
-          echo "🚀 published pompos@${{ steps.detect.outputs.new }}"
+          echo "🚀 published @cmblir/pompos@${{ steps.detect.outputs.new }}"
         env:
           PROVENANCE: ${{ vars.PROVENANCE }}
