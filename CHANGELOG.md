@@ -6,6 +6,45 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **Slack no longer echoes internal error detail into the channel.** A failed
+  turn replied `(error: <message>)` to whoever was talking to the bot, and a
+  provider's error message is built from the upstream response body
+  (`anthropic api <status>: <first 200 chars of body>`) — so an upstream payload
+  was shown to an untrusted sender. Slack now replies `(internal error)` and logs
+  the full reason to the operator's diagnostic sink, which is what `telegram` and
+  `matrix` already did. `(gated: …)` is unchanged in all three: that reason is
+  ours (`rate_limited` / `unauthorized`) and user-facing by design.
+
+### Fixed
+
+- **Service and cron operations act on the unit that exists on disk.** The
+  launchd label and systemd unit name name files an operator already has, loaded
+  under the pre-rename label. Resolving them to the new name meant `uninstall`
+  deleted nothing and reported success while the old unit kept running, `status`
+  reported a running service as not installed, and `install` wrote a *second*
+  unit — the same always-on service running twice with neither reachable from the
+  CLI. The plist filename, its `Label` and the argument to `launchctl list` are
+  now derived from one place, and an existing unit is adopted rather than
+  duplicated.
+- **Every config-directory resolution goes through one resolver.** Sixteen
+  modules re-derived it themselves, so `config.json` and agents resolved to an
+  existing `~/.lazyclaw` while the search index, trajectories, agent memory,
+  audit log and device-auth store were *created* under `~/.pompos` — and once
+  that directory existed the whole tool switched to it, so the operator's state
+  appeared to vanish. Those modules also only ever honoured `LAZYCLAW_CONFIG_DIR`,
+  so `POMPOS_CONFIG_DIR` would have moved the config and left the index behind.
+- **Cron log paths follow the configured directory** instead of a hardcoded
+  `~/.lazyclaw/logs` that ignored `POMPOS_CONFIG_DIR` / `LAZYCLAW_CONFIG_DIR`.
+- **The live model-catalogue fetches are bounded.** `fetchAnthropicModels` and
+  `fetchGeminiModels` passed no signal, so a non-responding endpoint left the
+  call pending until the OS gave up on the socket, holding a model-cache refresh
+  tick unresolved. Both now time out at 10s with a message naming the provider
+  rather than a bare `TimeoutError`.
+- **The dashboard keeps you signed in across the rename** — a token stored under
+  the old `lazyclaw_token` localStorage key is read and carried forward.
+
 ### Changed
 
 - **Renamed from `lazyclaw` to `pompos`.** The CLI, the package, the dashboard
