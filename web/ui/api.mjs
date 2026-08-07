@@ -8,9 +8,22 @@
 // token in localStorage and attach it as `Authorization: Bearer` on
 // every API call. A loopback daemon with no auth never sends a token —
 // the header is simply absent and calls work unchanged.
+// The key was `lazyclaw_token` before the rename, and it lives in the browser
+// rather than in a file we control — so unlike the config directory, we cannot
+// look at what is there and adopt it. An operator who already pasted their token
+// would simply be logged out by a bare rename. Reading falls back to the old key
+// and copies the value forward; the old key is left in place, since deleting it
+// gains nothing and forfeits the only path back.
 const TOKEN_KEY = 'pompos_token';
+const LEGACY_TOKEN_KEY = 'lazyclaw_token';
 export function getToken() {
-  try { return localStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; }
+  try {
+    const current = localStorage.getItem(TOKEN_KEY);
+    if (current) return current;
+    const legacy = localStorage.getItem(LEGACY_TOKEN_KEY);
+    if (legacy) { setToken(legacy); return legacy; }
+    return '';
+  } catch { return ''; }
 }
 export function setToken(t) {
   try { localStorage.setItem(TOKEN_KEY, t); } catch {}

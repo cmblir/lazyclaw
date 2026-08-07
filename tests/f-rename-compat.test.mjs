@@ -167,3 +167,34 @@ test("a command that is not ours is passed through untouched", async () => {
   assert.deepEqual(resolveCommand(['/usr/bin/rsync', '-a', 'x', 'y']),
     ['/usr/bin/rsync', '-a', 'x', 'y']);
 });
+
+// --- the dashboard's stored auth token -------------------------------------
+// Unlike the config directory, this one lives in the operator's browser, so
+// there is nothing to stat and adopt. A bare key rename logs out everyone who
+// had pasted a token into a --auth-token daemon.
+
+function withStubbedStorage(seed = {}) {
+  const map = { ...seed };
+  globalThis.localStorage = {
+    getItem(k) { return Object.prototype.hasOwnProperty.call(map, k) ? map[k] : null; },
+    setItem(k, v) { map[k] = String(v); },
+  };
+  return map;
+}
+
+test('a token stored under the old key is still read, and copied forward', async () => {
+  const map = withStubbedStorage({ lazyclaw_token: 'old-tok' });
+  const { getToken } = await import('../web/ui/api.mjs');
+  assert.equal(getToken(), 'old-tok', 'the pre-rename token must still authorize');
+  assert.equal(map.pompos_token, 'old-tok', 'and be copied to the new key');
+  assert.equal(map.lazyclaw_token, 'old-tok',
+    'the old key is left in place — deleting it gains nothing and forfeits the way back');
+});
+
+test('the new key wins when both are present, and an absent token is empty', async () => {
+  const { getToken } = await import('../web/ui/api.mjs');
+  withStubbedStorage({ lazyclaw_token: 'old-tok', pompos_token: 'new-tok' });
+  assert.equal(getToken(), 'new-tok');
+  withStubbedStorage({});
+  assert.equal(getToken(), '', 'no token at all must read as empty, not null');
+});
