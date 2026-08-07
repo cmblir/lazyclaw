@@ -21,7 +21,7 @@ export function attachWorkflowCron(name, schedule, deps = {}) {
   cron.parseCronSpec(schedule); // validate before touching state
   const cfg = readConfig();
   const jobName = `wf-${name}`;
-  const cmd = ['lazyclaw', 'workflow', 'run', name];
+  const cmd = ['pompos', 'workflow', 'run', name];
   cron.upsertJob(cfg, jobName, schedule, cmd);
   writeConfig(cfg);
   if (process.env.LAZYCLAW_SKIP_CRON_INSTALL) return { jobName, skipped: true };

@@ -144,3 +144,26 @@ test('both binary names are published', () => {
   assert.equal(pkg.bin.lazyclaw, 'cli.mjs',
     'the old name stays: installed launchd plists and crontab lines invoke it by name');
 });
+
+// --- scheduled jobs stored before the rename ------------------------------
+
+test('a job stored as lazyclaw still resolves to an absolute launcher', async () => {
+  // The installed plist holds a resolved absolute path, so it is safe either way.
+  // What is NOT safe is the stored config: a pre-rename job holds ['lazyclaw', ...]
+  // and if resolveCommand stopped recognising that head it would pass the argv
+  // through untouched, leaving launchd to exec a bare `lazyclaw` with a PATH that
+  // has never contained it — a schedule that fails silently.
+  const { resolveCommand } = await import('../cron.mjs');
+  for (const head of ['lazyclaw', 'pompos', '/usr/local/bin/lazyclaw', '/opt/x/pompos']) {
+    const out = resolveCommand([head, 'workflow', 'run', 'nightly']);
+    assert.equal(out[0], process.execPath, `${head} must resolve to the node binary`);
+    assert.match(out[1], /cli\.mjs$/, `${head} must resolve to an absolute cli.mjs`);
+    assert.deepEqual(out.slice(2), ['workflow', 'run', 'nightly'], `${head} must keep its args`);
+  }
+});
+
+test("a command that is not ours is passed through untouched", async () => {
+  const { resolveCommand } = await import('../cron.mjs');
+  assert.deepEqual(resolveCommand(['/usr/bin/rsync', '-a', 'x', 'y']),
+    ['/usr/bin/rsync', '-a', 'x', 'y']);
+});

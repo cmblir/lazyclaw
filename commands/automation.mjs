@@ -55,7 +55,8 @@ export async function cmdCron(sub, positional, flags = {}) {
       }
       // Stored command must start with `lazyclaw` (resolveCommand then makes it
       // absolute); prepend it when the user wrote the shorter `-- agent "…"`.
-      const cmd = rawCmd[0] === 'lazyclaw' ? rawCmd : ['lazyclaw', ...rawCmd];
+      // Either name counts as already-prefixed — resolveCommand knows both.
+      const cmd = ['pompos', 'lazyclaw'].includes(rawCmd[0]) ? rawCmd : ['pompos', ...rawCmd];
       try {
         cron.upsertJob(cfg, name, schedule, cmd);
       } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }

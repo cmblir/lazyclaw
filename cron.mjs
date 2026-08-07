@@ -34,18 +34,28 @@ class CronError extends Error {
 }
 
 // Absolute path to this package's CLI entrypoint. A scheduled job stores the
-// logical `['lazyclaw', …]` command, but the OS scheduler can't rely on a
-// `lazyclaw` shim being on its PATH: launchd runs with PATH=/usr/bin:/bin:
-// /usr/sbin:/sbin and cron with PATH=/usr/bin:/bin — neither includes the
-// Homebrew / npm-global / nvm bin dir where the shim lives. So at the moment we
-// hand the command to launchd / crontab / exec we rewrite a leading `lazyclaw`
-// into an absolute `<node> <abs cli.mjs>` launcher that resolves regardless of
-// PATH. A non-lazyclaw command (the user's own binary) is passed through as-is.
+// logical `['pompos', …]` command, but the OS scheduler can't rely on a `pompos`
+// shim being on its PATH: launchd runs with PATH=/usr/bin:/bin:/usr/sbin:/sbin
+// and cron with PATH=/usr/bin:/bin — neither includes the Homebrew / npm-global /
+// nvm bin dir where the shim lives. So at the moment we hand the command to
+// launchd / crontab / exec we rewrite a leading own-name into an absolute
+// `<node> <abs cli.mjs>` launcher that resolves regardless of PATH. A command
+// that is not ours (the user's own binary) is passed through as-is.
+//
+// `lazyclaw` is still recognised, and that is load-bearing: this project shipped
+// under that name through 6.10.0, so a job stored before the rename holds
+// ['lazyclaw', …] in the config on disk. Dropping the old name would leave those
+// argv arrays passed through untouched, and launchd would then try to exec a bare
+// `lazyclaw` with a PATH that has never contained it — a schedule that fails
+// silently. (The installed plist itself is safe either way: it holds the resolved
+// absolute path, not the name.)
 const CLI_PATH = fileURLToPath(new URL('./cli.mjs', import.meta.url));
+const OWN_NAMES = new Set(['pompos', 'lazyclaw']);
 
 export function resolveCommand(command) {
   const argv = Array.isArray(command) ? command.slice() : [String(command)];
-  if (argv.length && (argv[0] === 'lazyclaw' || path.basename(String(argv[0])) === 'lazyclaw')) {
+  const head = String(argv[0] ?? '');
+  if (argv.length && (OWN_NAMES.has(head) || OWN_NAMES.has(path.basename(head)))) {
     return [process.execPath, CLI_PATH, ...argv.slice(1)];
   }
   return argv;
