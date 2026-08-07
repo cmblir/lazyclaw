@@ -9,7 +9,7 @@ Chat in the terminal. Let the background learning loop distil your conversations
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
 ```bash
-npx pompos          # first run walks you through setup, then drops into chat
+npx @cmblir/pompos          # first run walks you through setup, then drops into chat
 ```
 
 <img width="1871" height="1146" alt="image" src="https://github.com/user-attachments/assets/365d05ac-cd24-4451-96b1-01fe82582a2b" />
@@ -27,7 +27,7 @@ You can read the whole thing. No hosted service, no telemetry, config in plain J
 ## Quick start
 
 ```bash
-npm install -g pompos     # or: npx pompos
+npm install -g @cmblir/pompos     # or: npx @cmblir/pompos
 pompos                    # fresh install → guided setup, then chat
 ```
 
@@ -214,7 +214,7 @@ Sensitive tools deny by default unless an approval hook grants them; `config.jso
 ## Install / hack
 
 ```bash
-npm install -g pompos                 # install
+npm install -g @cmblir/pompos                 # install
 git clone https://github.com/cmblir/pompos && cd pompos && npm install && npm link    # hack
 node --test tests/*.test.mjs            # run the suite
 ```
@@ -230,7 +230,11 @@ This tool was `lazyclaw` through 6.10.0. Nothing you have set up needs changing:
 - **The `lazyclaw` command still works**, so installed launchd plists, systemd units and crontab lines that invoke it by name keep running, as do schedules created before the rename.
 - **The dashboard keeps you signed in** — a token saved under the old key is read and carried forward.
 
-`npm install -g pompos` installs both commands. Releases now publish to the `pompos` package, so the `lazyclaw` package stays at the 6.9.3 already on npm.
+`npm install -g @cmblir/pompos` installs both commands. Releases publish to
+`@cmblir/pompos`; the bare `pompos` name is unavailable on npm, which refuses it as
+too close to the existing `prompts` package, and a scoped name is what npm itself
+suggests in that case. The unscoped `lazyclaw` package stays at the 6.9.3 already
+on npm and receives no further releases.
 
 ## Docs
 

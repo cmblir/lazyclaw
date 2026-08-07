@@ -7,7 +7,7 @@ config block, v5 behaves like v4 (spec §1.7).
 ## TL;DR
 
 ```bash
-npm install -g pompos@5
+npm install -g lazyclaw@5
 pompos migrate v5         # backs up to ~/.pompos/backup-v4/
 ```
 
@@ -60,7 +60,7 @@ See `docs/trainer-recipes.md` for more configurations.
 ```bash
 rm -rf ~/.pompos
 mv ~/.pompos/backup-v4 ~/.pompos
-npm install -g pompos@4
+npm install -g lazyclaw@4
 ```
 
 ## Verifying the migration

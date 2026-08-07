@@ -6,6 +6,8 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [6.11.0] - 2026-08-07
+
 ### Security
 
 - **Slack no longer echoes internal error detail into the channel.** A failed

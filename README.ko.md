@@ -9,7 +9,7 @@
 ## 빠른 시작
 
 ```bash
-npm install -g pompos     # 또는: npx pompos
+npm install -g @cmblir/pompos     # 또는: npx @cmblir/pompos
 pompos                    # 새 설치 → 가이드 셋업 후 chat
 ```
 
@@ -125,4 +125,7 @@ Node 18+ (Slack Socket Mode는 22+). macOS / Linux / WSL 1급.
 - **`lazyclaw` 명령도 유지된다.** 이름으로 호출하는 launchd plist·systemd 유닛·crontab, 그리고 개명 전에 만든 스케줄이 계속 돈다.
 - **대시보드 로그인이 유지된다** — 옛 키에 저장된 토큰을 읽어 새 키로 옮긴다.
 
-`npm install -g pompos`가 두 명령을 모두 설치한다. 릴리스는 이제 `pompos` 패키지로 게시되므로 `lazyclaw` 패키지는 npm에 있는 6.9.3에 머문다.
+`npm install -g @cmblir/pompos`가 두 명령을 모두 설치한다. 릴리스는 `@cmblir/pompos`로
+게시된다 — 무스코프 `pompos`는 npm이 기존 `prompts`와 너무 비슷하다고 거부해서 쓸 수 없고,
+그럴 때 npm이 직접 제안하는 방식이 스코프 이름이다. 무스코프 `lazyclaw` 패키지는 npm에 있는
+6.9.3에 머물고 이후 릴리스는 없다.

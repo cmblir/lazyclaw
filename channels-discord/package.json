@@ -6,7 +6,7 @@
   "main": "index.mjs",
   "files": ["index.mjs"],
   "peerDependencies": {
-    "pompos": ">=5.0.0"
+    "@cmblir/pompos": ">=5.0.0"
   },
   "dependencies": {
     "discord.js": "^14.16.0"
