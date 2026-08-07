@@ -15,11 +15,24 @@
 //      before worker 1.
 //   4. One failing subtask doesn't block the others.
 
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs';
 
 import { makeOrchestratorProvider } from '../providers/orchestrator.mjs';
 import { PROVIDERS, PROVIDER_INFO } from '../providers/registry.mjs';
+
+// These drive the real orchestrator provider, which persists a trajectory per
+// run through mas/trajectory_store.mjs. Without an isolated config directory
+// that lands in the developer's OWN ~/.pompos, mixing fake-planner test records
+// into their real trajectories and search index. node --test gives each file its
+// own process, so setting this at module scope is contained to this file.
+const _testConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-test-cfg-'));
+process.env.POMPOS_CONFIG_DIR = _testConfigDir;
+after(() => fs.rmSync(_testConfigDir, { recursive: true, force: true }));
+
 
 // orchestrator no longer imports the registry (cycle broken); callers inject
 // the provider lookup, exactly as registry.registerOrchestrator does.

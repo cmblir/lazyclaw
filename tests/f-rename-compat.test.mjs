@@ -303,3 +303,27 @@ test('every resolver agrees on a pre-rename install, and none of them creates th
     'creating it would make rule 2 fire next run and orphan everything');
   fs.rmSync(home, { recursive: true, force: true });
 });
+
+// --- tests must not write into the developer's own state -------------------
+// providers/orchestrator.mjs resolves its own config directory and persists a
+// trajectory per run, so a test that drives it without an isolated directory
+// writes fake-planner records into the real ~/.pompos — mixing test data into
+// the operator's trajectories and search index. Three files did exactly that.
+//
+// Scoped to this one import deliberately. Most tests that touch a disk-writing
+// module pass configDir as an argument and are already safe; an env-only rule
+// applied to all of them would be 28 false positives. This pins the surface that
+// resolves the directory for itself.
+
+test('every test driving the orchestrator provider isolates its config directory', () => {
+  const dir = path.join(ROOT, 'tests');
+  const offenders = [];
+  for (const name of fs.readdirSync(dir)) {
+    if (!name.endsWith('.test.mjs')) continue;
+    const src = fs.readFileSync(path.join(dir, name), 'utf8');
+    if (!src.includes('providers/orchestrator.mjs')) continue;
+    if (!/POMPOS_CONFIG_DIR|LAZYCLAW_CONFIG_DIR/.test(src)) offenders.push(name);
+  }
+  assert.deepEqual(offenders, [],
+    'set process.env.POMPOS_CONFIG_DIR to a mkdtemp dir at module scope and remove it in after()');
+});

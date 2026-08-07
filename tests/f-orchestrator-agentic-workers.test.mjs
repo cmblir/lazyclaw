@@ -5,10 +5,23 @@
 // runs each worker through runAgentTurn so it does real tool work, then reports.
 // OFF by default → the text-streaming path is byte-stable (existing tests).
 
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs';
 import { makeOrchestratorProvider } from '../providers/orchestrator.mjs';
 import { PROVIDERS, PROVIDER_INFO } from '../providers/registry.mjs';
+
+// These drive the real orchestrator provider, which persists a trajectory per
+// run through mas/trajectory_store.mjs. Without an isolated config directory
+// that lands in the developer's OWN ~/.pompos, mixing fake-planner test records
+// into their real trajectories and search index. node --test gives each file its
+// own process, so setting this at module scope is contained to this file.
+const _testConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-test-cfg-'));
+process.env.POMPOS_CONFIG_DIR = _testConfigDir;
+after(() => fs.rmSync(_testConfigDir, { recursive: true, force: true }));
+
 
 const _lookup = (p) => ({ prov: PROVIDERS[p], info: PROVIDER_INFO[p] });
 

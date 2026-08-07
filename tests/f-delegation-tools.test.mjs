@@ -7,7 +7,7 @@
 //     never defined → 'orchestrator.dispatchWorker unavailable' on every
 //     call. Fix implements a minimal one-shot worker dispatch.
 
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,6 +16,14 @@ import * as del from '../mas/tools/delegation.mjs';
 import * as orch from '../providers/orchestrator.mjs';
 import { registerAgent } from '../agents.mjs';
 import { subscribe, _reset as _resetEvents } from '../mas/events.mjs';
+
+// Imports the orchestrator provider, which resolves its own config directory and
+// persists a trajectory per run. Isolated so a future edit here cannot start
+// writing fake test records into the developer's real ~/.pompos.
+const _testConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-test-cfg-'));
+process.env.POMPOS_CONFIG_DIR = _testConfigDir;
+after(() => fs.rmSync(_testConfigDir, { recursive: true, force: true }));
+
 
 function tmpConfigDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-deleg-'));

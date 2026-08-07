@@ -20,11 +20,22 @@
 // config. Exactly ONE sendMessage call must reach the fake, and the
 // output must NOT contain the multi-agent phase headers.
 
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs';
 
 import { makeOrchestratorProvider } from '../providers/orchestrator.mjs';
 import { PROVIDERS, PROVIDER_INFO } from '../providers/registry.mjs';
+
+// Imports the orchestrator provider, which resolves its own config directory and
+// persists a trajectory per run. Isolated so a future edit here cannot start
+// writing fake test records into the developer's real ~/.pompos.
+const _testConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-test-cfg-'));
+process.env.POMPOS_CONFIG_DIR = _testConfigDir;
+after(() => fs.rmSync(_testConfigDir, { recursive: true, force: true }));
+
 
 // orchestrator no longer imports the registry (cycle broken); callers inject
 // the provider lookup, exactly as registry.registerOrchestrator does.
