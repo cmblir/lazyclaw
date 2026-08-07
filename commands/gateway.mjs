@@ -1,4 +1,4 @@
-// commands/gateway.mjs — `lazyclaw gateway`: the single-process always-on
+// commands/gateway.mjs — `pompos gateway`: the single-process always-on
 // agent (Phase 5, "approach B").
 //
 // One process owns everything: it starts the HTTP daemon in-process (the
@@ -27,7 +27,7 @@ import { pidfileStatus, pidfileStop } from './daemon.mjs';
 export const GATEWAY_CHANNELS = ['slack', 'telegram', 'matrix'];
 
 // In-tree plugin channels (channels-<name>/index.mjs). These are NOT builtins:
-// each ships as a @lazyclaw/channel-* package that exports
+// each ships as a @pompos/channel-* package that exports
 // register({ addChannel }) and wires a factory returning a channels/base.mjs
 // Channel (start/send/stop). The gateway loads the ENABLED ones at runtime so
 // `channels enable discord` is actually reachable instead of a no-op.
@@ -35,7 +35,7 @@ export const PLUGIN_CHANNELS = ['discord', 'email', 'signal', 'voice', 'whatsapp
 
 // The gateway runs in the foreground like the bare daemon, so a started
 // gateway records its pid + bound port here; `/gateway status|stop` reads
-// it back and cmdGateway removes it on shutdown. `lazyclaw service`'s
+// it back and cmdGateway removes it on shutdown. `pompos service`'s
 // fallback backend (no launchd/systemd) independently reuses this exact
 // path for its own bare-pid bookkeeping (see the write site below). The two
 // writers still disagree on format — bare pid vs. this file's JSON — but
@@ -90,8 +90,8 @@ const DEFAULT_FACTORIES = {
 // the wrong shape is caught lazily, when the returned transport factory is
 // invoked, so runGateway's per-channel try/catch turns it into a skip+warn.
 // Resolve an in-tree adapter's runtime dependency from <cfgDir>/node_modules
-// (where `lazyclaw channels install <name>` puts it), falling back to a bare
-// import (dep installed alongside lazyclaw). The adapters do a bare
+// (where `pompos channels install <name>` puts it), falling back to a bare
+// import (dep installed alongside pompos). The adapters do a bare
 // `import('discord.js')` which Node resolves from the adapter's own location —
 // NOT the config dir — so without this an installed dep is never found.
 export function _makeDepLoader(cfgDir) {
@@ -219,7 +219,7 @@ export async function runGateway(flags = {}, deps = {}) {
   if (!authToken) log('[gateway] warning: --no-auth — any local process can drive the agent on this port.\n');
   const allowlistArr = (cfg.pairing || []).map((p) => String(p.id));
   if (allowlistArr.length === 0) {
-    log('[gateway] warning: pairing allowlist is empty — the agent will answer ANYONE who can reach a connected channel. Pair senders with `lazyclaw pairing add <id>`.\n');
+    log('[gateway] warning: pairing allowlist is empty — the agent will answer ANYONE who can reach a connected channel. Pair senders with `pompos pairing add <id>`.\n');
   }
 
   // Live sender map: channels register here as they come up; the daemon's
@@ -248,7 +248,7 @@ export async function runGateway(flags = {}, deps = {}) {
   const factories = { ...DEFAULT_FACTORIES, ...(deps.channelFactories || {}) };
   const wanted = _selectChannels(cfg, flags);
   if (wanted.length === 0) {
-    log('[gateway] no channels configured/enabled — running the daemon core only. Add one with `lazyclaw setup` or pass --channels slack,telegram,matrix.\n');
+    log('[gateway] no channels configured/enabled — running the daemon core only. Add one with `pompos setup` or pass --channels slack,telegram,matrix.\n');
   }
 
   const channels = [];
@@ -324,7 +324,7 @@ export async function cmdGateway(flags = {}) {
   process.stderr.write('[gateway] running. Ctrl-C to stop.\n');
 
   // Record pid + the ACTUAL bound port so `/gateway status|stop` can find us
-  // without an lsof on the port. `lazyclaw service`'s launchd/systemd
+  // without an lsof on the port. `pompos service`'s launchd/systemd
   // backends never consult this file, tracking processes instead through
   // their own servicePaths scheme (commands/service.mjs) — but its fallback
   // backend independently writes a bare pid to this exact path

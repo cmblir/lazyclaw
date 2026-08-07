@@ -19,7 +19,7 @@ import { registerAgent } from '../agents.mjs';
 import { registerTeam } from '../teams.mjs';
 
 const freshMetrics = () => ({ costsByCurrency: {}, tokensTotal: { inputTokens: 0, outputTokens: 0 } });
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-tca-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-tca-'));
 
 test('accountant accumulates spend and fires onBreach once the cap is exceeded', () => {
   const metrics = freshMetrics();

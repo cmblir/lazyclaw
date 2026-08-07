@@ -266,7 +266,7 @@ export async function cmdInspect(sessionId, opts = {}) {
 // `fetch_data[fetch-data]` in the output — Mermaid's id rules are
 // stricter than ours.
 export async function cmdGraph(file, opts = {}) {
-  if (!file) { console.error('Usage: lazyclaw graph <workflow.mjs> [--lr] [--state <session-id>] [--dir <state-dir>]'); process.exit(2); }
+  if (!file) { console.error('Usage: pompos graph <workflow.mjs> [--lr] [--state <session-id>] [--dir <state-dir>]'); process.exit(2); }
   let nodes;
   try {
     nodes = await importWorkflow(file);

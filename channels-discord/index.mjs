@@ -1,12 +1,12 @@
-// @lazyclaw/channel-discord
+// @pompos/channel-discord
 //
 // discord.js v14 gateway client. Inbound MessageCreate events are routed
-// to the lazyclaw daemon's handler; outbound send() posts into the
+// to the pompos daemon's handler; outbound send() posts into the
 // channel id resolved from threadId.
 //
 // In-tree dev import: this file imports from '../channels/base.mjs' so the
 // per-plugin test can load it directly without going through node_modules.
-// Published packages will rewrite the import to 'lazyclaw/channels/base.mjs'
+// Published packages will rewrite the import to 'pompos/channels/base.mjs'
 // via a prepublishOnly script (out of scope for v5.0 plumbing).
 
 import { Channel } from '../channels/base.mjs';
@@ -16,8 +16,8 @@ export class DiscordChannel extends Channel {
     super('discord');
     this._token = opts.token || process.env.DISCORD_BOT_TOKEN || null;
     // loadDep resolves the runtime dep from the config dir when the gateway
-    // injects it (lazyclaw channels install discord); falls back to a bare
-    // import so a dep installed alongside lazyclaw still works.
+    // injects it (pompos channels install discord); falls back to a bare
+    // import so a dep installed alongside pompos still works.
     this._loadDep = typeof opts.loadDep === 'function' ? opts.loadDep : ((s) => import(s));
     this._client = null;
     this._lib = null;

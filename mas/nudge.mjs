@@ -17,7 +17,7 @@ const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;   // 5 min
 const DEFAULT_MIN_COUNT = 3;
 
 export function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
+  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
 }
 
 function recentPath(configDir) {

@@ -43,7 +43,7 @@ export const OPENAI_COMPAT_BUILTINS = {
     keyPrefix: 'sk-or-',
     docs: 'OpenRouter unified gateway — 200+ models behind one OpenAI-compatible endpoint. Auth: OPENROUTER_API_KEY env var or in-app api-key. Uses x-title/HTTP-Referer headers for attribution.',
     defaultModel: 'anthropic/claude-3.5-sonnet',
-    headers: { 'http-referer': 'https://github.com/cmblir/lazyclaude', 'x-title': 'lazyclaw' },
+    headers: { 'http-referer': 'https://github.com/cmblir/lazyclaude', 'x-title': 'pompos' },
     suggestedModels: [
       'anthropic/claude-3.5-sonnet',
       'anthropic/claude-3-opus',

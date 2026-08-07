@@ -20,7 +20,7 @@ function mockRes() {
 test('GET /scheduling aggregates cron jobs, goals, and loop runs', async () => {
   const dir = tmp();
   const store = { cfg: {} };
-  cron.upsertJob(store.cfg, 'daily', '0 9 * * *', ['lazyclaw', 'goal', 'tick', 'x']);
+  cron.upsertJob(store.cfg, 'daily', '0 9 * * *', ['pompos', 'goal', 'tick', 'x']);
   registerGoal({ name: 'launch', schedule: '0 8 * * 1', description: 'ship it' }, dir);
   writeMeta('L1', { prompt: 'keep trying', status: 'completed', provider: 'mock', startedAt: '2026-06-29T00:00:00Z' }, dir);
 
@@ -42,7 +42,7 @@ test('GET /scheduling aggregates cron jobs, goals, and loop runs', async () => {
 test('DELETE /cron/<name> removes the job from config', async () => {
   const dir = tmp();
   const store = { cfg: {} };
-  cron.upsertJob(store.cfg, 'nightly', '0 0 * * *', ['lazyclaw', 'goal', 'tick', 'x']);
+  cron.upsertJob(store.cfg, 'nightly', '0 0 * * *', ['pompos', 'goal', 'tick', 'x']);
   assert.ok(store.cfg.cron.nightly);
 
   const res = mockRes();

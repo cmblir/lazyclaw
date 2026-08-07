@@ -15,7 +15,7 @@ function run(argv, env = {}) {
   return { code: r.status ?? -1, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
 
-test('lazyclaw sandbox list prints the 6-enum', () => {
+test('pompos sandbox list prints the 6-enum', () => {
   const r = run(['sandbox', 'list']);
   assert.equal(r.code, 0, r.stderr);
   for (const k of ['local', 'docker', 'ssh', 'singularity', 'modal', 'daytona']) {
@@ -23,7 +23,7 @@ test('lazyclaw sandbox list prints the 6-enum', () => {
   }
 });
 
-test('lazyclaw sandbox status reports the default-on confinement posture', () => {
+test('pompos sandbox status reports the default-on confinement posture', () => {
   const r = run(['sandbox', 'status']);
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /confinement:\s*on/i, 'default-on confinement must be reported');
@@ -31,7 +31,7 @@ test('lazyclaw sandbox status reports the default-on confinement posture', () =>
   assert.match(r.stdout, /network/i);
 });
 
-test('lazyclaw sandbox status shows OFF when confine is disabled', () => {
+test('pompos sandbox status shows OFF when confine is disabled', () => {
   const dir = mkdtempSync(join(tmpdir(), 'lc-sbstatus-'));
   const cfgPath = join(dir, 'config.json');
   writeFileSync(cfgPath, JSON.stringify({ sandbox: { confine: false } }));
@@ -40,14 +40,14 @@ test('lazyclaw sandbox status shows OFF when confine is disabled', () => {
   assert.match(r.stdout, /confinement:\s*off/i);
 });
 
-test('lazyclaw sandbox test local succeeds (echo through LocalSandbox)', () => {
+test('pompos sandbox test local succeeds (echo through LocalSandbox)', () => {
   const r = run(['sandbox', 'test', 'local']);
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /ok\s+local/i);
 });
 
-test('lazyclaw sandbox add writes to a temp config dir', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'lazyclaw-sb-'));
+test('pompos sandbox add writes to a temp config dir', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pompos-sb-'));
   const cfg = join(dir, 'config.json');
   writeFileSync(cfg, '{}');
   const r = run(
@@ -60,8 +60,8 @@ test('lazyclaw sandbox add writes to a temp config dir', () => {
   assert.equal(written.sandbox.profiles.staging.image, 'alpine:3.20');
 });
 
-test('lazyclaw sandbox use selects a profile as default', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'lazyclaw-sb-'));
+test('pompos sandbox use selects a profile as default', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pompos-sb-'));
   const cfg = join(dir, 'config.json');
   writeFileSync(cfg, JSON.stringify({
     sandbox: { profiles: { staging: { kind: 'docker', image: 'x' } } },
@@ -73,7 +73,7 @@ test('lazyclaw sandbox use selects a profile as default', () => {
   assert.equal(written.sandbox.docker.image, 'x');
 });
 
-test('lazyclaw sandbox test unknown-backend reports error and exits non-zero', () => {
+test('pompos sandbox test unknown-backend reports error and exits non-zero', () => {
   const r = run(['sandbox', 'test', 'no-such-kind']);
   assert.notEqual(r.code, 0);
   assert.match(r.stderr + r.stdout, /SANDBOX_BAD_KIND|unknown/i);

@@ -6,6 +6,35 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Renamed from `lazyclaw` to `pompos`.** The CLI, the package, the dashboard
+  and the splash all carry the new name, and the terminal banner is new artwork —
+  a hooded figure rather than the sleeping sloth. Existing installs are not asked
+  to do anything:
+  - An existing `~/.lazyclaw` keeps being used **in place**. Resolution order is
+    `POMPOS_CONFIG_DIR` / `LAZYCLAW_CONFIG_DIR`, then `~/.pompos`, then
+    `~/.lazyclaw`, then `~/.pompos` for a fresh install. Nothing is moved or
+    copied — adopting a directory is reversible, migrating it silently is not.
+    `mv ~/.lazyclaw ~/.pompos` promotes it whenever the operator wants.
+  - Every `LAZYCLAW_*` variable is mirrored to its `POMPOS_*` name (and back) at
+    process start, so shell profiles, CI secrets, systemd units and launchd
+    plists keep taking effect. Whichever name is set explicitly wins; an empty
+    value counts as unset in both directions.
+  - The `lazyclaw` command is still published, so plists, units and crontab
+    lines that invoke it by name keep working — as do schedules stored before
+    the rename, whose saved argv begins with `lazyclaw`.
+  - The dashboard reads a token saved under the old `lazyclaw_token`
+    localStorage key and carries it forward, instead of silently logging
+    everyone out.
+  - Releases now publish to the `pompos` npm package; `lazyclaw` stays at the
+    6.9.3 already on npm.
+
+  Docs split by whether they instruct or record: the READMEs and the `docs/*.md`
+  guides use the new name, while `docs/superpowers/` specs, plans and QA reports
+  and this file's existing entries keep the old one — they describe what actually
+  shipped as lazyclaw.
+
 ## [6.10.0] - 2026-08-03
 
 ### Security

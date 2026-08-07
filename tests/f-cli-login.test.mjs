@@ -36,7 +36,7 @@ test('cliLoginStatus: gemini infers from creds file or GEMINI_API_KEY', async ()
   assert.equal((await cliLoginStatus('gemini-cli', { ...base, env: { GEMINI_API_KEY: 'k' } })).loggedIn, true);
 });
 
-test('cliLoginStatus: a stored lazyclaw key counts as connected', async () => {
+test('cliLoginStatus: a stored pompos key counts as connected', async () => {
   const s = await cliLoginStatus('codex-cli', { which: () => '/bin/codex', hasStoredKey: true });
   assert.equal(s.loggedIn, true);
   assert.equal(s.via, 'api-key');

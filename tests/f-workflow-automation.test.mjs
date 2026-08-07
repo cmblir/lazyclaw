@@ -49,7 +49,7 @@ test('attachWorkflowCron installs a wf-<name> job that runs the workflow', () =>
   };
   const r = attachWorkflowCron('daily', '0 9 * * *', { cron, readConfig: () => ({}), writeConfig: (c) => { written = c; } });
   assert.equal(r.jobName, 'wf-daily');
-  assert.deepEqual(written.cron['wf-daily'], { schedule: '0 9 * * *', command: ['lazyclaw', 'workflow', 'run', 'daily'] });
+  assert.deepEqual(written.cron['wf-daily'], { schedule: '0 9 * * *', command: ['pompos', 'workflow', 'run', 'daily'] });
 });
 
 test('CLI: workflow add → list → run (no channel) → remove', () => {
@@ -83,5 +83,5 @@ test('CLI: workflow add with --cron installs a cron job (skip real install)', ()
   assert.equal(JSON.parse(add.stdout).schedule, '0 9 * * *');
   // The cron job was registered in config.
   const cfg = JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'));
-  assert.deepEqual(cfg.cron['wf-sched'].command, ['lazyclaw', 'workflow', 'run', 'sched']);
+  assert.deepEqual(cfg.cron['wf-sched'].command, ['pompos', 'workflow', 'run', 'sched']);
 });

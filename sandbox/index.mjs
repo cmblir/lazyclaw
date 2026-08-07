@@ -69,7 +69,7 @@ export function resolveSandbox(cfg, workerName) {
 }
 
 // Directories whose reads are blocked inside a confined child even though reads
-// are otherwise allowed — credential stores + the lazyclaw config dir (which
+// are otherwise allowed — credential stores + the pompos config dir (which
 // holds auth profiles and channel tokens).
 function defaultDenyRead(homeDir, configDir) {
   const h = homeDir || os.homedir();

@@ -42,7 +42,7 @@ export async function cmdAuth(sub, positional, flags = {}) {
     case 'add': {
       const [provider, key] = positional;
       if (!provider || !key) {
-        console.error('Usage: lazyclaw auth add <provider> <key> [--label <name>]');
+        console.error('Usage: pompos auth add <provider> <key> [--label <name>]');
         process.exit(2);
       }
       try {
@@ -55,7 +55,7 @@ export async function cmdAuth(sub, positional, flags = {}) {
     case 'remove': {
       const [provider, label] = positional;
       if (!provider || !label) {
-        console.error('Usage: lazyclaw auth remove <provider> <label>');
+        console.error('Usage: pompos auth remove <provider> <label>');
         process.exit(2);
       }
       try { m.authRemove(cfg, provider, label); writeConfig(cfg); }
@@ -66,7 +66,7 @@ export async function cmdAuth(sub, positional, flags = {}) {
     case 'use': {
       const [provider, label] = positional;
       if (!provider || !label) {
-        console.error('Usage: lazyclaw auth use <provider> <label>');
+        console.error('Usage: pompos auth use <provider> <label>');
         process.exit(2);
       }
       try { m.authUse(cfg, provider, label); writeConfig(cfg); }
@@ -77,7 +77,7 @@ export async function cmdAuth(sub, positional, flags = {}) {
     case 'rotate': {
       const provider = positional[0];
       if (!provider) {
-        console.error('Usage: lazyclaw auth rotate <provider>');
+        console.error('Usage: pompos auth rotate <provider>');
         process.exit(2);
       }
       const next = m.authRotate(cfg, provider);
@@ -90,7 +90,7 @@ export async function cmdAuth(sub, positional, flags = {}) {
       return;
     }
     default:
-      console.error('Usage: lazyclaw auth <list|add|remove|use|rotate> ...');
+      console.error('Usage: pompos auth <list|add|remove|use|rotate> ...');
       process.exit(2);
   }
 }
@@ -106,7 +106,7 @@ export async function cmdPairing(sub, positional, flags = {}) {
     case 'add': {
       const id = positional[0];
       if (!id) {
-        console.error('Usage: lazyclaw pairing add <id> [--label <name>]');
+        console.error('Usage: pompos pairing add <id> [--label <name>]');
         process.exit(2);
       }
       try { m.pairingAdd(cfg, id, flags.label); writeConfig(cfg); }
@@ -117,7 +117,7 @@ export async function cmdPairing(sub, positional, flags = {}) {
     case 'remove': {
       const id = positional[0];
       if (!id) {
-        console.error('Usage: lazyclaw pairing remove <id>');
+        console.error('Usage: pompos pairing remove <id>');
         process.exit(2);
       }
       try { m.pairingRemove(cfg, id); writeConfig(cfg); }
@@ -126,7 +126,7 @@ export async function cmdPairing(sub, positional, flags = {}) {
       return;
     }
     default:
-      console.error('Usage: lazyclaw pairing <list|add|remove> ...');
+      console.error('Usage: pompos pairing <list|add|remove> ...');
       process.exit(2);
   }
 }
@@ -142,7 +142,7 @@ export async function cmdNodes(sub, positional, flags = {}) {
     case 'register': {
       const id = positional[0];
       if (!id) {
-        console.error('Usage: lazyclaw nodes register <id> [--platform macos|ios|android|web|cli] [--label <name>]');
+        console.error('Usage: pompos nodes register <id> [--platform macos|ios|android|web|cli] [--label <name>]');
         process.exit(2);
       }
       try { m.nodesRegister(cfg, id, flags.platform || 'cli', flags.label || ''); writeConfig(cfg); }
@@ -153,7 +153,7 @@ export async function cmdNodes(sub, positional, flags = {}) {
     case 'remove': {
       const id = positional[0];
       if (!id) {
-        console.error('Usage: lazyclaw nodes remove <id>');
+        console.error('Usage: pompos nodes remove <id>');
         process.exit(2);
       }
       try { m.nodesRemove(cfg, id); writeConfig(cfg); }
@@ -163,7 +163,7 @@ export async function cmdNodes(sub, positional, flags = {}) {
     }
     // Device-gateway pairing (Phase 27) — distinct from the config-based
     // `nodes register` table above. These drive the Ed25519 PairingStore
-    // a companion node authenticates against via `lazyclaw daemon`.
+    // a companion node authenticates against via `pompos daemon`.
     case 'pending': {
       const { PairingStore } = await import('../gateway/device_auth.mjs');
       const store = new PairingStore(path.dirname(configPath()));
@@ -179,7 +179,7 @@ export async function cmdNodes(sub, positional, flags = {}) {
     case 'approve': {
       const requestId = positional[0];
       if (!requestId) {
-        console.error('Usage: lazyclaw nodes approve <requestId>   (see `lazyclaw nodes pending`)');
+        console.error('Usage: pompos nodes approve <requestId>   (see `pompos nodes pending`)');
         process.exit(2);
       }
       const { PairingStore } = await import('../gateway/device_auth.mjs');
@@ -196,7 +196,7 @@ export async function cmdNodes(sub, positional, flags = {}) {
     case 'revoke': {
       const deviceId = positional[0];
       if (!deviceId) {
-        console.error('Usage: lazyclaw nodes revoke <deviceId>');
+        console.error('Usage: pompos nodes revoke <deviceId>');
         process.exit(2);
       }
       const { PairingStore } = await import('../gateway/device_auth.mjs');
@@ -207,7 +207,7 @@ export async function cmdNodes(sub, positional, flags = {}) {
     case 'rotate': {
       const deviceId = positional[0];
       if (!deviceId) {
-        console.error('Usage: lazyclaw nodes rotate <deviceId> [--ttl <ms>]');
+        console.error('Usage: pompos nodes rotate <deviceId> [--ttl <ms>]');
         process.exit(2);
       }
       const ttlRaw = flags.ttl;
@@ -223,7 +223,7 @@ export async function cmdNodes(sub, positional, flags = {}) {
       return;
     }
     default:
-      console.error('Usage: lazyclaw nodes <list|register|remove|pending|approve <requestId>|revoke <deviceId>|rotate <deviceId>|devices> ...');
+      console.error('Usage: pompos nodes <list|register|remove|pending|approve <requestId>|revoke <deviceId>|rotate <deviceId>|devices> ...');
       process.exit(2);
   }
 }
@@ -239,7 +239,7 @@ export async function cmdMessage(sub, positional, flags = {}) {
     case 'add': {
       const [name, url] = positional;
       if (!name || !url) {
-        console.error('Usage: lazyclaw message add <name> <webhook-url> [--kind slack|discord|generic]');
+        console.error('Usage: pompos message add <name> <webhook-url> [--kind slack|discord|generic]');
         process.exit(2);
       }
       try { m.messageAdd(cfg, name, url, flags.kind); writeConfig(cfg); }
@@ -250,7 +250,7 @@ export async function cmdMessage(sub, positional, flags = {}) {
     case 'remove': {
       const name = positional[0];
       if (!name) {
-        console.error('Usage: lazyclaw message remove <name>');
+        console.error('Usage: pompos message remove <name>');
         process.exit(2);
       }
       try { m.messageRemove(cfg, name); writeConfig(cfg); }
@@ -261,12 +261,12 @@ export async function cmdMessage(sub, positional, flags = {}) {
     case 'send': {
       const [name, ...textParts] = positional;
       if (!name) {
-        console.error('Usage: lazyclaw message send <name> <text|->');
+        console.error('Usage: pompos message send <name> <text|->');
         process.exit(2);
       }
       let text = textParts.join(' ');
       // `-` reads body from stdin so a long agent reply can be piped:
-      //   lazyclaw agent "summarize foo" | lazyclaw message send team -
+      //   pompos agent "summarize foo" | pompos message send team -
       if (text === '-' || (!text && !process.stdin.isTTY)) {
         text = await new Promise((resolve) => {
           let buf = '';
@@ -287,7 +287,7 @@ export async function cmdMessage(sub, positional, flags = {}) {
       return;
     }
     default:
-      console.error('Usage: lazyclaw message <list|add|remove|send> ...');
+      console.error('Usage: pompos message <list|add|remove|send> ...');
       process.exit(2);
   }
 }
@@ -303,7 +303,7 @@ export async function cmdWorkspace(sub, positional, flags = {}) {
     }
     case 'init': {
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw workspace init <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos workspace init <name>'); process.exit(2); }
       try {
         const dir = ws.initWorkspace(cfgDir, name);
         console.log(JSON.stringify({ ok: true, name, dir, files: ws.WORKSPACE_FILES }));
@@ -312,7 +312,7 @@ export async function cmdWorkspace(sub, positional, flags = {}) {
     }
     case 'show': {
       const [name, fileName] = positional;
-      if (!name) { console.error('Usage: lazyclaw workspace show <name> [<file>]'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos workspace show <name> [<file>]'); process.exit(2); }
       try {
         if (fileName) process.stdout.write(ws.readWorkspaceFile(cfgDir, name, fileName));
         else          process.stdout.write(ws.composeWorkspacePrompt(cfgDir, name) + '\n');
@@ -321,7 +321,7 @@ export async function cmdWorkspace(sub, positional, flags = {}) {
     }
     case 'remove': {
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw workspace remove <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos workspace remove <name>'); process.exit(2); }
       try { ws.removeWorkspace(cfgDir, name); }
       catch (e) { console.error(`error: ${e.message}`); process.exit(1); }
       console.log(JSON.stringify({ ok: true, removed: name }));
@@ -335,7 +335,7 @@ export async function cmdWorkspace(sub, positional, flags = {}) {
       return;
     }
     default:
-      console.error('Usage: lazyclaw workspace <list|init|show|remove|path> ...');
+      console.error('Usage: pompos workspace <list|init|show|remove|path> ...');
       process.exit(2);
   }
 }

@@ -5,7 +5,7 @@
 **Status:** resolved in `b479886` (D7) · **Severity:** was test-infra (no impact
 on macOS interactive use)
 
-About 35 Playwright specs that spawn `lazyclaw chat` / `loop` / `goal`
+About 35 Playwright specs that spawn `pompos chat` / `loop` / `goal`
 interactively — piping lines into a **non-TTY** child — failed on CI: the
 chat produced no output at all (`Received string: ""`) and persisted no turns.
 
@@ -30,7 +30,7 @@ iterator. Verified in a `node:20` container and on the real CI run for
 **Status:** resolved in `b9050be` (F8) · **Severity:** was a real product crash
 (not just a test issue)
 
-The last 6 CI playwright failures were the `lazyclaw providers test` (CLI) and
+The last 6 CI playwright failures were the `pompos providers test` (CLI) and
 daemon `GET /providers/test` specs. They probe every registered provider in
 parallel. The claude-cli provider spawned the `claude` binary and only caught
 **synchronous** spawn failures — but a missing binary (ENOENT) surfaces

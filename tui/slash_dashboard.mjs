@@ -6,13 +6,13 @@
 import { splitWhitespace } from './slash_helpers.mjs';
 import { resolvePort } from '../lib/ports.mjs';
 
-// /dashboard — open the lazyclaw web UI.
+// /dashboard — open the pompos web UI.
 //
 // v5.4.4 ROOT-CAUSE FIX (was: rapid repeated /dashboard within one chat
 // session spawned 20+ daemon children).
 //
 // Original implementation:
-//   probe /healthz → if !200, spawn detached `lazyclaw dashboard
+//   probe /healthz → if !200, spawn detached `pompos dashboard
 //   --no-open` and poll for up to 3s.
 //
 // Failure mode that produced the 20+ spawn pile-up:
@@ -82,7 +82,7 @@ function _openBrowser(url) {
 }
 
 async function _dashboardStop(port) {
-  // Best-effort kill of every lazyclaw dashboard daemon on the box.
+  // Best-effort kill of every pompos dashboard daemon on the box.
   // Used to clean up after the v5.4.3 spawn pile-up bug.
   if (process.platform === 'win32') {
     return 'dashboard stop: not implemented on Windows yet — kill via Task Manager';
@@ -103,16 +103,16 @@ async function _dashboardStop(port) {
   for (const pid of portPids) {
     try { process.kill(pid, 'SIGTERM'); } catch { /* gone */ }
   }
-  // Step 2: pkill any process whose command line includes "lazyclaw dashboard"
+  // Step 2: pkill any process whose command line includes "pompos dashboard"
   // — catches detached children that bound a different (random) port via
   // cmdDashboard's EADDRINUSE fallback.
   let pkilled = 0;
   try {
-    const pkill = spawn('pkill', ['-f', 'lazyclaw dashboard'], { stdio: ['ignore', 'ignore', 'ignore'] });
+    const pkill = spawn('pkill', ['-f', 'pompos dashboard'], { stdio: ['ignore', 'ignore', 'ignore'] });
     pkilled = await new Promise((r) => pkill.on('close', (code) => r(code === 0 ? 1 : 0)));
   } catch { /* fine */ }
   _dashboardChildPid = null;
-  return `✓ stopped ${portPids.length} listener(s) on :${port}${pkilled ? ' + remaining `lazyclaw dashboard` processes via pkill' : ''}`;
+  return `✓ stopped ${portPids.length} listener(s) on :${port}${pkilled ? ' + remaining `pompos dashboard` processes via pkill' : ''}`;
 }
 
 // Parse the daemon's "listening at <url>" stdout line so /dashboard opens the

@@ -21,7 +21,7 @@ export const PARAMETERS = {
 };
 
 const DEFAULT_MAX_MATCHES = 200;
-const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.playwright', 'playwright-report', 'test-results', '.lazyclaw']);
+const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'coverage', '.playwright', 'playwright-report', 'test-results', '.pompos']);
 const MAX_FILE_BYTES = 1_000_000;  // skip files bigger than 1 MB
 const TEXT_EXT = new Set([
   '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.json', '.md', '.txt',

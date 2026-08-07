@@ -63,7 +63,7 @@ export async function render(host) {
       const arr = r.skills || r;
       if (!Array.isArray(arr) || arr.length === 0) {
         list.replaceWith(list = el('div', { class: 'empty' },
-          'No skills yet. Install one: ', el('code', { text: 'lazyclaw skills install <user>/<repo>' }), '.'));
+          'No skills yet. Install one: ', el('code', { text: 'pompos skills install <user>/<repo>' }), '.'));
         meta.textContent = '';
         return;
       }

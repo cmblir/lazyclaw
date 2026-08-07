@@ -78,7 +78,7 @@ export async function _channels(args, ctx = {}) {
     const setKeys = Object.keys(answers);
     let note = '';
     if (!entry.ready) {
-      if (entry.missingDeps && entry.missingDeps.length) note += `\n(needs ${entry.missingDeps.join(', ')} — run: lazyclaw channels install ${chName})`;
+      if (entry.missingDeps && entry.missingDeps.length) note += `\n(needs ${entry.missingDeps.join(', ')} — run: pompos channels install ${chName})`;
       if (entry.missingBinary) note += `\n(needs the ${entry.missingBinary} binary on your PATH)`;
     }
     return `✓ ${spec.label} credentials saved (${setKeys.join(', ') || 'none'}) → ${entry.ready ? 'channel enabled' : 'saved (enable once the requirement is installed)'}${note}`;
@@ -139,7 +139,7 @@ export async function _channels(args, ctx = {}) {
     }
   }
   const rows = cf.channelStatusList(read());
-  if (!rows.length) return 'no channels configured. set credentials with /channels setup (or `lazyclaw setup` for the full wizard).';
+  if (!rows.length) return 'no channels configured. set credentials with /channels setup (or `pompos setup` for the full wizard).';
   // Cross-reference each channel's required env creds against the loaded env so
   // the list flags a channel that's "enabled" but missing its token.
   let channelMod = null;

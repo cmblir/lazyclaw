@@ -51,7 +51,7 @@ const DEFAULT_SCOPES = ['sessions', 'skills', 'trajectories', 'memories'];
 const MAX_K = 50;
 
 function _defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
+  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
 }
 
 // Read config.json from the tool's own configDir (not the env), so hybrid

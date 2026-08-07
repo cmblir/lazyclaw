@@ -1,6 +1,6 @@
-// commands/login.mjs — `lazyclaw login [claude]`.
+// commands/login.mjs — `pompos login [claude]`.
 //
-// lazyclaw is keyless: chatting via the claude-cli provider spawns the `claude`
+// pompos is keyless: chatting via the claude-cli provider spawns the `claude`
 // binary, which carries its own login. But the model-LISTING path makes a
 // direct api.anthropic.com call that needs a bearer, and on macOS the `claude`
 // login lives in the Keychain (no credential file), so listing failed with
@@ -90,7 +90,7 @@ export async function cmdLogin(positional = [], flags = {}, deps = {}) {
     log('Install the Claude CLI and log in:');
     log('  npm i -g @anthropic-ai/claude-code');
     log('  claude login');
-    log('Then re-run `lazyclaw login`. (Headless/CI: set CLAUDE_CODE_OAUTH_TOKEN, or `lazyclaw login --token <token>`.)');
+    log('Then re-run `pompos login`. (Headless/CI: set CLAUDE_CODE_OAUTH_TOKEN, or `pompos login --token <token>`.)');
     return 1;
   }
 
@@ -98,11 +98,11 @@ export async function cmdLogin(positional = [], flags = {}, deps = {}) {
   log('(A browser opens for OAuth; the token is printed when it finishes.)\n');
   const code = deps.runSetupToken ? await deps.runSetupToken() : await _runSetupToken();
   if (code !== 0) {
-    err('\n`claude setup-token` did not complete. Alternatively run `claude login`, then re-run `lazyclaw login`.');
+    err('\n`claude setup-token` did not complete. Alternatively run `claude login`, then re-run `pompos login`.');
     return 1;
   }
   log('\nDone. Copy the token printed above, then save it with EITHER:');
-  log('  lazyclaw login --token <paste-token>      # writes <config>/.env (recommended)');
+  log('  pompos login --token <paste-token>      # writes <config>/.env (recommended)');
   log('  export CLAUDE_CODE_OAUTH_TOKEN=<paste-token>');
   return 0;
 }

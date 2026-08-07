@@ -1,4 +1,4 @@
-// commands/workflow_named.mjs — `lazyclaw workflow <add|list|show|remove|run>`.
+// commands/workflow_named.mjs — `pompos workflow <add|list|show|remove|run>`.
 //
 // Stored, named declarative workflows (cfg.workflows[<name>]) — the Hermes-style
 // automation surface. `add` persists a def from a JSON file (+ optional Slack
@@ -73,7 +73,7 @@ export async function cmdWorkflow(sub, positional = [], flags = {}) {
       const name = positional[0];
       const file = positional[1];
       if (!name || !file) {
-        console.error('Usage: lazyclaw workflow add <name> <def.json> [--channel slack:#x] [--cron "<spec>"] [--reply-node <id>]');
+        console.error('Usage: pompos workflow add <name> <def.json> [--channel slack:#x] [--cron "<spec>"] [--reply-node <id>]');
         process.exit(2);
       }
       if (!validWorkflowName(name)) { console.error(`workflow add: invalid name "${name}" (letters/digits/.-_ only)`); process.exit(2); }
@@ -127,7 +127,7 @@ export async function cmdWorkflow(sub, positional = [], flags = {}) {
     case 'rm':
     case 'delete': {
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw workflow remove <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos workflow remove <name>'); process.exit(2); }
       const cfg = readConfig();
       if (!getNamedWorkflow(cfg, name)) { console.error(`workflow remove: no workflow "${name}"`); process.exit(2); }
       delete cfg.workflows[name];
@@ -146,7 +146,7 @@ export async function cmdWorkflow(sub, positional = [], flags = {}) {
 
     case 'run': {
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw workflow run <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos workflow run <name>'); process.exit(2); }
       const cfg = readConfig();
       try {
         const { result, reply, post } = await runNamedAndReport(name, cfg, {});
@@ -157,7 +157,7 @@ export async function cmdWorkflow(sub, positional = [], flags = {}) {
     }
 
     default:
-      console.error('Usage: lazyclaw workflow <list|show|add|remove|run> ...');
+      console.error('Usage: pompos workflow <list|show|add|remove|run> ...');
       process.exit(2);
   }
 }

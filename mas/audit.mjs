@@ -17,7 +17,7 @@ export class AuditError extends Error {
 }
 
 export function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
+  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
 }
 
 export function auditPath(taskId, configDir = defaultConfigDir()) {

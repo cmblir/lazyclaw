@@ -11,7 +11,7 @@ import { pidfileStatus, pidfileStop } from '../commands/daemon.mjs';
 import { _gatewayPidfilePath, gatewayStatus, gatewayStop } from '../commands/gateway.mjs';
 
 function tmpDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-gw-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-gw-'));
 }
 
 test('_gatewayPidfilePath sits next to the daemon pidfile', () => {

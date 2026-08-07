@@ -29,7 +29,7 @@ export function httpNode({ fetchImpl = globalThis.fetch, isSafe = isSafeUrl, max
 }
 
 // llm: { prompt, system?, model? } → the assistant's full text. `provider` is a
-// lazyclaw provider (sendMessage yields text chunks).
+// pompos provider (sendMessage yields text chunks).
 export function llmNode({ provider, apiKey, model: defaultModel } = {}) {
   return async (cfg, ctx) => {
     if (!provider || typeof provider.sendMessage !== 'function') throw new Error('llm node: no provider granted');

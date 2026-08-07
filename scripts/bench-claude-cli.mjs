@@ -3,12 +3,12 @@
 //
 // WHY this exists: a single end-to-end turn is ~3-5s and DOMINATED by model
 // generation + network (±2s of run-to-run noise), so one sample cannot isolate
-// lazyclaw's own overhead — single-sample comparisons came out noise-dominated
+// pompos's own overhead — single-sample comparisons came out noise-dominated
 // (lean even looked slower than non-lean once, which was pure noise). Per the
 // engineering directives (§9 "measure, don't guess; record before/after") and
 // the perf methodology note, every reported latency is median + p95 + stdev
 // over N runs, and we separate the model round-trip (claude's self-reported
-// duration_api_ms) from the lazyclaw + Claude-Code-harness overhead (external
+// duration_api_ms) from the pompos + Claude-Code-harness overhead (external
 // wall-clock minus that). The token deltas are deterministic and are the real,
 // noise-free win.
 //
@@ -273,7 +273,7 @@ export const TOOLSET = 'Read,Grep,Glob';
 export const UNBOUNDED_TURNS = 12;
 
 // Build the one-shot argv for a named condition by delegating to the provider's
-// own buildArgs(), so we measure EXACTLY the argv lazyclaw would run.
+// own buildArgs(), so we measure EXACTLY the argv pompos would run.
 export function oneShotArgs(name, prompt, model) {
   const base = { model };
   switch (name) {

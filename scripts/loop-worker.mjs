@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Detached worker for `lazyclaw loop --detach`.
+// Detached worker for `pompos loop --detach`.
 //
 // Invoked by the parent CLI with the same provider/model the parent
 // resolved, plus a loop id pointing at the state directory the parent

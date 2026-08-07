@@ -2,11 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildArgs } from '../providers/claude_cli.mjs';
 
-// Root cause of slow + "not smart" claude-cli turns: lazyclaw spawned `claude`
+// Root cause of slow + "not smart" claude-cli turns: pompos spawned `claude`
 // in the user's normal environment, so EVERY turn loaded the user's global
 // CLAUDE.md + skills + hooks + all MCP servers (~180k tokens, measured) and let
-// Claude Code act on them — slow, and polluted by config lazyclaw never wanted.
-// lazyclaw provides its own system prompt, so claude-cli must run LEAN.
+// Claude Code act on them — slow, and polluted by config pompos never wanted.
+// pompos provides its own system prompt, so claude-cli must run LEAN.
 
 test('claude-cli runs LEAN by default (no user CLAUDE.md / skills / hooks / MCP)', () => {
   const args = buildArgs('hello', {});

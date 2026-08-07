@@ -106,7 +106,7 @@ export async function render(host) {
     const text = input.value.trim();
     if (!text) return;
     const assignee = select.value;
-    if (!assignee) { appendMsg('error', 'No provider selected. Run `lazyclaw onboard` first.'); return; }
+    if (!assignee) { appendMsg('error', 'No provider selected. Run `pompos onboard` first.'); return; }
     input.value = '';
     appendMsg('user', text);
     chatHistory.push({ role: 'user', text });
@@ -144,7 +144,7 @@ export async function render(host) {
     const arr = Array.isArray(r) ? r : (r.providers || []);
     select.replaceChildren();
     if (arr.length === 0) {
-      select.append(el('option', { value: '', text: '(no providers — run lazyclaw onboard)' }));
+      select.append(el('option', { value: '', text: '(no providers — run pompos onboard)' }));
       return;
     }
     // Preselect the configured default when possible so the user doesn't

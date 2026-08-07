@@ -1,5 +1,5 @@
 // scripts/openclaw-import.mjs
-// Detect ~/.openclaw (or --from <dir>) and import into lazyclaw,
+// Detect ~/.openclaw (or --from <dir>) and import into pompos,
 // matching Hermes `claw migrate` coverage. Tags every skill
 // trained_by: openclaw-import (canonical C4).
 import fs from 'node:fs';
@@ -8,7 +8,7 @@ import os from 'node:os';
 
 export function defaultOpenclawDir() { return path.join(os.homedir(), '.openclaw'); }
 export function defaultCfgDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
+  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
 }
 
 function injectTrainedBy(content, value) {

@@ -1,7 +1,7 @@
 // User modeler — Phase B (v5 §4.10, §9.2, §0.1 C6).
 //
 // Honcho-equivalent. At session end, take the session's turns and ask
-// the trainer to produce a dialectic update for ~/.lazyclaw/memory/USER.md:
+// the trainer to produce a dialectic update for ~/.pompos/memory/USER.md:
 //
 //   ## Thesis      — durable facts the user just confirmed
 //   ## Antithesis  — contradictions to prior model (if any)
@@ -23,7 +23,7 @@ const MAX_TRANSCRIPT_CHARS = 16 * 1024;
 const MAX_USER_MD_BYTES = 32 * 1024;
 
 export function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
+  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
 }
 
 export function userModelPath(configDir = defaultConfigDir()) {

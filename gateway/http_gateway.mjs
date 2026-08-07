@@ -1,7 +1,7 @@
 // HTTP/SSE realisation of the device gateway — Phase 27.
 //
 // The OpenClaw "gateway" is a long-lived process companion nodes connect
-// to and authenticate against. lazyclaw realises that over the EXISTING
+// to and authenticate against. pompos realises that over the EXISTING
 // HTTP daemon (no `ws` dependency, no hand-rolled RFC6455 framing): the
 // device-auth handshake is two POSTs, authenticated routes carry the
 // device's bearer token, and server-pushed events ride an SSE stream.
@@ -15,7 +15,7 @@
 //     then ChallengeRegistry.consume (single-use / anti-replay). On
 //     success: an APPROVED device gets its rotated bearer token; an
 //     unapproved device gets a 403 `pending` receipt and a pairing
-//     request is recorded for the operator to `lazyclaw nodes approve`.
+//     request is recorded for the operator to `pompos nodes approve`.
 //
 //   GET  /gateway/whoami        (Authorization: Bearer <deviceToken>,
 //                                x-device-id: <deviceId>)  -> { deviceId }
@@ -146,7 +146,7 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
   // per-device scoping by design (a paired device is an operator surface).
   // Approval ids are unguessable (crypto.randomBytes), so only an
   // already-trusted, authenticated device can act. If you pair a
-  // lower-trust device, revoke it (`lazyclaw nodes revoke`) rather than
+  // lower-trust device, revoke it (`pompos nodes revoke`) rather than
   // relying on approval scoping.
   function resolveApproval(id, decision, by = '') {
     const a = approvals.get(id);

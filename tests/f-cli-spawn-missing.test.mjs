@@ -3,7 +3,7 @@
 //
 // Regression: spawn ENOENT arrives as an ASYNC ChildProcess 'error' event;
 // gemini_cli/codex_cli only caught the sync throw, so registering them made
-// `lazyclaw providers test` (which probes every provider in parallel) crash
+// `pompos providers test` (which probes every provider in parallel) crash
 // the whole process on any box without the `gemini`/`codex` binaries — CI
 // went red the moment they joined the registry. claude_cli got this fix in
 // F8; this pins the same behavior for all three.

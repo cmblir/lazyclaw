@@ -69,7 +69,7 @@ const claudeCliAgent = {
 };
 
 test.describe('Phase 19 — claude-cli tool-use adapter', () => {
-  test('toClaudeTools maps lazyclaw names to claude built-in names and dedupes', async () => {
+  test('toClaudeTools maps pompos names to claude built-in names and dedupes', async () => {
     const a = await loadAdapter();
     expect(a.toClaudeTools([{ name: 'bash' }, { name: 'read' }, { name: 'write' }, { name: 'grep' }]))
       .toBe('Bash,Read,Write,Grep');
@@ -77,7 +77,7 @@ test.describe('Phase 19 — claude-cli tool-use adapter', () => {
     expect(a.toClaudeTools([])).toBe('');
     // Unknown tool names are dropped silently — the CLI's `--tools`
     // arg won't accept them anyway and we don't want the adapter to
-    // refuse the call just because we added a lazyclaw-only tool.
+    // refuse the call just because we added a pompos-only tool.
     expect(a.toClaudeTools([{ name: 'bash' }, { name: 'frobnicate' }])).toBe('Bash');
   });
 

@@ -5,7 +5,7 @@
 import path from 'node:path';
 import { configPath } from '../lib/config.mjs';
 
-// Kill registry — `lazyclaw loops kill <id>` SIGTERMs once and SIGKILLs
+// Kill registry — `pompos loops kill <id>` SIGTERMs once and SIGKILLs
 // on a second invocation within KILL_ESCALATE_MS. Module-scoped so two
 // rapid invocations of `cmd loops kill <id>` from the same process see
 // each other; for separate processes the worker also handles SIGKILL by
@@ -25,7 +25,7 @@ export async function cmdLoops(sub, positional, flags = {}) {
     }
     case 'show': {
       const id = positional[0];
-      if (!id) { console.error('Usage: lazyclaw loops show <id>'); process.exit(2); }
+      if (!id) { console.error('Usage: pompos loops show <id>'); process.exit(2); }
       const meta = loopsMod.reconcileStatus(loopsMod.readMeta(id, cfgDir));
       if (!meta) { console.error(`no loop "${id}"`); process.exit(1); }
       const iterations = loopsMod.readIterations(id, cfgDir);
@@ -35,7 +35,7 @@ export async function cmdLoops(sub, positional, flags = {}) {
     }
     case 'kill': {
       const id = positional[0];
-      if (!id) { console.error('Usage: lazyclaw loops kill <id>'); process.exit(2); }
+      if (!id) { console.error('Usage: pompos loops kill <id>'); process.exit(2); }
       const meta = loopsMod.readMeta(id, cfgDir);
       if (!meta) { console.error(`no loop "${id}"`); process.exit(1); }
       if (!meta.pid) { console.error(`loop "${id}" has no pid`); process.exit(1); }
@@ -57,7 +57,7 @@ export async function cmdLoops(sub, positional, flags = {}) {
     }
     case 'tail': {
       const id = positional[0];
-      if (!id) { console.error('Usage: lazyclaw loops tail <id>'); process.exit(2); }
+      if (!id) { console.error('Usage: pompos loops tail <id>'); process.exit(2); }
       const dir = loopsMod.loopDir(id, cfgDir);
       const logPath = path.join(dir, 'iterations.log');
       const fs = await import('node:fs');
@@ -88,7 +88,7 @@ export async function cmdLoops(sub, positional, flags = {}) {
       return;
     }
     default:
-      console.error('Usage: lazyclaw loops <list|show|kill|tail> ...');
+      console.error('Usage: pompos loops <list|show|kill|tail> ...');
       process.exit(2);
   }
 }

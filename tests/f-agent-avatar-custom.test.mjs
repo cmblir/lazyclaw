@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { registerAgent, patchAgent, getAgent, setAgentAvatarImage, AgentError } from '../agents.mjs';
 import * as meta from '../daemon/routes/meta.mjs';
 
-function tmp() { return fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-cavatar-')); }
+function tmp() { return fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-cavatar-')); }
 const CLI = new URL('../cli.mjs', import.meta.url).pathname;
 
 // A 1x1 PNG (valid signature) written to disk to stand in for "a photo the user

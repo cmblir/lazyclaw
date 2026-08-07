@@ -7,7 +7,7 @@ import os from 'node:os';
 import { put, get, listByTaskId, OUTCOME_ENUM } from '../mas/trajectory_store.mjs';
 
 function tmpDir() {
-  const p = fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-traj-'));
+  const p = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-traj-'));
   return p;
 }
 

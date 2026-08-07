@@ -242,7 +242,7 @@ export async function cmdMemory(sub, positional, flags = {}) {
       return;
     }
     default:
-      console.error('Usage: lazyclaw memory <show|dream|edit> ...');
+      console.error('Usage: pompos memory <show|dream|edit> ...');
       process.exit(2);
   }
 }
@@ -302,21 +302,21 @@ export async function cmdSessions(sub, positional, flags = {}) {
     }
     case 'show': {
       const id = positional[0];
-      if (!id) { console.error('Usage: lazyclaw sessions show <id>'); process.exit(2); }
+      if (!id) { console.error('Usage: pompos sessions show <id>'); process.exit(2); }
       const turns = sessionsMod.loadTurns(id, cfgDir);
       console.log(JSON.stringify(turns, null, 2));
       return;
     }
     case 'clear': {
       const id = positional[0];
-      if (!id) { console.error('Usage: lazyclaw sessions clear <id>'); process.exit(2); }
+      if (!id) { console.error('Usage: pompos sessions clear <id>'); process.exit(2); }
       sessionsMod.clearSession(id, cfgDir);
       console.log(JSON.stringify({ ok: true, cleared: id }));
       return;
     }
     case 'export': {
       const id = positional[0];
-      if (!id) { console.error('Usage: lazyclaw sessions export <id> [--format md|json|text]'); process.exit(2); }
+      if (!id) { console.error('Usage: pompos sessions export <id> [--format md|json|text]'); process.exit(2); }
       const format = (flags.format || 'md').toLowerCase();
       const formatters = {
         md: sessionsMod.exportMarkdown,
@@ -336,7 +336,7 @@ export async function cmdSessions(sub, positional, flags = {}) {
     }
     case 'search': {
       const query = positional[0];
-      if (!query) { console.error('Usage: lazyclaw sessions search <query> [--regex]'); process.exit(2); }
+      if (!query) { console.error('Usage: pompos sessions search <query> [--regex]'); process.exit(2); }
       // --regex came in via the parsed flags map (parseArgs lifted it
       // out of positional). 'regex' is also in BOOLEAN_FLAGS so it
       // never consumes the next argument.
@@ -397,7 +397,7 @@ export async function cmdSessions(sub, positional, flags = {}) {
       return;
     }
     default:
-      console.error('Usage: lazyclaw sessions <list|show <id>|clear <id>|export <id>|search <query> [--regex]>');
+      console.error('Usage: pompos sessions <list|show <id>|clear <id>|export <id>|search <query> [--regex]>');
       process.exit(2);
   }
 }

@@ -1,6 +1,6 @@
 // Phase H — Doctor git probe (C12).
 //
-// `lazyclaw doctor` MUST detect a missing git binary up front. On
+// `pompos doctor` MUST detect a missing git binary up front. On
 // stripped Windows PATHs (no Git-for-Windows) or minimal Docker base
 // images, the git tool spawnSyncs ENOENT silently and any agent task
 // touching git fails opaquely. The probe should:

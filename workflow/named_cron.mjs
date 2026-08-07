@@ -1,7 +1,7 @@
 // workflow/named_cron.mjs — schedule a named declarative workflow via cron.
 //
 // Mirrors goals_cron.mjs: install an OS cron job (launchd / crontab) whose
-// command is `lazyclaw workflow run <name>`, so the OS scheduler fires the
+// command is `pompos workflow run <name>`, so the OS scheduler fires the
 // stored workflow on its schedule (no resident daemon loop). The job runs the
 // def and posts its reply to the bound channel (commands/workflow_named.mjs).
 // LAZYCLAW_SKIP_CRON_INSTALL writes the config but skips the backend install,
@@ -21,7 +21,7 @@ export function attachWorkflowCron(name, schedule, deps = {}) {
   cron.parseCronSpec(schedule); // validate before touching state
   const cfg = readConfig();
   const jobName = `wf-${name}`;
-  const cmd = ['lazyclaw', 'workflow', 'run', name];
+  const cmd = ['pompos', 'workflow', 'run', name];
   cron.upsertJob(cfg, jobName, schedule, cmd);
   writeConfig(cfg);
   if (process.env.LAZYCLAW_SKIP_CRON_INSTALL) return { jobName, skipped: true };

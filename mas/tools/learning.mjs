@@ -8,7 +8,7 @@ import * as skills from '../../skills.mjs';
 import { parseFrontmatter as sharedParseFrontmatter } from '../frontmatter.mjs';
 
 function resolveConfigDir(ctx) {
-  return ctx?.configDir || process.env.LAZYCLAW_CONFIG_DIR || path.join(process.env.HOME || '.', '.lazyclaw');
+  return ctx?.configDir || process.env.LAZYCLAW_CONFIG_DIR || path.join(process.env.HOME || '.', '.pompos');
 }
 
 function memoryDir(ctx) { return path.join(resolveConfigDir(ctx), 'memory'); }

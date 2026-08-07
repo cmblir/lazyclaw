@@ -9,7 +9,7 @@ function git(cwd, args, opts = {}) {
   // Git-for-Windows, minimal Docker base images) up front and surface
   // a clear remediation hint. The historical behaviour returned
   // {ok:false} with a cryptic spawn error, which made the
-  // "lazyclaw doctor" path the only reliable signal. Now any agent
+  // "pompos doctor" path the only reliable signal. Now any agent
   // touching this tool also gets a one-line diagnostic.
   //
   // CAPABILITY-ONLY sandbox seam: when opts.sandbox is truthy the git
@@ -29,7 +29,7 @@ function git(cwd, args, opts = {}) {
       stderr: '',
       exitCode: null,
       error: 'GIT_NOT_INSTALLED',
-      hint: 'git binary not found on PATH. Install Git, or set GIT_EXECUTABLE. See `lazyclaw doctor`.',
+      hint: 'git binary not found on PATH. Install Git, or set GIT_EXECUTABLE. See `pompos doctor`.',
     };
   }
   return { ok: r.status === 0, stdout: r.stdout, stderr: r.stderr, exitCode: r.status };

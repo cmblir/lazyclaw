@@ -27,7 +27,7 @@ async function untilTrue(predicate: () => boolean | Promise<boolean>, ms: number
   return false;
 }
 
-test.describe('Phase 2 — lazyclaw loop detached', () => {
+test.describe('Phase 2 — pompos loop detached', () => {
   test('--detach returns within 500ms and lists the loop', async () => {
     const cfg = tmpDir('p2-detach');
     expect(runCli(['config', 'set', 'provider', 'mock'], cfg).status).toBe(0);

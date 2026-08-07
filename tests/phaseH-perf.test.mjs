@@ -23,8 +23,8 @@ const BUDGETS = {
   daemonIdleRssMb: 180,
 };
 
-test('cold-start: lazyclaw version <= 400ms (spec §11.9 H5)', () => {
-  // Warm Node module cache once so we're measuring lazyclaw boot, not
+test('cold-start: pompos version <= 400ms (spec §11.9 H5)', () => {
+  // Warm Node module cache once so we're measuring pompos boot, not
   // first-ever resolver work on the host. Spec budget is steady-state.
   spawnSync(process.execPath, [CLI, 'version'], {
     encoding: 'utf8',

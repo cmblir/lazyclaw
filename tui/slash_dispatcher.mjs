@@ -113,7 +113,7 @@ export function _makeInkApprove(ctx) {
 // interactive flow.
 async function _registerCustom(ctx, registry, { name, baseUrl, apiKey }) {
   if (typeof ctx.readConfig !== 'function' || typeof ctx.writeConfig !== 'function') {
-    return 'add custom: config writer unavailable in this session — use: lazyclaw providers add <name> <baseUrl> [apiKey]';
+    return 'add custom: config writer unavailable in this session — use: pompos providers add <name> <baseUrl> [apiKey]';
   }
   try {
     const r = await addCustomProvider({
@@ -146,7 +146,7 @@ async function _maybePromptForKey(ctx, registry, provName) {
   if (existing) return;
   const key = await _promptText(ctx, {
     title: `${provName} needs an api key`,
-    subtitle: 'paste it now, or Esc to skip (set later via: lazyclaw auth)',
+    subtitle: 'paste it now, or Esc to skip (set later via: pompos auth)',
     secret: true,
   });
   if (!key) return;
@@ -319,8 +319,8 @@ async function _skillsList(args, ctx) {
   if (!names.length) {
     return [
       'no skills installed.',
-      'starter pack:  lazyclaw skills starter',
-      'install more:  lazyclaw skills install <owner>/<repo>',
+      'starter pack:  pompos skills starter',
+      'install more:  pompos skills install <owner>/<repo>',
       'then /skills to pick, or /skill <name>[,<name>] to activate.',
     ].join('\n');
   }
@@ -504,7 +504,7 @@ async function _agent(args, ctx) {
       const existing = agentsMod.getAgent(aname, ctx.cfgDir);
       if (!existing) return `no agent "${aname}"`;
       if (typeof ctx.openPicker !== 'function') {
-        return `agent edit: picker unavailable here — use: lazyclaw agent edit ${aname} --provider <p> --model <m>`;
+        return `agent edit: picker unavailable here — use: pompos agent edit ${aname} --provider <p> --model <m>`;
       }
       const registry = await _mod(ctx, 'registryMod', () => import('../providers/registry.mjs'));
       const r = await pickProviderModel(ctx, registry, { pickProvider: true, includeDefault: true, includeSwitch: false });
@@ -826,10 +826,10 @@ async function _goal(args, ctx) {
             const r = await attachGoalCron({ readConfig: ctx.readConfig, writeConfig: ctx.writeConfig, cron: cronMod, name: g.name, schedule: cron });
             cronNote = r.skipped ? ' (cron recorded; backend install skipped)' : ' (cron scheduled)';
           } catch (ce) {
-            cronNote = ` (cron attach failed: ${ce?.message || ce} — use: lazyclaw goal add ${g.name} --cron "${cron}")`;
+            cronNote = ` (cron attach failed: ${ce?.message || ce} — use: pompos goal add ${g.name} --cron "${cron}")`;
           }
         } else {
-          cronNote = ' (cron recorded — attach via: lazyclaw goal add --cron)';
+          cronNote = ' (cron recorded — attach via: pompos goal add --cron)';
         }
       }
       return `✓ goal ${g.name} added (status: active${cron ? `, cron: ${cron}` : ''})${cronNote}`;
@@ -892,7 +892,7 @@ async function _handoff(args, ctx) {
     const { openThreads } = await import('../channels/threads.mjs');
     const { runHandoff } = await import('../channels/handoff.mjs');
     const threads = openThreads(ctx.cfgDir);
-    const replState = globalThis.__lazyclawReplState || {};
+    const replState = globalThis.__pomposReplState || {};
     const cur = replState.channel && replState.externalId
       ? threads.findByExternal(replState.channel, replState.externalId)
       : null;
@@ -936,7 +936,7 @@ async function _personality(args, ctx) {
   // No arg → open Ink modal picker (v5.4.3). Confirm selects + activates.
   if (!sub) {
     const names = list();
-    if (!names.length) return 'no personalities installed — `lazyclaw personality install <name> <file.md>`';
+    if (!names.length) return 'no personalities installed — `pompos personality install <name> <file.md>`';
     if (typeof ctx.openPicker !== 'function') {
       return `personalities: ${names.join(', ')}\n(pass an arg: /personality use <name>)`;
     }
@@ -1230,7 +1230,7 @@ async function _task(args, ctx, write) {
 
 // /menu — in-chat command palette over the full subcommand catalog. The
 // no-arg launcher menu used to be the home screen; defaulting to chat hid it
-// behind `lazyclaw menu`. This restores discoverability: browse subcommands
+// behind `pompos menu`. This restores discoverability: browse subcommands
 // and get the exact command to run. (Most subcommands own stdout / spawn, so
 // they can't safely run inline in the Ink scrollback — we echo the command.)
 async function _menu(args, ctx, write) {
@@ -1248,7 +1248,7 @@ async function _menu(args, ctx, write) {
     }
     const picked = await ctx.openPicker({
       kind: 'menu',
-      title: 'lazyclaw subcommands',
+      title: 'pompos subcommands',
       subtitle: 'Enter runs it in chat (or shows the shell command) · Esc cancels',
       items,
     });
@@ -1258,12 +1258,12 @@ async function _menu(args, ctx, write) {
     // telling the user to leave chat.
     const handler = SLASH_HANDLERS.get(`/${cmd}`);
     if (handler) return handler('', ctx, write);
-    return `run from a shell:  lazyclaw ${cmd}`;
+    return `run from a shell:  pompos ${cmd}`;
   }
   return [
     'subcommands:',
     ...SUBCOMMAND_GROUPS.map(([g, cmds]) => `  ${g.padEnd(9)} ${cmds.join(' ')}`),
-    '(run: lazyclaw <subcommand>)',
+    '(run: pompos <subcommand>)',
   ].join('\n');
 }
 

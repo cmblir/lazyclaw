@@ -1,4 +1,4 @@
-// Persistent task registry for `/task` REPL command and `lazyclaw task`
+// Persistent task registry for `/task` REPL command and `pompos task`
 // subcommand. Backs the Phase 11 piece of docs/multi-agent.md.
 //
 // One file per task under <configDir>/tasks/<id>.json. Tasks are the

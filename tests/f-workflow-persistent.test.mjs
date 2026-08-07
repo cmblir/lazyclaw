@@ -14,7 +14,7 @@ import path from 'node:path';
 import { runDeclarativeRequest } from '../workflow/run_request.mjs';
 import { saveState, statePath } from '../workflow/persistent.mjs';
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-wfp-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-wfp-'));
 
 test('a fresh persistent run completes and writes state', async () => {
   const dir = tmp();

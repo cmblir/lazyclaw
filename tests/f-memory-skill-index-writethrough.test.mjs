@@ -17,7 +17,7 @@ import { setCore, dream } from '../memory.mjs';
 import { installSkill, removeSkill } from '../skills.mjs';
 import * as idx from '../mas/index_db.mjs';
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-midx-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-midx-'));
 // Fire-and-forget write-throughs resolve on a microtask after the (cached)
 // dynamic import settles; flush a few ticks before asserting.
 const settle = async () => { for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r)); };

@@ -1,6 +1,6 @@
 // tests/p5-nontty-line-read.test.mjs — the non-TTY picker fallbacks must read
 // exactly ONE line from a piped stream and hand the remainder back, so a
-// scripted/piped `lazyclaw setup` can drive several prompts in sequence. The
+// scripted/piped `pompos setup` can drive several prompts in sequence. The
 // old code resolved the whole multiline buffer (matched no id → skipped the
 // channel) and dropped the rest (the next prompt then hung).
 

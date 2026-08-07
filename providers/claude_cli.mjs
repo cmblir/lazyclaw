@@ -8,7 +8,7 @@
 //
 // The user's authentication is whatever `claude` is already logged in
 // with — i.e. an Anthropic Pro / Max / Team subscription session — so
-// no API key is needed and no key shows up in the lazyclaw config.
+// no API key is needed and no key shows up in the pompos config.
 //
 // Why this is a separate provider from ./anthropic.mjs:
 // - anthropic.mjs talks to api.anthropic.com directly and requires
@@ -116,11 +116,11 @@ function extractTextDelta(obj) {
   return '';
 }
 
-// Build the `claude` argv. By DEFAULT lazyclaw runs claude LEAN: lazyclaw
+// Build the `claude` argv. By DEFAULT pompos runs claude LEAN: pompos
 // supplies its own system prompt, so claude must NOT inherit the user's global
 // CLAUDE.md / skills / hooks / MCP servers. Loading them made every turn pull
 // ~180k tokens (measured) and let Claude Code act on the user's personal config
-// instead of lazyclaw's prompt — slow and off-task. `--setting-sources ''`
+// instead of pompos's prompt — slow and off-task. `--setting-sources ''`
 // loads none of user/project/local; `--strict-mcp-config` (no --mcp-config)
 // loads no MCP servers. Pass opts.lean=false to restore the full environment.
 export function buildArgs(prompt, opts = {}) {

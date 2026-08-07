@@ -5,7 +5,7 @@ import { fs, nodePath, PROVIDERS, PROVIDER_INFO, maskApiKey, costFromUsage, RATE
 
 export async function workflowsAggregate(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
-          // Mirror of CLI v3.48 `lazyclaw inspect --aggregate`. Per-node
+          // Mirror of CLI v3.48 `pompos inspect --aggregate`. Per-node
           // statistics across every persisted session in the state
           // directory. Answers "which node tends to be slow / fail
           // across all my runs?" — needs no workflow file, just state.
@@ -47,7 +47,7 @@ export async function workflowsAggregate(c) {
 export async function workflowsList(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
           // List every persisted workflow session in the configured
-          // state dir, newest activity first. Mirrors `lazyclaw inspect`
+          // state dir, newest activity first. Mirrors `pompos inspect`
           // (no-arg) exactly so a dashboard can use the same renderer
           // for CLI and HTTP outputs. Per-node `nodes` map is omitted —
           // call /workflows/<sessionId> for full detail.
@@ -104,7 +104,7 @@ export async function workflowsList(c) {
 export async function workflowGet(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
           // GET /workflows/<sessionId> — full state of a single
-          // workflow run. Same shape as `lazyclaw inspect <id>` (the
+          // workflow run. Same shape as `pompos inspect <id>` (the
           // engine's persisted object plus a derived summary block).
           // 404 when the state file is missing.
           const sid = workflowMatch[1];
@@ -117,7 +117,7 @@ export async function workflowGet(c) {
           }
           if (!state) return writeJson(res, 404, { error: 'workflow not found', sessionId: sid });
           // ?node=<id> drills into one node's state — same shape as
-          // `lazyclaw inspect <session> --node <id>` (v3.41). The
+          // `pompos inspect <session> --node <id>` (v3.41). The
           // HTTP status reflects the node's lifecycle (mirrors the
           // CLI exit codes): 200 success/pending/running, 410 Gone
           // for failed (request was valid, but the resource is in a

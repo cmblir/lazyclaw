@@ -1,4 +1,4 @@
-// LazyClaw auto-resume engine (phase 2).
+// Pompos auto-resume engine (phase 2).
 // State is persisted to <dir>/<sessionId>.json before each node starts and
 // after it transitions to success/failed. Re-running a successful node is a
 // no-op. Timeouts retry with exponential backoff up to maxRetries.

@@ -1,4 +1,4 @@
-// Provider registry for LazyClaw chat.
+// Provider registry for Pompos chat.
 // Each provider exposes { name, sendMessage(messages, opts) } where
 // sendMessage returns an AsyncIterable<string> of token chunks.
 //
@@ -149,7 +149,7 @@ export const PROVIDERS = {
 
 // Orchestrator — multi-agent dispatcher that composes other providers.
 // Registered upfront with no cfg/keyResolver so a bare process can list
-// it via `lazyclaw providers list`; `registerOrchestrator(...)` from
+// it via `pompos providers list`; `registerOrchestrator(...)` from
 // cli.mjs::ensureRegistry wires in the live cfg + auth-key resolver so
 // sendMessage can reach env vars / authProfiles / customProviders.
 // Inject the provider lookup so orchestrator never imports this module back
@@ -177,7 +177,7 @@ PROVIDERS.orchestrator = makeOrchestratorProvider({ lookup: _orchestratorLookup 
   PROVIDERS.mock = local.mock;
 }
 
-// Static metadata for `lazyclaw providers list/info`. Kept next to PROVIDERS
+// Static metadata for `pompos providers list/info`. Kept next to PROVIDERS
 // so adding a provider in one place can't drift from the list shown to users.
 export const PROVIDER_INFO = {
   mock: {
@@ -207,7 +207,7 @@ export const PROVIDER_INFO = {
   'gemini-cli': {
     name: 'gemini-cli',
     requiresApiKey: false,
-    docs: 'Google Gemini via the local `gemini` CLI (free Google-account login). No API key — auth flows through whatever account `gemini` is logged in with. Requires @google/gemini-cli installed. defaultModel is null on purpose: the set of models a given Google login may use is decided server-side, so by default lazyclaw passes no `-m` and lets the CLI pick the account-appropriate model. The suggestedModels below are optional power-user overrides.',
+    docs: 'Google Gemini via the local `gemini` CLI (free Google-account login). No API key — auth flows through whatever account `gemini` is logged in with. Requires @google/gemini-cli installed. defaultModel is null on purpose: the set of models a given Google login may use is decided server-side, so by default pompos passes no `-m` and lets the CLI pick the account-appropriate model. The suggestedModels below are optional power-user overrides.',
     endpoint: 'subprocess: gemini -p',
     defaultModel: null,
     suggestedModels: ['gemini-2.5-pro', 'gemini-2.5-flash', 'pro', 'flash'],
@@ -314,7 +314,7 @@ PROVIDER_INFO.orchestrator = {
 };
 
 // Mirror the OpenAI-compat builtins into PROVIDER_INFO so picker / docs /
-// `lazyclaw providers info` see them with the same shape as the hand-written
+// `pompos providers info` see them with the same shape as the hand-written
 // entries above.
 for (const [name, def] of Object.entries(OPENAI_COMPAT_BUILTINS)) {
   PROVIDER_INFO[name] = {

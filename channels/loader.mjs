@@ -1,6 +1,6 @@
 // channels/loader.mjs
 //
-// Plugin loader for @lazyclaw/channel-<name> packages. Installs into
+// Plugin loader for @pompos/channel-<name> packages. Installs into
 // <configDir>/node_modules via `npm install <spec>` and dynamic-imports
 // the entry, calling the package's exported register({Channel, addChannel}).
 
@@ -10,14 +10,14 @@ import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { Channel } from './base.mjs';
 
-const PLUGIN_RE = /^@lazyclaw\/channel-[a-z][a-z0-9-]*$/;
+const PLUGIN_RE = /^@pompos\/channel-[a-z][a-z0-9-]*$/;
 
 export function isPluginName(name) {
   return typeof name === 'string' && PLUGIN_RE.test(name);
 }
 
 export function listInstalled(configDir) {
-  const root = path.join(String(configDir), 'node_modules', '@lazyclaw');
+  const root = path.join(String(configDir), 'node_modules', '@pompos');
   if (!fs.existsSync(root)) return [];
   const out = [];
   for (const entry of fs.readdirSync(root)) {

@@ -19,7 +19,7 @@ export async function render(host) {
       meta.textContent = `${arr.length} channel${arr.length === 1 ? '' : 's'}`;
       if (!arr.length) {
         list.replaceWith(list = el('div', { class: 'empty' },
-          'No channels configured. Configure via ', el('code', { text: 'lazyclaw config set channels.<name> ...' }), '.'));
+          'No channels configured. Configure via ', el('code', { text: 'pompos config set channels.<name> ...' }), '.'));
         return;
       }
       const cards = arr.map((c) => el('div', { class: 'card' },

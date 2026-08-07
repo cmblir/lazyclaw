@@ -13,7 +13,7 @@
 //
 // v5.5: <Editor/> now renders inside a round-bordered Box — the
 // Claude-CLI-style input frame. The border uses `theme.border` (a
-// muted gray) so the accent `›` and sloth gutter stay the dominant
+// muted gray) so the accent `›` and banner gutter stay the dominant
 // amber notes. The box auto-fills the available terminal width via
 // Ink's flex defaults and grows vertically as the buffer wraps onto
 // new lines (Shift+Enter).

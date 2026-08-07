@@ -1,4 +1,4 @@
-// Persistent state and helpers for `lazyclaw loop` runs.
+// Persistent state and helpers for `pompos loop` runs.
 //
 // Storage layout under <configDir>/loops/<loopId>/:
 //   meta.json        — { prompt, max, until, sessionId, pid, pgid?, status,
@@ -14,7 +14,7 @@
 //   - meta.json mutates with the status field; iterations.log is append-only;
 //     result.json is written exactly once. Keeping them separate avoids
 //     read-modify-write contention between the worker (appending iter logs)
-//     and any reader (`lazyclaw loops show <id>`) running concurrently.
+//     and any reader (`pompos loops show <id>`) running concurrently.
 
 import fs from 'node:fs';
 import path from 'node:path';

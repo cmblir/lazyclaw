@@ -1,4 +1,4 @@
-// v5.3 splash NARROW tier: the sloth banner is rendered (stacked above
+// v5.3 splash NARROW tier: the banner is rendered (stacked above
 // the panel) rather than dropped, as it was in the pre-v5.3 layout.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -18,16 +18,16 @@ const fixture = {
   skills: [],
 };
 
-test('NARROW tier at cols=80 includes the sloth banner (first row of banner present)', () => {
+test('NARROW tier at cols=80 includes the banner (first row of banner present)', () => {
   const out = renderSplashToString(fixture, { columns: 80 });
   // The first row of the banner must appear verbatim somewhere in the output.
   assert.ok(out.includes(banner.rows[0]),
-    `expected first sloth row to appear at cols=80\nfirst row: ${banner.rows[0]}`);
+    `expected first banner row to appear at cols=80\nfirst row: ${banner.rows[0]}`);
 });
 
-test('NARROW tier at cols=80 includes every row of the sloth banner', () => {
+test('NARROW tier at cols=80 includes every row of the banner', () => {
   const out = renderSplashToString(fixture, { columns: 80 });
   for (const [i, row] of banner.rows.entries()) {
-    assert.ok(out.includes(row), `expected sloth row ${i} at cols=80`);
+    assert.ok(out.includes(row), `expected banner row ${i} at cols=80`);
   }
 });

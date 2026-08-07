@@ -16,7 +16,7 @@ export async function render(host) {
       if (!Array.isArray(arr) || arr.length === 0) {
         list.replaceWith(list = el('div', { class: 'empty' },
           'No persisted sessions yet. Start one with ',
-          el('code', { text: 'lazyclaw chat --session <id>' }), '.'));
+          el('code', { text: 'pompos chat --session <id>' }), '.'));
         return;
       }
       const rows = arr.map((s) => {

@@ -1,4 +1,4 @@
-// Persistent goal registry for `/goal` REPL command and `lazyclaw goal`
+// Persistent goal registry for `/goal` REPL command and `pompos goal`
 // subcommand.
 //
 // Storage layout under <configDir>/goals/<name>.json. One file per goal so

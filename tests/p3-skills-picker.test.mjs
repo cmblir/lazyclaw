@@ -28,7 +28,7 @@ test('/skills with none installed returns a clear install hint', async () => {
   const ctx = makeCtx({ skills: [] });
   const out = await dispatchSlash('/skills', '', ctx);
   assert.match(out, /no skills installed/i);
-  assert.match(out, /lazyclaw skills install/);
+  assert.match(out, /pompos skills install/);
 });
 
 test('/skills lists installed skills when there is no picker', async () => {

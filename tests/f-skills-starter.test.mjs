@@ -1,4 +1,4 @@
-// tests/f-skills-starter.test.mjs — `lazyclaw skills starter` installs the
+// tests/f-skills-starter.test.mjs — `pompos skills starter` installs the
 // bundled starter pack (repo skills/ dir) into <configDir>/skills/, skips
 // names that already exist, and only overwrites with --force.
 

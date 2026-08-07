@@ -7,7 +7,7 @@ import { teamForChannel, registerTeam } from '../teams.mjs';
 import { registerAgent } from '../agents.mjs';
 import { routeInboundToTeam } from '../daemon/lib/team_inbound.mjs';
 
-function tmp() { return fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-tinb-')); }
+function tmp() { return fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-tinb-')); }
 
 test('teamForChannel matches a team by its slackChannel (or null)', () => {
   const teams = [

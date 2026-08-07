@@ -1,5 +1,5 @@
 // scripts/hermes-import.mjs
-// Detect ~/.hermes (or --from <dir>) and import into lazyclaw.
+// Detect ~/.hermes (or --from <dir>) and import into pompos.
 //   skills/*.md       → <cfgDir>/skills/*.md with trained_by: hermes-import (C4)
 //   USER.md           → <cfgDir>/memory/USER.md          (C6)
 //   MEMORY.md         → <cfgDir>/memory/core.md          (merged, append)
@@ -11,7 +11,7 @@ import os from 'node:os';
 
 export function defaultHermesDir() { return path.join(os.homedir(), '.hermes'); }
 export function defaultCfgDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
+  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
 }
 
 function injectTrainedBy(content, value) {

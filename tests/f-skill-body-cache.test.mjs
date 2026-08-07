@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { installSkill, loadSkill } from '../skills.mjs';
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-skb-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-skb-'));
 
 test('loadSkill reads a skill body from disk once across repeated calls', () => {
   const d = tmp();

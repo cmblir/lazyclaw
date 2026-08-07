@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { composePromptStack } from '../mas/prompt_stack.mjs';
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-pstack-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-pstack-'));
 
 test('a static layer file is read from disk once across repeated calls', () => {
   const dir = tmp();

@@ -12,7 +12,7 @@ const FIXTURES = path.join(import.meta.dirname || path.dirname(new URL(import.me
 
 function copyFixture(name) {
   const src = path.join(FIXTURES, name);
-  const dst = fs.mkdtempSync(path.join(os.tmpdir(), `lazyclaw-mig-${name}-`));
+  const dst = fs.mkdtempSync(path.join(os.tmpdir(), `pompos-mig-${name}-`));
   fs.cpSync(src, dst, { recursive: true });
   return dst;
 }

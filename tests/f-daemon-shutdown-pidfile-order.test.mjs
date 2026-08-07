@@ -15,7 +15,7 @@
 // `shuttingDown` branch and calls process.exit(1) immediately — it never
 // reaches any code after the await. If removePidfile() runs only after that
 // await, this second-signal path leaks daemon.pid, and the next
-// `lazyclaw daemon status` reports a dead daemon as running until something
+// `pompos daemon status` reports a dead daemon as running until something
 // else cleans it up. Moving removePidfile() before the await (mirroring
 // commands/gateway.mjs's onSig, which already does removePidfile() before
 // `await gw.stop()`) closes that window: the pidfile is gone the moment
@@ -53,6 +53,6 @@ test('cmdDaemon shutdown: removePidfile() runs before awaiting gracefulShutdown'
     'handler. A second SIGINT/SIGTERM arriving during the graceful-shutdown window takes the ' +
     'early "already shuttingDown" branch and calls process.exit(1) directly, without ever running ' +
     'code after the await — so if removePidfile() sits after the await, that second-signal path ' +
-    'leaks daemon.pid and `lazyclaw daemon status` will report a dead daemon as running.'
+    'leaks daemon.pid and `pompos daemon status` will report a dead daemon as running.'
   );
 });

@@ -1,5 +1,5 @@
 // toolsets — named bundles of tool names that an agent can be assigned via
-// `lazyclaw agent edit <name> --toolset coding-min`. Built-ins ship in
+// `pompos agent edit <name> --toolset coding-min`. Built-ins ship in
 // code; user-defined sets live in <configDir>/toolsets.json.
 
 import fs from 'node:fs';
@@ -15,7 +15,7 @@ const BUILTIN = {
 };
 
 function configFile(opts) {
-  const dir = opts?.configDir || process.env.LAZYCLAW_CONFIG_DIR || path.join(process.env.HOME || '.', '.lazyclaw');
+  const dir = opts?.configDir || process.env.LAZYCLAW_CONFIG_DIR || path.join(process.env.HOME || '.', '.pompos');
   fs.mkdirSync(dir, { recursive: true });
   return path.join(dir, 'toolsets.json');
 }

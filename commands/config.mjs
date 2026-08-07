@@ -22,7 +22,7 @@ export async function cmdPersonality(sub, a, b) {
   }
 
   if (sub === 'show') {
-    if (!a) { console.error('Usage: lazyclaw personality show <name>'); return 2; }
+    if (!a) { console.error('Usage: pompos personality show <name>'); return 2; }
     const p = path.join(dir, `${a}.md`);
     if (!fs.existsSync(p)) { console.error(`personality not found: ${a}`); return 1; }
     process.stdout.write(fs.readFileSync(p, 'utf8'));
@@ -30,7 +30,7 @@ export async function cmdPersonality(sub, a, b) {
   }
 
   if (sub === 'install') {
-    if (!a || !b) { console.error('Usage: lazyclaw personality install <name> <file>'); return 2; }
+    if (!a || !b) { console.error('Usage: pompos personality install <name> <file>'); return 2; }
     const dst = path.join(dir, `${a}.md`);
     if (fs.existsSync(dst)) { console.error(`personality already installed: ${a}`); return 1; }
     if (!fs.existsSync(b)) { console.error(`source file not found: ${b}`); return 1; }
@@ -40,7 +40,7 @@ export async function cmdPersonality(sub, a, b) {
   }
 
   if (sub === 'remove') {
-    if (!a) { console.error('Usage: lazyclaw personality remove <name>'); return 2; }
+    if (!a) { console.error('Usage: pompos personality remove <name>'); return 2; }
     const p = path.join(dir, `${a}.md`);
     if (!fs.existsSync(p)) { console.error(`personality not installed: ${a}`); return 1; }
     fs.unlinkSync(p);
@@ -49,7 +49,7 @@ export async function cmdPersonality(sub, a, b) {
   }
 
   if (sub === 'use') {
-    if (!a) { console.error('Usage: lazyclaw personality use <name>'); return 2; }
+    if (!a) { console.error('Usage: pompos personality use <name>'); return 2; }
     const p = path.join(dir, `${a}.md`);
     if (!fs.existsSync(p)) { console.error(`personality not installed: ${a}`); return 1; }
     const cfgPath = path.join(cfgDir, 'config.json');
@@ -97,7 +97,7 @@ export async function cmdConfigEdit() {
     console.log(JSON.stringify({ ok: true, path: p }));
   } catch (e) {
     console.error(`config: edit produced invalid JSON: ${e.message}`);
-    console.error(`Re-run \`lazyclaw config edit\` to fix; nothing else has been touched.`);
+    console.error(`Re-run \`pompos config edit\` to fix; nothing else has been touched.`);
     process.exit(1);
   }
 }
@@ -147,7 +147,7 @@ export async function cmdDoctor() {
   const cfg = readConfig();
   const issues = [];
   const warnings = [];
-  if (!cfg.provider) issues.push('config.provider is missing — run `lazyclaw onboard`');
+  if (!cfg.provider) issues.push('config.provider is missing — run `pompos onboard`');
   // Only flag a missing api-key when the picked provider actually
   // requires one. claude-cli / ollama / mock all run keylessly, so the
   // previous `provider !== 'mock'` check produced false positives.
@@ -174,8 +174,8 @@ export async function cmdDoctor() {
       warnings.push(
         'config.provider is "orchestrator" but cfg.orchestrator is missing/empty. '
         + 'Pre-v5.3.2 setup wizards could leave you in this half-configured state. '
-        + 'Either finish orchestrator setup (`lazyclaw orchestrator set-planner …` + `lazyclaw orchestrator workers add …`) '
-        + 'or switch to a single concrete provider: `lazyclaw config set provider claude-cli`.'
+        + 'Either finish orchestrator setup (`pompos orchestrator set-planner …` + `pompos orchestrator workers add …`) '
+        + 'or switch to a single concrete provider: `pompos config set provider claude-cli`.'
       );
     }
   }
@@ -183,7 +183,7 @@ export async function cmdDoctor() {
   // `git`; on a stripped Windows PATH (no Git-for-Windows installed) or
   // a minimal Docker base image, that spawnSync ENOENTs and any agent
   // task touching the git tool fails opaquely. Probe up-front so
-  // `lazyclaw doctor` surfaces a clean diagnostic and the operator can
+  // `pompos doctor` surfaces a clean diagnostic and the operator can
   // install the binary before they trip over it.
   let gitInfo = null;
   try {
@@ -223,7 +223,7 @@ export async function cmdDoctor() {
       }
       indexInfo = { failuresLast24h: recent, totalFailures: lines.length };
       if (recent > 0) {
-        issues.push(`${recent} index write failure(s) in the last 24h — run \`lazyclaw index rebuild\` to recover.`);
+        issues.push(`${recent} index write failure(s) in the last 24h — run \`pompos index rebuild\` to recover.`);
       }
     } else {
       indexInfo = { failuresLast24h: 0, totalFailures: 0 };
@@ -234,7 +234,7 @@ export async function cmdDoctor() {
   // Workflow state health — informational counters that show whether
   // the user has any failed or stuck workflow runs to attend to. We
   // don't push these to `issues` (a stuck workflow doesn't break the
-  // CLI) but they surface in the output so `lazyclaw doctor | jq` can
+  // CLI) but they surface in the output so `pompos doctor | jq` can
   // surface them in dashboards.
   const stateDir = process.env.LAZYCLAW_WORKFLOW_STATE_DIR || '.workflow-state';
   let workflows = null;
@@ -310,7 +310,7 @@ export async function cmdVersion() {
 export async function cmdCompletion(shell) {
   if (shell === 'bash') { process.stdout.write(bashCompletion()); return; }
   if (shell === 'zsh')  { process.stdout.write(zshCompletion()); return; }
-  console.error('Usage: lazyclaw completion <bash|zsh>');
+  console.error('Usage: pompos completion <bash|zsh>');
   process.exit(2);
 }
 export function cmdConfigGet(key) {
@@ -325,7 +325,7 @@ export function cmdConfigGet(key) {
 }
 
 // Structural integrity check across the whole config. Distinct from
-// `lazyclaw doctor` (runtime checks: provider available, key present
+// `pompos doctor` (runtime checks: provider available, key present
 // for the active provider). Validate is purely about *shape* — does
 // every value have the right type, is `provider` known, are rates
 // well-formed.

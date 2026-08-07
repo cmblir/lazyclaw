@@ -25,7 +25,7 @@ const _cache = new Map();   // id → record (capped at CACHE_MAX entries)
 const CACHE_MAX = 256;
 
 function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
+  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
 }
 
 function trajectoriesDir(configDir) {

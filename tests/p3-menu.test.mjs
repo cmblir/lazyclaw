@@ -1,6 +1,6 @@
 // tests/p3-menu.test.mjs — the no-arg launcher menu (browse + run any
 // subcommand) was hidden once the no-arg default became chat; it's only
-// reachable via `lazyclaw menu`. /menu brings the discoverable subcommand
+// reachable via `pompos menu`. /menu brings the discoverable subcommand
 // catalog back into the chat as a command palette.
 
 import test from 'node:test';
@@ -18,14 +18,14 @@ test('/menu with a picker lists subcommands and echoes the run command', async (
   assert.equal(seen.kind, 'menu');
   const ids = seen.items.map((i) => i.id);
   assert.ok(ids.includes('dashboard') && ids.includes('doctor') && ids.includes('sessions'));
-  assert.match(out, /lazyclaw doctor/);
+  assert.match(out, /pompos doctor/);
 });
 
 test('/menu without a picker lists the grouped catalog', async () => {
   const out = await dispatchSlash('/menu', '', {});
   assert.match(out, /doctor/);
   assert.match(out, /dashboard/);
-  assert.match(out, /lazyclaw <subcommand>/);
+  assert.match(out, /pompos <subcommand>/);
 });
 
 test('/menu cancel returns cancelled', async () => {

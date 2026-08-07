@@ -97,13 +97,13 @@ test.describe('Phase 8 — Slack adapter', () => {
       apiBase: mock.url, requireInbound: true,
     });
     await ch.start(async ({ text }: { text: string }) => `pong: ${text}`);
-    await ch._simulateInbound('@lazyclaw hi', 'C999:1700000000.000100');
+    await ch._simulateInbound('@pompos hi', 'C999:1700000000.000100');
     expect(mock.posts).toHaveLength(1);
     expect(mock.posts[0].path).toBe('/api/chat.postMessage');
     expect(mock.posts[0].headers.authorization).toBe('Bearer xoxb-test');
     expect(mock.posts[0].body.channel).toBe('C999');
     expect(mock.posts[0].body.thread_ts).toBe('1700000000.000100');
-    expect(mock.posts[0].body.text).toBe('pong: @lazyclaw hi');
+    expect(mock.posts[0].body.text).toBe('pong: @pompos hi');
     await ch.stop();
     await mock.close();
   });

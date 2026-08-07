@@ -57,19 +57,19 @@ test('network failure is reported, not thrown', async () => {
 test('slack verify exposes the identity auth.test returned', async () => {
   const r = await verifyChannel('slack', {
     env: { SLACK_BOT_TOKEN: 'xoxb-x' },
-    fetchImpl: okFetch({ ok: true, team: 'Acme', user: 'lazyclaw', user_id: 'U123', team_id: 'T456', bot_id: 'B789' }),
+    fetchImpl: okFetch({ ok: true, team: 'Acme', user: 'pompos', user_id: 'U123', team_id: 'T456', bot_id: 'B789' }),
   });
   assert.equal(r.ok, true);
   assert.equal(r.identity.userId, 'U123');
   assert.equal(r.identity.teamId, 'T456');
-  assert.equal(r.identity.user, 'lazyclaw');
+  assert.equal(r.identity.user, 'pompos');
   assert.equal(r.identity.team, 'Acme');
 });
 
 test('slack verify identity is absent, not a throw, when auth.test omits the ids', async () => {
   const r = await verifyChannel('slack', {
     env: { SLACK_BOT_TOKEN: 'xoxb-x' },
-    fetchImpl: okFetch({ ok: true, team: 'Acme', user: 'lazyclaw' }),
+    fetchImpl: okFetch({ ok: true, team: 'Acme', user: 'pompos' }),
   });
   assert.equal(r.ok, true);
   assert.equal(r.identity.userId, null);

@@ -15,9 +15,9 @@ test('default-on: empty cfg yields a local filesystem-confinement spec (confiner
   assert.ok(spec.denyRead.includes(path.join(os.homedir(), '.aws')));
 });
 
-test('default-on: the lazyclaw configDir (holds auth/tokens) is added to denyRead', () => {
-  const spec = defaultSandboxSpec({}, { cwd: '/w', configDir: '/home/u/.lazyclaw' });
-  assert.ok(spec.denyRead.includes('/home/u/.lazyclaw'));
+test('default-on: the pompos configDir (holds auth/tokens) is added to denyRead', () => {
+  const spec = defaultSandboxSpec({}, { cwd: '/w', configDir: '/home/u/.pompos' });
+  assert.ok(spec.denyRead.includes('/home/u/.pompos'));
 });
 
 test('opt-out: cfg.sandbox.confine === false disables confinement (null spec)', () => {

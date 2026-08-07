@@ -28,7 +28,7 @@ export async function ratesList(c) {
 
 export async function ratesValidate(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
-          // Mirror of v3.30's `lazyclaw rates validate`. Same shape
+          // Mirror of v3.30's `pompos rates validate`. Same shape
           // (single source of truth in rates-validate.mjs). HTTP
           // status reflects ok/issues so a UI's cost-config badge
           // can branch on HTTP code: 200 ok, 422 issues
@@ -41,7 +41,7 @@ export async function ratesValidate(c) {
 
 export async function ratesShape(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
-          // Mirror of `lazyclaw rates shape`. Returns the zero-filled
+          // Mirror of `pompos rates shape`. Returns the zero-filled
           // reference rate-card template so a dashboard config panel
           // or a script that scaffolds a new card can get the required
           // fields without shelling to the CLI.

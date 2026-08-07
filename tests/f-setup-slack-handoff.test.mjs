@@ -16,7 +16,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { finishSlackSetup, buildAnnounce } from '../commands/setup_slack_handoff.mjs';
 
-const IDENTITY = { userId: 'U123', teamId: 'T456', user: 'lazyclaw', team: 'Acme' };
+const IDENTITY = { userId: 'U123', teamId: 'T456', user: 'pompos', team: 'Acme' };
 
 // Answers the wizard's yes/no and text prompts in order.
 function scriptedIo(answers) {
@@ -45,7 +45,7 @@ test('pairs the operator using the identity auth.test already returned', async (
   const io = scriptedIo([true, '', false]);   // pair? yes; destination default; start? no
   await finishSlackSetup({ cfg, identity: IDENTITY, io, deps: baseDeps() });
   assert.deepEqual(cfg.pairing.map((p) => p.id), ['U123']);
-  assert.match(cfg.pairing[0].label, /lazyclaw/);
+  assert.match(cfg.pairing[0].label, /pompos/);
   // The operator is never asked to go find their own Slack ID.
   assert.ok(io.asked.some((q) => /U123/.test(q)), `the id should be offered, asked: ${JSON.stringify(io.asked)}`);
 });
@@ -173,7 +173,7 @@ test('runChannelStep invokes the Slack hand-off after a successful verify', asyn
   const fs = await import('node:fs');
   const os = await import('node:os');
   const path = await import('node:path');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-handoff-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-handoff-'));
   const prev = process.env.LAZYCLAW_CONFIG_DIR;
   process.env.LAZYCLAW_CONFIG_DIR = dir;
   let probedPort = null;      // only _startGateway calls this

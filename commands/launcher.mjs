@@ -3,7 +3,7 @@
 // the process.exit-interception dispatcher (_DispatchExit /
 // _dispatchMenuChoice), the dead (zero-caller) _runFirstTimeOnboard helper,
 // and the arrow-key menu loop (cmdLauncher) that mirrors every top-level
-// `lazyclaw <subcommand>`. cmdOnboard / cmdSetup / cmdHelp stay in
+// `pompos <subcommand>`. cmdOnboard / cmdSetup / cmdHelp stay in
 // setup.mjs and are imported back here; setup.mjs re-exports cmdLauncher
 // so cli.mjs's dynamic import of commands/setup.mjs for cmdLauncher keeps
 // working unchanged.
@@ -16,7 +16,7 @@ import { cmdOnboard, cmdSetup, cmdHelp } from './setup.mjs';
 
 // First-run welcome panel + delegated onboard. Drawn once before the
 // main launcher menu when the config has no provider yet. Walks the
-// user through the same arrow-key picker that `lazyclaw onboard`
+// user through the same arrow-key picker that `pompos onboard`
 // uses; on success the launcher continues, on cancel the launcher
 // exits politely instead of dropping into a menu where every option
 // would error.
@@ -29,7 +29,7 @@ async function _runFirstTimeOnboard() {
   process.stdout.write('\n');
   process.stdout.write(`  ${bold('👋 Welcome — first-time setup')}\n\n`);
   process.stdout.write(`  ${dim('No provider configured yet at')} ${configPath()}\n`);
-  process.stdout.write(`  ${dim('Pick a provider + model below; LazyClaw stores it in ~/.lazyclaw/config.json.')}\n\n`);
+  process.stdout.write(`  ${dim('Pick a provider + model below; Pompos stores it in ~/.pompos/config.json.')}\n\n`);
   process.stdout.write(`  ${dim('Quick rule of thumb:')}\n`);
   process.stdout.write(`  ${dim('  · gemini / openai / anthropic — need an API key (sk-... / paste during setup)')}\n`);
   process.stdout.write(`  ${dim('  · claude-cli / ollama          — keyless (use your existing Claude Code login or local Ollama)')}\n`);
@@ -105,7 +105,7 @@ async function _dispatchMenuChoice(argv) {
       case 'message':      return await (await import('../commands/auth_nodes.mjs')).cmdMessage(rest[0], rest.slice(1), {});
       case 'doctor':       return await (await import('../commands/config.mjs')).cmdDoctor();
       case 'status':       return await (await import('../commands/config.mjs')).cmdStatus();
-      // v3.99.27 — fill the rest of the lazyclaw <subcommand> surface
+      // v3.99.27 — fill the rest of the pompos <subcommand> surface
       // so the no-arg launcher mirrors every entry in SUBCOMMANDS.
       case 'orchestrator': return await (await import('../commands/providers.mjs')).cmdOrchestrator(rest[0], rest.slice(1), {});
       case 'rates':        return await (await import('../commands/providers.mjs')).cmdRates(rest[0], rest.slice(1), {});
@@ -118,7 +118,7 @@ async function _dispatchMenuChoice(argv) {
         if (csub === 'path')  { process.stdout.write(configPath() + '\n'); return; }
         if (csub === 'edit')  return await (await import('../commands/config.mjs')).cmdConfigEdit();
         if (csub === 'validate') return await (await import('../commands/config.mjs')).cmdConfigValidate();
-        process.stderr.write('Usage: lazyclaw config <get|set|list|delete|path|edit|validate>\n');
+        process.stderr.write('Usage: pompos config <get|set|list|delete|path|edit|validate>\n');
         return;
       }
       case 'inspect':      return await (await import('../commands/workflow.mjs')).dispatch('inspect', { positional: [rest[0]], flags: {} });
@@ -154,7 +154,7 @@ export async function cmdLauncher() {
   await ensureRegistry();
   // Item table is fixed across iterations — only the dispatcher and
   // the per-iteration draw redraw on each loop tick.
-  // Mirror every top-level `lazyclaw <subcommand>` here so the no-arg
+  // Mirror every top-level `pompos <subcommand>` here so the no-arg
   // launcher is a complete discovery surface. Commands that need
   // arguments (workflow runner, daemon, completion, import) route
   // through `help <cmd>` so the menu pick prints copy-pasteable usage
@@ -166,7 +166,7 @@ export async function cmdLauncher() {
     { id: 'agent',        label: 'Agent',        desc: 'one-shot prompt — read text and exit',          argv: ['agent'], promptForBody: true },
     { id: 'orchestrator', label: 'Orchestrator', desc: 'multi-agent dispatch — planner + workers',      argv: ['orchestrator', 'status'] },
     // UI & onboarding
-    { id: 'dashboard',    label: 'Dashboard',    desc: 'open the lazyclaw web UI in your browser',      argv: ['dashboard'] },
+    { id: 'dashboard',    label: 'Dashboard',    desc: 'open the pompos web UI in your browser',      argv: ['dashboard'] },
     { id: 'setup',        label: 'Setup',        desc: 'multi-step provider / workspace / skill wizard',argv: ['setup'] },
     { id: 'onboard',      label: 'Onboard',      desc: 'pick provider / model / api-key',               argv: ['onboard'] },
     // Auth & config
@@ -198,13 +198,13 @@ export async function cmdLauncher() {
     { id: 'import',       label: 'Import',       desc: 'restore from a bundle on stdin',                argv: ['help', 'import'] },
     // Tools
     { id: 'completion',   label: 'Completion',   desc: 'shell completion (bash | zsh)',                 argv: ['help', 'completion'] },
-    { id: 'version',      label: 'Version',      desc: 'lazyclaw version + Node + platform',            argv: ['version'] },
+    { id: 'version',      label: 'Version',      desc: 'pompos version + Node + platform',            argv: ['version'] },
     // Diagnostics
     { id: 'doctor',       label: 'Doctor',       desc: 'diagnostic — config, providers, workflows',    argv: ['doctor'] },
     { id: 'status',       label: 'Status',       desc: 'current provider / model / masked key',         argv: ['status'] },
     // Meta
     { id: 'help',         label: 'Help',         desc: 'one-line summary of every subcommand',          argv: ['help'] },
-    { id: 'quit',         label: 'Quit',         desc: 'exit lazyclaw',                                 argv: null },
+    { id: 'quit',         label: 'Quit',         desc: 'exit pompos',                                 argv: null },
   ];
 
   const accent = (s) => `\x1b[38;2;217;179;90m${s}\x1b[0m`;
@@ -222,7 +222,7 @@ export async function cmdLauncher() {
   // try/finally below is load-bearing: the loop body keeps stdin
   // ref'd so the picker's keypress events fire. If we just `return`
   // on Quit, stdin stays ref'd and Node's event loop never empties
-  // → the `lazyclaw` process hangs forever after the user picked
+  // → the `pompos` process hangs forever after the user picked
   // Quit. The finally explicitly pauses + unrefs stdin so the
   // process exits cleanly the moment the user picks Quit.
   try {
@@ -239,7 +239,7 @@ export async function cmdLauncher() {
       }
       cfg = readConfig();
       if (!cfg.provider) {
-        process.stdout.write('\n  Setup not completed — exiting.\n  Run `lazyclaw setup` when ready, then try `lazyclaw` again.\n\n');
+        process.stdout.write('\n  Setup not completed — exiting.\n  Run `pompos setup` when ready, then try `pompos` again.\n\n');
         return;
       }
     }
@@ -289,7 +289,7 @@ export async function cmdLauncher() {
     let slashBuffer = null; // null = menu mode; string = slash mode (always starts with '/')
     let slashNotice = '';   // one-line hint shown after the buffer (e.g. "unknown command")
     const LAUNCHER_SLASH_HELP = [
-      { cmd: '/exit',    help: 'leave lazyclaw' },
+      { cmd: '/exit',    help: 'leave pompos' },
       { cmd: '/quit',    help: 'alias for /exit' },
       { cmd: '/help',    help: 'list slash commands' },
       { cmd: '/version', help: 'print version + node + platform' },
@@ -413,7 +413,7 @@ export async function cmdLauncher() {
   } finally {
     // Drop the stdin holds we kept open while the menu was active.
     // Without this, the Node event loop never empties on Quit and
-    // the `lazyclaw` process hangs at the shell prompt. Mirrors the
+    // the `pompos` process hangs at the shell prompt. Mirrors the
     // cleanup path cmdChat installed in v3.92 for the same reason.
     if (process.stdin.isTTY && process.stdin.setRawMode) {
       try { process.stdin.setRawMode(false); } catch (_) {}

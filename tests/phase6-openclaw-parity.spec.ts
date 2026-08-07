@@ -281,7 +281,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(systems).toHaveLength(1);
   });
 
-  test('lazyclaw run --parallel executes a DAG by topological level', () => {
+  test('pompos run --parallel executes a DAG by topological level', () => {
     const dir = tmpConfigDir();
     // Workflow file with a fan-out / fan-in shape. Sleeps 250ms in each
     // independent node so a sequential runner would take 750ms+ for the
@@ -316,7 +316,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(elapsed).toBeLessThan(650);
   });
 
-  test('lazyclaw run --parallel-persistent runs a DAG with state persistence', () => {
+  test('pompos run --parallel-persistent runs a DAG with state persistence', () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'pdag.mjs');
     fs.writeFileSync(wfPath,
@@ -341,7 +341,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(state.nodes.merge.output).toBe('B:A+C:A');
   });
 
-  test('lazyclaw resume --parallel-persistent picks up a failed DAG run from state', () => {
+  test('pompos resume --parallel-persistent picks up a failed DAG run from state', () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'flaky.mjs');
     // Sentinel file: first attempt at b throws; second attempt succeeds.
@@ -378,7 +378,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(o2.executedNodes.sort()).toEqual(['b', 'c']);
   });
 
-  test('lazyclaw resume (no flag) defaults to sequential — backward-compatible behavior', () => {
+  test('pompos resume (no flag) defaults to sequential — backward-compatible behavior', () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'flow.mjs');
     fs.writeFileSync(wfPath,
@@ -397,7 +397,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.resumed).toBe(true);
   });
 
-  test('lazyclaw run --parallel-persistent resumes after a flaky failure', () => {
+  test('pompos run --parallel-persistent resumes after a flaky failure', () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'flaky.mjs');
     // Sentinel-file approach so the second invocation can flip behavior.
@@ -428,7 +428,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(o2.executedNodes.sort()).toEqual(['b', 'c']);
   });
 
-  test('lazyclaw run --parallel surfaces cycle errors with exit 1', () => {
+  test('pompos run --parallel surfaces cycle errors with exit 1', () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'cyclic.mjs');
     fs.writeFileSync(wfPath,
@@ -447,14 +447,14 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.executedNodes).toEqual([]);
   });
 
-  test('lazyclaw inspect: missing state file → exit 2 with helpful stderr', () => {
+  test('pompos inspect: missing state file → exit 2 with helpful stderr', () => {
     const dir = tmpConfigDir();
     const r = runCli(['inspect', 'nope', '--dir', path.join(dir, 'st')], dir);
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/No state for session/);
   });
 
-  test('lazyclaw inspect: fully completed workflow → exit 1 with summary.done=true', () => {
+  test('pompos inspect: fully completed workflow → exit 1 with summary.done=true', () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'tiny.mjs');
     fs.writeFileSync(wfPath,
@@ -477,7 +477,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(typeof out.summary.durationMs).toBe('number');
   });
 
-  test('lazyclaw inspect: terminal failure → exit 3 with failedNodes populated', () => {
+  test('pompos inspect: terminal failure → exit 3 with failedNodes populated', () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'broken.mjs');
     fs.writeFileSync(wfPath,
@@ -501,7 +501,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.failedNodes[0].error).toMatch(/boom/);
   });
 
-  test('lazyclaw inspect --aggregate: percentiles (p50/p95/p99) reflect distribution', () => {
+  test('pompos inspect --aggregate: percentiles (p50/p95/p99) reflect distribution', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -529,7 +529,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(fetch.p99DurationMs).toBe(990);
   });
 
-  test('lazyclaw inspect --aggregate: percentiles on a single value all equal that value', () => {
+  test('pompos inspect --aggregate: percentiles on a single value all equal that value', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -547,7 +547,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(fetch.p99DurationMs).toBe(42);
   });
 
-  test('lazyclaw inspect --aggregate: nodes with no recorded durations get 0 across percentiles', () => {
+  test('pompos inspect --aggregate: nodes with no recorded durations get 0 across percentiles', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -566,7 +566,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(stat.p99DurationMs).toBe(0);
   });
 
-  test('lazyclaw inspect --aggregate: per-node stats across every session', () => {
+  test('pompos inspect --aggregate: per-node stats across every session', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -612,7 +612,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     });
   });
 
-  test('lazyclaw inspect --aggregate --node <id>: drill into one node across sessions', () => {
+  test('pompos inspect --aggregate --node <id>: drill into one node across sessions', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -646,7 +646,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.fetch).toBeUndefined();
   });
 
-  test('lazyclaw inspect --aggregate --node: unknown node → exit 2 with helpful stderr', () => {
+  test('pompos inspect --aggregate --node: unknown node → exit 2 with helpful stderr', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -659,7 +659,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(r.stderr).toMatch(/No node "never" found across sessions/);
   });
 
-  test('lazyclaw inspect --aggregate --filter restricts the population (CLI + daemon parity)', async () => {
+  test('pompos inspect --aggregate --filter restricts the population (CLI + daemon parity)', async () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -695,14 +695,14 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     } finally { await d.kill(); }
   });
 
-  test('lazyclaw inspect --aggregate: missing state dir → exit 2', () => {
+  test('pompos inspect --aggregate: missing state dir → exit 2', () => {
     const dir = tmpConfigDir();
     const r = runCli(['inspect', '--dir', path.join(dir, 'no-such'), '--aggregate'], dir);
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/does not exist/);
   });
 
-  test('lazyclaw inspect --aggregate: empty state dir → sessionCount 0', () => {
+  test('pompos inspect --aggregate: empty state dir → sessionCount 0', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'empty');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -713,7 +713,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.nodeStats).toEqual({});
   });
 
-  test('lazyclaw inspect (no arg): lists every session sorted by recency', () => {
+  test('pompos inspect (no arg): lists every session sorted by recency', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -744,7 +744,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.sessions[0].nodes).toBeUndefined();
   });
 
-  test('lazyclaw validate: well-formed DAG → exit 0 with levels + maxParallelism', () => {
+  test('pompos validate: well-formed DAG → exit 0 with levels + maxParallelism', () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'good.mjs');
     fs.writeFileSync(wfPath,
@@ -768,7 +768,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.levels).toHaveLength(3);
   });
 
-  test('lazyclaw validate: cycle → exit 1 with helpful issue', () => {
+  test('pompos validate: cycle → exit 1 with helpful issue', () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'cyclic.mjs');
     fs.writeFileSync(wfPath,
@@ -784,7 +784,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.issues.join('\n')).toMatch(/cycle/);
   });
 
-  test('lazyclaw validate: duplicate id and missing execute → multiple issues', () => {
+  test('pompos validate: duplicate id and missing execute → multiple issues', () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'broken.mjs');
     fs.writeFileSync(wfPath,
@@ -803,7 +803,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.issues.some((m: string) => m.includes('deps must be an array'))).toBe(true);
   });
 
-  test('lazyclaw validate: unknown dep is a warning, not a hard failure', () => {
+  test('pompos validate: unknown dep is a warning, not a hard failure', () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'warn.mjs');
     fs.writeFileSync(wfPath,
@@ -818,7 +818,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.warnings.some((m: string) => m.includes('ghost'))).toBe(true);
   });
 
-  test('lazyclaw validate: missing file → exit 2', () => {
+  test('pompos validate: missing file → exit 2', () => {
     const dir = tmpConfigDir();
     const r = runCli(['validate', path.join(dir, 'nope.mjs')], dir);
     expect(r.status).toBe(2);
@@ -855,7 +855,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     } finally { await d.kill(); }
   });
 
-  test('lazyclaw providers test: mock provider returns ok with reply length and duration', () => {
+  test('pompos providers test: mock provider returns ok with reply length and duration', () => {
     const dir = tmpConfigDir();
     const r = runCli(['providers', 'test', 'mock'], dir);
     expect(r.status).toBe(0);
@@ -868,7 +868,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(typeof out.durationMs).toBe('number');
   });
 
-  test('lazyclaw providers test --prompt <text> uses the supplied prompt', () => {
+  test('pompos providers test --prompt <text> uses the supplied prompt', () => {
     const dir = tmpConfigDir();
     const r = runCli(['providers', 'test', 'mock', '--prompt', 'hello-from-test'], dir);
     expect(r.status).toBe(0);
@@ -877,7 +877,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.reply).toContain('hello-from-test');
   });
 
-  test('lazyclaw providers test (no name) tests every provider in parallel', () => {
+  test('pompos providers test (no name) tests every provider in parallel', () => {
     const dir = tmpConfigDir();
     const r = runCli(['providers', 'test'], dir);
     // Real providers will fail without keys; mock will pass. Exit 1
@@ -894,7 +894,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(typeof out.totalDurationMs).toBe('number');
   });
 
-  test('lazyclaw providers test --all is equivalent to no name', () => {
+  test('pompos providers test --all is equivalent to no name', () => {
     const dir = tmpConfigDir();
     const r = runCli(['providers', 'test', '--all'], dir);
     expect([0, 1]).toContain(r.status);
@@ -902,7 +902,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.results.some((p: any) => p.name === 'mock')).toBe(true);
   });
 
-  test('lazyclaw providers test (no name): every result has the per-provider shape', () => {
+  test('pompos providers test (no name): every result has the per-provider shape', () => {
     const dir = tmpConfigDir();
     const r = runCli(['providers', 'test', '--prompt', 'hello'], dir);
     const out = JSON.parse(r.stdout);
@@ -920,14 +920,14 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     }
   });
 
-  test('lazyclaw providers test: unknown provider → exit 2 with helpful stderr', () => {
+  test('pompos providers test: unknown provider → exit 2 with helpful stderr', () => {
     const dir = tmpConfigDir();
     const r = runCli(['providers', 'test', 'never-heard-of-it'], dir);
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/unknown provider/);
   });
 
-  test('lazyclaw graph: emits Mermaid graph TD with node decls and dep edges', () => {
+  test('pompos graph: emits Mermaid graph TD with node decls and dep edges', () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'flow.mjs');
     fs.writeFileSync(wfPath,
@@ -958,7 +958,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     ]));
   });
 
-  test('lazyclaw graph --lr emits graph LR', () => {
+  test('pompos graph --lr emits graph LR', () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'flow.mjs');
     fs.writeFileSync(wfPath,
@@ -972,7 +972,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(r.stdout.split('\n')[0]).toBe('graph LR');
   });
 
-  test('lazyclaw graph: ids with non-Mermaid-safe chars get sanitized identifiers but the visible label keeps the original', () => {
+  test('pompos graph: ids with non-Mermaid-safe chars get sanitized identifiers but the visible label keeps the original', () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'flow.mjs');
     fs.writeFileSync(wfPath,
@@ -993,7 +993,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(r.stdout).toContain('n_2nd_step --> final_merge');
   });
 
-  test('lazyclaw graph --state overlays run status with glyphs and classDef styling', () => {
+  test('pompos graph --state overlays run status with glyphs and classDef styling', () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'flow.mjs');
     fs.writeFileSync(wfPath,
@@ -1034,7 +1034,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(r.stdout).toContain('class d pending');
   });
 
-  test('lazyclaw graph --state with missing session → exit 2', () => {
+  test('pompos graph --state with missing session → exit 2', () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'flow.mjs');
     fs.writeFileSync(wfPath,
@@ -1046,14 +1046,14 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(r.stderr).toMatch(/no state for session/);
   });
 
-  test('lazyclaw graph: missing file → exit 2 with helpful stderr', () => {
+  test('pompos graph: missing file → exit 2 with helpful stderr', () => {
     const dir = tmpConfigDir();
     const r = runCli(['graph', path.join(dir, 'no-such.mjs')], dir);
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/graph:/);
   });
 
-  test('lazyclaw clear: deletes existing state file → exit 0 with removed:true', () => {
+  test('pompos clear: deletes existing state file → exit 0 with removed:true', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -1069,7 +1069,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(fs.existsSync(path.join(stateDir, 'doomed.json'))).toBe(false);
   });
 
-  test('lazyclaw clear: idempotent — second call still exits 0 with removed:false', () => {
+  test('pompos clear: idempotent — second call still exits 0 with removed:false', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -1078,14 +1078,14 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(JSON.parse(r.stdout)).toEqual({ ok: true, sessionId: 'never-existed', removed: false });
   });
 
-  test('lazyclaw clear: missing state dir → exit 2', () => {
+  test('pompos clear: missing state dir → exit 2', () => {
     const dir = tmpConfigDir();
     const r = runCli(['clear', 'whatever', '--dir', path.join(dir, 'no-such')], dir);
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/does not exist/);
   });
 
-  test('lazyclaw clear: refuses sessionId that resolves outside the state dir', () => {
+  test('pompos clear: refuses sessionId that resolves outside the state dir', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -1098,7 +1098,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(fs.existsSync(outside)).toBe(true);
   });
 
-  test('lazyclaw inspect --node <id>: drills into one node, exit code mirrors status', () => {
+  test('pompos inspect --node <id>: drills into one node, exit code mirrors status', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -1136,7 +1136,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(r4.stderr).toMatch(/No node "never-existed"/);
   });
 
-  test('lazyclaw inspect --slowest <N> returns top N nodes by durationMs', () => {
+  test('pompos inspect --slowest <N> returns top N nodes by durationMs', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -1161,7 +1161,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.top[0].durationMs).toBe(1500);
   });
 
-  test('lazyclaw inspect --slowest with N larger than node count returns all nodes', () => {
+  test('pompos inspect --slowest with N larger than node count returns all nodes', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -1179,7 +1179,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(JSON.parse(r.stdout).top).toHaveLength(2);
   });
 
-  test('lazyclaw inspect --slowest 0 / negative / non-numeric → exit 2', () => {
+  test('pompos inspect --slowest 0 / negative / non-numeric → exit 2', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -1194,7 +1194,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     }
   });
 
-  test('lazyclaw inspect --slowest: missing durationMs treated as 0 in sort', () => {
+  test('pompos inspect --slowest: missing durationMs treated as 0 in sort', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -1214,7 +1214,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.top[1].durationMs).toBe(0);   // missing → 0
   });
 
-  test('lazyclaw inspect --critical-path computes the longest weighted path', () => {
+  test('pompos inspect --critical-path computes the longest weighted path', () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'flow.mjs');
     // Diamond DAG:
@@ -1252,7 +1252,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.perNodeMs).toEqual({ a: 10, b: 50, c: 30, d: 20 });
   });
 
-  test('lazyclaw inspect --critical-path: missing durations default to 0 (path uses any node)', () => {
+  test('pompos inspect --critical-path: missing durations default to 0 (path uses any node)', () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'flow.mjs');
     fs.writeFileSync(wfPath,
@@ -1281,7 +1281,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.path).toEqual(['a', 'b']);   // Path still recovered from deps even with 0 duration
   });
 
-  test('lazyclaw inspect --critical-path: missing workflow file → exit 2', () => {
+  test('pompos inspect --critical-path: missing workflow file → exit 2', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -1294,7 +1294,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(r.stderr).toMatch(/critical-path:/);
   });
 
-  test('lazyclaw inspect --summary trims per-node detail in single-session mode', () => {
+  test('pompos inspect --summary trims per-node detail in single-session mode', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -1327,7 +1327,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(compact.updatedAt).toBe(2);
   });
 
-  test('lazyclaw inspect --filter / --limit + daemon /workflows?filter=&limit= parity', async () => {
+  test('pompos inspect --filter / --limit + daemon /workflows?filter=&limit= parity', async () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -1365,7 +1365,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     } finally { await d.kill(); }
   });
 
-  test('lazyclaw inspect --status filters list mode by lifecycle bucket', () => {
+  test('pompos inspect --status filters list mode by lifecycle bucket', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -1398,14 +1398,14 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(r4.stderr).toMatch(/invalid --status/);
   });
 
-  test('lazyclaw inspect (no arg): missing state dir → exit 2', () => {
+  test('pompos inspect (no arg): missing state dir → exit 2', () => {
     const dir = tmpConfigDir();
     const r = runCli(['inspect', '--dir', path.join(dir, 'no-such-dir')], dir);
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/does not exist/);
   });
 
-  test('lazyclaw inspect (no arg): empty state dir → exit 0 with empty sessions array', () => {
+  test('pompos inspect (no arg): empty state dir → exit 0 with empty sessions array', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'empty-state');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -1415,7 +1415,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.sessions).toEqual([]);
   });
 
-  test('lazyclaw inspect: partially completed (resumable) → exit 0', () => {
+  test('pompos inspect: partially completed (resumable) → exit 0', () => {
     const dir = tmpConfigDir();
     const stateDir = path.join(dir, 'st');
     fs.mkdirSync(stateDir, { recursive: true });
@@ -1442,7 +1442,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.summary.durationMs).toBe(12);
   });
 
-  test('lazyclaw run SIGINT mid-flow exits 130 with aborted:true and state stays resumable', async () => {
+  test('pompos run SIGINT mid-flow exits 130 with aborted:true and state stays resumable', async () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'long.mjs');
     // Three nodes: a (instant), b (sleeps 2s — we'll SIGINT during this),
@@ -1510,7 +1510,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(o2.executedNodes).toEqual(['b', 'c']);   // a was skipped
   });
 
-  test('lazyclaw run SIGINT in --parallel mode forwards signal and exits 130', async () => {
+  test('pompos run SIGINT in --parallel mode forwards signal and exits 130', async () => {
     const dir = tmpConfigDir();
     const wfPath = path.join(dir, 'pwf.mjs');
     // Three independent nodes; each sleeps 2s. SIGINT should abort the
@@ -1854,7 +1854,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(calls[0].headers['anthropic-version']).toBeTruthy();
   });
 
-  // Daemon helper: spawn `lazyclaw daemon --port 0`, wait for the bound URL
+  // Daemon helper: spawn `pompos daemon --port 0`, wait for the bound URL
   // line on stdout, return the URL plus a cleanup hook.
   function startDaemonProc(cfgDir: string, extraArgs: string[] = [], extraEnv: NodeJS.ProcessEnv = {}): Promise<{ url: string, kill: () => Promise<void> }> {
     return new Promise((resolve, reject) => {
@@ -1903,7 +1903,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
 
   test('daemon GET /health works even with no provider configured (liveness != readiness)', async () => {
     const dir = tmpConfigDir();
-    // No `lazyclaw config set provider ...` here. /doctor would 503
+    // No `pompos config set provider ...` here. /doctor would 503
     // (provider missing) but /health is still 200 — conventionally,
     // liveness asks "is the process alive?" not "is it ready?"
     const d = await startDaemonProc(dir);
@@ -2230,7 +2230,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     } finally { await d2.kill(); }
   });
 
-  test('daemon GET /config returns all config keys with api-key masked (mirrors lazyclaw config list)', async () => {
+  test('daemon GET /config returns all config keys with api-key masked (mirrors pompos config list)', async () => {
     const dir = tmpConfigDir();
     runCli(['config', 'set', 'provider', 'anthropic'], dir);
     runCli(['config', 'set', 'model', 'claude-opus-4-7'], dir);
@@ -5004,7 +5004,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     } finally { await d.kill(); }
   });
 
-  test('lazyclaw daemon --auth-token T enforces the token end-to-end', async () => {
+  test('pompos daemon --auth-token T enforces the token end-to-end', async () => {
     const dir = tmpConfigDir();
     runCli(['config', 'set', 'provider', 'mock'], dir);
     const child = spawn(process.execPath, [CLI, 'daemon', '--port', '0', '--auth-token', 'tok-xyz'], {
@@ -5945,7 +5945,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     } finally { await d.kill(); }
   });
 
-  test('lazyclaw skills search: substring match across skill bodies', () => {
+  test('pompos skills search: substring match across skill bodies', () => {
     const dir = tmpConfigDir();
     fs.mkdirSync(path.join(dir, 'skills'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'skills', 'rust.md'),
@@ -5965,7 +5965,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.matches.find((m: any) => m.name === 'rust').excerpt.toLowerCase()).toContain('result');
   });
 
-  test('lazyclaw skills search --regex applies the pattern', () => {
+  test('pompos skills search --regex applies the pattern', () => {
     const dir = tmpConfigDir();
     fs.mkdirSync(path.join(dir, 'skills'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'skills', 'logs.md'),
@@ -5981,7 +5981,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(out.matches[0].matchCount).toBe(2);   // E1023 + E2034
   });
 
-  test('lazyclaw skills search: empty result still exits 0', () => {
+  test('pompos skills search: empty result still exits 0', () => {
     const dir = tmpConfigDir();
     fs.mkdirSync(path.join(dir, 'skills'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'skills', 'a.md'), 'hello world\n');
@@ -5990,7 +5990,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(JSON.parse(r.stdout).matches).toEqual([]);
   });
 
-  test('lazyclaw skills search --regex rejects invalid regex with exit 2', () => {
+  test('pompos skills search --regex rejects invalid regex with exit 2', () => {
     const dir = tmpConfigDir();
     const r = runCli(['skills', 'search', '[unclosed', '--regex'], dir);
     expect(r.status).toBe(2);
@@ -6684,7 +6684,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     const dir = tmpConfigDir();
     const r = runCli(['sessions', 'export'], dir);
     expect(r.status).toBe(2);
-    expect(r.stderr).toMatch(/Usage: lazyclaw sessions export/);
+    expect(r.stderr).toMatch(/Usage: pompos sessions export/);
   });
 
   test('sessionPath rejects path-traversal ids', async () => {
@@ -6698,8 +6698,8 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     const dir = tmpConfigDir();
     const r = runCli(['completion', 'bash'], dir);
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain('_lazyclaw_completion');
-    expect(r.stdout).toContain('complete -F _lazyclaw_completion lazyclaw');
+    expect(r.stdout).toContain('_pompos_completion');
+    expect(r.stdout).toContain('complete -F _pompos_completion pompos');
     for (const sub of ['run', 'resume', 'config', 'chat', 'agent', 'doctor', 'status', 'onboard', 'sessions', 'skills', 'providers', 'daemon', 'version', 'completion']) {
       expect(r.stdout).toContain(sub);
     }
@@ -6711,8 +6711,8 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     const dir = tmpConfigDir();
     const r = runCli(['completion', 'zsh'], dir);
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain('#compdef lazyclaw');
-    expect(r.stdout).toContain('compdef _lazyclaw lazyclaw');
+    expect(r.stdout).toContain('#compdef pompos');
+    expect(r.stdout).toContain('compdef _pompos pompos');
     for (const sub of ['run', 'resume', 'config', 'chat', 'agent', 'doctor', 'status', 'onboard', 'sessions', 'skills', 'providers', 'daemon', 'version']) {
       expect(r.stdout).toContain(`'${sub}'`);
     }
@@ -6723,7 +6723,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     const dir = tmpConfigDir();
     const r = runCli(['completion'], dir);
     expect(r.status).toBe(2);
-    expect(r.stderr).toMatch(/Usage: lazyclaw completion/);
+    expect(r.stderr).toMatch(/Usage: pompos completion/);
     const r2 = runCli(['completion', 'fish'], dir);
     expect(r2.status).toBe(2);
   });
@@ -6873,23 +6873,23 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     const dir = tmpConfigDir();
     const r = runCli(['help'], dir);
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain('lazyclaw — terminal AI assistant');
+    expect(r.stdout).toContain('pompos — terminal AI assistant');
     for (const sub of ['run', 'resume', 'config', 'chat', 'agent', 'doctor', 'status', 'onboard', 'sessions', 'skills', 'providers', 'daemon', 'version', 'completion']) {
       expect(r.stdout).toContain(sub);
     }
-    expect(r.stdout).toMatch(/lazyclaw help <subcommand>/);
+    expect(r.stdout).toMatch(/pompos help <subcommand>/);
   });
 
   test('help <subcommand> prints detailed usage', () => {
     const dir = tmpConfigDir();
     const r = runCli(['help', 'daemon'], dir);
     expect(r.status).toBe(0);
-    expect(r.stdout).toMatch(/^Usage: lazyclaw daemon/);
+    expect(r.stdout).toMatch(/^Usage: pompos daemon/);
     expect(r.stdout).toContain('--auth-token');
     expect(r.stdout).toContain('--allow-origin');
     // Different subcommand returns its own usage, not daemon's
     const r2 = runCli(['help', 'sessions'], dir);
-    expect(r2.stdout).toMatch(/^Usage: lazyclaw sessions/);
+    expect(r2.stdout).toMatch(/^Usage: pompos sessions/);
     expect(r2.stdout).toContain('export');
     expect(r2.stdout).not.toContain('--auth-token');
   });
@@ -6899,13 +6899,13 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     const r = runCli(['help', 'nonsense-command'], dir);
     expect(r.status).toBe(2);
     expect(r.stderr).toMatch(/unknown command "nonsense-command"/);
-    expect(r.stderr).toMatch(/run `lazyclaw help`/);
+    expect(r.stderr).toMatch(/run `pompos help`/);
   });
 
   test('--help and -h are aliases for `help` (no argument lists subcommands)', () => {
     const dir = tmpConfigDir();
-    expect(runCli(['--help'], dir).stdout).toContain('lazyclaw — terminal AI assistant');
-    expect(runCli(['-h'], dir).stdout).toContain('lazyclaw — terminal AI assistant');
+    expect(runCli(['--help'], dir).stdout).toContain('pompos — terminal AI assistant');
+    expect(runCli(['-h'], dir).stdout).toContain('pompos — terminal AI assistant');
   });
 
   test('version subcommand prints VERSION + node + platform as JSON', () => {

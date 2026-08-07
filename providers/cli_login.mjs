@@ -42,7 +42,7 @@ export const CLI_LOGIN_PROVIDERS = {
     credPath: join(homedir(), '.gemini', 'oauth_creds.json'),
     apiKeyEnv: 'GEMINI_API_KEY',
     browserHint: 'gemini (Google sign-in)',
-    apiKeyHint: 'Google AI Studio key — saved in lazyclaw and passed as GEMINI_API_KEY',
+    apiKeyHint: 'Google AI Studio key — saved in pompos and passed as GEMINI_API_KEY',
   },
 };
 
@@ -78,7 +78,7 @@ function _runForCode(bin, args) {
  *   runStatus?: (bin:string, args:string[])=>Promise<number>,
  *   existsSync?: (p:string)=>boolean,
  *   env?: Record<string,string|undefined>,
- *   hasStoredKey?: boolean,   // a key already saved in lazyclaw for this provider
+ *   hasStoredKey?: boolean,   // a key already saved in pompos for this provider
  * }} [deps]
  * @returns {Promise<{supported:boolean, binMissing?:boolean, loggedIn?:boolean, via?:string, pkg?:string}>}
  */
@@ -89,7 +89,7 @@ export async function cliLoginStatus(provName, deps = {}) {
   if (!which(spec.bin)) {
     return { supported: true, binMissing: true, loggedIn: false, pkg: spec.pkg };
   }
-  // An explicit lazyclaw-stored key means we can authenticate regardless of
+  // An explicit pompos-stored key means we can authenticate regardless of
   // the CLI's own login state (codex via env, gemini via GEMINI_API_KEY).
   if (deps.hasStoredKey) return { supported: true, binMissing: false, loggedIn: true, via: 'api-key' };
   if (spec.statusArgs) {
@@ -161,7 +161,7 @@ export async function runCliLoginInteractive(req = {}) {
       const code = await _spawnKeyStdin(spec.bin, spec.apiKeyStdinArgs, apiKey);
       process.stdout.write(code === 0 ? `\n  ${ok('✓ codex signed in with an API key.')}\n\n` : `\n  codex login exited ${code}.\n\n`);
     }
-    // gemini's key is persisted in lazyclaw config by the caller and injected
+    // gemini's key is persisted in pompos config by the caller and injected
     // as GEMINI_API_KEY at spawn time — nothing to run here.
     return;
   }
@@ -174,6 +174,6 @@ export async function runCliLoginInteractive(req = {}) {
   } else if (provider === 'gemini-cli') {
     process.stdout.write(`\n  Launching ${dim('gemini')} for Google sign-in. Authenticate in the browser, then ${dim('/quit')} (or Ctrl-C) inside gemini to return.\n\n`);
     await _spawnInherit(spec.bin, spec.loginArgs);
-    process.stdout.write(`\n  Back in lazyclaw.\n\n`);
+    process.stdout.write(`\n  Back in pompos.\n\n`);
   }
 }

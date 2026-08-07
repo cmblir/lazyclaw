@@ -22,7 +22,7 @@ import { messageAdd } from '../config_features.mjs';
 // IN-TREE under channels-<name>/ and the gateway runs them directly. What they
 // need is a RUNTIME dependency: an npm package (`deps`) installed into the
 // config dir, or an external `binary` on PATH. (The old catalog pointed at
-// unpublished `@lazyclaw/channel-*` packages, so `channels install` 404'd.)
+// unpublished `@pompos/channel-*` packages, so `channels install` 404'd.)
 export const CHANNEL_CATALOG = [
   { name: 'slack',    builtin: true,  label: 'Slack',
     fields: [
@@ -92,7 +92,7 @@ export function channelByName(name) {
 // Pure: turn collected answers into { envVars, deps, binary, builtin }. Empty/
 // whitespace answers are dropped so a skipped optional field doesn't write an
 // empty env var. `deps`/`binary` describe the runtime requirement the in-tree
-// channel needs to actually run (replaces the old, unpublished `@lazyclaw/
+// channel needs to actually run (replaces the old, unpublished `@pompos/
 // channel-*` plugin pointer).
 export function buildChannelEntry(name, answers = {}) {
   const spec = channelByName(name);
@@ -239,12 +239,12 @@ async function configureChannel({ cfgDir, spec, prompt, colors, write, fetchImpl
   if (!entry.ready) {
     if (entry.missingDeps && entry.missingDeps.length) {
       write(`  ${warn('needs a runtime package:')} ${entry.missingDeps.join(', ')}\n`);
-      write(`    ${dim(`install with: lazyclaw channels install ${spec.name}  (runs: npm install --prefix ${cfgDir} ${entry.missingDeps.join(' ')})`)}\n`);
+      write(`    ${dim(`install with: pompos channels install ${spec.name}  (runs: npm install --prefix ${cfgDir} ${entry.missingDeps.join(' ')})`)}\n`);
     }
     if (entry.missingBinary) {
       write(`  ${warn('needs an external binary:')} ${entry.missingBinary} (must be on your PATH)\n`);
     }
-    write(`    ${dim(`then enable it with: lazyclaw channels enable ${spec.name}`)}\n`);
+    write(`    ${dim(`then enable it with: pompos channels enable ${spec.name}`)}\n`);
   }
   write('\n');
   return entry;
@@ -377,7 +377,7 @@ export async function runChannelStep({ cfgDir, prompt, colors, write = (s) => pr
 export async function runWebhookStep({ prompt, colors, write = (s) => process.stdout.write(s) }) {
   const { dim, ok, warn } = colors;
   const { _pickYesNo } = await import('../tui/pickers.mjs');
-  write(`  ${dim('Outbound webhook for `lazyclaw message send <name> <text>`. Slack / Discord Incoming Webhook URLs work as-is.')}\n\n`);
+  write(`  ${dim('Outbound webhook for `pompos message send <name> <text>`. Slack / Discord Incoming Webhook URLs work as-is.')}\n\n`);
   const wantHook = await _pickYesNo('Add an outbound webhook?', { yesLabel: 'Add one', noLabel: 'Skip', defaultYes: false });
   const hookName = wantHook ? (await prompt('  webhook name: ')).trim() : '';
   if (!hookName) { write(`  ${dim('— skipped —')}\n\n`); return { skipped: true }; }
@@ -482,6 +482,6 @@ export async function runOrchestratorStep({ prompt, colors, write = (s) => proce
   cf.orchestratorEnable(cfg, true);
   writeConfig(cfg);
   write(`  ${ok('✓ orchestration enabled:')} planner ${planner} · workers ${workers.join(', ')}\n`);
-  write(`  ${dim('change later: /orchestrator  or  lazyclaw orchestrator status')}\n\n`);
+  write(`  ${dim('change later: /orchestrator  or  pompos orchestrator status')}\n\n`);
   return { skipped: false, planner, workers };
 }

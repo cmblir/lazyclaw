@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { runLearning } from '../mas/learning.mjs';
 
-const tmpCfg = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-lpar-'));
+const tmpCfg = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-lpar-'));
 
 const STANDARD_SKILL = (
   'name: parallel-trainer-skill\n' +

@@ -64,7 +64,7 @@ Both `maxCallsPerDay` (int) and `usdPerDay` (float) may be set. The
 
 `better-sqlite3` ships no prebuilt for musl/freebsd. Either:
 ```bash
-npm install -g lazyclaw --build-from-source
+npm install -g pompos --build-from-source
 ```
 or install with a glibc-based image (Debian, Ubuntu, Alpine via
 `apk add gcompat`).

@@ -1,4 +1,4 @@
-// Layered memory for LazyClaw.
+// Layered memory for Pompos.
 //
 // Three storage shapes under <configDir>/memory/:
 //   core.md                — single curated file. User-edited or LLM-edited.

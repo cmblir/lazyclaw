@@ -3,7 +3,7 @@
 // "provider/model" form, required fields present, numbers non-
 // negative.
 //
-// Shared between `lazyclaw rates validate` (CLI) and
+// Shared between `pompos rates validate` (CLI) and
 // `GET /rates/validate` (daemon) so both produce bit-for-bit
 // identical output.
 

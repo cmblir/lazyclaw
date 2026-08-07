@@ -111,7 +111,7 @@ export async function refreshModelCache({ cache, readConfig, logger, fetchImpl, 
 
 /**
  * Start the background refresh: once after `initialDelayMs`, then every
- * `intervalMs`. Both timers are `unref()`d so a bare `lazyclaw --version` or
+ * `intervalMs`. Both timers are `unref()`d so a bare `pompos --version` or
  * the test suite never waits on them to exit — they only run for as long as
  * the process is alive for other reasons.
  *

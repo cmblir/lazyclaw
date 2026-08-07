@@ -24,7 +24,7 @@ import { reindexAll } from '../mas/index_db.mjs';
 import { parseFrontmatter } from '../skills.mjs';
 
 function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
+  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
 }
 
 function tsStamp() {

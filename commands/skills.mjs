@@ -27,7 +27,7 @@ export async function cmdSkills(sub, positional, flags = {}) {
     }
     case 'show': {
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw skills show <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos skills show <name>'); process.exit(2); }
       try { process.stdout.write(skillsMod.loadSkill(name, cfgDir)); }
       catch (e) { console.error(e.message); process.exit(1); }
       return;
@@ -43,7 +43,7 @@ export async function cmdSkills(sub, positional, flags = {}) {
       // with `/` still routes to the explicit-flag branch — though
       // skillPath() rejects slashes anyway).
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw skills install <user/repo[@ref][:path]> | <name> [--from <path> | --from-url <https://...>]'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos skills install <user/repo[@ref][:path]> | <name> [--from <path> | --from-url <https://...>]'); process.exit(2); }
       if (name.includes('/') && !flags.from && !flags['from-url']) {
         const inst = await import('../skills_install.mjs');
         try {
@@ -138,19 +138,19 @@ export async function cmdSkills(sub, positional, flags = {}) {
     }
     case 'remove': {
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw skills remove <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos skills remove <name>'); process.exit(2); }
       skillsMod.removeSkill(name, cfgDir);
       console.log(JSON.stringify({ ok: true, removed: name }));
       return;
     }
     case 'search': {
-      // Mirror of `lazyclaw sessions search` — case-insensitive substring
+      // Mirror of `pompos sessions search` — case-insensitive substring
       // by default, --regex for pattern mode. Returns per-skill match
       // count + first-excerpt window (40 chars before/after match).
       // The skill body IS markdown so users typically search for terms
       // mentioned in instructions or examples.
       const query = positional[0];
-      if (!query) { console.error('Usage: lazyclaw skills search <query> [--regex]'); process.exit(2); }
+      if (!query) { console.error('Usage: pompos skills search <query> [--regex]'); process.exit(2); }
       const useRegex = !!flags.regex;
       let matcher;
       if (useRegex) {
@@ -224,13 +224,13 @@ export async function cmdSkills(sub, positional, flags = {}) {
     }
     case 'classify': {
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw skills classify <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos skills classify <name>'); process.exit(2); }
       const curator = await import('../skills_curator.mjs');
       console.log(JSON.stringify({ name, state: curator.classify(name, cfgDir, Date.now()), usage: curator.usageOf(name, cfgDir) }, null, 2));
       return;
     }
     default:
-      console.error('Usage: lazyclaw skills <list|show <name>|install <name> [--from path]|starter [--force]|remove <name>|search <query> [--regex]|curate|classify <name>>');
+      console.error('Usage: pompos skills <list|show <name>|install <name> [--from path]|starter [--force]|remove <name>|search <query> [--regex]|curate|classify <name>>');
       process.exit(2);
   }
 }

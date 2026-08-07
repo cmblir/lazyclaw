@@ -5,7 +5,7 @@
 // stream into a grid of lines so a test can assert "the status row appears
 // exactly once on screen".
 //
-// Deliberately partial: it implements only the sequences lazyclaw + Ink emit.
+// Deliberately partial: it implements only the sequences pompos + Ink emit.
 // Anything else is consumed and ignored rather than printed as literal text.
 //
 // Known simplification: the grid grows without bound instead of scrolling when

@@ -6,10 +6,10 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { registerAgent, patchAgent, getAgent, AgentError } from '../agents.mjs';
 
-function tmp() { return fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-avatar-')); }
+function tmp() { return fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-avatar-')); }
 const CLI = new URL('../cli.mjs', import.meta.url).pathname;
 
-// A user wants to CHOOSE which of the 20 built-in pixel-art sprites an agent
+// A user wants to CHOOSE which of the 20 built-in pixel-banner sprites an agent
 // shows in the Team Live dashboard, instead of relying on the keyword-inferred
 // default. dashboard.js already renders rec.avatar (1..20) first — but nothing
 // ever wrote it. These tests pin the missing registry side.

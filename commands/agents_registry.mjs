@@ -24,7 +24,7 @@ export async function cmdAgentRegistry(sub, positional, flags = {}) {
       return;
     }
     case 'add': {
-      if (!name) { console.error('Usage: lazyclaw agent add <name> [--role "..."] [--provider X] [--model Y] [--display "..."] [--manager <agent>] [--tools bash,read,write,grep,skill_view] [--tags a,b] [--skill-write auto|manual|off]'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos agent add <name> [--role "..."] [--provider X] [--model Y] [--display "..."] [--manager <agent>] [--tools bash,read,write,grep,skill_view] [--tags a,b] [--skill-write auto|manual|off]'); process.exit(2); }
       const tools = agentsMod.parseToolsFlag(flags.tools);
       try {
         const a = agentsMod.registerAgent({
@@ -47,14 +47,14 @@ export async function cmdAgentRegistry(sub, positional, flags = {}) {
       return;
     }
     case 'show': {
-      if (!name) { console.error('Usage: lazyclaw agent show <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos agent show <name>'); process.exit(2); }
       const a = agentsMod.getAgent(name, cfgDir);
       if (!a) { console.error(`agent show: no agent "${name}"`); process.exit(2); }
       emitJson(a);
       return;
     }
     case 'edit': {
-      if (!name) { console.error('Usage: lazyclaw agent edit <name> [--role "..."] [--provider X] [--model Y] [--display "..."] [--tools ...] [--skill-write auto|manual|off] [--memory-write auto|manual|off]'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos agent edit <name> [--role "..."] [--provider X] [--model Y] [--display "..."] [--tools ...] [--skill-write auto|manual|off] [--memory-write auto|manual|off]'); process.exit(2); }
       const patch = {};
       if (flags.role !== undefined)         patch.role = String(flags.role);
       if (flags.provider !== undefined)     patch.provider = String(flags.provider);
@@ -77,7 +77,7 @@ export async function cmdAgentRegistry(sub, positional, flags = {}) {
     case 'set-avatar': {
       const val = positional[1];
       if (!name || val === undefined) {
-        console.error('Usage: lazyclaw agent set-avatar <name> <1-20 | none | <image-file> | http(s)://url>\n  1-20      pick a built-in pixel-art sprite\n  none      keep the role-inferred default\n  file/url  use a custom character photo');
+        console.error('Usage: pompos agent set-avatar <name> <1-20 | none | <image-file> | http(s)://url>\n  1-20      pick a built-in pixel-art sprite\n  none      keep the role-inferred default\n  file/url  use a custom character photo');
         process.exit(2);
       }
       const v = String(val).trim();
@@ -97,7 +97,7 @@ export async function cmdAgentRegistry(sub, positional, flags = {}) {
     case 'remove':
     case 'rm':
     case 'delete': {
-      if (!name) { console.error('Usage: lazyclaw agent remove <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos agent remove <name>'); process.exit(2); }
       try { emitJson(agentsMod.removeAgent(name, cfgDir)); }
       catch (err) { console.error(`agent remove: ${err?.message || err}`); process.exit(2); }
       return;
@@ -107,7 +107,7 @@ export async function cmdAgentRegistry(sub, positional, flags = {}) {
       const op = positional[0];
       const memName = positional[1];
       if (!op || !memName) {
-        console.error('Usage: lazyclaw agent memory <show|edit|clear> <name>');
+        console.error('Usage: pompos agent memory <show|edit|clear> <name>');
         process.exit(2);
       }
       const memMod = await import('../mas/agent_memory.mjs');
@@ -136,7 +136,7 @@ export async function cmdAgentRegistry(sub, positional, flags = {}) {
           const removed = memMod.clear(memName, cfgDir);
           process.stdout.write(removed ? `cleared memory for "${memName}"\n` : `(no memory for "${memName}")\n`);
         } else {
-          console.error(`Usage: lazyclaw agent memory <show|edit|clear> <name>`);
+          console.error(`Usage: pompos agent memory <show|edit|clear> <name>`);
           process.exit(2);
         }
       } catch (err) {
@@ -149,7 +149,7 @@ export async function cmdAgentRegistry(sub, positional, flags = {}) {
       const aname = positional[0];
       const taskId = flags.task || positional[1];
       if (!aname || !taskId) {
-        console.error('Usage: lazyclaw agent reflect <name> --task <id>');
+        console.error('Usage: pompos agent reflect <name> --task <id>');
         process.exit(2);
       }
       const tasksMod = await import('../tasks.mjs');
@@ -182,7 +182,7 @@ export async function cmdAgentRegistry(sub, positional, flags = {}) {
       const aname = positional[0];
       const taskId = flags.task || positional[1];
       if (!aname || !taskId) {
-        console.error('Usage: lazyclaw agent skill-synth <name> --task <id> [--dry-run]');
+        console.error('Usage: pompos agent skill-synth <name> --task <id> [--dry-run]');
         process.exit(2);
       }
       const tasksMod = await import('../tasks.mjs');
@@ -221,7 +221,7 @@ export async function cmdAgentRegistry(sub, positional, flags = {}) {
       return;
     }
     default:
-      console.error('Usage: lazyclaw agent <add|list|show|edit|remove|memory|reflect|skill-synth> ...');
+      console.error('Usage: pompos agent <add|list|show|edit|remove|memory|reflect|skill-synth> ...');
       process.exit(2);
   }
 }

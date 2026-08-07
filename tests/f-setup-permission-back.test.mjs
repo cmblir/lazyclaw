@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 function withTmpCfg(fn) {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-permstep-'));
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-permstep-'));
   const prev = process.env.LAZYCLAW_CONFIG_DIR;
   process.env.LAZYCLAW_CONFIG_DIR = d;
   return Promise.resolve(fn(d)).finally(() => {

@@ -20,7 +20,7 @@ import os from 'node:os';
 export const FORMATS = Object.freeze(['atropos', 'axolotl', 'openai-ft', 'jsonl']);
 
 function defaultConfigDir() {
-  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.lazyclaw');
+  return process.env.LAZYCLAW_CONFIG_DIR || path.join(os.homedir(), '.pompos');
 }
 
 function trajectoriesDir(configDir) {

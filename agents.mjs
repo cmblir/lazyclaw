@@ -1,4 +1,4 @@
-// Persistent agent registry for `/agent` REPL command and `lazyclaw agent`
+// Persistent agent registry for `/agent` REPL command and `pompos agent`
 // subcommand. Backs the Phase 9 piece of docs/multi-agent.md.
 //
 // Storage layout under <configDir>/agents/<name>.json. One file per
@@ -9,7 +9,7 @@
 //
 // Defaults reflect §10 of the multi-agent spec: a freshly created
 // agent gets the full tool whitelist (bash + read + write + grep)
-// because the user opted for "lazyclaw 모든 권한". Callers that want a
+// because the user opted for "pompos 모든 권한". Callers that want a
 // stricter posture can pass an explicit `tools` array.
 
 import fs from 'node:fs';
@@ -104,14 +104,14 @@ function defaultShape(name) {
     manager: '',
     // Phase 18 — agent memory write trigger. 'auto' means the router
     // fires a reflection LLM call on terminal `done`; 'manual' waits
-    // for `lazyclaw agent reflect`; 'off' disables writes entirely.
+    // for `pompos agent reflect`; 'off' disables writes entirely.
     memoryWrite: 'auto',
     memoryMaxChars: 12 * 1024,
     // v5 Group A (M3) — self-improving skill synthesis trigger.
     // Default flipped to 'auto' so the learning loop actually closes
     // end-to-end on a fresh install: every agent that finishes a task
     // contributes a SKILL.md unless the operator explicitly opted out
-    // ('manual' waits for `lazyclaw agent skill-synth`; 'off' disables).
+    // ('manual' waits for `pompos agent skill-synth`; 'off' disables).
     // The canonical post-task hook (mas/learning.mjs) also reads
     // `(skillWrite ?? 'auto')`, so v4 records that pre-date this field
     // get the new default without a forced migration.

@@ -163,7 +163,7 @@ test.describe('Phase 14 — termination policies', () => {
     await mock.close();
   });
 
-  test('manual lazyclaw task abandon stops future ticks even when the task was running', async () => {
+  test('manual pompos task abandon stops future ticks even when the task was running', async () => {
     const mock = await startMockAnthropic();
     // First tick: agent keeps mentioning itself so we'd burn budget if
     // the second tick were allowed.

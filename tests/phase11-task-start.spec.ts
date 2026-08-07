@@ -142,7 +142,7 @@ test.describe('Phase 11 — task start', () => {
     await seedTeam(cfg);
     const r = runCli(['task', 'start', '--team', 'shop'], cfg);
     expect(r.status).toBe(2);
-    expect(r.stderr).toMatch(/Usage: lazyclaw task start/);
+    expect(r.stderr).toMatch(/Usage: pompos task start/);
   });
 
   test('task list returns the JSON array sorted newest-first', async () => {

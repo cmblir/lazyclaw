@@ -2,7 +2,7 @@
 // Keychain.
 //
 // `claude login` on macOS stores its credential in the OS Keychain (there is no
-// ~/.claude/.credentials.json file like on Linux), so lazyclaw's keyless paths
+// ~/.claude/.credentials.json file like on Linux), so pompos's keyless paths
 // (model listing, trainer detection) couldn't see an existing, working login
 // and fell back to an "authenticate first" error. This reads that Keychain item
 // — the same JSON blob the Linux file holds — and returns its accessToken.

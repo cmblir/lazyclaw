@@ -436,7 +436,7 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
             Box,
             // v5.5 — `justifyContent: 'flex-end'` pins the newest content to
             // the bottom of the fixed-height alt canvas; older lines (the
-            // splash / sloth + manual) overflow off the TOP and are clipped
+            // splash / banner + manual) overflow off the TOP and are clipped
             // naturally, exactly like a real scrollback. This replaces the
             // v5.4.3 hack that hard-dropped the splash after the first turn
             // (which made the manual + character abruptly vanish the moment

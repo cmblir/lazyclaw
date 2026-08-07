@@ -1,7 +1,7 @@
 // tests/f-mcp-boot.test.mjs — mcp-boot: MCP support is implemented but never
 // booted. Pins three gaps:
 //   (a) nothing calls server_spawn.startConfigured at daemon boot;
-//   (b) `lazyclaw mcp list` subcommand did not exist;
+//   (b) `pompos mcp list` subcommand did not exist;
 //   (c) startConfigured actually registers an mcp:<server>:<tool> tool
 //       (sensitive=true) into the registry via an injected fake transport.
 //
@@ -27,7 +27,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(HERE, '..', 'cli.mjs');
 
 function tmpCfgDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-mcp-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-mcp-'));
 }
 
 // makeHandler needs a minimally-viable ctx. The handler fn itself is never
@@ -121,7 +121,7 @@ test('toolsets accept an mcp:<server>:<tool> name', () => {
   assert.ok(resolved.includes('mcp:bootfs:read_file'));
 });
 
-// (b): `lazyclaw mcp list` exists, exits 0, and prints the configured servers
+// (b): `pompos mcp list` exists, exits 0, and prints the configured servers
 // from cfg.mcp.servers. Pre-fix the subcommand did not exist (exit 2).
 test('CLI: `mcp list` prints configured servers and exits 0', () => {
   const dir = tmpCfgDir();

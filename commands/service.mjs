@@ -1,5 +1,5 @@
-// commands/service.mjs — `lazyclaw service <install|uninstall|status|restart>`.
-// Wraps a lazyclaw long-running command as an always-on OS service via
+// commands/service.mjs — `pompos service <install|uninstall|status|restart>`.
+// Wraps a pompos long-running command as an always-on OS service via
 // lib/service_install.mjs (launchd / systemd / detached-fallback).
 //
 // v1 manages the DAEMON — the single always-on agent core. Once the channel
@@ -34,7 +34,7 @@ export function _buildSpec(surface, flags = {}, cfgDir = '', deps = {}) {
   const args = [deps.cliPath ? deps.cliPath() : cliPath(), surface];
   // Default the service to the well-known port the channel listeners dial
   // (the LAZYCLAW_DAEMON_URL default), so `service install` + `* listen`
-  // work together out of the box. Bare `lazyclaw daemon` still defaults to a
+  // work together out of the box. Bare `pompos daemon` still defaults to a
   // random port for ad-hoc / scripted use. Resolved the same way cmdService's
   // own EADDRINUSE warning below is, so the two never disagree.
   args.push('--port', String(resolvePort(surface, flags, deps.cfg)));
@@ -48,7 +48,7 @@ export function _buildSpec(surface, flags = {}, cfgDir = '', deps = {}) {
     args,
     workingDir: deps.cwd || process.cwd(),
     configDir: cfgDir,
-    description: `lazyclaw always-on ${surface}`,
+    description: `pompos always-on ${surface}`,
     env: { LAZYCLAW_CONFIG_DIR: cfgDir },
     backend: detectBackend({ override: flags.backend || null, hasSystemctl: hasSystemd }),
   };
@@ -84,7 +84,7 @@ export async function cmdService(sub, positional = [], flags = {}) {
       const r = installService(spec);
       emit({ ok: true, action: 'install', ...r });
       if (r.backend === 'fallback') {
-        process.stderr.write('note: no service manager detected — running detached with a pidfile. This survives the terminal but NOT a reboot. Re-run `lazyclaw service install` after reboot, or install launchd/systemd.\n');
+        process.stderr.write('note: no service manager detected — running detached with a pidfile. This survives the terminal but NOT a reboot. Re-run `pompos service install` after reboot, or install launchd/systemd.\n');
         // The detached child's fate is invisible (stdio ignored), so verify it
         // actually stayed up — a daemon that hit EADDRINUSE (port already in
         // use) exits within ~200ms. Surface that instead of a false "ok".
@@ -115,6 +115,6 @@ export async function cmdService(sub, positional = [], flags = {}) {
     process.exit(2);
   }
 
-  console.error('Usage: lazyclaw service <install|uninstall|status|restart> [daemon|gateway] [--port N] [--auth-token T] [--log LEVEL] [--channels a,b] [--backend launchd|systemd|fallback]');
+  console.error('Usage: pompos service <install|uninstall|status|restart> [daemon|gateway] [--port N] [--auth-token T] [--log LEVEL] [--channels a,b] [--backend launchd|systemd|fallback]');
   process.exit(2);
 }

@@ -141,7 +141,7 @@ test.describe('Phase 16 — polish: avatar, typing placeholder, transcript expor
     expect(JSON.parse(json).id).toBe('t_20260518_polish');
   });
 
-  test('lazyclaw task transcript prints the rendered text by default and JSON with --format json', async () => {
+  test('pompos task transcript prints the rendered text by default and JSON with --format json', async () => {
     const cfg = tmpDir('p16-cli-transcript');
     expect(runCli(['agent', 'add', 'planner'], cfg).status).toBe(0);
     expect(runCli(['team',  'add', 'shop',   '--agents', 'planner'], cfg).status).toBe(0);

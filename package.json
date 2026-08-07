@@ -1,5 +1,5 @@
 {
-  "name": "lazyclaw",
+  "name": "pompos",
   "version": "6.10.0",
   "description": "Lazy, elegant terminal CLI for chatting with Claude / OpenAI / Gemini / Ollama, orchestrating multi-step LLM workflows, and running multi-agent Slack teams with cross-task memory. Banner-on-launch, slash-command ghost autocomplete, persistent sessions, local HTTP gateway.",
   "keywords": [
@@ -28,6 +28,7 @@
   "type": "module",
   "main": "cli.mjs",
   "bin": {
+    "pompos": "cli.mjs",
     "lazyclaw": "cli.mjs"
   },
   "scripts": {

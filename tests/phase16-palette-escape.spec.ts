@@ -18,7 +18,7 @@
 // tests/phase16-dashboard-browser.spec.ts's pattern verbatim: the bare
 // `daemon` command needs an explicit --allow-origin (dashboard.js and every
 // /ui/*.mjs import send Origin even same-origin, per that file's comment),
-// unlike `lazyclaw dashboard` which sets allowLoopbackOrigin unconditionally.
+// unlike `pompos dashboard` which sets allowLoopbackOrigin unconditionally.
 //
 // The drawer only exists below the 820px breakpoint (web/dashboard.css's
 // `.burger { display: none }` / `@media (max-width: 820px) { .burger {

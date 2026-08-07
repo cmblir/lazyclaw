@@ -18,7 +18,7 @@ import { registerAgent } from '../agents.mjs';
 import { subscribe, _reset as _resetEvents } from '../mas/events.mjs';
 
 function tmpConfigDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-deleg-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-deleg-'));
 }
 
 // ── BUG 2: dispatchWorker must exist and be a function ──────────────────

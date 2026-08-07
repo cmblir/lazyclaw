@@ -25,7 +25,7 @@ const LIMIT = 500;
 
 // Directories we never lint (vendored, generated, or test fixtures that are
 // legitimately long).
-const SKIP_DIRS = new Set(['node_modules', 'tests', 'dist-lazyclaw', '.git']);
+const SKIP_DIRS = new Set(['node_modules', 'tests', 'dist-pompos', '.git']);
 
 // Ratchet allowlist: path (relative to repo root) -> max allowed lines.
 // Pinned to the size each file had when the gate landed; tighten as files

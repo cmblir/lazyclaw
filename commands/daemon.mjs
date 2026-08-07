@@ -8,7 +8,7 @@ import { resolvePort } from '../lib/ports.mjs';
 import { assertUnattendedSafe, installCrashHandlers } from '../lib/gateway_guard.mjs';
 import { isProcessAlive } from '../loops.mjs';
 
-// The bare `lazyclaw daemon` runs in the foreground, so a started daemon
+// The bare `pompos daemon` runs in the foreground, so a started daemon
 // records its pid + the actually-bound port here. status/stop read it back;
 // the start path writes it after bind and removes it on graceful shutdown.
 export function _daemonPidfilePath(configDir) {
@@ -178,7 +178,7 @@ export async function cmdDashboard(flags = {}) {
     }
   }
   const url = `http://127.0.0.1:${d.port}/dashboard`;
-  process.stdout.write(`🦞 LazyClaw dashboard listening at ${url}\n`);
+  process.stdout.write(`🦞 Pompos dashboard listening at ${url}\n`);
   if (!flags['no-open']) {
     // macOS uses `open`; Linux generally `xdg-open`; Windows
     // `cmd /c start`. Detect by platform; bail silently if the
@@ -223,8 +223,8 @@ export async function cmdDaemon(flags) {
   }
   if (sub === 'stop') {
     const r = daemonStop({ configDir: cfgDirEarly });
-    if (!r.running) process.stdout.write('lazyclaw daemon: not running\n');
-    else process.stdout.write(`lazyclaw daemon: stopped pid ${r.pid}${r.killed ? '' : ''}\n`);
+    if (!r.running) process.stdout.write('pompos daemon: not running\n');
+    else process.stdout.write(`pompos daemon: stopped pid ${r.pid}${r.killed ? '' : ''}\n`);
     process.exit(r.exitCode);
   }
   if (sub === 'logs') {
@@ -235,7 +235,7 @@ export async function cmdDaemon(flags) {
     const { servicePaths } = await import('../lib/service_install.mjs');
     const logfile = servicePaths('daemon', { configDir: cfgDirEarly }).logfile;
     if (fs.existsSync(logfile)) process.stdout.write(logfile + '\n');
-    else process.stdout.write(`No service logfile at ${logfile}.\nThe foreground daemon logs to stdout (run \`lazyclaw daemon --log info\`).\n`);
+    else process.stdout.write(`No service logfile at ${logfile}.\nThe foreground daemon logs to stdout (run \`pompos daemon --log info\`).\n`);
     process.exit(0);
   }
   await ensureRegistry();
@@ -289,7 +289,7 @@ export async function cmdDaemon(flags) {
   const costCapOrNull = Object.keys(costCap).length > 0 ? costCap : null;
   // Workflow state dir: --workflow-state-dir flag wins, then env, then
   // the CLI's default of `.workflow-state` (cwd-relative). Mirrors the
-  // CLI's `lazyclaw run --dir` resolution so `inspect` and the daemon
+  // CLI's `pompos run --dir` resolution so `inspect` and the daemon
   // see the same files.
   const workflowStateDirValue = flags['workflow-state-dir']
     || process.env.LAZYCLAW_WORKFLOW_STATE_DIR
@@ -301,7 +301,7 @@ export async function cmdDaemon(flags) {
       port: Number.isFinite(port) ? port : 0,
       once,
       readConfig,
-      // `lazyclaw daemon` exposes mutation endpoints (POST /providers,
+      // `pompos daemon` exposes mutation endpoints (POST /providers,
       // PUT /rates/<key>, etc.) only when an auth token is configured
       // — without one the daemon is loopback-only but still untrusted
       // (any process on the box can hit it). dashboard subcommand sets
@@ -317,20 +317,20 @@ export async function cmdDaemon(flags) {
       responseCache,
       logger,
       costCap: costCapOrNull,
-      // Same live model-list cache the dashboard gets — a bare `lazyclaw
+      // Same live model-list cache the dashboard gets — a bare `pompos
       // daemon` still serves GET /providers, so it should too.
       modelRefresh: true,
     });
   } catch (err) {
-    // `lazyclaw daemon` exits cleanly on EADDRINUSE with a readable
+    // `pompos daemon` exits cleanly on EADDRINUSE with a readable
     // message instead of the historical unhandled-error stack trace.
-    // Unlike `lazyclaw dashboard`, daemon doesn't auto-kill the prior
+    // Unlike `pompos dashboard`, daemon doesn't auto-kill the prior
     // listener — bare daemon callers are usually scripts that expect
     // exact port semantics, so we surface the failure and let them
     // choose (re-run with --port 0 for random, or kill the holdout).
     if (err?.code === 'EADDRINUSE') {
       process.stderr.write(
-        `lazyclaw daemon: port ${port} is in use.\n` +
+        `pompos daemon: port ${port} is in use.\n` +
         `  Re-run with --port 0 for a random port, or free the port:\n` +
         `    lsof -ti tcp:${port} | xargs kill -9\n`
       );

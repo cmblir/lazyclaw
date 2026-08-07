@@ -50,7 +50,7 @@ export async function providersList(c) {
 export async function providerGet(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
           // GET /providers/<name> — full per-provider metadata
-          // (mirrors CLI `lazyclaw providers info <name>`).
+          // (mirrors CLI `pompos providers info <name>`).
           // The `name !== 'test'` guard keeps `/providers/test`
           // (parallel batch endpoint) from being intercepted here;
           // switch-case order ensures the literal `GET /providers/test`
@@ -70,7 +70,7 @@ export async function providerGet(c) {
 
 export async function providersTest(c) {
   const { ctx, logger, metrics, gateway, costCap, cachedByName, gwConfigDir, nudgeSuggestionsRing, workflowStateDir, req, res, method, path, route, url, sessionMatch, providerMatch, providerTestMatch, sessionExportMatch, skillMatch, workflowMatch, configKeyMatch, ratesKeyMatch } = c;
-          // Mirror of CLI v3.55 `lazyclaw providers test` (no name).
+          // Mirror of CLI v3.55 `pompos providers test` (no name).
           // A dashboard's "key validity" badge calls this once and
           // gets a per-provider verdict in one round trip. HTTP
           // status mirrors CLI exit code:

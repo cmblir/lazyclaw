@@ -26,7 +26,7 @@ import {
 // ─── helpers ─────────────────────────────────────────────────────────────
 
 function tmpCfgDir() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-slash-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-slash-'));
 }
 
 function makeMockCtx(overrides = {}) {
@@ -139,7 +139,7 @@ test('/status reports provider, model, key, messages, session', async () => {
 test('/version returns version + node + platform', async () => {
   const ctx = makeMockCtx();
   const out = await dispatchSlash('/version', '', ctx);
-  assert.match(out, /^lazyclaw 5\.4\.0-test \(node /);
+  assert.match(out, /^pompos 5\.4\.0-test \(node /);
   assert.ok(out.includes(process.platform));
 });
 
@@ -465,7 +465,7 @@ test('/handoff without args returns usage', async () => {
 test('/handoff with args but no bound thread returns error', async () => {
   const ctx = makeMockCtx();
   // Ensure no stale replState from another test.
-  delete globalThis.__lazyclawReplState;
+  delete globalThis.__pomposReplState;
   const out = await dispatchSlash('/handoff', 'slack C123', ctx);
   assert.match(out, /handoff: no thread bound/);
 });
@@ -510,7 +510,7 @@ test('every command in SLASH_COMMANDS executes without throwing', async () => {
   for (const c of SLASH_COMMANDS) {
     const ctx = makeMockCtx();
     // /handoff would still resolve (returns usage), but ensure replState is clean.
-    delete globalThis.__lazyclawReplState;
+    delete globalThis.__pomposReplState;
     let out;
     try {
       out = await dispatchSlash(c.cmd, '', ctx, () => {});

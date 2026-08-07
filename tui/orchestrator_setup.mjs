@@ -48,7 +48,7 @@ export async function _setupOrchestratorInteractive() {
     };
   });
   const plannerPick = await _arrowMenu({
-    title: 'LazyClaw setup — Step 3 of 3:  orchestrator — pick the planner',
+    title: 'Pompos setup — Step 3 of 3:  orchestrator — pick the planner',
     subtitle: 'The planner decomposes the user request into subtasks and writes the final synthesis. Strong reasoning models work best here.',
     items: plannerItems,
     searchable: true,
@@ -78,7 +78,7 @@ export async function _setupOrchestratorInteractive() {
       { id: '__done__',   label: `Done${workers.length ? ` (${workers.length} worker${workers.length === 1 ? '' : 's'})` : ' — at least one worker required'}`, desc: workers.length ? 'save cfg.orchestrator and finish' : 'add one worker first' },
     ];
     const action = await _arrowMenu({
-      title: 'LazyClaw setup — orchestrator workers',
+      title: 'Pompos setup — orchestrator workers',
       subtitle: `Planner: ${planner}`,
       items,
     });

@@ -311,7 +311,7 @@ export class MatrixChannel extends Channel {
   // collide with a previous run's low counters.
   _nextTxnId() {
     this._txnCounter += 1;
-    return `lazyclaw-${this._txnCounter}-${Date.now()}`;
+    return `pompos-${this._txnCounter}-${Date.now()}`;
   }
 
   // Spin up the long-poll loop. Each iteration issues a single held-open

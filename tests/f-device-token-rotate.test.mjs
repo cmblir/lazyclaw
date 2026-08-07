@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PairingStore } from '../gateway/device_auth.mjs';
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-rot-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-rot-'));
 const approve = (store, deviceId, opts) => {
   const { requestId } = store.requestPairing({ deviceId, platform: 'cli', label: 'my-laptop' });
   return store.approve(requestId, opts);

@@ -76,7 +76,7 @@ export async function render(host) {
   host.append(phead('Approvals', 'Actions waiting on a human before an agent can proceed.'));
   host.append(banner('warn', '!', el('b', { text: 'Read-only in this release. ' }),
     'Resolving an approval is gated on a paired device’s Ed25519 token; the dashboard is not one yet. ',
-    'Approve from a paired device or with ', el('code', { text: 'lazyclaw nodes' }), '.'));
+    'Approve from a paired device or with ', el('code', { text: 'pompos nodes' }), '.'));
 
   const tbody = el('tbody', {});
   const tableWrap = el('div', { class: 'scroll' }, el('table', { class: 'tbl' },

@@ -1,7 +1,7 @@
 // tests/f-gateway-plugin-deps.test.mjs — the gateway runs the in-tree plugin
 // channels (discord/email/whatsapp/…), but their lazy `import('discord.js')`
-// resolved from lazyclaw's own node_modules, not the config dir where
-// `lazyclaw channels install` puts the dep — so an installed dep was never
+// resolved from pompos's own node_modules, not the config dir where
+// `pompos channels install` puts the dep — so an installed dep was never
 // found. And the factory was called with only { allowlist }, so email (no env
 // fallback) always threw IMAP_CONFIG_MISSING. These pin the dep-resolution and
 // credential threading.
