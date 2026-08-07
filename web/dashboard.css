@@ -562,14 +562,17 @@
       display: flex; align-items: center; justify-content: center; font-size: 24px;
       background: #1e2130; border: 3px solid #475569;
     }
+    /* The sprites are square (67x67) with the figure already centred, so plain
+       `center` is right. `center top` was needed only while the files had wildly
+       different aspect ratios and the top bias was the least-bad compromise. */
     .tagent-avatar img {
       position: absolute; inset: 0; width: 100%; height: 100%;
-      object-fit: cover; object-position: center top;
+      object-fit: cover; object-position: center;
       image-rendering: pixelated;
     }
     .detail-avatar {
       width: 30px; height: 30px; border-radius: 50%; object-fit: cover;
-      object-position: center top; image-rendering: pixelated; vertical-align: middle;
+      object-position: center; image-rendering: pixelated; vertical-align: middle;
       margin-right: 8px; background: #1e2130; border: 2px solid #475569;
     }
     .tagent.working .tagent-avatar { border-color: #34d399; box-shadow: 0 0 0 4px rgba(52,211,153,0.16); }
