@@ -28,6 +28,7 @@
   "type": "module",
   "main": "cli.mjs",
   "bin": {
+    "pompos": "cli.mjs",
     "lazyclaw": "cli.mjs"
   },
   "scripts": {
