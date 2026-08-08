@@ -1,0 +1,28 @@
+name: Deprecate lazyclaw on npm
+# One-shot, manual-only. The old unscoped package still installs silently at
+# 6.9.3; this stamps every version with a pointer to the renamed package so
+# `npm install -g lazyclaw` prints where development went. Runs from CI because
+# the only credential with publish rights lives in the NPM_TOKEN secret.
+# Delete this file after a successful run.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deprecate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Deprecate every lazyclaw version
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm deprecate lazyclaw "Renamed to @cmblir/pompos — install with: npm install -g @cmblir/pompos (the pompos and lazyclaw commands both keep working; an existing ~/.lazyclaw is picked up in place)"
+          echo "verifying:"
+          npm view lazyclaw deprecated
