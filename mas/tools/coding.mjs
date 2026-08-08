@@ -48,7 +48,7 @@ const python_exec = {
     required: ['code'],
   },
   async exec(args, ctx) {
-    const py = ctx?.python || process.env.LAZYCLAW_PYTHON || 'python3';
+    const py = ctx?.python || process.env.POMPOS_PYTHON || 'python3';
     return runProc(py, ['-c', args.code], {
       cwd: ctx?.cwd, timeoutMs: args.timeoutMs,
       sandbox: ctx?.sandbox, _spawnSandboxed: ctx?._spawnSandboxed,

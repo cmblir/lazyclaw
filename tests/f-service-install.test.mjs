@@ -238,7 +238,7 @@ test('cmdService._buildSpec: wraps `daemon` with flags + injects config dir', as
   assert.equal(gw.name, 'gateway');
   assert.equal(spec.configDir, '/cfg');
   assert.equal(spec.workingDir, '/w');
-  assert.equal(spec.env.LAZYCLAW_CONFIG_DIR, '/cfg');
+  assert.equal(spec.env.POMPOS_CONFIG_DIR, '/cfg');
   assert.equal(spec.name, 'daemon');
 });
 

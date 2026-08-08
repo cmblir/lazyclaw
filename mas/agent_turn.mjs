@@ -95,7 +95,7 @@ export async function runAgentTurn({
   // default-stamped record so every production agent turn lands in
   // trajectory_store. Two opt-outs exist for callers that don't want
   // disk side effects (tool-use unit tests, sandboxed harnesses):
-  //   - set process.env.LAZYCLAW_NO_TRAJECTORY='1'
+  //   - set process.env.POMPOS_NO_TRAJECTORY='1'
   //   - omit configDir (legacy unit-test surface — see _maybePersistTrajectory)
   trajectoryRef = { startedAt: Date.now() },
   // v5 (canonical decision C5) — when true, the system slot passed to
@@ -192,7 +192,7 @@ export async function runAgentTurn({
   if (trajectoryRef && typeof trajectoryRef === 'object' && !trajectoryRef.startedAt) trajectoryRef.startedAt = Date.now();
 
   const _maybePersistTrajectory = async (outcome) => {
-    if (process.env.LAZYCLAW_NO_TRAJECTORY === '1') return;
+    if (process.env.POMPOS_NO_TRAJECTORY === '1') return;
     if (!trajectoryRef) return;
     // Defence-in-depth: callers that don't pass configDir (legacy unit
     // tests of the tool-use loop) shouldn't see a side-effect on
@@ -355,7 +355,7 @@ export async function runAgentTurn({
     // We feed every tool error (denied/unknown/runtime) back to the
     // model so it can recover. Only an extraordinary error (e.g. the
     // provider returned a malformed envelope) bails out here.
-    if (toolErrored && process.env.LAZYCLAW_TOOL_STRICT === '1') {
+    if (toolErrored && process.env.POMPOS_TOOL_STRICT === '1') {
       await _maybePersistTrajectory('failed');
       return { text: lastText, iterations, stoppedBy: 'tool_error', toolCalls, usage: _usage() };
     }

@@ -11,6 +11,9 @@
 // never gets touched. --dry-run prints what would be removed without
 // hitting chat.delete.
 
+// Standalone entrypoint: cli.mjs's boot never runs here, so mirror the
+// POMPOS_*/POMPOS_* prefixes ourselves before anything reads them.
+import '../lib/env_compat_boot.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

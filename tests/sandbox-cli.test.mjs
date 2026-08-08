@@ -35,7 +35,7 @@ test('pompos sandbox status shows OFF when confine is disabled', () => {
   const dir = mkdtempSync(join(tmpdir(), 'lc-sbstatus-'));
   const cfgPath = join(dir, 'config.json');
   writeFileSync(cfgPath, JSON.stringify({ sandbox: { confine: false } }));
-  const r = run(['sandbox', 'status'], { LAZYCLAW_CONFIG: cfgPath });
+  const r = run(['sandbox', 'status'], { POMPOS_CONFIG: cfgPath });
   assert.equal(r.code, 0, r.stderr);
   assert.match(r.stdout, /confinement:\s*off/i);
 });
@@ -52,7 +52,7 @@ test('pompos sandbox add writes to a temp config dir', () => {
   writeFileSync(cfg, '{}');
   const r = run(
     ['sandbox', 'add', 'staging', '--kind', 'docker', '--image', 'alpine:3.20'],
-    { LAZYCLAW_CONFIG: cfg },
+    { POMPOS_CONFIG: cfg },
   );
   assert.equal(r.code, 0, r.stderr);
   const written = JSON.parse(readFileSync(cfg, 'utf8'));
@@ -66,7 +66,7 @@ test('pompos sandbox use selects a profile as default', () => {
   writeFileSync(cfg, JSON.stringify({
     sandbox: { profiles: { staging: { kind: 'docker', image: 'x' } } },
   }));
-  const r = run(['sandbox', 'use', 'staging'], { LAZYCLAW_CONFIG: cfg });
+  const r = run(['sandbox', 'use', 'staging'], { POMPOS_CONFIG: cfg });
   assert.equal(r.code, 0, r.stderr);
   const written = JSON.parse(readFileSync(cfg, 'utf8'));
   assert.equal(written.sandbox.default, 'docker');

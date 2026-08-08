@@ -20,7 +20,7 @@
 // singleton, so a mounted test that asserts on rendered ANSI colour needs
 // chalk.level forced too, or the colour never reaches the frame at all.
 //
-// And LAZYCLAW_NO_CURSOR_ANCHOR: forcing process.stdout.isTTY also opens the
+// And POMPOS_NO_CURSOR_ANCHOR: forcing process.stdout.isTTY also opens the
 // gate on the unrelated IME cursor-anchor effect in tui/editor.mjs, which —
 // unlike motionEnabled() — installs a PERMANENT monkey-patch on the real
 // process.stdout.write the first time it fires (tui/editor_anchor.mjs's
@@ -42,24 +42,24 @@ export async function withMotionForced(fn) {
     isTTY: process.stdout.isTTY,
     noColor: process.env.NO_COLOR,
     term: process.env.TERM,
-    noMotion: process.env.LAZYCLAW_NO_MOTION,
-    noAnchor: process.env.LAZYCLAW_NO_CURSOR_ANCHOR,
+    noMotion: process.env.POMPOS_NO_MOTION,
+    noAnchor: process.env.POMPOS_NO_CURSOR_ANCHOR,
     chalkLevel: chalk.level,
   };
   try {
     process.stdout.isTTY = true;
     delete process.env.NO_COLOR;
     process.env.TERM = 'xterm-256color';
-    delete process.env.LAZYCLAW_NO_MOTION;
-    process.env.LAZYCLAW_NO_CURSOR_ANCHOR = '1';
+    delete process.env.POMPOS_NO_MOTION;
+    process.env.POMPOS_NO_CURSOR_ANCHOR = '1';
     chalk.level = 3;
     return await fn();
   } finally {
     process.stdout.isTTY = saved.isTTY;
     if (saved.noColor === undefined) delete process.env.NO_COLOR; else process.env.NO_COLOR = saved.noColor;
     if (saved.term === undefined) delete process.env.TERM; else process.env.TERM = saved.term;
-    if (saved.noMotion === undefined) delete process.env.LAZYCLAW_NO_MOTION; else process.env.LAZYCLAW_NO_MOTION = saved.noMotion;
-    if (saved.noAnchor === undefined) delete process.env.LAZYCLAW_NO_CURSOR_ANCHOR; else process.env.LAZYCLAW_NO_CURSOR_ANCHOR = saved.noAnchor;
+    if (saved.noMotion === undefined) delete process.env.POMPOS_NO_MOTION; else process.env.POMPOS_NO_MOTION = saved.noMotion;
+    if (saved.noAnchor === undefined) delete process.env.POMPOS_NO_CURSOR_ANCHOR; else process.env.POMPOS_NO_CURSOR_ANCHOR = saved.noAnchor;
     chalk.level = saved.chalkLevel;
   }
 }

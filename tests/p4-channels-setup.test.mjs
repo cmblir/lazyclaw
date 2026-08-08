@@ -9,7 +9,7 @@ import { dispatchSlash } from '../tui/slash_dispatcher.mjs';
 
 function tmpCfgDir() {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lc-chsetup-'));
-  process.env.LAZYCLAW_CONFIG_DIR = d; // persistChannel's config write resolves this
+  process.env.POMPOS_CONFIG_DIR = d; // persistChannel's config write resolves this
   return d;
 }
 // Scripted openPicker: 'menu' kind returns the queued channel pick; 'text' kind

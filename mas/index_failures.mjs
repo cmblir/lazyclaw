@@ -44,8 +44,8 @@ export function _isNativeAbiError(e) {
 export function _warnIndexFailure(label, e) {
   // Index internals stay off the user's screen: recorded in index-failures.jsonl
   // (+ surfaced by `pompos doctor`); echoed to the console only when an
-  // operator sets LAZYCLAW_DEBUG. End users never see DB error codes.
-  if (!process.env.LAZYCLAW_DEBUG) return;
+  // operator sets POMPOS_DEBUG. End users never see DB error codes.
+  if (!process.env.POMPOS_DEBUG) return;
   if (_isNativeAbiError(e)) {
     if (_nativeHintShown) return;
     _nativeHintShown = true;

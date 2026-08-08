@@ -25,7 +25,7 @@ test('/config is registered in the slash catalog', () => {
 // fell through to `default:` ("unknown slash") and never set requestSetup —
 // making the post-loop `if (_legacyCtx.requestSetup) ... cmdSetup(...)` guard
 // dead code on any terminal that takes the legacy path (<60 cols, non-TTY,
-// LAZYCLAW_NO_INK=1, or any Ink failure). The legacy switch's /config case now
+// POMPOS_NO_INK=1, or any Ink failure). The legacy switch's /config case now
 // delegates to legacySlashRoute, so driving that exported helper exercises the
 // exact code the legacy path runs.
 test('legacy path: /config sets ctx.requestSetup and returns EXIT (breaks the loop)', () => {

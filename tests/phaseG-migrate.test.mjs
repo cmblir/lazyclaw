@@ -19,7 +19,7 @@ function setup(fixtureName) {
 
 function run(args, cfgDir) {
   return spawnSync(process.execPath, [CLI, ...args], {
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, LAZYCLAW_NO_INK: '1' },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, POMPOS_NO_INK: '1' },
     encoding: 'utf8',
   });
 }

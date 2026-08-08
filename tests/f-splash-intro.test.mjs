@@ -75,7 +75,7 @@ test('playSplashIntro writes nothing when motion is off', async () => {
   const played = await playSplashIntro({ version: '1.0.0' }, {
     write: (s) => writes.push(s),
     sleep: async () => {},
-    env: { LAZYCLAW_NO_MOTION: '1' },
+    env: { POMPOS_NO_MOTION: '1' },
     stream: { isTTY: true },
   });
   assert.equal(played, false);

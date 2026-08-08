@@ -26,7 +26,7 @@ test('openclaw import smoke', () => {
 
   const r = spawnSync(
     process.execPath, [CLI, 'openclaw', 'import', '--from', oc],
-    { env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, LAZYCLAW_NO_INK: '1' }, encoding: 'utf8' }
+    { env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, POMPOS_NO_INK: '1' }, encoding: 'utf8' }
   );
   assert.equal(r.status, 0, `stderr: ${r.stderr}\nstdout: ${r.stdout}`);
 

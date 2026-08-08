@@ -30,8 +30,8 @@ async function withDaemon(cfgDir, fn, cfgOverrides = {}) {
   };
   // Point all the per-module config-dir env vars at the tmp cfg so
   // sessions / skills / agents land inside the sandbox.
-  const prevEnv = process.env.LAZYCLAW_CONFIG_DIR;
-  process.env.LAZYCLAW_CONFIG_DIR = cfgDir;
+  const prevEnv = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = cfgDir;
   const d = await startDaemon({
     readConfig,
     writeConfig,
@@ -45,8 +45,8 @@ async function withDaemon(cfgDir, fn, cfgOverrides = {}) {
     await fn({ base, cfgDir, readConfig, writeConfig });
   } finally {
     await d.close();
-    if (prevEnv === undefined) delete process.env.LAZYCLAW_CONFIG_DIR;
-    else process.env.LAZYCLAW_CONFIG_DIR = prevEnv;
+    if (prevEnv === undefined) delete process.env.POMPOS_CONFIG_DIR;
+    else process.env.POMPOS_CONFIG_DIR = prevEnv;
   }
 }
 

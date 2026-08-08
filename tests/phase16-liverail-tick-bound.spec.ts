@@ -87,7 +87,7 @@ async function startDaemon(cfgDir: string, stateDir: string): Promise<Daemon> {
     CLI, 'daemon', '--port', String(port), '--allow-origin', `http://127.0.0.1:${port}`,
     '--workflow-state-dir', stateDir,
   ], {
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir }, stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir }, stdio: ['ignore', 'pipe', 'pipe'],
   }) as ChildProcessWithoutNullStreams;
   let bound = 0; let buf = '';
   child.stdout.on('data', (d) => {

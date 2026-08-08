@@ -16,21 +16,21 @@ function mkTmpDir() {
 
 test('readConfig returns {} when config.json is missing (fresh install)', () => {
   const dir = mkTmpDir();
-  const prev = process.env.LAZYCLAW_CONFIG_DIR;
-  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  const prev = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
   try {
     assert.deepEqual(readConfig(), {});
   } finally {
-    if (prev === undefined) delete process.env.LAZYCLAW_CONFIG_DIR;
-    else process.env.LAZYCLAW_CONFIG_DIR = prev;
+    if (prev === undefined) delete process.env.POMPOS_CONFIG_DIR;
+    else process.env.POMPOS_CONFIG_DIR = prev;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test('readConfig fails loudly (does NOT return {}) on a corrupt config.json and leaves the file intact', () => {
   const dir = mkTmpDir();
-  const prev = process.env.LAZYCLAW_CONFIG_DIR;
-  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  const prev = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
   const p = path.join(dir, 'config.json');
   // A real-world typo: trailing comma + unquoted value. Carries recoverable
   // settings (provider/key) that must NOT be silently dropped or overwritten.
@@ -70,8 +70,8 @@ test('readConfig fails loudly (does NOT return {}) on a corrupt config.json and 
       'corrupt config.json bytes must be unchanged after readConfig');
   } finally {
     process.stderr.write = origErr;
-    if (prev === undefined) delete process.env.LAZYCLAW_CONFIG_DIR;
-    else process.env.LAZYCLAW_CONFIG_DIR = prev;
+    if (prev === undefined) delete process.env.POMPOS_CONFIG_DIR;
+    else process.env.POMPOS_CONFIG_DIR = prev;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

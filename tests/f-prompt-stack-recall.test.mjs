@@ -52,8 +52,8 @@ test('runAgentTurn (usePromptStack) injects recalled context for the user messag
     capturedBody = opts?.body;
     return { ok: true, json: async () => ({ choices: [{ finish_reason: 'stop', message: { content: 'ok' } }] }) };
   };
-  const prev = process.env.LAZYCLAW_NO_TRAJECTORY;
-  process.env.LAZYCLAW_NO_TRAJECTORY = '1';
+  const prev = process.env.POMPOS_NO_TRAJECTORY;
+  process.env.POMPOS_NO_TRAJECTORY = '1';
   try {
     await runAgentTurn({
       agent: { provider: 'openai', model: 'gpt-4', role: 'helper', tools: [] },
@@ -63,7 +63,7 @@ test('runAgentTurn (usePromptStack) injects recalled context for the user messag
       fetchImpl, apiKey: 'k',
     });
   } finally {
-    if (prev === undefined) delete process.env.LAZYCLAW_NO_TRAJECTORY; else process.env.LAZYCLAW_NO_TRAJECTORY = prev;
+    if (prev === undefined) delete process.env.POMPOS_NO_TRAJECTORY; else process.env.POMPOS_NO_TRAJECTORY = prev;
   }
   assert.ok(capturedBody, 'the adapter made a request');
   assert.match(String(capturedBody), /Relevant recalled context/, 'recall layer reached the system prompt');

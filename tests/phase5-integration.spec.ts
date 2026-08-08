@@ -19,7 +19,7 @@ test('phase 5 — full integration: configure → run with AI node → kill → 
   // Configure provider via CLI.
   const setProv = spawnSync(process.execPath, [CLI, 'config', 'set', 'provider', 'mock'], {
     encoding: 'utf8',
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir },
   });
   expect(setProv.status).toBe(0);
 

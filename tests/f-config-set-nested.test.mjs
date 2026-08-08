@@ -15,8 +15,8 @@ import { cmdConfigSet } from '../commands/config.mjs';
 
 function withTmpConfig(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-cfg-set-'));
-  const prev = process.env.LAZYCLAW_CONFIG_DIR;
-  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  const prev = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
   // cmdConfigSet logs a JSON line on success; swallow it to keep test output clean.
   const origLog = console.log;
   console.log = () => {};
@@ -24,8 +24,8 @@ function withTmpConfig(fn) {
     fn(dir);
   } finally {
     console.log = origLog;
-    if (prev === undefined) delete process.env.LAZYCLAW_CONFIG_DIR;
-    else process.env.LAZYCLAW_CONFIG_DIR = prev;
+    if (prev === undefined) delete process.env.POMPOS_CONFIG_DIR;
+    else process.env.POMPOS_CONFIG_DIR = prev;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }

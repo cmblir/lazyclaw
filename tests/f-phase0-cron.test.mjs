@@ -4,8 +4,8 @@
 // which cron.mjs never exported, so every tool call hit the "cron.add missing"
 // fallback. This exercises the tools against the REAL cron.mjs backend (no
 // injected fake) and asserts a job round-trips: add -> list shows it -> remove
-// drops it. LAZYCLAW_CONFIG_DIR isolates config.json to a temp dir and
-// LAZYCLAW_SKIP_CRON_INSTALL keeps the test off the real launchd/crontab.
+// drops it. POMPOS_CONFIG_DIR isolates config.json to a temp dir and
+// POMPOS_SKIP_CRON_INSTALL keeps the test off the real launchd/crontab.
 //
 // BUG 2: scheduled goal ticks stored command=["pompos",...], but launchd /
 // crontab run with a minimal PATH and no shell, so the bare "pompos" token
@@ -38,10 +38,10 @@ function intervalsOf(xml) {
 
 test('cron tools round-trip against the REAL cron.mjs backend (add -> list -> remove)', async () => {
   const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lc-f0cron-'));
-  const prevDir = process.env.LAZYCLAW_CONFIG_DIR;
-  const prevSkip = process.env.LAZYCLAW_SKIP_CRON_INSTALL;
-  process.env.LAZYCLAW_CONFIG_DIR = cfgDir;
-  process.env.LAZYCLAW_SKIP_CRON_INSTALL = '1';
+  const prevDir = process.env.POMPOS_CONFIG_DIR;
+  const prevSkip = process.env.POMPOS_SKIP_CRON_INSTALL;
+  process.env.POMPOS_CONFIG_DIR = cfgDir;
+  process.env.POMPOS_SKIP_CRON_INSTALL = '1';
   try {
     // Fresh import so the module is not carrying an injected fake backend.
     const sched = await import(`../mas/tools/scheduling.mjs?real=${Date.now()}`);
@@ -66,8 +66,8 @@ test('cron tools round-trip against the REAL cron.mjs backend (add -> list -> re
     const listAfter = await list.exec({});
     assert.ok(!listAfter.jobs.some((j) => j.name === 'morning'), 'removed job must be gone');
   } finally {
-    if (prevDir === undefined) delete process.env.LAZYCLAW_CONFIG_DIR; else process.env.LAZYCLAW_CONFIG_DIR = prevDir;
-    if (prevSkip === undefined) delete process.env.LAZYCLAW_SKIP_CRON_INSTALL; else process.env.LAZYCLAW_SKIP_CRON_INSTALL = prevSkip;
+    if (prevDir === undefined) delete process.env.POMPOS_CONFIG_DIR; else process.env.POMPOS_CONFIG_DIR = prevDir;
+    if (prevSkip === undefined) delete process.env.POMPOS_SKIP_CRON_INSTALL; else process.env.POMPOS_SKIP_CRON_INSTALL = prevSkip;
     fs.rmSync(cfgDir, { recursive: true, force: true });
   }
 });
@@ -88,8 +88,8 @@ test('resolveCommand leaves an already-absolute command untouched', () => {
 });
 
 test('attachGoalCron persists the LOGICAL command; resolution to absolute happens at install time', async () => {
-  const prevSkip = process.env.LAZYCLAW_SKIP_CRON_INSTALL;
-  process.env.LAZYCLAW_SKIP_CRON_INSTALL = '1';
+  const prevSkip = process.env.POMPOS_SKIP_CRON_INSTALL;
+  process.env.POMPOS_SKIP_CRON_INSTALL = '1';
   let store = {};
   const readConfig = () => JSON.parse(JSON.stringify(store));
   const writeConfig = (c) => { store = JSON.parse(JSON.stringify(c)); };
@@ -108,7 +108,7 @@ test('attachGoalCron persists the LOGICAL command; resolution to absolute happen
     assert.ok(resolved[1].endsWith('cli.mjs'), 'resolved command must carry the CLI entry');
     assert.ok(!resolved.includes('pompos'), 'bare "pompos" token gone after resolution');
   } finally {
-    if (prevSkip === undefined) delete process.env.LAZYCLAW_SKIP_CRON_INSTALL; else process.env.LAZYCLAW_SKIP_CRON_INSTALL = prevSkip;
+    if (prevSkip === undefined) delete process.env.POMPOS_SKIP_CRON_INSTALL; else process.env.POMPOS_SKIP_CRON_INSTALL = prevSkip;
   }
 });
 

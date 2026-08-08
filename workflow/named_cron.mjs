@@ -4,7 +4,7 @@
 // command is `pompos workflow run <name>`, so the OS scheduler fires the
 // stored workflow on its schedule (no resident daemon loop). The job runs the
 // def and posts its reply to the bound channel (commands/workflow_named.mjs).
-// LAZYCLAW_SKIP_CRON_INSTALL writes the config but skips the backend install,
+// POMPOS_SKIP_CRON_INSTALL writes the config but skips the backend install,
 // so the wiring is unit-testable with no real launchd/crontab.
 //
 // Note: launchd/crontab do NOT capture the shell env, so a scheduled run that
@@ -24,7 +24,7 @@ export function attachWorkflowCron(name, schedule, deps = {}) {
   const cmd = ['pompos', 'workflow', 'run', name];
   cron.upsertJob(cfg, jobName, schedule, cmd);
   writeConfig(cfg);
-  if (process.env.LAZYCLAW_SKIP_CRON_INSTALL) return { jobName, skipped: true };
+  if (process.env.POMPOS_SKIP_CRON_INSTALL) return { jobName, skipped: true };
   const backend = cron.pickBackend();
   if (backend === 'launchd') cron.installLaunchdJob(jobName, schedule, cmd);
   else cron.installCrontabJob(jobName, schedule, cmd);
@@ -40,7 +40,7 @@ export function detachWorkflowCron(name, deps = {}) {
   if (!cfg.cron || !cfg.cron[jobName]) return false;
   cron.removeJob(cfg, jobName);
   writeConfig(cfg);
-  if (process.env.LAZYCLAW_SKIP_CRON_INSTALL) return true;
+  if (process.env.POMPOS_SKIP_CRON_INSTALL) return true;
   const backend = cron.pickBackend();
   try {
     if (backend === 'launchd') cron.uninstallLaunchdJob(jobName);

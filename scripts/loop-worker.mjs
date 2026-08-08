@@ -15,13 +15,16 @@
 //   --provider <name>
 //   --until <regex>
 //   --session-existing <id>      reuse the named chat session
-//   --cfg-dir <path>             override LAZYCLAW_CONFIG_DIR
+//   --cfg-dir <path>             override POMPOS_CONFIG_DIR
 //   --model <name>               provider-specific model name
 //
 // LC_FAIL_AT_ITER=<N> is honored as a test hook: exits with code 7 just
 // before iteration N's provider call. Used by phase 2 spec to assert
 // the `failed` meta status path.
 
+// Standalone entrypoint: cli.mjs's boot never runs here, so mirror the
+// POMPOS_*/POMPOS_* prefixes ourselves before anything reads them.
+import '../lib/env_compat_boot.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -56,7 +59,7 @@ if (!loopId) {
 }
 
 if (args['cfg-dir']) {
-  process.env.LAZYCLAW_CONFIG_DIR = args['cfg-dir'];
+  process.env.POMPOS_CONFIG_DIR = args['cfg-dir'];
 }
 
 const loops = await import(path.join(REPO_ROOT, 'loops.mjs'));
@@ -66,11 +69,11 @@ const registryUrl = path.join(REPO_ROOT, 'providers', 'registry.mjs');
 const { PROVIDERS } = await import(registryUrl);
 const { readConfig, _resolveAuthKey } = await import(path.join(REPO_ROOT, 'lib', 'config.mjs'));
 
-const cfgDir = process.env.LAZYCLAW_CONFIG_DIR || loops.defaultConfigDir();
+const cfgDir = process.env.POMPOS_CONFIG_DIR || loops.defaultConfigDir();
 const sessionId = args['session-existing'] || `loop:${loopId}`;
 
 // Resolve the auth key the SAME way the foreground loop does — the worker used
-// process.env.LAZYCLAW_API_KEY||'' and so failed auth against anthropic/openai.
+// process.env.POMPOS_API_KEY||'' and so failed auth against anthropic/openai.
 const cfg = readConfig();
 
 const provName = args.provider || 'mock';

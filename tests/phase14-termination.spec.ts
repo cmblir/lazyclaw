@@ -16,14 +16,14 @@ function tmpDir(prefix: string): string {
 function runCli(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...env },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...env },
   });
 }
 
 function runCliAsync(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}): Promise<{ status: number | null, stdout: string, stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...env },
+      env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '', stderr = '';
@@ -152,12 +152,12 @@ test.describe('Phase 14 — termination policies', () => {
     expect(runCli(['auth',  'use', 'anthropic', 'm'], cfg).status).toBe(0);
     const open = JSON.parse(runCli(['task', 'start', '--team', 'shop', '--title', 'x'], cfg).stdout);
 
-    const r = await runCliAsync(['task', 'tick', open.id, 'go'], cfg, { LAZYCLAW_ANTHROPIC_BASE_URL: mock.baseUrl });
+    const r = await runCliAsync(['task', 'tick', open.id, 'go'], cfg, { POMPOS_ANTHROPIC_BASE_URL: mock.baseUrl });
     expect(r.status).toBe(0);
     expect(JSON.parse(r.stdout).stoppedBy).toBe('done');
 
     // A second tick after termination must exit non-zero with ROUTER_CLOSED.
-    const r2 = await runCliAsync(['task', 'tick', open.id, 'more'], cfg, { LAZYCLAW_ANTHROPIC_BASE_URL: mock.baseUrl });
+    const r2 = await runCliAsync(['task', 'tick', open.id, 'more'], cfg, { POMPOS_ANTHROPIC_BASE_URL: mock.baseUrl });
     expect(r2.status).toBe(2);
     expect(r2.stderr).toMatch(/ROUTER_CLOSED|done — cannot run/);
     await mock.close();
@@ -185,7 +185,7 @@ test.describe('Phase 14 — termination policies', () => {
     // Tick once to take a budget hit, then abandon, then verify a third
     // tick is refused. The first tick uses --max-turns 1 so we don't
     // need to feed a long mock queue.
-    const t1 = await runCliAsync(['task', 'tick', open.id, 'go', '--max-turns', '1'], cfg, { LAZYCLAW_ANTHROPIC_BASE_URL: mock.baseUrl });
+    const t1 = await runCliAsync(['task', 'tick', open.id, 'go', '--max-turns', '1'], cfg, { POMPOS_ANTHROPIC_BASE_URL: mock.baseUrl });
     expect(t1.status).toBe(0);
     expect(JSON.parse(t1.stdout).stoppedBy).toBe('budget');
 
@@ -193,7 +193,7 @@ test.describe('Phase 14 — termination policies', () => {
     expect(ab.status).toBe(0);
     expect(JSON.parse(ab.stdout).status).toBe('abandoned');
 
-    const t2 = await runCliAsync(['task', 'tick', open.id, 'more'], cfg, { LAZYCLAW_ANTHROPIC_BASE_URL: mock.baseUrl });
+    const t2 = await runCliAsync(['task', 'tick', open.id, 'more'], cfg, { POMPOS_ANTHROPIC_BASE_URL: mock.baseUrl });
     expect(t2.status).toBe(2);
     expect(t2.stderr).toMatch(/abandoned/);
     await mock.close();
@@ -221,7 +221,7 @@ test.describe('Phase 14 — termination policies', () => {
     expect(runCli(['auth',  'use', 'anthropic', 'm'], cfg).status).toBe(0);
     const open = JSON.parse(runCli(['task', 'start', '--team', 'shop', '--title', 'forever'], cfg).stdout);
 
-    const r = await runCliAsync(['task', 'tick', open.id, 'spin', '--max-turns', '4'], cfg, { LAZYCLAW_ANTHROPIC_BASE_URL: mock.baseUrl });
+    const r = await runCliAsync(['task', 'tick', open.id, 'spin', '--max-turns', '4'], cfg, { POMPOS_ANTHROPIC_BASE_URL: mock.baseUrl });
     expect(r.status).toBe(0);
     const summary = JSON.parse(r.stdout);
     expect(summary.stoppedBy).toBe('budget');
@@ -252,7 +252,7 @@ test.describe('Phase 14 — termination policies', () => {
     expect(runCli(['auth',  'use', 'anthropic', 'm'], cfg).status).toBe(0);
     const open = JSON.parse(runCli(['task', 'start', '--team', 'shop', '--title', 'quiet'], cfg).stdout);
 
-    const r = await runCliAsync(['task', 'tick', open.id, 'go'], cfg, { LAZYCLAW_ANTHROPIC_BASE_URL: mock.baseUrl });
+    const r = await runCliAsync(['task', 'tick', open.id, 'go'], cfg, { POMPOS_ANTHROPIC_BASE_URL: mock.baseUrl });
     expect(r.status).toBe(0);
     expect(JSON.parse(r.stdout).stoppedBy).toBe('idle');
     // Idle is a pause, not a failure → 'paused' (resumable via `task tick`).

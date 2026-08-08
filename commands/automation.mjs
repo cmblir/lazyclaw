@@ -192,7 +192,7 @@ export async function cmdLoop(prompt, flags = {}) {
     const child = spawn(process.execPath, argv, {
       detached: true,
       stdio: 'ignore',
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir },
     });
     child.unref();
     loopsMod.patchMeta(loopId, { pid: child.pid, pgid: child.pid, status: 'running' }, cfgDir);
@@ -275,7 +275,7 @@ export { cmdLoops } from './automation_loops.mjs';
 // Install (or refresh) the system scheduler entry that fires
 // `lazyclaw goal tick <name>` on a schedule. Writes to cfg.cron and to
 // the OS backend (launchd / crontab). Tests set
-// LAZYCLAW_SKIP_CRON_INSTALL=1 to skip the OS-side mutation but keep
+// POMPOS_SKIP_CRON_INSTALL=1 to skip the OS-side mutation but keep
 // the config-side wiring so `cron list` still reflects the entry.
 export async function _attachGoalCron(name, schedule) {
   const cron = await import('../cron.mjs');
@@ -377,12 +377,12 @@ export async function cmdGoal(sub, positional, flags = {}) {
       if (!g) {
         // No goal file at all — exit 0 silently. The scheduler may be
         // chasing a deleted goal; we don't want to noisy-log the cron
-        // path. Setting LAZYCLAW_DEBUG=1 surfaces it.
-        if (process.env.LAZYCLAW_DEBUG) console.error(`tick: no goal "${name}"`);
+        // path. Setting POMPOS_DEBUG=1 surfaces it.
+        if (process.env.POMPOS_DEBUG) console.error(`tick: no goal "${name}"`);
         return;
       }
       if (g.status !== 'active') {
-        if (process.env.LAZYCLAW_DEBUG) console.error(`tick: goal "${name}" is ${g.status}, skipping`);
+        if (process.env.POMPOS_DEBUG) console.error(`tick: goal "${name}" is ${g.status}, skipping`);
         return;
       }
       await ensureRegistry();

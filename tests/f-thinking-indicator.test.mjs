@@ -121,12 +121,12 @@ test('ReplApp: thinking… shows between submit and the first chunk, and goes aw
 // ─── Alt-buffer wiring guard ────────────────────────────────────────────
 //
 // tui/repl.mjs renders <Thinking/> a SECOND time, in the alt-buffer layout
-// arm (the branch taken when LAZYCLAW_ALT=1), ahead of the non-alt copy the
+// arm (the branch taken when POMPOS_ALT=1), ahead of the non-alt copy the
 // test above pins. Nothing else in this suite ever exercises that arm —
-// tests/helpers/repl_harness.mjs deletes LAZYCLAW_ALT by default to pin the
+// tests/helpers/repl_harness.mjs deletes POMPOS_ALT by default to pin the
 // non-alt layout — so that copy was unpinned: deleting only the alt-buffer
 // call leaves the whole suite green. mountRepl's `alt: true` option (added
-// alongside this test) sets LAZYCLAW_ALT=1 instead of deleting it, which is
+// alongside this test) sets POMPOS_ALT=1 instead of deleting it, which is
 // what computeAltEnabled (tui/repl_altbuffer.mjs) reads to pick the alt arm.
 //
 // Uses the vt_screen model rather than a raw substring check on h.bytes so

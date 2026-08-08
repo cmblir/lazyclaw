@@ -5,7 +5,7 @@
 // recording the cron string and telling the user to re-run from the CLI.
 // Dependency-injected on readConfig / writeConfig and the cron module so the
 // core unit-tests with a fake cron and no real launchd/crontab writes.
-// `LAZYCLAW_SKIP_CRON_INSTALL` skips the backend install (config still written).
+// `POMPOS_SKIP_CRON_INSTALL` skips the backend install (config still written).
 
 export async function attachGoalCron({ readConfig, writeConfig, cron, name, schedule }) {
   cron.parseCronSpec(schedule); // validate before touching state
@@ -19,7 +19,7 @@ export async function attachGoalCron({ readConfig, writeConfig, cron, name, sche
   const cmd = ['pompos', 'goal', 'tick', name];
   cron.upsertJob(cfg, jobName, schedule, cmd);
   writeConfig(cfg);
-  if (process.env.LAZYCLAW_SKIP_CRON_INSTALL) return { jobName, skipped: true };
+  if (process.env.POMPOS_SKIP_CRON_INSTALL) return { jobName, skipped: true };
   const backend = cron.pickBackend();
   if (backend === 'launchd') cron.installLaunchdJob(jobName, schedule, cmd);
   else cron.installCrontabJob(jobName, schedule, cmd);
@@ -44,7 +44,7 @@ export async function runGoalTick({ name, withGoalLock, runTick, lockOpts }) {
   if (outcome && outcome.skipped) {
     // Overlap: another tick for this goal is in flight. Log + skip so the
     // scheduler does not crash and no interleaved check-in lands.
-    if (process.env.LAZYCLAW_DEBUG) {
+    if (process.env.POMPOS_DEBUG) {
       const holderPid = outcome.holder && outcome.holder.pid;
       console.error(`goal tick "${name}" skipped: another tick is running${holderPid ? ` (pid ${holderPid})` : ''}`);
     }
@@ -59,7 +59,7 @@ export async function detachGoalCron({ readConfig, writeConfig, cron, name }) {
   if (!cfg.cron || !cfg.cron[jobName]) return false;
   cron.removeJob(cfg, jobName);
   writeConfig(cfg);
-  if (process.env.LAZYCLAW_SKIP_CRON_INSTALL) return true;
+  if (process.env.POMPOS_SKIP_CRON_INSTALL) return true;
   const backend = cron.pickBackend();
   try {
     if (backend === 'launchd') cron.uninstallLaunchdJob(jobName);

@@ -16,7 +16,7 @@ import { PairingStore } from '../gateway/device_auth.mjs';
 
 const CLI = fileURLToPath(new URL('../cli.mjs', import.meta.url));
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-noderot-'));
-const runCli = (args, dir) => spawnSync(process.execPath, [CLI, ...args], { env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir }, encoding: 'utf8' });
+const runCli = (args, dir) => spawnSync(process.execPath, [CLI, ...args], { env: { ...process.env, POMPOS_CONFIG_DIR: dir }, encoding: 'utf8' });
 
 test('nodes rotate re-issues a token without printing it; the old token is revoked', () => {
   const dir = tmp();

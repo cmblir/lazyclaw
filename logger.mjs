@@ -4,7 +4,7 @@
 // is the de-facto observability format (jq-friendly, ingestible by every
 // log shipper) and an 80-line module covers our needs.
 //
-// Levels: debug < info < warn < error. Setting LAZYCLAW_LOG_LEVEL=warn
+// Levels: debug < info < warn < error. Setting POMPOS_LOG_LEVEL=warn
 // silences info+debug. The default (info) keeps user-meaningful events
 // without per-request noise; the daemon's access log lives at info so
 // it's on by default once the logger is wired.

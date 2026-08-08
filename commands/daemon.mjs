@@ -128,10 +128,10 @@ export async function cmdDashboard(flags = {}) {
     sessionsDirGetter: () => cfgDir,
     sessionsMod,
     version: () => readVersionFromRepo(),
-    workflowStateDir: () => process.env.LAZYCLAW_WORKFLOW_STATE_DIR || '.workflow-state',
+    workflowStateDir: () => process.env.POMPOS_WORKFLOW_STATE_DIR || '.workflow-state',
     // No auth token by default — same loopback-only assumption the
     // bare daemon uses. Users who want to expose the dashboard set
-    // LAZYCLAW_AUTH_TOKEN + --allow-origin via the daemon command.
+    // POMPOS_AUTH_TOKEN + --allow-origin via the daemon command.
     authToken: undefined,
     allowedOrigins: [],
     // The dashboard's browser tab posts back to the same loopback URL
@@ -247,13 +247,13 @@ export async function cmdDaemon(flags) {
   // --auth-token wins over the env var so a per-invocation override works.
   // When neither is set, the daemon runs unauthenticated (the historical
   // single-user-loopback default).
-  const authToken = flags['auth-token'] || process.env.LAZYCLAW_AUTH_TOKEN || null;
+  const authToken = flags['auth-token'] || process.env.POMPOS_AUTH_TOKEN || null;
   // --allow-origin accepts a comma-separated list (also reads
-  // LAZYCLAW_ALLOW_ORIGINS env). When neither is set, any request that
+  // POMPOS_ALLOW_ORIGINS env). When neither is set, any request that
   // carries an `Origin` header is rejected with 403 — the browser-CSRF
   // / DNS-rebinding default. CLI/script callers don't send Origin so
   // they're unaffected.
-  const originSrc = flags['allow-origin'] || process.env.LAZYCLAW_ALLOW_ORIGINS || '';
+  const originSrc = flags['allow-origin'] || process.env.POMPOS_ALLOW_ORIGINS || '';
   const allowedOrigins = String(originSrc).split(',').map(s => s.trim()).filter(Boolean);
   // --rate-limit <capacity> sets a token-bucket cap per remote IP.
   // refillPerSec defaults to capacity/60 so the bucket sustains the
@@ -268,10 +268,10 @@ export async function cmdDaemon(flags) {
   // the shared map so the cache state actually persists.
   const responseCache = flags['response-cache'] ? true : null;
   // --log <level> enables structured access logging. Also reads
-  // LAZYCLAW_LOG_LEVEL. When set, every request emits a JSON line on
+  // POMPOS_LOG_LEVEL. When set, every request emits a JSON line on
   // stderr at info level: {ts, level, msg:'access', method, path, status,
   // durationMs, remote}. Default is silent.
-  const logLevel = flags.log || process.env.LAZYCLAW_LOG_LEVEL || null;
+  const logLevel = flags.log || process.env.POMPOS_LOG_LEVEL || null;
   const { createLogger } = await import('../logger.mjs');
   const logger = logLevel ? createLogger({ level: logLevel }) : null;
   // Cost cap parsing: any --cost-cap-<currency> <amount> flag pair
@@ -292,7 +292,7 @@ export async function cmdDaemon(flags) {
   // CLI's `pompos run --dir` resolution so `inspect` and the daemon
   // see the same files.
   const workflowStateDirValue = flags['workflow-state-dir']
-    || process.env.LAZYCLAW_WORKFLOW_STATE_DIR
+    || process.env.POMPOS_WORKFLOW_STATE_DIR
     || '.workflow-state';
   const cfgDir = path.dirname(configPath());
   let d;

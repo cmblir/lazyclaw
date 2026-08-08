@@ -11,7 +11,7 @@ import {
 } from '../lib/config.mjs';
 import { ensureRegistry, requireRegistry, getRegistry } from '../lib/registry_boot.mjs';
 import { SUBCOMMANDS, parseArgs, AGENT_REG_SUBS } from '../lib/args.mjs';
-import { LAZYCLAW_META_GUARD } from '../lib/nl_config_command.mjs';
+import { POMPOS_META_GUARD } from '../lib/nl_config_command.mjs';
 import {
   _attachGhostAutocomplete, _fetchModelsForProvider,
   _pickProviderInteractive, _printChatBanner,
@@ -59,7 +59,7 @@ export async function cmdChat(flags = {}) {
   });
   if (_mode === 'setup') {
     try { await (await import('./setup.mjs')).cmdSetup(undefined, [], {}); }
-    catch (e) { if (process.env.LAZYCLAW_DEBUG) console.error('[setup] fell through:', e?.message); }
+    catch (e) { if (process.env.POMPOS_DEBUG) console.error('[setup] fell through:', e?.message); }
     // Re-read the config the wizard just wrote so this session uses it.
     cfg = readConfig();
     activeProvName = cfg.provider || activeProvName;
@@ -97,9 +97,9 @@ export async function cmdChat(flags = {}) {
   // Top-of-session banner so the user can see at a glance what they're
   // talking to. Cheap (no provider call) and TTY-only.
   // v5 ink splash + REPL when stdin is a real TTY and the user has not
-  // opted out via LAZYCLAW_NO_INK=1. Non-TTY pipelines and the opt-out
+  // opted out via POMPOS_NO_INK=1. Non-TTY pipelines and the opt-out
   // env var fall through to the v4 figlet + readline path unchanged.
-  const __useInkSplash = process.stdout.isTTY && !process.env.LAZYCLAW_NO_INK;
+  const __useInkSplash = process.stdout.isTTY && !process.env.POMPOS_NO_INK;
   if (__useInkSplash) {
     try {
       const React = (await import('react')).default;
@@ -174,7 +174,7 @@ export async function cmdChat(flags = {}) {
       }
       // Always send the base guard system prompt (even on a fresh install).
       if (!_inkMessages.some((m) => m.role === 'system')) {
-        const merged = [..._inkSysParts, LAZYCLAW_META_GUARD].join('\n\n---\n\n');
+        const merged = [..._inkSysParts, POMPOS_META_GUARD].join('\n\n---\n\n');
         _inkMessages.unshift({ role: 'system', content: merged });
         if (_inkSessionId) sessionsMod.appendTurn(_inkSessionId, 'system', merged, _inkCfgDir);
       }
@@ -456,7 +456,7 @@ export async function cmdChat(flags = {}) {
     }
   }
   if (!messages.some(m => m.role === 'system')) {
-    const merged = [...sysParts, LAZYCLAW_META_GUARD].join('\n\n---\n\n');
+    const merged = [...sysParts, POMPOS_META_GUARD].join('\n\n---\n\n');
     messages.unshift({ role: 'system', content: merged });
     if (sessionId) sessionsMod.appendTurn(sessionId, 'system', merged, cfgDir);
   }

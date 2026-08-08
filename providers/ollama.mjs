@@ -57,10 +57,10 @@ class TimeoutError extends Error {
 const DEFAULT_IDLE_TIMEOUT_MS = 120000;
 
 // Resolve the IDLE (inter-chunk) timeout once per request: opts override
-// wins, then env LAZYCLAW_REQUEST_TIMEOUT_MS (positive int), else 120s.
+// wins, then env POMPOS_REQUEST_TIMEOUT_MS (positive int), else 120s.
 function resolveIdleTimeoutMs(opts) {
   if (Number.isFinite(opts?.idleTimeoutMs) && opts.idleTimeoutMs > 0) return opts.idleTimeoutMs;
-  const raw = parseInt(process.env.LAZYCLAW_REQUEST_TIMEOUT_MS ?? '', 10);
+  const raw = parseInt(process.env.POMPOS_REQUEST_TIMEOUT_MS ?? '', 10);
   if (Number.isFinite(raw) && raw > 0) return raw;
   return DEFAULT_IDLE_TIMEOUT_MS;
 }

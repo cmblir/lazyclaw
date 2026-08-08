@@ -1,7 +1,7 @@
 // tests/p3-noalt-default.test.mjs — v5.5: the chat defaults to the Static
 // scrollback (no full-frame redraw → no typing flicker; the splash prints once
 // and scrolls naturally, never the alt-canvas vanish/blank). Alt-buffer
-// fullscreen is opt-in via LAZYCLAW_ALT=1; LAZYCLAW_NO_ALT=1 still forces off.
+// fullscreen is opt-in via POMPOS_ALT=1; POMPOS_NO_ALT=1 still forces off.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,11 +12,11 @@ import { ReplApp, computeAltEnabled } from '../tui/repl.mjs';
 
 // ─── pure decision ─────────────────────────────────────────────────────────
 
-test('computeAltEnabled defaults to non-alt and is opt-in via LAZYCLAW_ALT', () => {
+test('computeAltEnabled defaults to non-alt and is opt-in via POMPOS_ALT', () => {
   assert.equal(computeAltEnabled({}, true), false, 'default = non-alt even on a TTY');
-  assert.equal(computeAltEnabled({ LAZYCLAW_ALT: '1' }, true), true, 'opt-in');
-  assert.equal(computeAltEnabled({ LAZYCLAW_ALT: '1' }, false), false, 'never on a non-TTY');
-  assert.equal(computeAltEnabled({ LAZYCLAW_ALT: '1', LAZYCLAW_NO_ALT: '1' }, true), false, 'NO_ALT wins');
+  assert.equal(computeAltEnabled({ POMPOS_ALT: '1' }, true), true, 'opt-in');
+  assert.equal(computeAltEnabled({ POMPOS_ALT: '1' }, false), false, 'never on a non-TTY');
+  assert.equal(computeAltEnabled({ POMPOS_ALT: '1', POMPOS_NO_ALT: '1' }, true), false, 'NO_ALT wins');
 });
 
 // ─── render: default shows the splash and does NOT enter the alt-buffer ──────
@@ -37,8 +37,8 @@ function mkTtyStdio() {
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 test('default chat (no env) shows the splash and never enters the alt-buffer', async () => {
-  const pa = process.env.LAZYCLAW_ALT; const pn = process.env.LAZYCLAW_NO_ALT;
-  delete process.env.LAZYCLAW_ALT; delete process.env.LAZYCLAW_NO_ALT;
+  const pa = process.env.POMPOS_ALT; const pn = process.env.POMPOS_NO_ALT;
+  delete process.env.POMPOS_ALT; delete process.env.POMPOS_NO_ALT;
   const io = mkTtyStdio();
   const instance = render(
     React.createElement(ReplApp, {
@@ -58,7 +58,7 @@ test('default chat (no env) shows the splash and never enters the alt-buffer', a
     assert.match(io.frames(), /subcommand/i, 'splash still visible after a command');
   } finally {
     try { instance.unmount(); } catch {}
-    if (pa === undefined) delete process.env.LAZYCLAW_ALT; else process.env.LAZYCLAW_ALT = pa;
-    if (pn === undefined) delete process.env.LAZYCLAW_NO_ALT; else process.env.LAZYCLAW_NO_ALT = pn;
+    if (pa === undefined) delete process.env.POMPOS_ALT; else process.env.POMPOS_ALT = pa;
+    if (pn === undefined) delete process.env.POMPOS_NO_ALT; else process.env.POMPOS_NO_ALT = pn;
   }
 });

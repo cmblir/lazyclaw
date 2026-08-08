@@ -53,7 +53,7 @@ async function startDaemon(cfgDir: string): Promise<Daemon> {
   const child = spawn(process.execPath, [
     CLI, 'daemon', '--port', String(port), '--allow-origin', `http://127.0.0.1:${port}`,
   ], {
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir },
     stdio: ['ignore', 'pipe', 'pipe'],
   }) as ChildProcessWithoutNullStreams;
   let bound = 0;

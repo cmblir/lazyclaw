@@ -69,9 +69,9 @@ export function makeHandler(ctx) {
   // and the explicit allowlist (or no-browser default) stays in force.
   const allowLoopback = !!ctx.allowLoopbackOrigin;
   // Default state dir matches the CLI's default. Callers can override
-  // via ctx.workflowStateDir or LAZYCLAW_WORKFLOW_STATE_DIR env var.
+  // via ctx.workflowStateDir or POMPOS_WORKFLOW_STATE_DIR env var.
   const workflowStateDir = ctx.workflowStateDir
-    || (() => process.env.LAZYCLAW_WORKFLOW_STATE_DIR || '.workflow-state');
+    || (() => process.env.POMPOS_WORKFLOW_STATE_DIR || '.workflow-state');
   ctx = { ...ctx, workflowStateDir };
   // Rate limiter is opt-in; passing nothing → unlimited (the historical
   // single-user-loopback default). When enabled, scope is per remote IP.

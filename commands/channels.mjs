@@ -18,12 +18,12 @@ function _bootGuard(cfg, surface) {
 }
 
 // Resolve the daemon the listener forwards to. Defaults to the dashboard/
-// daemon loopback port; override with --daemon-url or LAZYCLAW_DAEMON_URL.
+// daemon loopback port; override with --daemon-url or POMPOS_DAEMON_URL.
 const DEFAULT_DAEMON_URL = 'http://127.0.0.1:19600';
 function _daemonTarget(flags) {
   return {
-    daemonUrl: flags['daemon-url'] || process.env.LAZYCLAW_DAEMON_URL || DEFAULT_DAEMON_URL,
-    daemonToken: flags['auth-token'] || process.env.LAZYCLAW_AUTH_TOKEN || null,
+    daemonUrl: flags['daemon-url'] || process.env.POMPOS_DAEMON_URL || DEFAULT_DAEMON_URL,
+    daemonToken: flags['auth-token'] || process.env.POMPOS_AUTH_TOKEN || null,
   };
 }
 

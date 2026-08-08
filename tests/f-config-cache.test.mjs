@@ -6,7 +6,7 @@ import path from 'node:path';
 
 test('readConfig is mtime-cached but hands out independent, mutation-safe clones', async () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-cfgcache-'));
-  process.env.LAZYCLAW_CONFIG_DIR = d;
+  process.env.POMPOS_CONFIG_DIR = d;
   const { readConfig, writeConfig, _invalidateConfigCache } = await import('../lib/config.mjs');
   _invalidateConfigCache();
 
@@ -29,5 +29,5 @@ test('readConfig is mtime-cached but hands out independent, mutation-safe clones
   assert.equal(readConfig().n, 2, 'writeConfig invalidates the cache');
 
   fs.rmSync(d, { recursive: true, force: true });
-  delete process.env.LAZYCLAW_CONFIG_DIR;
+  delete process.env.POMPOS_CONFIG_DIR;
 });

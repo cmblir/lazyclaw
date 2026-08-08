@@ -19,7 +19,7 @@ function tmpCfg() {
 function runCli(args, cfgDir) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir },
   });
 }
 

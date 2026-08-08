@@ -8,7 +8,7 @@ import { bashCompletion, zshCompletion } from '../lib/args.mjs';
 import { defaultConfigDir as _persDefaultCfg } from '../memory.mjs';
 
 export async function cmdPersonality(sub, a, b) {
-  const cfgDir = process.env.LAZYCLAW_CONFIG_DIR || _persDefaultCfg();
+  const cfgDir = process.env.POMPOS_CONFIG_DIR || _persDefaultCfg();
   const dir = path.join(cfgDir, 'personalities');
   fs.mkdirSync(dir, { recursive: true });
 
@@ -78,7 +78,7 @@ export async function cmdConfigEdit() {
   // as nothing.
   fs.mkdirSync(path.dirname(p), { recursive: true });
   if (!fs.existsSync(p)) fs.writeFileSync(p, '{}\n');
-  const editor = process.env.LAZYCLAW_EDITOR || process.env.VISUAL || process.env.EDITOR || 'vi';
+  const editor = process.env.POMPOS_EDITOR || process.env.VISUAL || process.env.EDITOR || 'vi';
   const { spawn } = await import('node:child_process');
   await new Promise((resolve, reject) => {
     const child = spawn(editor, [p], { stdio: 'inherit' });
@@ -236,7 +236,7 @@ export async function cmdDoctor() {
   // don't push these to `issues` (a stuck workflow doesn't break the
   // CLI) but they surface in the output so `pompos doctor | jq` can
   // surface them in dashboards.
-  const stateDir = process.env.LAZYCLAW_WORKFLOW_STATE_DIR || '.workflow-state';
+  const stateDir = process.env.POMPOS_WORKFLOW_STATE_DIR || '.workflow-state';
   let workflows = null;
   try {
     const { listSessions } = await import('../workflow/summary.mjs');

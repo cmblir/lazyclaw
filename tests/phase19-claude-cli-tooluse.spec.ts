@@ -10,7 +10,7 @@ function tmpDir(prefix: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), `lc-${prefix}-`));
 }
 
-// Drop a deterministic shim script we point LAZYCLAW_CLAUDE_BIN at.
+// Drop a deterministic shim script we point POMPOS_CLAUDE_BIN at.
 // The shim:
 //   - records the argv it was invoked with to <captureDir>/argv.json
 //   - prints `replyText` as a stream-json sequence the adapter will
@@ -117,7 +117,7 @@ test.describe('Phase 19 — claude-cli tool-use adapter', () => {
     }, /* signal */);
     // Phase 12 default budget is 10, but a final reply terminates after
     // a single iteration.
-    // We override the binary via LAZYCLAW_CLAUDE_BIN at the process
+    // We override the binary via POMPOS_CLAUDE_BIN at the process
     // level so the runner-internal adapter picks the shim up.
     expect(r.iterations).toBe(1);
     expect(r.stoppedBy).toBe('final');
@@ -129,7 +129,7 @@ test.describe('Phase 19 — claude-cli tool-use adapter', () => {
 
   test('claude-cli adapter advertises the agent tool whitelist as Claude built-in names', async () => {
     const shim = writeShim('ok');
-    process.env.LAZYCLAW_CLAUDE_BIN = shim.binPath;
+    process.env.POMPOS_CLAUDE_BIN = shim.binPath;
     try {
       const { runAgentTurn } = await loadRunner();
       const r = await runAgentTurn({
@@ -140,19 +140,19 @@ test.describe('Phase 19 — claude-cli tool-use adapter', () => {
       const argv = fs.readFileSync(path.join(shim.captureDir, 'argv.txt'), 'utf8');
       expect(argv).toMatch(/--tools(\s+|=)Bash,Grep/);
     } finally {
-      delete process.env.LAZYCLAW_CLAUDE_BIN;
+      delete process.env.POMPOS_CLAUDE_BIN;
     }
   });
 });
 
 // The two runAgentTurn tests above share process.env state — Playwright
 // runs spec files in their own workers, so cross-test bleed is bounded
-// to this file. We set LAZYCLAW_CLAUDE_BIN inside each test before
+// to this file. We set POMPOS_CLAUDE_BIN inside each test before
 // invoking the runner so the shim path is unambiguous.
 test.beforeEach(async ({}, testInfo) => {
   if (testInfo.title.includes('runAgentTurn with a claude-cli agent')) {
     const shim = writeShim('I am done [[TASK_DONE]]');
-    process.env.LAZYCLAW_CLAUDE_BIN = shim.binPath;
+    process.env.POMPOS_CLAUDE_BIN = shim.binPath;
   }
 });
-test.afterEach(() => { delete process.env.LAZYCLAW_CLAUDE_BIN; });
+test.afterEach(() => { delete process.env.POMPOS_CLAUDE_BIN; });

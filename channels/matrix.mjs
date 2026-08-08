@@ -27,7 +27,7 @@
 // `_simulateInbound` / `send` directly. The default poll path is intended to
 // be driven by a `matrix listen` subcommand (mirrors `telegram listen`).
 //
-// LAZYCLAW_MATRIX_API_BASE (or opts.apiBase) overrides the API base URL so
+// POMPOS_MATRIX_API_BASE (or opts.apiBase) overrides the API base URL so
 // the Phase 30 spec can point the adapter at a local mock HTTP server. When
 // unset it defaults to the homeserver.
 
@@ -55,7 +55,7 @@ export function readMatrixEnv(env = process.env) {
     homeserver: env.MATRIX_HOMESERVER || null,
     accessToken: env.MATRIX_ACCESS_TOKEN || null,
     userId: env.MATRIX_USER_ID || null,
-    apiBase: env.LAZYCLAW_MATRIX_API_BASE || null,
+    apiBase: env.POMPOS_MATRIX_API_BASE || null,
   };
 }
 
@@ -149,7 +149,7 @@ export class MatrixChannel extends Channel {
     }
     if (!this._env.apiBase) {
       throw new MatrixError(
-        'cannot resolve a Matrix API base URL — set MATRIX_HOMESERVER, LAZYCLAW_MATRIX_API_BASE, or pass { apiBase }',
+        'cannot resolve a Matrix API base URL — set MATRIX_HOMESERVER, POMPOS_MATRIX_API_BASE, or pass { apiBase }',
         'MATRIX_MISSING_API_BASE'
       );
     }

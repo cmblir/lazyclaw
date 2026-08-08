@@ -97,10 +97,10 @@ test('resolvePermissionModeForSurface("unattended") with unattendedExec=true -> 
 test('runAgentTurn forwards opts.permissionMode into the claude_cli --permission-mode argument', async () => {
   const FAKE = path.join(HERE, 'fixtures', 'fake-claude-record-argv.mjs');
   const argvOut = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lc-perm-')), 'argv.json');
-  const prevBin = process.env.LAZYCLAW_CLAUDE_BIN;
-  const prevOut = process.env.LAZYCLAW_ARGV_OUT;
-  process.env.LAZYCLAW_CLAUDE_BIN = FAKE;
-  process.env.LAZYCLAW_ARGV_OUT = argvOut;
+  const prevBin = process.env.POMPOS_CLAUDE_BIN;
+  const prevOut = process.env.POMPOS_ARGV_OUT;
+  process.env.POMPOS_CLAUDE_BIN = FAKE;
+  process.env.POMPOS_ARGV_OUT = argvOut;
   try {
     const cliAgent = { name: 'c', role: 'R', provider: 'claude-cli', model: 'sonnet', tools: [] };
     const r = await runAgentTurn({ agent: cliAgent, userMessage: 'hi', permissionMode: 'plan' });
@@ -110,8 +110,8 @@ test('runAgentTurn forwards opts.permissionMode into the claude_cli --permission
     assert.ok(i >= 0, '--permission-mode must be present in the spawned argv');
     assert.equal(argv[i + 1], 'plan', 'the forwarded mode must reach claude');
   } finally {
-    if (prevBin === undefined) delete process.env.LAZYCLAW_CLAUDE_BIN; else process.env.LAZYCLAW_CLAUDE_BIN = prevBin;
-    if (prevOut === undefined) delete process.env.LAZYCLAW_ARGV_OUT; else process.env.LAZYCLAW_ARGV_OUT = prevOut;
+    if (prevBin === undefined) delete process.env.POMPOS_CLAUDE_BIN; else process.env.POMPOS_CLAUDE_BIN = prevBin;
+    if (prevOut === undefined) delete process.env.POMPOS_ARGV_OUT; else process.env.POMPOS_ARGV_OUT = prevOut;
   }
 });
 
@@ -120,10 +120,10 @@ test('runAgentTurn forwards opts.permissionMode into the claude_cli --permission
 test('runAgentTurn without a permissionMode opt keeps the bypassPermissions fallback', async () => {
   const FAKE = path.join(HERE, 'fixtures', 'fake-claude-record-argv.mjs');
   const argvOut = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'lc-perm-')), 'argv.json');
-  const prevBin = process.env.LAZYCLAW_CLAUDE_BIN;
-  const prevOut = process.env.LAZYCLAW_ARGV_OUT;
-  process.env.LAZYCLAW_CLAUDE_BIN = FAKE;
-  process.env.LAZYCLAW_ARGV_OUT = argvOut;
+  const prevBin = process.env.POMPOS_CLAUDE_BIN;
+  const prevOut = process.env.POMPOS_ARGV_OUT;
+  process.env.POMPOS_CLAUDE_BIN = FAKE;
+  process.env.POMPOS_ARGV_OUT = argvOut;
   try {
     const cliAgent = { name: 'c', role: 'R', provider: 'claude-cli', model: 'sonnet', tools: [] };
     await runAgentTurn({ agent: cliAgent, userMessage: 'hi' });
@@ -131,8 +131,8 @@ test('runAgentTurn without a permissionMode opt keeps the bypassPermissions fall
     const i = argv.indexOf('--permission-mode');
     assert.equal(argv[i + 1], 'bypassPermissions', 'default fallback must stay bypassPermissions');
   } finally {
-    if (prevBin === undefined) delete process.env.LAZYCLAW_CLAUDE_BIN; else process.env.LAZYCLAW_CLAUDE_BIN = prevBin;
-    if (prevOut === undefined) delete process.env.LAZYCLAW_ARGV_OUT; else process.env.LAZYCLAW_ARGV_OUT = prevOut;
+    if (prevBin === undefined) delete process.env.POMPOS_CLAUDE_BIN; else process.env.POMPOS_CLAUDE_BIN = prevBin;
+    if (prevOut === undefined) delete process.env.POMPOS_ARGV_OUT; else process.env.POMPOS_ARGV_OUT = prevOut;
   }
 });
 

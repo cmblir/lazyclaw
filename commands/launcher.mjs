@@ -256,7 +256,7 @@ export async function cmdLauncher() {
     process.stdin.resume();
     process.stdin.ref();
 
-    const useLegacyBanner = !!process.env.LAZYCLAW_LEGACY_MENU;
+    const useLegacyBanner = !!process.env.POMPOS_LEGACY_MENU;
     const bannerRowsCached = useLegacyBanner
       ? _renderBanner(readVersionFromRepo())
       : await _renderV5Banner(readVersionFromRepo());

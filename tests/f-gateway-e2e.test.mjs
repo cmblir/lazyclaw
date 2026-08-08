@@ -51,12 +51,12 @@ test('_selectChannels: flags override, cfg-enabled default, unknowns dropped', (
 
 test('gateway boot guard: refuses allowUnattendedSensitive', async () => {
   const dir = mkCfgDir({ provider: 'mock', security: { allowUnattendedSensitive: true } });
-  const prev = process.env.LAZYCLAW_CONFIG_DIR;
-  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  const prev = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
   try {
     await assert.rejects(() => runGateway({ port: 0 }, { log: () => {} }), GatewayGuardError);
   } finally {
-    process.env.LAZYCLAW_CONFIG_DIR = prev;
+    process.env.POMPOS_CONFIG_DIR = prev;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -68,8 +68,8 @@ test('gateway e2e: inbound through the core, live handoff notify + rollback', as
     pairing: [{ id: 'U1' }],
     channels: { slack: { enabled: true }, telegram: { enabled: true } },
   });
-  const prev = process.env.LAZYCLAW_CONFIG_DIR;
-  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  const prev = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
   const slack = stubChannel();
   const telegram = stubChannel({ failSend: true });
   let gw = null;
@@ -138,7 +138,7 @@ test('gateway e2e: inbound through the core, live handoff notify + rollback', as
     assert.equal(telegram.state.stopped, true);
   } finally {
     if (gw) { try { await gw.stop(); } catch { /* already down */ } }
-    process.env.LAZYCLAW_CONFIG_DIR = prev;
+    process.env.POMPOS_CONFIG_DIR = prev;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

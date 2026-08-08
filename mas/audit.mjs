@@ -4,7 +4,7 @@
 // <configDir>/tasks/<id>.audit.jsonl. Stores hashes of the args and
 // result so a runaway agent can't blow the disk with verbose tool I/O,
 // while still giving operators something to grep against when they need
-// forensics. Set LAZYCLAW_AUDIT_RAW=1 to additionally inline the raw
+// forensics. Set POMPOS_AUDIT_RAW=1 to additionally inline the raw
 // args/result bodies — useful in development, off by default.
 
 import fs from 'node:fs';
@@ -43,7 +43,7 @@ export function append({ taskId, agent, tool, args, result, ok = true, configDir
     result_hash: hashJson(result),
     ok: !!ok,
   };
-  if (process.env.LAZYCLAW_AUDIT_RAW === '1') {
+  if (process.env.POMPOS_AUDIT_RAW === '1') {
     entry.args = args;
     entry.result = result;
   }

@@ -7,7 +7,7 @@
 //   2. The enter/leave escapes are the correct DEC 1049 sequences.
 //   3. FullScreen({ enabled: false }) is a pass-through — NO escape bytes
 //      leak into stdout. This protects non-TTY pipelines, CI, and the
-//      LAZYCLAW_NO_ALT escape hatch.
+//      POMPOS_NO_ALT escape hatch.
 //   4. FullScreen({ enabled: true }) on mount writes \x1b[?1049h to
 //      stdout; on unmount writes \x1b[?1049l. Verified by intercepting
 //      process.stdout.write while invoking the useEffect lifecycle via
@@ -142,7 +142,7 @@ test('ReplApp source contains the FullScreen wrapper and routes through it', asy
   const src = fs.readFileSync(path.join(here, '..', 'tui', 'repl.mjs'), 'utf8');
 
   assert.ok(src.includes('FullScreen'), 'ReplApp must reference FullScreen');
-  assert.ok(src.includes('LAZYCLAW_NO_ALT'), 'must honor LAZYCLAW_NO_ALT opt-out');
+  assert.ok(src.includes('POMPOS_NO_ALT'), 'must honor POMPOS_NO_ALT opt-out');
   assert.ok(src.includes('process.stdout') && src.includes('isTTY'),
     'must gate alt-buffer on stdout.isTTY');
   // Ensure the escape strings appear only via the named constants — no

@@ -174,8 +174,8 @@ test('runChannelStep invokes the Slack hand-off after a successful verify', asyn
   const os = await import('node:os');
   const path = await import('node:path');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-handoff-'));
-  const prev = process.env.LAZYCLAW_CONFIG_DIR;
-  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  const prev = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
   let probedPort = null;      // only _startGateway calls this
   let spawnedWith = null;     // only reached if the user said yes to starting
   try {
@@ -200,8 +200,8 @@ test('runChannelStep invokes the Slack hand-off after a successful verify', asyn
       },
     });
   } finally {
-    if (prev === undefined) delete process.env.LAZYCLAW_CONFIG_DIR;
-    else process.env.LAZYCLAW_CONFIG_DIR = prev;
+    if (prev === undefined) delete process.env.POMPOS_CONFIG_DIR;
+    else process.env.POMPOS_CONFIG_DIR = prev;
     fs.rmSync(dir, { recursive: true, force: true });
   }
   assert.ok(probedPort !== null, 'the hand-off never ran — runChannelStep did not call it');

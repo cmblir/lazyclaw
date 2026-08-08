@@ -21,14 +21,14 @@
 //     `""` so tools are fully disabled.
 //   - --system-prompt carries the agent role + memory + team metadata
 //     the mention router builds.
-//   - LAZYCLAW_CLAUDE_BIN overrides the binary path so tests can
+//   - POMPOS_CLAUDE_BIN overrides the binary path so tests can
 //     point at a deterministic shim script.
 
 import { spawn } from 'node:child_process';
 import { classifyCliExit } from '../cli_error.mjs';
 
 const DEFAULT_BIN = 'claude';
-const LAZYCLAW_TO_CLAUDE_TOOL = {
+const POMPOS_TO_CLAUDE_TOOL = {
   bash: 'Bash',
   read: 'Read',
   write: 'Write',
@@ -55,7 +55,7 @@ export class ClaudeCliToolUseError extends Error {
 export function toClaudeTools(schemas) {
   if (!Array.isArray(schemas) || schemas.length === 0) return '';
   const names = schemas
-    .map((s) => LAZYCLAW_TO_CLAUDE_TOOL[s?.name])
+    .map((s) => POMPOS_TO_CLAUDE_TOOL[s?.name])
     .filter(Boolean);
   return [...new Set(names)].join(',');
 }
@@ -235,7 +235,7 @@ export async function callOnce({
   }
   const args = buildToolUseArgs({ prompt, model, system, tools, permissionMode, lean, maxTurns });
 
-  const binPath = bin || process.env.LAZYCLAW_CLAUDE_BIN || DEFAULT_BIN;
+  const binPath = bin || process.env.POMPOS_CLAUDE_BIN || DEFAULT_BIN;
   let proc;
   try {
     proc = spawn(binPath, args, {

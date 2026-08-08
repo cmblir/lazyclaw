@@ -102,7 +102,7 @@ test.describe('Phase 28 — gateway hardening', () => {
 interface Daemon { baseUrl: string; port: number; child: ChildProcessWithoutNullStreams; stop: () => Promise<void>; }
 async function startDaemonAuth(cfgDir: string, token: string): Promise<Daemon> {
   const child = spawn(process.execPath, [CLI, 'daemon', '--port', '0', '--auth-token', token], {
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir }, stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir }, stdio: ['ignore', 'pipe', 'pipe'],
   }) as ChildProcessWithoutNullStreams;
   let port = 0; let buf = '';
   child.stdout.on('data', (d) => { buf += d.toString(); const nl = buf.indexOf('\n'); if (nl >= 0 && !port) { try { const j = JSON.parse(buf.slice(0, nl)); if (j.port) port = j.port; } catch { /* */ } } });

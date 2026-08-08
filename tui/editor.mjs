@@ -97,7 +97,7 @@ export function Editor({
   // moves the terminal cursor back inside its content row after each
   // render so macOS IMEs (Hangul / Japanese / Chinese) draw their
   // pre-edit overlay at the actual typing position. Opt-out via the
-  // LAZYCLAW_NO_CURSOR_ANCHOR env var (handled internally).
+  // POMPOS_NO_CURSOR_ANCHOR env var (handled internally).
   altEnabled,
   // v6.x slash-argument completion (all optional). When the buffer is a
   // command + a completable value, the host sets argCompletable; Tab then
@@ -315,16 +315,16 @@ export function Editor({
   // NEXT render's log-update eraseLines starts from inside the editor.
   // Ink immediately overwrites with the full new frame, so the user
   // sees at most a one-tick flicker. The IME-correctness win is worth
-  // the cosmetic cost. Opt out via LAZYCLAW_NO_CURSOR_ANCHOR=1.
+  // the cosmetic cost. Opt out via POMPOS_NO_CURSOR_ANCHOR=1.
   useEffect(() => {
     // Runs in BOTH the alt-buffer and the default (non-alt Static) layouts: the
     // editor is the last child either way, so the cursor parks below it and the
     // rowsUp math (editor geometry only) is identical. Anchoring in non-alt is
     // what makes the terminal cursor visible AT the caret (so you can see where
     // you're typing) and what keeps a CJK/Hangul IME pre-edit inside the box
-    // instead of leaking onto the row below. Opt out via LAZYCLAW_NO_CURSOR_ANCHOR=1.
+    // instead of leaking onto the row below. Opt out via POMPOS_NO_CURSOR_ANCHOR=1.
     void altEnabled;
-    if (process.env.LAZYCLAW_NO_CURSOR_ANCHOR === '1') return;
+    if (process.env.POMPOS_NO_CURSOR_ANCHOR === '1') return;
     if (!(process.stdout && process.stdout.isTTY)) return;
     const cols = Math.max(20, process.stdout.columns || 80);
     const inner = Math.max(8, cols - 4);
@@ -367,7 +367,7 @@ export function Editor({
     const colTarget = 3 + prefixWidth + colInLine;
     // The shim this effect depends on is installed at mount by ReplApp, NOT
     // here: it also carries the stray-write redirect, which must stay on even
-    // when LAZYCLAW_NO_CURSOR_ANCHOR turns this effect off above.
+    // when POMPOS_NO_CURSOR_ANCHOR turns this effect off above.
     // If a previous anchor moved the cursor up and NO render's eraseLines has
     // consumed that offset yet (two state updates between redraws — e.g. fast
     // typing or backspace), the cursor is still parked up inside the editor.

@@ -134,7 +134,7 @@ async function runChatTurn(prompt) {
 
 test('FIX2: chat wraps the interactive provider so a transient 529 is retried', async () => {
   const dir = tmpConfigDir();
-  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  process.env.POMPOS_CONFIG_DIR = dir;
   fs.writeFileSync(
     path.join(dir, 'config.json'),
     JSON.stringify({ provider: 'flaky529', model: 'm1' }),
@@ -164,6 +164,6 @@ test('FIX2: chat wraps the interactive provider so a transient 529 is retried', 
     assert.doesNotMatch(out, /error: overloaded/, 'transient error must not surface as a chat error');
   } finally {
     delete reg.PROVIDERS.flaky529;
-    delete process.env.LAZYCLAW_CONFIG_DIR;
+    delete process.env.POMPOS_CONFIG_DIR;
   }
 });

@@ -20,7 +20,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function startDaemon(cfgDir) {
   const child = spawn(process.execPath, [CLI, 'daemon', '--port', '0'], {
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let out = '';

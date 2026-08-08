@@ -64,7 +64,7 @@ test('patchAgent clears avatarImage with null', () => {
 
 test('CLI: agent set-avatar <name> <url> sets a custom image; <N> switches back to a sprite', () => {
   const d = tmp();
-  const run = (args) => spawnSync('node', [CLI, ...args], { env: { ...process.env, LAZYCLAW_CONFIG_DIR: d }, encoding: 'utf8' });
+  const run = (args) => spawnSync('node', [CLI, ...args], { env: { ...process.env, POMPOS_CONFIG_DIR: d }, encoding: 'utf8' });
   run(['agent', 'add', 'backend', '--provider', 'claude-cli']);
   assert.equal(run(['agent', 'set-avatar', 'backend', 'https://example.com/muzi.png']).status, 0);
   assert.equal(getAgent('backend', d).avatarImage, 'https://example.com/muzi.png');

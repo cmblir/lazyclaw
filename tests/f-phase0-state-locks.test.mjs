@@ -24,31 +24,31 @@ function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-locks-'));
 }
 
-test('defaultConfigDir honors LAZYCLAW_CONFIG_DIR override', () => {
-  const prev = process.env.LAZYCLAW_CONFIG_DIR;
+test('defaultConfigDir honors POMPOS_CONFIG_DIR override', () => {
+  const prev = process.env.POMPOS_CONFIG_DIR;
   try {
-    process.env.LAZYCLAW_CONFIG_DIR = '/tmp/override-xyz';
+    process.env.POMPOS_CONFIG_DIR = '/tmp/override-xyz';
     assert.equal(defaultConfigDir(), '/tmp/override-xyz');
   } finally {
-    if (prev === undefined) delete process.env.LAZYCLAW_CONFIG_DIR;
-    else process.env.LAZYCLAW_CONFIG_DIR = prev;
+    if (prev === undefined) delete process.env.POMPOS_CONFIG_DIR;
+    else process.env.POMPOS_CONFIG_DIR = prev;
   }
 });
 
 test('defaultConfigDir falls back to ~/.pompos', () => {
-  const prev = process.env.LAZYCLAW_CONFIG_DIR;
+  const prev = process.env.POMPOS_CONFIG_DIR;
   try {
-    delete process.env.LAZYCLAW_CONFIG_DIR;
+    delete process.env.POMPOS_CONFIG_DIR;
     assert.equal(defaultConfigDir(), path.join(os.homedir(), '.pompos'));
   } finally {
-    if (prev !== undefined) process.env.LAZYCLAW_CONFIG_DIR = prev;
+    if (prev !== undefined) process.env.POMPOS_CONFIG_DIR = prev;
   }
 });
 
 test('the shared defaultConfigDir backs the per-module re-exports', async () => {
-  const prev = process.env.LAZYCLAW_CONFIG_DIR;
+  const prev = process.env.POMPOS_CONFIG_DIR;
   try {
-    process.env.LAZYCLAW_CONFIG_DIR = '/tmp/shared-check';
+    process.env.POMPOS_CONFIG_DIR = '/tmp/shared-check';
     const tasks = await import('../tasks.mjs');
     const goals = await import('../goals.mjs');
     const loops = await import('../loops.mjs');
@@ -60,8 +60,8 @@ test('the shared defaultConfigDir backs the per-module re-exports', async () => 
       assert.equal(mod.defaultConfigDir(), '/tmp/shared-check');
     }
   } finally {
-    if (prev === undefined) delete process.env.LAZYCLAW_CONFIG_DIR;
-    else process.env.LAZYCLAW_CONFIG_DIR = prev;
+    if (prev === undefined) delete process.env.POMPOS_CONFIG_DIR;
+    else process.env.POMPOS_CONFIG_DIR = prev;
   }
 });
 

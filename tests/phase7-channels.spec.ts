@@ -15,7 +15,7 @@ function tmpDir(prefix: string): string {
 function runCli(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...env },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...env },
   });
 }
 
@@ -82,7 +82,7 @@ test.describe('Phase 7 — channel adapter interface', () => {
     const cfg = tmpDir('p7-http');
     expect(runCli(['config', 'set', 'provider', 'mock'], cfg).status).toBe(0);
     const child = spawn(process.execPath, [CLI, 'daemon', '--port', '0'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfg },
+      env: { ...process.env, POMPOS_CONFIG_DIR: cfg },
       stdio: ['ignore', 'pipe', 'pipe'],
     }) as ChildProcessWithoutNullStreams;
     let port = 0;

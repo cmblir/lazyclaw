@@ -28,7 +28,7 @@ test('cold-start: pompos version <= 400ms (spec §11.9 H5)', () => {
   // first-ever resolver work on the host. Spec budget is steady-state.
   spawnSync(process.execPath, [CLI, 'version'], {
     encoding: 'utf8',
-    env: { ...process.env, LAZYCLAW_NO_INK: '1' },
+    env: { ...process.env, POMPOS_NO_INK: '1' },
   });
 
   const samples = [];
@@ -36,7 +36,7 @@ test('cold-start: pompos version <= 400ms (spec §11.9 H5)', () => {
     const t0 = process.hrtime.bigint();
     const r = spawnSync(process.execPath, [CLI, 'version'], {
       encoding: 'utf8',
-      env: { ...process.env, LAZYCLAW_NO_INK: '1' },
+      env: { ...process.env, POMPOS_NO_INK: '1' },
     });
     const elapsedMs = Number(process.hrtime.bigint() - t0) / 1e6;
     assert.equal(r.status, 0, `version exited non-zero: ${r.stderr}`);

@@ -168,7 +168,7 @@ export function _attachGhostAutocomplete(rl) {
 // v5 hero banner — ANSI Shadow POMPOS wordmark stacked on top of the
 // braille banner (tui/banner.generated.mjs + tui/wordmark.mjs). Left-aligned
 // with a 2-cell margin so wide terminals don't push the banner to the right.
-// Opt out with LAZYCLAW_LEGACY_MENU=1 to fall back to the v4 figlet box.
+// Opt out with POMPOS_LEGACY_MENU=1 to fall back to the v4 figlet box.
 export async function _renderV5Banner(version) {
   const a = await _loadBannerAssets();
   if (!a) return _renderBanner(version); // missing tarball asset → v4 figlet

@@ -59,7 +59,7 @@ test('patchAgent rejects an out-of-range avatar', () => {
 
 test('CLI: agent set-avatar <name> <N> persists the chosen sprite', () => {
   const d = tmp();
-  const run = (args) => spawnSync('node', [CLI, ...args], { env: { ...process.env, LAZYCLAW_CONFIG_DIR: d }, encoding: 'utf8' });
+  const run = (args) => spawnSync('node', [CLI, ...args], { env: { ...process.env, POMPOS_CONFIG_DIR: d }, encoding: 'utf8' });
   assert.equal(run(['agent', 'add', 'backend', '--provider', 'claude-cli']).status, 0);
   const r = run(['agent', 'set-avatar', 'backend', '5']);
   assert.equal(r.status, 0, r.stderr);
@@ -69,7 +69,7 @@ test('CLI: agent set-avatar <name> <N> persists the chosen sprite', () => {
 
 test('CLI: agent set-avatar <name> none clears back to inference', () => {
   const d = tmp();
-  const run = (args) => spawnSync('node', [CLI, ...args], { env: { ...process.env, LAZYCLAW_CONFIG_DIR: d }, encoding: 'utf8' });
+  const run = (args) => spawnSync('node', [CLI, ...args], { env: { ...process.env, POMPOS_CONFIG_DIR: d }, encoding: 'utf8' });
   run(['agent', 'add', 'backend', '--provider', 'claude-cli']);
   run(['agent', 'set-avatar', 'backend', '9']);
   assert.equal(getAgent('backend', d).avatar, 9);

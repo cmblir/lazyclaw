@@ -102,9 +102,9 @@ test('anthropic: steady stream past one idle window completes (no total cap)', a
 });
 
 // ── env var resolves the default when no opts override is given ───────────
-test('anthropic: LAZYCLAW_REQUEST_TIMEOUT_MS sets the idle window', async () => {
-  const prev = process.env.LAZYCLAW_REQUEST_TIMEOUT_MS;
-  process.env.LAZYCLAW_REQUEST_TIMEOUT_MS = '50';
+test('anthropic: POMPOS_REQUEST_TIMEOUT_MS sets the idle window', async () => {
+  const prev = process.env.POMPOS_REQUEST_TIMEOUT_MS;
+  process.env.POMPOS_REQUEST_TIMEOUT_MS = '50';
   try {
     const body = makeTimedBody({ frames: [A_START], gaps: [0], hang: true });
     await assert.rejects(
@@ -115,8 +115,8 @@ test('anthropic: LAZYCLAW_REQUEST_TIMEOUT_MS sets the idle window', async () => 
       (err) => err.code === 'TIMEOUT',
     );
   } finally {
-    if (prev === undefined) delete process.env.LAZYCLAW_REQUEST_TIMEOUT_MS;
-    else process.env.LAZYCLAW_REQUEST_TIMEOUT_MS = prev;
+    if (prev === undefined) delete process.env.POMPOS_REQUEST_TIMEOUT_MS;
+    else process.env.POMPOS_REQUEST_TIMEOUT_MS = prev;
   }
 });
 

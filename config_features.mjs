@@ -290,8 +290,8 @@ export function channelSetEnabled(cfg, name, enabled) {
 // The sliding history budget sent to the model each turn (NOT the model's hard
 // context limit). Shared by the /context slash, the setup step, the status bar,
 // and applyChatWindow so all four agree. Defaults mirror chat_window.mjs.
-const _CTX_DEFAULT_TURNS = Number(process.env.LAZYCLAW_CHAT_WINDOW_TURNS) || 20;
-const _CTX_DEFAULT_TOKENS = Number(process.env.LAZYCLAW_CHAT_WINDOW_TOKENS) || 8000;
+const _CTX_DEFAULT_TURNS = Number(process.env.POMPOS_CHAT_WINDOW_TURNS) || 20;
+const _CTX_DEFAULT_TOKENS = Number(process.env.POMPOS_CHAT_WINDOW_TOKENS) || 8000;
 export function chatWindowGet(cfg) {
   const c = (cfg && cfg.chat && typeof cfg.chat === 'object') ? cfg.chat : {};
   return { turns: Number(c.windowTurns) || _CTX_DEFAULT_TURNS, tokens: Number(c.windowTokens) || _CTX_DEFAULT_TOKENS };

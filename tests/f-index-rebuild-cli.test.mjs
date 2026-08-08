@@ -23,7 +23,7 @@ function tmpCfg(prefix = 'lc-index-rebuild-') {
 function runCli(args, cfgDir, env = {}) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...env },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...env },
   });
 }
 

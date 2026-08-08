@@ -8,7 +8,7 @@ import os from 'node:os'; import fs from 'node:fs'; import path from 'node:path'
 import { dispatchSlash } from '../tui/slash_dispatcher.mjs';
 import { orchestratorSlash } from '../tui/orchestrator_flow.mjs';
 
-function tmp() { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lc-rem-')); process.env.LAZYCLAW_CONFIG_DIR = d; return d; }
+function tmp() { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lc-rem-')); process.env.POMPOS_CONFIG_DIR = d; return d; }
 function scripted(answers) {
   const q = [...answers];
   return async (opts) => {

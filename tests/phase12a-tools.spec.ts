@@ -172,11 +172,11 @@ test.describe('Phase 12a — tool runner', () => {
     expect(entries[0].args_hash).toMatch(/^sha256:/);
   });
 
-  test('LAZYCLAW_AUDIT_RAW=1 inlines args + result in the audit entry', async () => {
+  test('POMPOS_AUDIT_RAW=1 inlines args + result in the audit entry', async () => {
     const cfgDir = tmpDir('p12a-audit-raw');
     const ws = tmpDir('p12a-audit-raw-ws');
-    const prev = process.env.LAZYCLAW_AUDIT_RAW;
-    process.env.LAZYCLAW_AUDIT_RAW = '1';
+    const prev = process.env.POMPOS_AUDIT_RAW;
+    process.env.POMPOS_AUDIT_RAW = '1';
     try {
       const { runner, audit } = await load();
       const taskId = 't_20260518_audit2';
@@ -185,8 +185,8 @@ test.describe('Phase 12a — tool runner', () => {
       expect(entry.args).toEqual({ path: 'nope' });
       expect(entry.result).toBeTruthy();
     } finally {
-      if (prev === undefined) delete process.env.LAZYCLAW_AUDIT_RAW;
-      else process.env.LAZYCLAW_AUDIT_RAW = prev;
+      if (prev === undefined) delete process.env.POMPOS_AUDIT_RAW;
+      else process.env.POMPOS_AUDIT_RAW = prev;
     }
   });
 });

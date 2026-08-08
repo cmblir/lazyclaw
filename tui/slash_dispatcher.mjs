@@ -28,7 +28,7 @@
 //
 // Interactive sub-menus that are readline-coupled in cli.mjs surface a hint in
 // Ink instead of crashing; pass an arg form (`/provider openai`) or set
-// LAZYCLAW_NO_INK=1.
+// POMPOS_NO_INK=1.
 
 import { SLASH_COMMANDS } from './slash_commands.mjs';
 import { nearest } from '../lib/args.mjs';
@@ -638,7 +638,7 @@ async function _loop(args, ctx, write) {
   // v5.4 minimal port: parses + reports. The full streaming loop in
   // cli.mjs:3091 needs an in-Ink writeFn + abort wiring; we ship a faithful
   // single-shot iteration via loop-engine.mjs to avoid silent regressions.
-  // For multi-iter the operator can still set LAZYCLAW_NO_INK=1.
+  // For multi-iter the operator can still set POMPOS_NO_INK=1.
   let loopMod;
   try { loopMod = await import('../loop-engine.mjs'); }
   catch (e) { return `loop unavailable: ${e?.message || e}`; }

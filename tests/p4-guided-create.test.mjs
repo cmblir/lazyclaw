@@ -12,7 +12,7 @@ import { getGoal } from '../goals.mjs';
 import { listTeams, registerTeam } from '../teams.mjs';
 import { registerAgent } from '../agents.mjs';
 
-function tmp() { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lc-guided-')); process.env.LAZYCLAW_CONFIG_DIR = d; return d; }
+function tmp() { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'lc-guided-')); process.env.POMPOS_CONFIG_DIR = d; return d; }
 // Scripted picker: 'text' kind (a _promptText prompt) → next text answer as
 // {id:'__text__',query}; any other kind → next menu answer verbatim.
 function scripted(menuAndText) {

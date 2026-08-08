@@ -26,6 +26,9 @@
 //   { type:'result', total_cost_usd, duration_ms, duration_api_ms,
 //                     num_turns, is_error, usage:{ all zeros } }            <- cost/timing/turns
 
+// Standalone entrypoint: cli.mjs's boot never runs here, so mirror the
+// POMPOS_*/POMPOS_* prefixes ourselves before anything reads them.
+import '../lib/env_compat_boot.mjs';
 import { performance } from 'node:perf_hooks';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -393,7 +396,7 @@ async function runPersistent(ctx, results) {
 async function main() {
   const only = (process.env.CONDITIONS || '').split(',').map((s) => s.trim()).filter(Boolean);
   const ctx = {
-    bin: process.env.BIN || process.env.LAZYCLAW_CLAUDE_BIN || 'claude',
+    bin: process.env.BIN || process.env.POMPOS_CLAUDE_BIN || 'claude',
     model: process.env.MODEL || '',
     prompt: process.env.PROMPT || 'Reply with exactly the single word: ok',
     toolPrompt: process.env.TOOL_PROMPT

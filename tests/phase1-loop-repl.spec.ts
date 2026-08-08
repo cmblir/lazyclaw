@@ -14,7 +14,7 @@ function tmpConfigDir(): string {
 function runCli(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...env },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...env },
   });
 }
 
@@ -22,7 +22,7 @@ function spawnChat(cfgDir: string, sessionId: string, env: NodeJS.ProcessEnv = {
   // Plain (non-TTY) mode: stdin is a pipe so the test feeds /loop & /exit
   // line by line. The CLI's REPL exits cleanly on /exit.
   return spawn(process.execPath, [CLI, 'chat', '--session', sessionId], {
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...env },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...env },
     stdio: ['pipe', 'pipe', 'pipe'],
   }) as ChildProcessWithoutNullStreams;
 }

@@ -1,7 +1,7 @@
 // tests/f-detached-loop-memory.test.mjs — `loop --detach --use-memory` was
 // doubly broken: the detach argv builder never forwarded --use-memory/--recall
 // (so the worker never saw them), and the worker built no system message and
-// sent apiKey: process.env.LAZYCLAW_API_KEY||'' instead of resolving it from
+// sent apiKey: process.env.POMPOS_API_KEY||'' instead of resolving it from
 // config. The foreground path honored both. These pin the detached parity.
 
 import test from 'node:test';
@@ -38,7 +38,7 @@ test('the detached worker honours --use-memory (injects core memory into the tur
   const r = spawnSync(process.execPath, [
     WORKER, '--loop-id', loopId, '--prompt', 'ping', '--max', '1',
     '--provider', 'mock', '--cfg-dir', cfgDir, '--use-memory',
-  ], { encoding: 'utf8', env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir } });
+  ], { encoding: 'utf8', env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir } });
   assert.equal(r.status, 0, `worker exited ${r.status}: ${r.stderr}`);
   // The mock provider echoes the system message it received into its reply
   // ([sys:...]) and the worker records a reply preview in iterations.log.

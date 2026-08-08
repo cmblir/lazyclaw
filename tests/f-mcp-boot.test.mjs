@@ -130,7 +130,7 @@ test('CLI: `mcp list` prints configured servers and exits 0', () => {
     JSON.stringify({ mcp: { servers: [{ name: 'cfgserver', command: 'echo', args: ['hi'] }] } }),
   );
   const r = spawnSync(process.execPath, [CLI, 'mcp', 'list'], {
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+    env: { ...process.env, POMPOS_CONFIG_DIR: dir },
     encoding: 'utf8',
   });
   assert.equal(r.status, 0, `mcp list should exit 0, got ${r.status}\n${r.stderr}`);

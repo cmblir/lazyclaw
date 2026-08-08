@@ -10,11 +10,11 @@ async function getBackend() {
   // not the add/list/remove the old code assumed — so every tool call used to hit
   // the "cron.add missing" fallback. Wire the tools to the real API plus the
   // shared config IO, and install/uninstall the OS-level job (skippable in tests
-  // via LAZYCLAW_SKIP_CRON_INSTALL, mirroring goals_cron.mjs).
+  // via POMPOS_SKIP_CRON_INSTALL, mirroring goals_cron.mjs).
   const cron = await import('../../cron.mjs').catch(() => null);
   if (!cron) throw new Error('scheduling: cron.mjs not available');
   const { readConfig, writeConfig } = await import('../../lib/config.mjs');
-  const skipInstall = () => !!process.env.LAZYCLAW_SKIP_CRON_INSTALL;
+  const skipInstall = () => !!process.env.POMPOS_SKIP_CRON_INSTALL;
   const install = (name, schedule, command) => {
     if (skipInstall()) return;
     if (cron.pickBackend() === 'launchd') cron.installLaunchdJob(name, schedule, command);

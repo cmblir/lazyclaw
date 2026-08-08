@@ -156,7 +156,7 @@ test('CLI: pompos trajectories export --format jsonl writes file', () => {
   const r = spawnSync(
     process.execPath,
     [CLI, 'trajectories', 'export', '--format', 'jsonl', '--out', outDir],
-    { env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir, LAZYCLAW_NO_INK: '1' }, encoding: 'utf8' },
+    { env: { ...process.env, POMPOS_CONFIG_DIR: dir, POMPOS_NO_INK: '1' }, encoding: 'utf8' },
   );
   assert.equal(r.status, 0, `stderr: ${r.stderr}\nstdout: ${r.stdout}`);
   assert.ok(fs.existsSync(outDir), 'out dir created');

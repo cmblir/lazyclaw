@@ -16,7 +16,7 @@ const CLI = path.join(REPO_ROOT, 'cli.mjs');
 
 function tmpDir(p: string): string { return fs.mkdtempSync(path.join(os.tmpdir(), `lc-${p}-`)); }
 function runCli(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}) {
-  return spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...env } });
+  return spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...env } });
 }
 async function loadSkills() {
   return await import(pathToFileURL(path.join(REPO_ROOT, 'skills.mjs')).href) as typeof import('../skills.mjs');

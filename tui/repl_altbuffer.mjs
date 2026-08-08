@@ -15,7 +15,7 @@
 // trace (violates §1 Truthfulness / no silent catch).
 //
 // `enabled` is false for non-TTY pipelines, CI, ink-testing-library, and
-// the LAZYCLAW_NO_ALT escape hatch. When false this is a pass-through —
+// the POMPOS_NO_ALT escape hatch. When false this is a pass-through —
 // no escape sequences leak into stdout.
 import { useEffect } from 'react';
 
@@ -25,10 +25,10 @@ export const CURSOR_VISIBLE   = '\x1b[?25h';
 
 // Rendering-mode decision. Default = Static scrollback (no flicker; splash
 // prints once + scrolls naturally). Alt-buffer fullscreen is opt-in via
-// LAZYCLAW_ALT=1; LAZYCLAW_NO_ALT=1 forces it off. TTY-only either way.
+// POMPOS_ALT=1; POMPOS_NO_ALT=1 forces it off. TTY-only either way.
 export function computeAltEnabled(env, hasTTY) {
   const e = env || {};
-  return !!hasTTY && !!e.LAZYCLAW_ALT && !e.LAZYCLAW_NO_ALT;
+  return !!hasTTY && !!e.POMPOS_ALT && !e.POMPOS_NO_ALT;
 }
 
 export function FullScreen({ enabled, children }) {

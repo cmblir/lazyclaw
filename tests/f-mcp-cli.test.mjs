@@ -19,7 +19,7 @@ import * as mcpClient from '../mcp/client.mjs';
 const CLI = fileURLToPath(new URL('../cli.mjs', import.meta.url));
 const tmpCfgDir = () => fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-mcpcli-'));
 const runCli = (args, dir) => spawnSync(process.execPath, [CLI, ...args], {
-  env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir }, encoding: 'utf8',
+  env: { ...process.env, POMPOS_CONFIG_DIR: dir }, encoding: 'utf8',
 });
 const seed = (dir, cfg) => fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(cfg));
 
@@ -73,8 +73,8 @@ test('mcp remove of an unknown server fails', () => {
 test('mcp call spawns the server, runs the tool, and returns its result', async () => {
   const dir = tmpCfgDir();
   seed(dir, { mcp: { servers: [{ name: 'fs', command: 'fake', args: [], allowGlob: '*' }] } });
-  const prevDir = process.env.LAZYCLAW_CONFIG_DIR;
-  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  const prevDir = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
   mcpClient.__setTransport({
     connect: async () => ({
       listTools: async () => ({ tools: [{ name: 'read_file', description: 'Read', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } }] }),
@@ -90,7 +90,7 @@ test('mcp call spawns the server, runs the tool, and returns its result', async 
   } finally {
     process.stdout.write = origWrite;
     mcpClient.__setTransport(null);
-    if (prevDir === undefined) delete process.env.LAZYCLAW_CONFIG_DIR; else process.env.LAZYCLAW_CONFIG_DIR = prevDir;
+    if (prevDir === undefined) delete process.env.POMPOS_CONFIG_DIR; else process.env.POMPOS_CONFIG_DIR = prevDir;
   }
   const res = JSON.parse(out);
   assert.equal(res.ok, true, `call should succeed; got ${out}`);

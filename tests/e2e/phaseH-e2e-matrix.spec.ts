@@ -6,7 +6,7 @@ import * as os from 'node:os';
 
 const CLI = path.resolve(process.cwd(), 'cli.mjs');
 
-// Hermetic config dir per-test: HOME and LAZYCLAW_CONFIG_DIR both repointed.
+// Hermetic config dir per-test: HOME and POMPOS_CONFIG_DIR both repointed.
 function freshHome(): { home: string; env: NodeJS.ProcessEnv } {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-e2e-'));
   fs.mkdirSync(path.join(home, '.pompos'), { recursive: true });
@@ -15,10 +15,10 @@ function freshHome(): { home: string; env: NodeJS.ProcessEnv } {
     env: {
       ...process.env,
       HOME: home,
-      LAZYCLAW_CONFIG_DIR: path.join(home, '.pompos'),
-      LAZYCLAW_MOCK_PROVIDER: '1',
-      LAZYCLAW_NO_INK: '1',
-      LAZYCLAW_NO_NETWORK: '1',
+      POMPOS_CONFIG_DIR: path.join(home, '.pompos'),
+      POMPOS_MOCK_PROVIDER: '1',
+      POMPOS_NO_INK: '1',
+      POMPOS_NO_NETWORK: '1',
     },
   };
 }
@@ -83,9 +83,9 @@ for (const provider of PROVIDERS) {
           }
 
           const { home, env } = freshHome();
-          env.LAZYCLAW_E2E_PROVIDER = provider;
-          env.LAZYCLAW_E2E_CHANNEL = channel;
-          env.LAZYCLAW_E2E_FLOW = flow;
+          env.POMPOS_E2E_PROVIDER = provider;
+          env.POMPOS_E2E_CHANNEL = channel;
+          env.POMPOS_E2E_FLOW = flow;
 
           // Seed config with trainer block matching the flow.
           const cfg = {
@@ -99,7 +99,7 @@ for (const provider of PROVIDERS) {
           );
 
           // Each flow exercises a distinct command path. The mock provider
-          // (gated by LAZYCLAW_MOCK_PROVIDER=1) returns a canned successful
+          // (gated by POMPOS_MOCK_PROVIDER=1) returns a canned successful
           // response so we test wiring, not provider behaviour.
           let r;
           switch (flow) {

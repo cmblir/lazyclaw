@@ -13,8 +13,8 @@
 // research sessions without recompiling. Lives in its own file so it
 // can be imported by tests without invoking cli.mjs::main().
 
-export const CHAT_WINDOW_TURNS = Number(process.env.LAZYCLAW_CHAT_WINDOW_TURNS) || 20;
-export const CHAT_WINDOW_TOKEN_BUDGET = Number(process.env.LAZYCLAW_CHAT_WINDOW_TOKENS) || 8000;
+export const CHAT_WINDOW_TURNS = Number(process.env.POMPOS_CHAT_WINDOW_TURNS) || 20;
+export const CHAT_WINDOW_TOKEN_BUDGET = Number(process.env.POMPOS_CHAT_WINDOW_TOKENS) || 8000;
 
 // Approximate token count of a messages[] array (4 chars/token, same heuristic
 // the window cap uses). Drives the status-bar context gauge so it reflects the
@@ -75,8 +75,8 @@ export function applyChatWindow(messages, { turns = CHAT_WINDOW_TURNS, tokens = 
 // Returns { messages, elidedTurns, truncatedResults } and NEVER mutates the
 // input array (deep-copies only the blocks it rewrites).
 
-export const COMPACT_TOOL_RESULT_MAX_CHARS = Number(process.env.LAZYCLAW_COMPACT_TOOL_RESULT_CHARS) || 8000;
-export const COMPACT_KEEP_RECENT_TURNS = Number(process.env.LAZYCLAW_COMPACT_KEEP_TURNS) || 8;
+export const COMPACT_TOOL_RESULT_MAX_CHARS = Number(process.env.POMPOS_COMPACT_TOOL_RESULT_CHARS) || 8000;
+export const COMPACT_KEEP_RECENT_TURNS = Number(process.env.POMPOS_COMPACT_KEEP_TURNS) || 8;
 
 // Truncate a string result body, leaving a marker that names how much was cut.
 function _elideText(text, maxChars) {

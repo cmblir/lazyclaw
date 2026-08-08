@@ -19,7 +19,7 @@
 // to be driven by a future `telegram listen` subcommand (not yet wired in
 // the CLI).
 //
-// LAZYCLAW_TELEGRAM_API_BASE (or opts.apiBase) overrides the Bot API
+// POMPOS_TELEGRAM_API_BASE (or opts.apiBase) overrides the Bot API
 // base URL so the Phase 21 spec can point the adapter at a local mock
 // HTTP server.
 
@@ -46,7 +46,7 @@ export class TelegramError extends Error {
 export function readTelegramEnv(env = process.env) {
   return {
     token: env.TELEGRAM_BOT_TOKEN || null,
-    apiBase: env.LAZYCLAW_TELEGRAM_API_BASE || DEFAULT_API_BASE,
+    apiBase: env.POMPOS_TELEGRAM_API_BASE || DEFAULT_API_BASE,
   };
 }
 

@@ -16,14 +16,14 @@ function tmpDir(prefix: string): string {
 function runCli(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...env },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...env },
   });
 }
 
 function runCliAsync(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}): Promise<{ status: number | null, stdout: string, stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...env },
+      env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '', stderr = '';
@@ -384,7 +384,7 @@ test.describe('Phase 13 — mention router', () => {
     expect(runCli(['auth', 'use',  'anthropic', 'mock'], cfg).status).toBe(0);
 
     const r = await runCliAsync(['task', 'tick', task.id, 'do the thing', '--max-turns', '3'], cfg, {
-      LAZYCLAW_ANTHROPIC_BASE_URL: mock.baseUrl,
+      POMPOS_ANTHROPIC_BASE_URL: mock.baseUrl,
     });
     expect(r.status).toBe(0);
     const summary = JSON.parse(r.stdout);

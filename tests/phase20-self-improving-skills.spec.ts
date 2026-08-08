@@ -25,7 +25,7 @@ function tmpDir(prefix: string): string {
 function runCli(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...env },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...env },
   });
 }
 
@@ -52,7 +52,7 @@ async function loadRedact() {
 function runCliAsync(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}): Promise<{ status: number | null, stdout: string, stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...env },
+      env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '', stderr = '';
@@ -329,7 +329,7 @@ test.describe('Phase 20E — synthesizeSkill + CLI + auto path', () => {
     seedAgentTeamAuth(cfg);
     const open = JSON.parse(runCli(['task', 'start', '--team', 'shop', '--title', 'ship'], cfg).stdout);
 
-    const r = await runCliAsync(['agent', 'skill-synth', 'planner', '--task', open.id], cfg, { LAZYCLAW_ANTHROPIC_BASE_URL: mock.baseUrl });
+    const r = await runCliAsync(['agent', 'skill-synth', 'planner', '--task', open.id], cfg, { POMPOS_ANTHROPIC_BASE_URL: mock.baseUrl });
     expect(r.status).toBe(0);
 
     const skills = await loadSkills();
@@ -347,7 +347,7 @@ test.describe('Phase 20E — synthesizeSkill + CLI + auto path', () => {
     seedAgentTeamAuth(cfg);
     const open = JSON.parse(runCli(['task', 'start', '--team', 'shop', '--title', 'ship'], cfg).stdout);
 
-    const r = await runCliAsync(['agent', 'skill-synth', 'planner', '--task', open.id, '--dry-run'], cfg, { LAZYCLAW_ANTHROPIC_BASE_URL: mock.baseUrl });
+    const r = await runCliAsync(['agent', 'skill-synth', 'planner', '--task', open.id, '--dry-run'], cfg, { POMPOS_ANTHROPIC_BASE_URL: mock.baseUrl });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('## When to Use');
 
@@ -370,7 +370,7 @@ test.describe('Phase 20E — synthesizeSkill + CLI + auto path', () => {
     fs.writeFileSync(agentFile, JSON.stringify(rec, null, 2));
 
     const open = JSON.parse(runCli(['task', 'start', '--team', 'shop', '--title', 'wrap'], cfg).stdout);
-    const tick = await runCliAsync(['task', 'tick', open.id, 'go'], cfg, { LAZYCLAW_ANTHROPIC_BASE_URL: mock.baseUrl });
+    const tick = await runCliAsync(['task', 'tick', open.id, 'go'], cfg, { POMPOS_ANTHROPIC_BASE_URL: mock.baseUrl });
     expect(tick.status).toBe(0);
     expect(JSON.parse(tick.stdout).stoppedBy).toBe('done');
 
@@ -393,7 +393,7 @@ test.describe('Phase 20F — recall index injected into the turn context', () =>
     skills.installSkill('deploy-flow', '---\nname: deploy-flow\ndescription: ship the app safely\n---\n\n## When to Use\nprod\n', cfg);
 
     const open = JSON.parse(runCli(['task', 'start', '--team', 'shop', '--title', 'now'], cfg).stdout);
-    const tick = await runCliAsync(['task', 'tick', open.id, 'go'], cfg, { LAZYCLAW_ANTHROPIC_BASE_URL: mock.baseUrl });
+    const tick = await runCliAsync(['task', 'tick', open.id, 'go'], cfg, { POMPOS_ANTHROPIC_BASE_URL: mock.baseUrl });
     expect(tick.status).toBe(0);
 
     const first = mock.posts[0].body as { system: string | Array<{ text: string }>; tools: Array<{ name: string }> };
@@ -418,7 +418,7 @@ test.describe('Phase 20F — recall index injected into the turn context', () =>
     seedAgentTeamAuth(cfg);
 
     const open = JSON.parse(runCli(['task', 'start', '--team', 'shop', '--title', 'now'], cfg).stdout);
-    const tick = await runCliAsync(['task', 'tick', open.id, 'go'], cfg, { LAZYCLAW_ANTHROPIC_BASE_URL: mock.baseUrl });
+    const tick = await runCliAsync(['task', 'tick', open.id, 'go'], cfg, { POMPOS_ANTHROPIC_BASE_URL: mock.baseUrl });
     expect(tick.status).toBe(0);
 
     const first = mock.posts[0].body as { system: string | Array<{ text: string }> };

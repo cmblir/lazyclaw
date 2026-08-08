@@ -90,17 +90,17 @@ test('DEFECT A: runAgentTurn drives a full turn for an openai-compat provider (n
 
 test('DEFECT A preserved: claude-cli still normalizes to kind:final via runAgentTurn', async () => {
   const FAKE = path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'fake-claude.mjs');
-  // The claude-cli adapter reads its binary from LAZYCLAW_CLAUDE_BIN when set;
+  // The claude-cli adapter reads its binary from POMPOS_CLAUDE_BIN when set;
   // runAgentTurn does not forward a per-agent bin, so point the env at the fake.
-  const prev = process.env.LAZYCLAW_CLAUDE_BIN;
-  process.env.LAZYCLAW_CLAUDE_BIN = FAKE;
+  const prev = process.env.POMPOS_CLAUDE_BIN;
+  process.env.POMPOS_CLAUDE_BIN = FAKE;
   try {
     const cliAgent = { name: 'c', role: 'R', provider: 'claude-cli', model: 'sonnet', tools: [] };
     const r = await runAgentTurn({ agent: cliAgent, userMessage: 'hi' });
     assert.equal(r.stoppedBy, 'final');
   } finally {
-    if (prev === undefined) delete process.env.LAZYCLAW_CLAUDE_BIN;
-    else process.env.LAZYCLAW_CLAUDE_BIN = prev;
+    if (prev === undefined) delete process.env.POMPOS_CLAUDE_BIN;
+    else process.env.POMPOS_CLAUDE_BIN = prev;
   }
 });
 

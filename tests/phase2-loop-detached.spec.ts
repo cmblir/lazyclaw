@@ -14,7 +14,7 @@ function tmpDir(prefix: string): string {
 function runCli(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...env },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...env },
   });
 }
 
@@ -103,7 +103,7 @@ test.describe('Phase 2 — pompos loop detached', () => {
     const { loopId } = JSON.parse(r.stdout.trim());
 
     const tail = spawn(process.execPath, [CLI, 'loops', 'tail', loopId, '--poll-ms', '50', '--max-wait-ms', '8000'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfg },
+      env: { ...process.env, POMPOS_CONFIG_DIR: cfg },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';

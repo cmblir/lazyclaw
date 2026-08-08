@@ -68,7 +68,7 @@ test('`index embed` reports 0 embedded when the feature is off', () => {
   indexSessionTurn({ session_id: 's1', turn_idx: 0, role: 'user', ts: 1, content: 'hello world' }, dir);
   closeIndex(dir);
   const r = spawnSync(process.execPath, [CLI, 'index', 'embed'], {
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir }, encoding: 'utf8',
+    env: { ...process.env, POMPOS_CONFIG_DIR: dir }, encoding: 'utf8',
   });
   assert.equal(r.status, 0, `index embed should exit 0; stderr=${r.stderr}`);
   assert.deepEqual(JSON.parse(r.stdout), { ok: true, embedded: 0 });

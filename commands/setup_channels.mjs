@@ -113,7 +113,7 @@ export function buildChannelEntry(name, answers = {}) {
 // Side-effecting persist used by the interactive step (and unit-tested with a
 // temp cfgDir). Writes creds to <cfgDir>/.env and metadata to cfg.channels.
 // readConfig()/writeConfig() resolve configPath() fresh on every call (it
-// reads LAZYCLAW_CONFIG_DIR at use-time, nothing import-cached), so they
+// reads POMPOS_CONFIG_DIR at use-time, nothing import-cached), so they
 // target <cfgDir>/config.json when the caller has pointed the env var there.
 export function persistChannel(cfgDir, name, answers) {
   const entry = buildChannelEntry(name, answers);

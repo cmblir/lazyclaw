@@ -14,7 +14,7 @@ const REPO_ROOT = process.cwd();
 const CLI = path.join(REPO_ROOT, 'cli.mjs');
 function tmpDir(p: string): string { return fs.mkdtempSync(path.join(os.tmpdir(), `lc-${p}-`)); }
 function runCli(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}) {
-  return spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...env } });
+  return spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...env } });
 }
 async function loadRedact() { return await import(pathToFileURL(path.join(REPO_ROOT, 'mas', 'redact.mjs')).href) as typeof import('../mas/redact.mjs'); }
 async function loadMatrix() { return await import(pathToFileURL(path.join(REPO_ROOT, 'channels', 'matrix.mjs')).href) as typeof import('../channels/matrix.mjs'); }

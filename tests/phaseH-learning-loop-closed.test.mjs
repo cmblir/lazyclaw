@@ -92,7 +92,7 @@ test('M5 — installSynthesized respects frontmatter trained_by even when create
 test('C3 — runAgentTurn persists a trajectory even when caller omits trajectoryRef', async () => {
   const cfg = tmpCfg('lc-c3-');
   trajectoryStore._resetCache();
-  delete process.env.LAZYCLAW_NO_TRAJECTORY;
+  delete process.env.POMPOS_NO_TRAJECTORY;
   // Mock adapter that returns final on the first call; we drive runAgentTurn
   // through the anthropic adapter against a stub fetch so we don't need
   // a real provider.
@@ -123,10 +123,10 @@ test('C3 — runAgentTurn persists a trajectory even when caller omits trajector
   assert.ok(files.length >= 1, 'expected at least one trajectory file');
 });
 
-test('C3 — LAZYCLAW_NO_TRAJECTORY=1 disables the default persist for tests', async () => {
+test('C3 — POMPOS_NO_TRAJECTORY=1 disables the default persist for tests', async () => {
   const cfg = tmpCfg('lc-c3-off-');
   trajectoryStore._resetCache();
-  process.env.LAZYCLAW_NO_TRAJECTORY = '1';
+  process.env.POMPOS_NO_TRAJECTORY = '1';
   try {
     const fetchImpl = async () => ({
       ok: true,
@@ -145,9 +145,9 @@ test('C3 — LAZYCLAW_NO_TRAJECTORY=1 disables the default persist for tests', a
     });
     const dir = path.join(cfg, 'trajectories');
     assert.equal(fs.existsSync(dir), false,
-      'LAZYCLAW_NO_TRAJECTORY=1 must suppress trajectory writes');
+      'POMPOS_NO_TRAJECTORY=1 must suppress trajectory writes');
   } finally {
-    delete process.env.LAZYCLAW_NO_TRAJECTORY;
+    delete process.env.POMPOS_NO_TRAJECTORY;
   }
 });
 
@@ -237,7 +237,7 @@ test('M3 — fresh agent with no explicit skillWrite still runs synthesizeSkill 
 // ─── M4 ─────────────────────────────────────────────────────────────
 test('M4 — tasks.appendTurn populates fts_sessions with session_id="task:<id>"', async () => {
   const cfg = tmpCfg('lc-m4-');
-  process.env.LAZYCLAW_CONFIG_DIR = cfg;
+  process.env.POMPOS_CONFIG_DIR = cfg;
   openIndex(cfg);
   // Build the minimal team/agent so registerTask succeeds.
   registerAgent({ name: 'planner', role: 'r' }, cfg);
@@ -254,5 +254,5 @@ test('M4 — tasks.appendTurn populates fts_sessions with session_id="task:<id>"
   assert.ok(taskHit,
     `expected fts_sessions row with session_id "task:${task.id}", got hits: ${JSON.stringify(out.hits)}`);
   closeIndex(cfg);
-  delete process.env.LAZYCLAW_CONFIG_DIR;
+  delete process.env.POMPOS_CONFIG_DIR;
 });

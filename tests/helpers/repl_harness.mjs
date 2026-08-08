@@ -74,7 +74,7 @@ function swap(key, value) {
  *
  * @param {object} props extra ReplApp props (merged over the defaults)
  * @param {{columns?: number, rows?: number, alt?: boolean}} geom fake terminal
- *   geometry. `alt: true` sets LAZYCLAW_ALT=1 (instead of deleting it) so
+ *   geometry. `alt: true` sets POMPOS_ALT=1 (instead of deleting it) so
  *   computeAltEnabled (tui/repl_altbuffer.mjs) resolves to the alt-buffer
  *   layout arm. Default stays non-alt (env var deleted), matching prior
  *   behavior exactly.
@@ -101,8 +101,8 @@ export function mountRepl(props = {}, { columns = 100, rows = 40, alt = false } 
   const saved = {
     offset: anchorState.offset,
     shimmed: anchorState.shimmed,
-    envAlt: process.env.LAZYCLAW_ALT,
-    envNoAnchor: process.env.LAZYCLAW_NO_CURSOR_ANCHOR,
+    envAlt: process.env.POMPOS_ALT,
+    envNoAnchor: process.env.POMPOS_NO_CURSOR_ANCHOR,
   };
   const restoreStdout = swap('stdout', stdout);
   const restoreStderr = swap('stderr', stderr);
@@ -110,10 +110,10 @@ export function mountRepl(props = {}, { columns = 100, rows = 40, alt = false } 
   // Pin the configuration under test: the PRIMARY terminal buffer (Ink
   // <Static> scrollback, the default) with the IME cursor anchor ON. Both are
   // env-switchable, so a developer's shell must not change what tests assert.
-  // `alt: true` opts into the alt-buffer arm instead (LAZYCLAW_ALT=1).
-  if (alt) process.env.LAZYCLAW_ALT = '1';
-  else delete process.env.LAZYCLAW_ALT;
-  delete process.env.LAZYCLAW_NO_CURSOR_ANCHOR;
+  // `alt: true` opts into the alt-buffer arm instead (POMPOS_ALT=1).
+  if (alt) process.env.POMPOS_ALT = '1';
+  else delete process.env.POMPOS_ALT;
+  delete process.env.POMPOS_NO_CURSOR_ANCHOR;
   // Force the anchor shim to re-install over THIS mount's stdout; the module
   // singleton would otherwise still hold a previous mount's stream.
   anchorState.offset = 0;
@@ -129,8 +129,8 @@ export function mountRepl(props = {}, { columns = 100, rows = 40, alt = false } 
     restoreStderr();
     anchorState.offset = saved.offset;
     anchorState.shimmed = saved.shimmed;
-    restoreEnv('LAZYCLAW_ALT', saved.envAlt);
-    restoreEnv('LAZYCLAW_NO_CURSOR_ANCHOR', saved.envNoAnchor);
+    restoreEnv('POMPOS_ALT', saved.envAlt);
+    restoreEnv('POMPOS_NO_CURSOR_ANCHOR', saved.envNoAnchor);
   }
 
   function restoreEnv(key, value) {

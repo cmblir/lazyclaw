@@ -65,16 +65,16 @@ test('loadDotenvIfAny falls back to the configured dir when called with no cfgDi
   // token and reported a false "no token set".
   const dir = tmpCfgDir();
   fs.writeFileSync(path.join(dir, '.env'), 'SLACK_BOT_TOKEN=xoxb-fallback\n');
-  const prevDir = process.env.LAZYCLAW_CONFIG_DIR;
+  const prevDir = process.env.POMPOS_CONFIG_DIR;
   const prevTok = process.env.SLACK_BOT_TOKEN;
-  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  process.env.POMPOS_CONFIG_DIR = dir;
   delete process.env.SLACK_BOT_TOKEN;
   try {
     const r = loadDotenvIfAny();
     assert.equal(process.env.SLACK_BOT_TOKEN, 'xoxb-fallback');
     assert.ok(r.loaded >= 1);
   } finally {
-    if (prevDir === undefined) delete process.env.LAZYCLAW_CONFIG_DIR; else process.env.LAZYCLAW_CONFIG_DIR = prevDir;
+    if (prevDir === undefined) delete process.env.POMPOS_CONFIG_DIR; else process.env.POMPOS_CONFIG_DIR = prevDir;
     if (prevTok === undefined) delete process.env.SLACK_BOT_TOKEN; else process.env.SLACK_BOT_TOKEN = prevTok;
   }
 });
@@ -141,8 +141,8 @@ test('buildChannelEntry(unknown) throws', () => {
 
 test('persistChannel writes creds to .env and enables cfg.channels.<name>', () => {
   const dir = tmpCfgDir();
-  const prevCfg = process.env.LAZYCLAW_CONFIG_DIR;
-  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  const prevCfg = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
   try {
     persistChannel(dir, 'telegram', { token: '111:aaa' });
     const env = fs.readFileSync(path.join(dir, '.env'), 'utf8');
@@ -150,7 +150,7 @@ test('persistChannel writes creds to .env and enables cfg.channels.<name>', () =
     const cfg = JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'));
     assert.equal(cfg.channels.telegram.enabled, true);
   } finally {
-    if (prevCfg === undefined) delete process.env.LAZYCLAW_CONFIG_DIR; else process.env.LAZYCLAW_CONFIG_DIR = prevCfg;
+    if (prevCfg === undefined) delete process.env.POMPOS_CONFIG_DIR; else process.env.POMPOS_CONFIG_DIR = prevCfg;
   }
 });
 
@@ -181,8 +181,8 @@ function scriptedPick(channelNames) {
 
 test('runChannelStep: selecting telegram + token persists and reports success', async () => {
   const dir = tmpCfgDir();
-  const prevCfg = process.env.LAZYCLAW_CONFIG_DIR;
-  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  const prevCfg = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
   const out = [];
   try {
     const r = await runChannelStep({
@@ -203,14 +203,14 @@ test('runChannelStep: selecting telegram + token persists and reports success', 
     // would still pass the absence check above, so assert the masked form too.
     assert.match(rendered, /TELEGRAM_BOT_TOKEN = 111…aa/, 'masked token must be emitted');
   } finally {
-    if (prevCfg === undefined) delete process.env.LAZYCLAW_CONFIG_DIR; else process.env.LAZYCLAW_CONFIG_DIR = prevCfg;
+    if (prevCfg === undefined) delete process.env.POMPOS_CONFIG_DIR; else process.env.POMPOS_CONFIG_DIR = prevCfg;
   }
 });
 
 test('runChannelStep: verifies a builtin channel credential and reports ✓ on success', async () => {
   const dir = tmpCfgDir();
-  const prevCfg = process.env.LAZYCLAW_CONFIG_DIR;
-  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  const prevCfg = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
   const out = [];
   // Fake fetch: telegram getMe returns ok.
   const fetchImpl = async () => ({ json: async () => ({ ok: true, result: { username: 'mybot' } }) });
@@ -227,14 +227,14 @@ test('runChannelStep: verifies a builtin channel credential and reports ✓ on s
     assert.match(rendered, /✓ verified/, 'a good token must report verified');
     assert.match(rendered, /mybot/, 'verify detail surfaces the bot identity');
   } finally {
-    if (prevCfg === undefined) delete process.env.LAZYCLAW_CONFIG_DIR; else process.env.LAZYCLAW_CONFIG_DIR = prevCfg;
+    if (prevCfg === undefined) delete process.env.POMPOS_CONFIG_DIR; else process.env.POMPOS_CONFIG_DIR = prevCfg;
   }
 });
 
 test('runChannelStep: a rejected credential reports ✗ not verified during setup', async () => {
   const dir = tmpCfgDir();
-  const prevCfg = process.env.LAZYCLAW_CONFIG_DIR;
-  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  const prevCfg = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
   const out = [];
   const fetchImpl = async () => ({ json: async () => ({ ok: false, description: 'Unauthorized' }) });
   try {
@@ -248,7 +248,7 @@ test('runChannelStep: a rejected credential reports ✗ not verified during setu
     });
     assert.match(out.join(''), /✗ not verified/, 'a bad token must be flagged at setup time');
   } finally {
-    if (prevCfg === undefined) delete process.env.LAZYCLAW_CONFIG_DIR; else process.env.LAZYCLAW_CONFIG_DIR = prevCfg;
+    if (prevCfg === undefined) delete process.env.POMPOS_CONFIG_DIR; else process.env.POMPOS_CONFIG_DIR = prevCfg;
   }
 });
 
@@ -268,8 +268,8 @@ test('runChannelStep: Esc on the picker skips cleanly', async () => {
 
 test('runChannelStep: configures multiple channels in one pass', async () => {
   const dir = tmpCfgDir();
-  const prevCfg = process.env.LAZYCLAW_CONFIG_DIR;
-  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  const prevCfg = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
   try {
     const r = await runChannelStep({
       cfgDir: dir,
@@ -285,14 +285,14 @@ test('runChannelStep: configures multiple channels in one pass', async () => {
     assert.match(env, /TELEGRAM_BOT_TOKEN=111:aaa/);
     assert.match(env, /SLACK_BOT_TOKEN=xoxb-tok/);
   } finally {
-    if (prevCfg === undefined) delete process.env.LAZYCLAW_CONFIG_DIR; else process.env.LAZYCLAW_CONFIG_DIR = prevCfg;
+    if (prevCfg === undefined) delete process.env.POMPOS_CONFIG_DIR; else process.env.POMPOS_CONFIG_DIR = prevCfg;
   }
 });
 
 test('runChannelStep: an in-tree channel with a missing dep is saved DISABLED with an honest install hint (no 404 package)', async () => {
   const dir = tmpCfgDir();
-  const prevCfg = process.env.LAZYCLAW_CONFIG_DIR;
-  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  const prevCfg = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
   const out = [];
   try {
     const r = await runChannelStep({
@@ -316,7 +316,7 @@ test('runChannelStep: an in-tree channel with a missing dep is saved DISABLED wi
     assert.equal(cfg.channels.discord.enabled, false, 'in-tree channel stays disabled until its dep is installed');
     assert.deepEqual(cfg.channels.discord.pending.deps, ['discord.js']);
   } finally {
-    if (prevCfg === undefined) delete process.env.LAZYCLAW_CONFIG_DIR; else process.env.LAZYCLAW_CONFIG_DIR = prevCfg;
+    if (prevCfg === undefined) delete process.env.POMPOS_CONFIG_DIR; else process.env.POMPOS_CONFIG_DIR = prevCfg;
   }
 });
 

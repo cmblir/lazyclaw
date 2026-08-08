@@ -33,7 +33,7 @@ export function _buildSpec(surface, flags = {}, cfgDir = '', deps = {}) {
   const hasSystemd = typeof deps.hasSystemctl === 'function' ? deps.hasSystemctl() : hasSystemctl();
   const args = [deps.cliPath ? deps.cliPath() : cliPath(), surface];
   // Default the service to the well-known port the channel listeners dial
-  // (the LAZYCLAW_DAEMON_URL default), so `service install` + `* listen`
+  // (the POMPOS_DAEMON_URL default), so `service install` + `* listen`
   // work together out of the box. Bare `pompos daemon` still defaults to a
   // random port for ad-hoc / scripted use. Resolved the same way cmdService's
   // own EADDRINUSE warning below is, so the two never disagree.
@@ -49,7 +49,7 @@ export function _buildSpec(surface, flags = {}, cfgDir = '', deps = {}) {
     workingDir: deps.cwd || process.cwd(),
     configDir: cfgDir,
     description: `pompos always-on ${surface}`,
-    env: { LAZYCLAW_CONFIG_DIR: cfgDir },
+    env: { POMPOS_CONFIG_DIR: cfgDir },
     backend: detectBackend({ override: flags.backend || null, hasSystemctl: hasSystemd }),
   };
 }

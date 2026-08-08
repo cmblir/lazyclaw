@@ -6,10 +6,10 @@ import path from 'node:path';
 
 function withTmpCfg(fn) {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-permstep-'));
-  const prev = process.env.LAZYCLAW_CONFIG_DIR;
-  process.env.LAZYCLAW_CONFIG_DIR = d;
+  const prev = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = d;
   return Promise.resolve(fn(d)).finally(() => {
-    if (prev === undefined) delete process.env.LAZYCLAW_CONFIG_DIR; else process.env.LAZYCLAW_CONFIG_DIR = prev;
+    if (prev === undefined) delete process.env.POMPOS_CONFIG_DIR; else process.env.POMPOS_CONFIG_DIR = prev;
     fs.rmSync(d, { recursive: true, force: true });
   });
 }

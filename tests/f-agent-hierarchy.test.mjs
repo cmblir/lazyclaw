@@ -12,7 +12,7 @@ const CLI = new URL('../cli.mjs', import.meta.url).pathname;
 
 test('CLI: agent add --manager persists the manager (hierarchy from the command line)', () => {
   const d = tmp();
-  const run = (args) => spawnSync('node', [CLI, ...args], { env: { ...process.env, LAZYCLAW_CONFIG_DIR: d }, encoding: 'utf8' });
+  const run = (args) => spawnSync('node', [CLI, ...args], { env: { ...process.env, POMPOS_CONFIG_DIR: d }, encoding: 'utf8' });
   assert.equal(run(['agent', 'add', 'boss', '--provider', 'claude-cli']).status, 0);
   const r = run(['agent', 'add', 'report', '--provider', 'claude-cli', '--manager', 'boss']);
   assert.equal(r.status, 0, r.stderr);

@@ -7,12 +7,12 @@
 //
 // Global gate: motionEnabled(). Animation is OFF when stdout is not a TTY
 // (tests, pipes, CI), when the NO_COLOR standard applies, on dumb terminals,
-// and when the user opts out with LAZYCLAW_NO_MOTION=1 (the reduced-motion
+// and when the user opts out with POMPOS_NO_MOTION=1 (the reduced-motion
 // escape hatch). Every animated component must check it.
 //
 // motionEnabled(env, stream) delegates its three shared checks (NO_COLOR,
 // TERM==='dumb', !stream.isTTY) to tui/theme.mjs's colorEnabled(env, stream)
-// and layers only LAZYCLAW_NO_MOTION on top. colorEnabled takes an injectable
+// and layers only POMPOS_NO_MOTION on top. colorEnabled takes an injectable
 // `env` (defaulting to process.env) for exactly this reason, so the two gates
 // can't silently drift apart — a change to one is a change to both.
 
@@ -34,7 +34,7 @@ export function spinnerFrame(tick) {
 }
 
 export function motionEnabled(env = process.env, stream = process.stdout) {
-  if (!env || env.LAZYCLAW_NO_MOTION === '1') return false;
+  if (!env || env.POMPOS_NO_MOTION === '1') return false;
   return colorEnabled(env, stream);
 }
 

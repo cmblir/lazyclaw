@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// FIRST import, deliberately: mirrors LAZYCLAW_* <-> POMPOS_* so the pre-rename
+// FIRST import, deliberately: mirrors POMPOS_* <-> POMPOS_* so the pre-rename
 // environment keeps working. Must precede every other import — see the module's
 // own comment for why the ordering is load-bearing and not merely tidy.
 import './lib/env_compat_boot.mjs';

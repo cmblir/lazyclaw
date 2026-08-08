@@ -18,9 +18,9 @@ import { attachWorkflowCron } from '../workflow/named_cron.mjs';
 
 const CLI = fileURLToPath(new URL('../cli.mjs', import.meta.url));
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'lazyclaw-wfauto-'));
-// LAZYCLAW_SKIP_CRON_INSTALL is forced so a `--cron` add never touches the real
+// POMPOS_SKIP_CRON_INSTALL is forced so a `--cron` add never touches the real
 // launchd/crontab during tests (config is still written).
-const runCli = (args, dir) => spawnSync(process.execPath, [CLI, ...args], { env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir, LAZYCLAW_SKIP_CRON_INSTALL: '1' }, encoding: 'utf8' });
+const runCli = (args, dir) => spawnSync(process.execPath, [CLI, ...args], { env: { ...process.env, POMPOS_CONFIG_DIR: dir, POMPOS_SKIP_CRON_INSTALL: '1' }, encoding: 'utf8' });
 
 test('runNamedAndReport runs a named workflow and posts the reply to the bound channel', async () => {
   const sent = [];

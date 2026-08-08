@@ -1,5 +1,5 @@
 // tests/p3-goal-cron-dispatch.test.mjs — P3 restore: /goal add --cron attaches
-// a schedule from the Ink chat and /goal close detaches it. LAZYCLAW_SKIP_CRON
+// a schedule from the Ink chat and /goal close detaches it. POMPOS_SKIP_CRON
 // _INSTALL keeps the test off the real launchd/crontab backend.
 
 import test from 'node:test';
@@ -10,7 +10,7 @@ import path from 'node:path';
 
 import { dispatchSlash } from '../tui/slash_dispatcher.mjs';
 
-process.env.LAZYCLAW_SKIP_CRON_INSTALL = '1';
+process.env.POMPOS_SKIP_CRON_INSTALL = '1';
 
 function makeCtx() {
   const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lc-goalcron-'));

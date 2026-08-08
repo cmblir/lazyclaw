@@ -104,7 +104,7 @@ test.describe('Phase 29B — tool_runner approve hook', () => {
 // ── end-to-end over a live daemon ───────────────────────────────────────
 interface Daemon { baseUrl: string; child: ChildProcessWithoutNullStreams; stop: () => Promise<void>; }
 async function startDaemon(cfgDir: string): Promise<Daemon> {
-  const child = spawn(process.execPath, [CLI, 'daemon', '--port', '0'], { env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir }, stdio: ['ignore', 'pipe', 'pipe'] }) as ChildProcessWithoutNullStreams;
+  const child = spawn(process.execPath, [CLI, 'daemon', '--port', '0'], { env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir }, stdio: ['ignore', 'pipe', 'pipe'] }) as ChildProcessWithoutNullStreams;
   let port = 0; let buf = '';
   child.stdout.on('data', (d) => { buf += d.toString(); const nl = buf.indexOf('\n'); if (nl >= 0 && !port) { try { const j = JSON.parse(buf.slice(0, nl)); if (j.port) port = j.port; } catch { /* */ } } });
   const start = Date.now();

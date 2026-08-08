@@ -97,7 +97,7 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
   const { exit } = useApp();
 
   // Rendering mode: default Static scrollback (no flicker / alt-canvas bugs);
-  // alt-buffer fullscreen opt-in via LAZYCLAW_ALT=1 (LAZYCLAW_NO_ALT=1 forces
+  // alt-buffer fullscreen opt-in via POMPOS_ALT=1 (POMPOS_NO_ALT=1 forces
   // off). TTY-only; read once on mount into a ref (env can't change at runtime).
   const altEnabledRef = useRef(null);
   if (altEnabledRef.current === null) {
@@ -121,7 +121,7 @@ export function ReplApp({ splashProps, runTurn, runTurnFactory, slashCommands, o
   // tui/stray_writes.mjs can hand those chunks to Ink's safe write path.
   //
   // At mount, NOT from the Editor's cursor-anchor effect that also uses the
-  // shim: that effect opts out on LAZYCLAW_NO_CURSOR_ANCHOR=1, so installing
+  // shim: that effect opts out on POMPOS_NO_CURSOR_ANCHOR=1, so installing
   // from there made opting out of the anchor silently disable this redirect too.
   // Gated on isInkStdout rather than on that env var because the shim patches
   // the REAL process.stdout/stderr permanently — a mount rendering elsewhere

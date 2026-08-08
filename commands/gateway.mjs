@@ -206,7 +206,7 @@ export async function runGateway(flags = {}, deps = {}) {
   // and persist it 0600 (so `service install gateway` restarts keep the same
   // token and the operator can read it from the file — it is never logged).
   // --no-auth opts back into the historical open-loopback posture.
-  let authToken = flags['auth-token'] || process.env.LAZYCLAW_AUTH_TOKEN || null;
+  let authToken = flags['auth-token'] || process.env.POMPOS_AUTH_TOKEN || null;
   const tokenFile = path.join(cfgDir, 'gateway.token');
   if (!authToken && !flags['no-auth']) {
     try { authToken = fs.readFileSync(tokenFile, 'utf8').trim() || null; } catch { /* not minted yet */ }

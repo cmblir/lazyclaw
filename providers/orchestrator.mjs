@@ -367,7 +367,7 @@ export function makeOrchestratorProvider(opts = {}) {
       // Carry the no-fabrication honesty guard into the user-facing synthesis
       // (lazy import avoids a static cycle) — ON-orchestrator must not drop it.
       let synthSystem = SYNTHESIS_SYSTEM;
-      try { const g = (await import('../lib/nl_config_command.mjs')).LAZYCLAW_META_GUARD; if (g) synthSystem = `${g}\n\n---\n\n${SYNTHESIS_SYSTEM}`; } catch { /* guard unavailable */ }
+      try { const g = (await import('../lib/nl_config_command.mjs')).POMPOS_META_GUARD; if (g) synthSystem = `${g}\n\n---\n\n${SYNTHESIS_SYSTEM}`; } catch { /* guard unavailable */ }
       try {
         for await (const chunk of planner.prov.sendMessage([
           { role: 'system', content: synthSystem },

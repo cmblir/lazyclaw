@@ -16,7 +16,7 @@ function tmpDir(prefix: string): string {
 function runCli(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, LAZYCLAW_SKIP_CRON_INSTALL: '1', ...env },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, POMPOS_SKIP_CRON_INSTALL: '1', ...env },
   });
 }
 
@@ -26,7 +26,7 @@ function runCli(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}) {
 function runCliAsync(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}): Promise<{ status: number | null, stdout: string, stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, LAZYCLAW_SKIP_CRON_INSTALL: '1', ...env },
+      env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, POMPOS_SKIP_CRON_INSTALL: '1', ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '', stderr = '';

@@ -42,7 +42,7 @@ function tmpCfg() {
 function runCli(args, cfgDir) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir },
   });
 }
 
@@ -82,7 +82,7 @@ test('importing a redacted bundle never persists the ***REDACTED*** placeholder'
   const imp = spawnSync(process.execPath, [CLI, 'import'], {
     input: exp.stdout,
     encoding: 'utf8',
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: dstDir },
+    env: { ...process.env, POMPOS_CONFIG_DIR: dstDir },
   });
   assert.equal(imp.status, 0, `import failed: ${imp.stderr}`);
 

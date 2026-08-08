@@ -25,7 +25,7 @@ function runCli(args) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'lc-ergo-'));
   try {
     return spawnSync(process.execPath, [CLI, ...args], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: tmp },
+      env: { ...process.env, POMPOS_CONFIG_DIR: tmp },
       encoding: 'utf8',
     });
   } finally {

@@ -58,7 +58,7 @@ test('spinnerFrame never returns undefined for non-finite or non-numeric ticks',
 test('motionEnabled is off without a TTY, with NO_COLOR, on dumb terminals, and on opt-out', () => {
   const tty = { isTTY: true };
   assert.equal(motionEnabled({}, tty), true);
-  assert.equal(motionEnabled({ LAZYCLAW_NO_MOTION: '1' }, tty), false);
+  assert.equal(motionEnabled({ POMPOS_NO_MOTION: '1' }, tty), false);
   assert.equal(motionEnabled({ NO_COLOR: '1' }, tty), false);
   assert.equal(motionEnabled({ TERM: 'dumb' }, tty), false);
   assert.equal(motionEnabled({}, { isTTY: false }), false);

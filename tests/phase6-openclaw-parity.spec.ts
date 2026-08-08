@@ -14,7 +14,7 @@ function tmpConfigDir(): string {
 function runCli(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...env },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...env },
   });
 }
 
@@ -41,7 +41,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     const dir = tmpConfigDir();
     runCli(['config', 'set', 'provider', 'mock'], dir);
     // No workflow state dir yet → workflows.present:false (no error).
-    const r1 = runCli(['doctor'], dir, { LAZYCLAW_WORKFLOW_STATE_DIR: path.join(dir, 'no-such') });
+    const r1 = runCli(['doctor'], dir, { POMPOS_WORKFLOW_STATE_DIR: path.join(dir, 'no-such') });
     const o1 = JSON.parse(r1.stdout);
     expect(o1.workflows).toEqual({ dir: path.join(dir, 'no-such'), present: false });
 
@@ -58,7 +58,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
       nodes: { x: { status: 'failed', error: 'boom', attempts: 3 } },
       startedAt: 1, updatedAt: 2,
     }));
-    const r2 = runCli(['doctor'], dir, { LAZYCLAW_WORKFLOW_STATE_DIR: stateDir });
+    const r2 = runCli(['doctor'], dir, { POMPOS_WORKFLOW_STATE_DIR: stateDir });
     const o2 = JSON.parse(r2.stdout);
     expect(o2.workflows).toMatchObject({
       dir: stateDir, total: 2, done: 1, failed: 1, resumable: 0, running: 0,
@@ -76,7 +76,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
       nodes: { a: { status: 'running', attempts: 1 } },
       startedAt: 1, updatedAt: 2,
     }));
-    const r = runCli(['doctor'], dir, { LAZYCLAW_WORKFLOW_STATE_DIR: stateDir });
+    const r = runCli(['doctor'], dir, { POMPOS_WORKFLOW_STATE_DIR: stateDir });
     expect(r.status).toBe(1);   // ok=false because issues array now non-empty
     const out = JSON.parse(r.stdout);
     expect(out.issues).toEqual(expect.arrayContaining([
@@ -201,7 +201,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     runCli(['onboard', '--non-interactive', '--provider', 'mock', '--model', 'claude-opus-4-7', '--api-key', 'sk-secret-leak-test'], dir);
 
     const child = spawn(process.execPath, [CLI, 'chat'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const chunks: string[] = [];
@@ -229,7 +229,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     fs.writeFileSync(path.join(dir, 'skills', 'concise.md'), '# Concise\nbe brief\n');
 
     const child = spawn(process.execPath, [CLI, 'chat', '--skill', 'concise', '--session', 'sk-test'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const chunks: string[] = [];
@@ -265,7 +265,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
       JSON.stringify({ role: 'assistant', content: 'mock-reply: first', ts: 3 }) + '\n');
 
     const child = spawn(process.execPath, [CLI, 'chat', '--skill', 'a', '--session', 'resume'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     child.stdin.write('second\n');
@@ -1467,7 +1467,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     );
     const stateDir = path.join(dir, 'st');
     const child = spawn(process.execPath, [CLI, 'run', 'sigint-job', wfPath, '--dir', stateDir], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const chunks: string[] = [];
@@ -1533,7 +1533,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
        ];`,
     );
     const child = spawn(process.execPath, [CLI, 'run', '--parallel', 'demo', wfPath], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const chunks: string[] = [];
@@ -1560,7 +1560,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     // the next user line still works.
     const longPrompt = 'q'.repeat(200);
     const child = spawn(process.execPath, [CLI, 'chat'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const chunks: string[] = [];
@@ -1598,7 +1598,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     runCli(['config', 'set', 'provider', 'mock'], dir);
 
     const child = spawn(process.execPath, [CLI, 'chat'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const chunks: string[] = [];
@@ -1625,7 +1625,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     runCli(['config', 'set', 'provider', 'mock'], dir);
 
     const child = spawn(process.execPath, [CLI, 'chat'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const chunks: string[] = [];
@@ -1647,7 +1647,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     runCli(['config', 'set', 'provider', 'mock'], dir);
 
     const child = spawn(process.execPath, [CLI, 'chat'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const chunks: string[] = [];
@@ -1674,7 +1674,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     const dir = tmpConfigDir();
     runCli(['config', 'set', 'provider', 'mock'], dir);
     const child = spawn(process.execPath, [CLI, 'chat'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const chunks: string[] = [];
@@ -1691,7 +1691,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     const dir = tmpConfigDir();
     runCli(['config', 'set', 'provider', 'mock'], dir);
     const child = spawn(process.execPath, [CLI, 'chat'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const chunks: string[] = [];
@@ -1712,7 +1712,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     const dir = tmpConfigDir();
     runCli(['config', 'set', 'provider', 'mock'], dir);
     const child = spawn(process.execPath, [CLI, 'chat'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const chunks: string[] = [];
@@ -1745,7 +1745,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     fs.writeFileSync(path.join(dir, 'skills', 'b.md'), '# B\nbody-B\n');
 
     const child = spawn(process.execPath, [CLI, 'chat', '--session', 'sw'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     child.stdin.write('first\n');
@@ -1776,7 +1776,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     fs.writeFileSync(path.join(dir, 'skills', 'concise.md'), '# Concise\nbe brief\n');
 
     const child = spawn(process.execPath, [CLI, 'chat', '--skill', 'concise', '--session', 'cl'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     child.stdin.write('hello\n');
@@ -1800,7 +1800,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     runCli(['config', 'set', 'provider', 'mock'], dir);
 
     const child = spawn(process.execPath, [CLI, 'chat'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const chunks: string[] = [];
@@ -1859,7 +1859,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
   function startDaemonProc(cfgDir: string, extraArgs: string[] = [], extraEnv: NodeJS.ProcessEnv = {}): Promise<{ url: string, kill: () => Promise<void> }> {
     return new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [CLI, 'daemon', '--port', '0', ...extraArgs], {
-        env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...extraEnv },
+        env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...extraEnv },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let buf = '';
@@ -3561,7 +3561,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
       CLI, 'daemon', '--port', '0',
       '--cost-cap-usd', '0.10',
     ], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const url: string = await new Promise((resolve, reject) => {
@@ -3643,7 +3643,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
       });`,
     );
     const child = spawn(process.execPath, ['--import', preload, CLI, 'daemon', '--port', '0'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const url: string = await new Promise((resolve, reject) => {
@@ -3792,7 +3792,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     runCli(['config', 'set', 'provider', 'mock'], dir);
     // Spawn directly so we can read stderr.
     const child = spawn(process.execPath, [CLI, 'daemon', '--port', '0', '--log', 'info'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const stderr: string[] = [];
@@ -4030,7 +4030,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
       });`,
     );
     const child = spawn(process.execPath, ['--import', preload, CLI, 'daemon', '--port', '0'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const url: string = await new Promise((resolve, reject) => {
@@ -4379,7 +4379,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
       });`,
     );
     const child = spawn(process.execPath, ['--import', preload, CLI, 'chat'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const chunks: string[] = [];
@@ -4405,7 +4405,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     runCli(['config', 'set', 'provider', 'mock'], dir);
 
     const child = spawn(process.execPath, [CLI, 'chat'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const chunks: string[] = [];
@@ -4452,7 +4452,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
       });`,
     );
     const child = spawn(process.execPath, ['--import', preload, CLI, 'chat'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const chunks: string[] = [];
@@ -4493,7 +4493,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
       });`,
     );
     const child = spawn(process.execPath, ['--import', preload, CLI, 'chat'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const chunks: string[] = [];
@@ -4578,7 +4578,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     );
     const r = spawnSync(process.execPath, ['--import', preload, CLI, 'agent', 'q', '--cost'], {
       encoding: 'utf8',
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
     });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('reply');
@@ -4637,7 +4637,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     runCli(['config', 'set', 'api-key', 'sk-ant-x'], dir);
     const r = spawnSync(process.execPath, ['--import', preload, CLI, 'agent', 'hi', '--usage'], {
       encoding: 'utf8',
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
     });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('reply');
@@ -5008,7 +5008,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     const dir = tmpConfigDir();
     runCli(['config', 'set', 'provider', 'mock'], dir);
     const child = spawn(process.execPath, [CLI, 'daemon', '--port', '0', '--auth-token', 'tok-xyz'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let url = '';
@@ -6076,7 +6076,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
       CLI, 'skills', 'install', 'witty', '--from-url', 'https://example.test/x.md',
     ], {
       encoding: 'utf8',
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
     });
     expect(r.status).toBe(0);
     const out = JSON.parse(r.stdout);
@@ -6104,7 +6104,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
       CLI, 'skills', 'install', 'big', '--from-url', 'https://example.test/x.md',
     ], {
       encoding: 'utf8',
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
     });
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/exceeds .* bytes; refusing/);
@@ -6122,7 +6122,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
       CLI, 'skills', 'install', 'missing', '--from-url', 'https://example.test/x.md',
     ], {
       encoding: 'utf8',
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
     });
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/→ 404/);
@@ -6131,7 +6131,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
   test('skills install reads stdin when --from is not given', async () => {
     const dir = tmpConfigDir();
     const child = spawn(process.execPath, [CLI, 'skills', 'install', 'piped'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     child.stdin.write('# Piped Skill\n\nbe concise.\n');
@@ -6175,14 +6175,14 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     expect(r.stdout.trim()).toBe(path.join(dir, 'config.json'));
   });
 
-  test('config edit invokes $LAZYCLAW_EDITOR on the config file and validates JSON on save', () => {
+  test('config edit invokes $POMPOS_EDITOR on the config file and validates JSON on save', () => {
     const dir = tmpConfigDir();
     // Pre-seed a config so the editor opens an existing file.
     fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ provider: 'mock' }));
     // Use a noop "editor" — `true` exits 0 without doing anything.
     // The test asserts: cmdConfigEdit doesn't crash, prints ok, leaves
     // the JSON parseable.
-    const r = runCli(['config', 'edit'], dir, { LAZYCLAW_EDITOR: 'true' });
+    const r = runCli(['config', 'edit'], dir, { POMPOS_EDITOR: 'true' });
     expect(r.status).toBe(0);
     const out = JSON.parse(r.stdout);
     expect(out.ok).toBe(true);
@@ -6198,7 +6198,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     const corruptScript = path.join(dir, 'corrupt.sh');
     fs.writeFileSync(corruptScript, '#!/bin/sh\necho "this is not json" > "$1"\n');
     fs.chmodSync(corruptScript, 0o755);
-    const r = runCli(['config', 'edit'], dir, { LAZYCLAW_EDITOR: corruptScript });
+    const r = runCli(['config', 'edit'], dir, { POMPOS_EDITOR: corruptScript });
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/invalid JSON/);
   });
@@ -6206,7 +6206,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
   test('config edit creates the file when missing rather than failing', () => {
     const dir = tmpConfigDir();
     // No config.json yet. Editor exits clean (true → empty edit, file gets {} from us).
-    const r = runCli(['config', 'edit'], dir, { LAZYCLAW_EDITOR: 'true' });
+    const r = runCli(['config', 'edit'], dir, { POMPOS_EDITOR: 'true' });
     expect(r.status).toBe(0);
     const cfg = JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'));
     expect(cfg).toEqual({});
@@ -6275,7 +6275,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     // which the mock echoes; this test asserts the bare reply, so disable it.
     { const p = path.join(dir, 'config.json'); const c = JSON.parse(fs.readFileSync(p, 'utf8')); c.chat = { ...(c.chat || {}), recall: false }; fs.writeFileSync(p, JSON.stringify(c)); }
     const child = spawn(process.execPath, [CLI, 'chat', '--session', 'feat-x'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const chunks: string[] = [];
@@ -6301,7 +6301,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     runCli(['config', 'set', 'provider', 'mock'], dir);
     const turn = (input: string) => new Promise<string>((resolve) => {
       const child = spawn(process.execPath, [CLI, 'chat', '--session', 'sticky'], {
-        env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+        env: { ...process.env, POMPOS_CONFIG_DIR: dir },
         stdio: ['pipe', 'pipe', 'pipe'],
       });
       const chunks: string[] = [];
@@ -6861,7 +6861,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     const r = spawnSync(process.execPath, [CLI, 'import'], {
       input: exported,
       encoding: 'utf8',
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dst },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dst },
     });
     expect(r.status).toBe(0);
     const cfg = JSON.parse(fs.readFileSync(path.join(dst, 'config.json'), 'utf8'));
@@ -6983,7 +6983,7 @@ test.describe('Phase 6 — OpenClaw parity', () => {
     const dir = tmpConfigDir();
     runCli(['config', 'set', 'provider', 'mock'], dir);
     const child = spawn(process.execPath, [CLI, 'agent', '-'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     child.stdin.write('piped prompt\n');

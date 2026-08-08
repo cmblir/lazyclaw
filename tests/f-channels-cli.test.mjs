@@ -20,7 +20,7 @@ function tmpCfg(prefix = 'lc-channels-cli-') {
 function runCli(args, cfgDir, env = {}) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...env },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...env },
   });
 }
 
@@ -76,7 +76,7 @@ test('channels enable rejects an unknown name (exit 2, no config pollution)', ()
 
 // ── Legacy REPL path: dispatchSlash with a ctx lacking readConfig/writeConfig
 //    falls back to disk (Finding 6). We import the dispatcher in a child
-//    process so LAZYCLAW_CONFIG_DIR points at our temp dir for lib/config. ──
+//    process so POMPOS_CONFIG_DIR points at our temp dir for lib/config. ──
 test('legacy path /channels toggle persists to disk via the lib/config fallback', () => {
   const dir = tmpCfg();
   // Seed an enabled slack section so the toggle has something to flip and the
@@ -95,7 +95,7 @@ test('legacy path /channels toggle persists to disk via the lib/config fallback'
   `;
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
     encoding: 'utf8',
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+    env: { ...process.env, POMPOS_CONFIG_DIR: dir },
   });
   assert.equal(r.status, 0, `child exited ${r.status}; stderr=${r.stderr}`);
   const { out, ctxEnabled } = JSON.parse(r.stdout);

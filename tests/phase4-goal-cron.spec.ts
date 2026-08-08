@@ -16,11 +16,11 @@ function runCli(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}) {
     encoding: 'utf8',
     env: {
       ...process.env,
-      LAZYCLAW_CONFIG_DIR: cfgDir,
+      POMPOS_CONFIG_DIR: cfgDir,
       // Block the OS-level launchd / crontab install so test runs don't
       // mutate the developer's real scheduler. The cfg.cron table is
       // still written so all the visible assertions hold.
-      LAZYCLAW_SKIP_CRON_INSTALL: '1',
+      POMPOS_SKIP_CRON_INSTALL: '1',
       ...env,
     },
   });

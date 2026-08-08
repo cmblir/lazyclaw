@@ -16,14 +16,14 @@ function tmpDir(prefix: string): string {
 function runCli(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...env },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...env },
   });
 }
 
 function runCliAsync(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}): Promise<{ status: number | null, stdout: string, stderr: string }> {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...env },
+      env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '', stderr = '';
@@ -80,7 +80,7 @@ interface Daemon {
 }
 async function startDaemon(cfgDir: string): Promise<Daemon> {
   const child = spawn(process.execPath, [CLI, 'daemon', '--port', '0'], {
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir },
     stdio: ['ignore', 'pipe', 'pipe'],
   }) as ChildProcessWithoutNullStreams;
   let port = 0; let buf = '';
@@ -190,7 +190,7 @@ test.describe('Phase 18 — agent memory', () => {
     mod.prependEntry('planner', { taskId: 't_prior', title: 'prior task', body: '- prior insight A' }, cfg);
 
     const open = JSON.parse(runCli(['task', 'start', '--team', 'shop', '--title', 'now'], cfg).stdout);
-    const tick = await runCliAsync(['task', 'tick', open.id, 'go'], cfg, { LAZYCLAW_ANTHROPIC_BASE_URL: mock.baseUrl });
+    const tick = await runCliAsync(['task', 'tick', open.id, 'go'], cfg, { POMPOS_ANTHROPIC_BASE_URL: mock.baseUrl });
     expect(tick.status).toBe(0);
     expect(JSON.parse(tick.stdout).stoppedBy).toBe('done');
 
@@ -224,7 +224,7 @@ test.describe('Phase 18 — agent memory', () => {
     expect(runCli(['auth', 'add', 'anthropic', 'sk-test', '--label', 'm'], cfg).status).toBe(0);
     expect(runCli(['auth', 'use', 'anthropic', 'm'], cfg).status).toBe(0);
     const open = JSON.parse(runCli(['task', 'start', '--team', 'shop', '--title', 'wrap'], cfg).stdout);
-    const tick = await runCliAsync(['task', 'tick', open.id, 'go'], cfg, { LAZYCLAW_ANTHROPIC_BASE_URL: mock.baseUrl });
+    const tick = await runCliAsync(['task', 'tick', open.id, 'go'], cfg, { POMPOS_ANTHROPIC_BASE_URL: mock.baseUrl });
     expect(tick.status).toBe(0);
 
     const mod = await loadMem();
@@ -247,7 +247,7 @@ test.describe('Phase 18 — agent memory', () => {
     fs.writeFileSync(agentFile, JSON.stringify(agentRec, null, 2));
 
     const open2 = JSON.parse(runCli(['task', 'start', '--team', 'shop', '--title', 'no-write'], cfg).stdout);
-    const tick2 = await runCliAsync(['task', 'tick', open2.id, 'go'], cfg, { LAZYCLAW_ANTHROPIC_BASE_URL: mock2.baseUrl });
+    const tick2 = await runCliAsync(['task', 'tick', open2.id, 'go'], cfg, { POMPOS_ANTHROPIC_BASE_URL: mock2.baseUrl });
     expect(tick2.status).toBe(0);
 
     const memAfter = mod.readMemory('planner', cfg);
@@ -288,7 +288,7 @@ test.describe('Phase 18 — agent memory', () => {
     expect(runCli(['auth', 'use', 'anthropic', 'm'], cfg).status).toBe(0);
     const open = JSON.parse(runCli(['task', 'start', '--team', 'shop', '--title', 'manual'], cfg).stdout);
 
-    const r = await runCliAsync(['agent', 'reflect', 'planner', '--task', open.id], cfg, { LAZYCLAW_ANTHROPIC_BASE_URL: mock.baseUrl });
+    const r = await runCliAsync(['agent', 'reflect', 'planner', '--task', open.id], cfg, { POMPOS_ANTHROPIC_BASE_URL: mock.baseUrl });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('explicit lesson');
 

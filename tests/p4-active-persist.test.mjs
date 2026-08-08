@@ -11,7 +11,7 @@ import { readConfig, writeConfig, persistActiveModel, persistActiveProvider } fr
 
 function freshCfgDir() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lc-persist-'));
-  process.env.LAZYCLAW_CONFIG_DIR = dir;
+  process.env.POMPOS_CONFIG_DIR = dir;
   return dir;
 }
 

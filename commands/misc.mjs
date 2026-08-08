@@ -135,14 +135,14 @@ export async function cmdSandbox(args, flags = {}) {
 }
 
 export function _sandboxLoadConfigOrEmpty() {
-  const p = process.env.LAZYCLAW_CONFIG || configPath();
+  const p = process.env.POMPOS_CONFIG || configPath();
   try {
     return JSON.parse(fs.readFileSync(p, 'utf8'));
   } catch { return {}; }
 }
 
 export function _sandboxSaveConfig(cfg) {
-  const p = process.env.LAZYCLAW_CONFIG || configPath();
+  const p = process.env.POMPOS_CONFIG || configPath();
   fs.mkdirSync(path.dirname(p), { recursive: true });
   fs.writeFileSync(p, JSON.stringify(cfg, null, 2));
 }

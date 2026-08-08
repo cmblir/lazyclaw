@@ -57,7 +57,7 @@ class ClaudeSession {
     if (model) args.push('--model', model);
     if (o.system && String(o.system).trim()) args.push('--append-system-prompt', String(o.system));
 
-    this.proc = this._spawn(o.bin || process.env.LAZYCLAW_CLAUDE_BIN || 'claude', args, {
+    this.proc = this._spawn(o.bin || process.env.POMPOS_CLAUDE_BIN || 'claude', args, {
       cwd: o.cwd || process.cwd(),
       stdio: ['pipe', 'pipe', 'pipe'],
     });

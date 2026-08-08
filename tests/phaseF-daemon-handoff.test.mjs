@@ -28,8 +28,8 @@ function tmpCfg(prefix = 'lc-handoff-') {
 async function withDaemon(cfgDir, fn) {
   const cfg = { provider: 'mock', model: 'mock-model' };
   fs.writeFileSync(path.join(cfgDir, 'config.json'), JSON.stringify(cfg));
-  const prevEnv = process.env.LAZYCLAW_CONFIG_DIR;
-  process.env.LAZYCLAW_CONFIG_DIR = cfgDir;
+  const prevEnv = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = cfgDir;
   const d = await startDaemon({
     readConfig: () => cfg,
     writeConfig: () => {},
@@ -43,8 +43,8 @@ async function withDaemon(cfgDir, fn) {
     await fn({ base, cfgDir });
   } finally {
     await d.close();
-    if (prevEnv === undefined) delete process.env.LAZYCLAW_CONFIG_DIR;
-    else process.env.LAZYCLAW_CONFIG_DIR = prevEnv;
+    if (prevEnv === undefined) delete process.env.POMPOS_CONFIG_DIR;
+    else process.env.POMPOS_CONFIG_DIR = prevEnv;
   }
 }
 

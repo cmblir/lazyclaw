@@ -14,7 +14,7 @@ function tmpConfigDir(): string {
 function runCli(args: string[], cfgDir: string, env: NodeJS.ProcessEnv = {}) {
   return spawnSync(process.execPath, [CLI, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, LAZYCLAW_CONFIG_DIR: cfgDir, ...env },
+    env: { ...process.env, POMPOS_CONFIG_DIR: cfgDir, ...env },
   });
 }
 
@@ -54,7 +54,7 @@ test.describe('Phase 4 — Terminal Configuration', () => {
     expect(runCli(['config', 'set', 'provider', 'mock'], dir).status).toBe(0);
 
     const child = spawn(process.execPath, [CLI, 'chat'], {
-      env: { ...process.env, LAZYCLAW_CONFIG_DIR: dir },
+      env: { ...process.env, POMPOS_CONFIG_DIR: dir },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
 
