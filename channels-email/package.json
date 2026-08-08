@@ -1,5 +1,5 @@
 {
-  "name": "@pompos/channel-email",
+  "name": "@cmblir/channel-email",
   "version": "0.1.0",
   "description": "Email channel plugin for pompos v5 (IMAP IDLE + SMTP).",
   "type": "module",

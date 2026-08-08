@@ -1,5 +1,5 @@
 {
-  "name": "@pompos/channel-voice",
+  "name": "@cmblir/channel-voice",
   "version": "0.1.0",
   "description": "Voice memo channel for pompos v5 (transcribe-only; TTS deferred to v5.1).",
   "type": "module",

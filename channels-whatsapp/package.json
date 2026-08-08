@@ -1,5 +1,5 @@
 {
-  "name": "@pompos/channel-whatsapp",
+  "name": "@cmblir/channel-whatsapp",
   "version": "0.1.0",
   "description": "WhatsApp channel plugin for pompos v5 (whatsapp-web.js).",
   "type": "module",

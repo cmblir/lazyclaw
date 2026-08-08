@@ -27,7 +27,7 @@ import { pidfileStatus, pidfileStop } from './daemon.mjs';
 export const GATEWAY_CHANNELS = ['slack', 'telegram', 'matrix'];
 
 // In-tree plugin channels (channels-<name>/index.mjs). These are NOT builtins:
-// each ships as a @pompos/channel-* package that exports
+// each ships as a @cmblir/channel-* package that exports
 // register({ addChannel }) and wires a factory returning a channels/base.mjs
 // Channel (start/send/stop). The gateway loads the ENABLED ones at runtime so
 // `channels enable discord` is actually reachable instead of a no-op.

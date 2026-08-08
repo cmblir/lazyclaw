@@ -1,4 +1,4 @@
-// @pompos/channel-email
+// @cmblir/channel-email
 //
 // IMAP IDLE for inbound, nodemailer for outbound. threadId is the
 // In-Reply-To / Message-ID chain root so replies stay in the same

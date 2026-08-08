@@ -1,5 +1,5 @@
 {
-  "name": "@pompos/channel-signal",
+  "name": "@cmblir/channel-signal",
   "version": "0.1.0",
   "description": "Signal channel plugin for pompos v5 (signal-cli wrapper).",
   "type": "module",

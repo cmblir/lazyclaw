@@ -192,7 +192,7 @@ export async function cmdMatrix(sub, positional, flags = {}) {
 // `pompos channels [list|enable <name>|disable <name>|install <pkg>|remove <pkg>]`
 // list   — configured built-in channels (cfg.channels.<name>) + installed plugins.
 // enable/disable — toggle cfg.channels.<name>.enabled (view/edit the setting).
-// install/remove — manage @pompos/channel-* plugin packages.
+// install/remove — manage @cmblir/channel-* plugin packages.
 export async function cmdChannels(sub, positional = [], flags = {}) {
   const cfgDir = path.dirname(configPath());
   const { createLoader, listInstalled } = await import('../channels/loader.mjs');
@@ -202,7 +202,7 @@ export async function cmdChannels(sub, positional = [], flags = {}) {
     const name = positional[0];
     if (!name) { process.stderr.write('usage: pompos channels install <name>   (e.g. discord, email, whatsapp)\n'); process.exit(2); }
     const { isPluginName } = await import('../channels/loader.mjs');
-    // Back-compat: an explicit @pompos/channel-* spec still routes through the
+    // Back-compat: an explicit @cmblir/channel-* spec still routes through the
     // legacy plugin loader (for anyone shipping a real published package).
     if (isPluginName(name)) {
       const info = await loader.install(name);
@@ -238,7 +238,7 @@ export async function cmdChannels(sub, positional = [], flags = {}) {
   }
   if (sub === 'remove' || sub === 'uninstall') {
     const name = positional[0];
-    if (!name) { process.stderr.write('usage: pompos channels remove <@pompos/channel-name>\n'); process.exit(2); }
+    if (!name) { process.stderr.write('usage: pompos channels remove <@cmblir/channel-name>\n'); process.exit(2); }
     await loader.remove(name);
     process.stdout.write(`removed ${name}\n`);
     return;

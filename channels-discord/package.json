@@ -1,5 +1,5 @@
 {
-  "name": "@pompos/channel-discord",
+  "name": "@cmblir/channel-discord",
   "version": "0.1.0",
   "description": "Discord channel plugin for pompos v5.",
   "type": "module",

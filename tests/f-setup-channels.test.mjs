@@ -119,9 +119,9 @@ test('buildChannelEntry(discord) reports the real runtime dep (not a 404 npm pac
   assert.deepEqual(e.deps, ['discord.js']);
 });
 
-test('CHANNEL_CATALOG no longer points at unpublished @pompos/channel-* packages', () => {
+test('CHANNEL_CATALOG no longer points at unpublished @cmblir/channel-* packages', () => {
   for (const c of CHANNEL_CATALOG) {
-    assert.equal(c.plugin, undefined, `${c.name} must not carry a @pompos plugin pointer`);
+    assert.equal(c.plugin, undefined, `${c.name} must not carry a scoped plugin pointer`);
     if (!c.builtin) assert.ok(Array.isArray(c.deps) || c.binary, `${c.name} must declare a real dep or binary`);
   }
 });
@@ -305,8 +305,8 @@ test('runChannelStep: an in-tree channel with a missing dep is saved DISABLED wi
     // discord.js is not installed in the temp cfgDir → not ready.
     assert.equal(r.needsPlugin, 'discord.js');
     const rendered = out.join('');
-    // Never advertises the unpublished @pompos/channel-* package.
-    assert.doesNotMatch(rendered, /@pompos\/channel-/, 'must not point at a 404 npm package');
+    // Never advertises the unpublished @cmblir/channel-* package.
+    assert.doesNotMatch(rendered, /@[a-z-]+\/channel-/, 'must not point at a 404 npm package');
     // Points at the REAL runtime dep + the working install command.
     assert.match(rendered, /discord\.js/);
     assert.ok(rendered.includes('pompos channels install discord'), 'must print the real install command');

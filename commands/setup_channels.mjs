@@ -22,7 +22,7 @@ import { messageAdd } from '../config_features.mjs';
 // IN-TREE under channels-<name>/ and the gateway runs them directly. What they
 // need is a RUNTIME dependency: an npm package (`deps`) installed into the
 // config dir, or an external `binary` on PATH. (The old catalog pointed at
-// unpublished `@pompos/channel-*` packages, so `channels install` 404'd.)
+// unpublished `@cmblir/channel-*` packages, so `channels install` 404'd.)
 export const CHANNEL_CATALOG = [
   { name: 'slack',    builtin: true,  label: 'Slack',
     fields: [
@@ -92,7 +92,7 @@ export function channelByName(name) {
 // Pure: turn collected answers into { envVars, deps, binary, builtin }. Empty/
 // whitespace answers are dropped so a skipped optional field doesn't write an
 // empty env var. `deps`/`binary` describe the runtime requirement the in-tree
-// channel needs to actually run (replaces the old, unpublished `@pompos/
+// channel needs to actually run (replaces the old, unpublished `@cmblir/
 // channel-*` plugin pointer).
 export function buildChannelEntry(name, answers = {}) {
   const spec = channelByName(name);

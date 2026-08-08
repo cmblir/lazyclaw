@@ -1,4 +1,4 @@
-// @pompos/channel-discord
+// @cmblir/channel-discord
 //
 // discord.js v14 gateway client. Inbound MessageCreate events are routed
 // to the pompos daemon's handler; outbound send() posts into the

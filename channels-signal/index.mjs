@@ -1,4 +1,4 @@
-// @pompos/channel-signal
+// @cmblir/channel-signal
 //
 // Thin wrapper around `signal-cli` (external binary, must be installed
 // separately and linked to a registered account). Inbound polling uses
