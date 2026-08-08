@@ -436,55 +436,10 @@ export function rebuild(configDir = defaultConfigDir()) {
   openIndex(configDir);
 }
 
-// Rebuild AND repopulate the FTS index from the on-disk source of truth
-// (sessions JSONL, flat skill .md, memory core/episodic). This is what
-// `index rebuild` / doctor recovery must call — a bare rebuild() zeroes recall.
-// Shared by scripts/migrate-v5 and the daemon POST /index/rebuild route.
-export function reindexAll(configDir = defaultConfigDir()) {
-  rebuild(configDir);
-  // Sessions — flat <configDir>/sessions/<id>.jsonl, one turn per line.
-  const sessDir = path.join(configDir, 'sessions');
-  if (fs.existsSync(sessDir)) {
-    for (const f of fs.readdirSync(sessDir)) {
-      if (!f.endsWith('.jsonl')) continue;
-      const id = f.slice(0, -'.jsonl'.length);
-      let idx = 0;
-      const raw = fs.readFileSync(path.join(sessDir, f), 'utf8');
-      for (const line of raw.split('\n')) {
-        if (!line) continue;
-        try {
-          const o = JSON.parse(line);
-          indexSessionTurn({ session_id: id, turn_idx: idx++, role: o.role || 'user', ts: o.ts || 0, content: o.content || '' }, configDir);
-        } catch { /* skip malformed line */ }
-      }
-    }
-  }
-  // Skills — canonical flat <configDir>/skills/<name>.md (skip the .archive dir).
-  const skillsDir = path.join(configDir, 'skills');
-  if (fs.existsSync(skillsDir)) {
-    for (const f of fs.readdirSync(skillsDir)) {
-      if (!f.endsWith('.md')) continue;
-      const name = f.slice(0, -'.md'.length);
-      const { meta, body } = _miniFrontmatter(fs.readFileSync(path.join(skillsDir, f), 'utf8'));
-      indexSkill({
-        skill_name: name,
-        trained_by: meta.trained_by || 'legacy',
-        group_name: meta.group || (name.includes('-') ? name.split('-')[0] : 'legacy'),
-        content: body,
-      }, configDir);
-    }
-  }
-  // Memory — core.md + episodic/*.md.
-  const memDir = path.join(configDir, 'memory');
-  if (fs.existsSync(memDir)) {
-    const core = path.join(memDir, 'core.md');
-    if (fs.existsSync(core)) indexMemory({ topic: 'core', kind: 'core', content: fs.readFileSync(core, 'utf8') }, configDir);
-    const epi = path.join(memDir, 'episodic');
-    if (fs.existsSync(epi)) {
-      for (const f of fs.readdirSync(epi)) {
-        if (!f.endsWith('.md')) continue;
-        indexMemory({ topic: f.slice(0, -'.md'.length), kind: 'episodic', content: fs.readFileSync(path.join(epi, f), 'utf8') }, configDir);
-      }
-    }
-  }
-}
+// Rebuild + repopulate moved to mas/reindex.mjs (this file was at its size
+// limit). Imported rather than only re-exported: `export ... from` creates no
+// local binding, and openIndex calls reindexAll itself on a schema-version
+// migration. The import cycle (reindex.mjs imports our function declarations,
+// which hoist) is evaluated safely in either load order.
+import { reindexAll } from './reindex.mjs';
+export { reindexAll };

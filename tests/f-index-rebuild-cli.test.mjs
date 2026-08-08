@@ -81,3 +81,46 @@ test('index with a bad sub exits 2 with an index-specific usage message', () => 
   assert.equal(r.status, 2, `expected exit 2, got ${r.status}; stdout=${r.stdout}`);
   assert.match(r.stderr, /Usage: pompos index <rebuild\|embed>/);
 });
+
+// (d) reindexAll must walk EVERYTHING that is indexed at write time. It
+// covered sessions, skills and core/episodic memories but not trajectories or
+// the USER model — so the documented recovery path destroyed exactly the
+// recall data a long-running install has most of. Observed live: a reindex
+// dropped fts_trajectories from 1451 rows to 0 and lost the USER memory row
+// while the JSONL and USER.md sources sat intact on disk.
+
+test('index rebuild repopulates trajectories and the USER model from disk', async () => {
+  const dir = tmpCfg();
+
+  // A trajectory exactly as trajectory_store.put lays it out on disk.
+  const day = path.join(dir, 'trajectories', '2026-08-01');
+  fs.mkdirSync(day, { recursive: true });
+  fs.writeFileSync(path.join(day, '01TESTTRAJECTORYID00000000.jsonl'), JSON.stringify({
+    id: '01TESTTRAJECTORYID00000000',
+    agentName: 'backend-dev',
+    outcome: 'done',
+    finalAnswer: 'rotated the flux capacitor',
+    turns: [{ content: 'user asked about the flux capacitor' }],
+  }) + '\n');
+
+  // The USER model exactly as user_modeler writes it.
+  fs.mkdirSync(path.join(dir, 'memory'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'memory', 'USER.md'), '- prefers terse answers\n');
+
+  const r = runCli(['index', 'rebuild'], dir);
+  assert.equal(r.status, 0, `stderr=${r.stderr}`);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.counts.trajectories, 1,
+    'a trajectory on disk must survive a rebuild — write-time indexing alone means rebuild = lose');
+  assert.equal(out.counts.memories, 1, 'USER.md must be re-indexed');
+
+  // The reindexed row must be reachable by content, same as a write-time row.
+  const { openIndex } = await import('../mas/index_db.mjs');
+  const db = openIndex(dir);
+  const traj = db.prepare("SELECT agent, outcome FROM fts_trajectories WHERE fts_trajectories MATCH 'flux'").all();
+  assert.equal(traj.length, 1);
+  assert.equal(traj[0].agent, 'backend-dev');
+  assert.equal(traj[0].outcome, 'done');
+  const user = db.prepare("SELECT topic, kind FROM fts_memories WHERE topic='USER'").get();
+  assert.deepEqual(user, { topic: 'USER', kind: 'user_model' });
+});
