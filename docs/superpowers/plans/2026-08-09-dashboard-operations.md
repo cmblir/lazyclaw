@@ -12,7 +12,14 @@
 
 - Write path: `dispatchSlash` only. No typed REST route may be added for agents/teams/tasks/config/workflows.
 - Authorization: the existing bearer gate is the only gate. Token holder has full authority; a loopback daemon with no token stays unauthenticated-full-rights. No new permission concept.
-- Envelope, verbatim: success `{ ok: true, lines: string[], data?: object }`; failure `{ ok: false, error: string, code: 'SLASH_ERR' }`; interactive-only `{ ok: false, code: 'TTY_ONLY', error: string, hint: string }`; confirmation `{ ok: false, code: 'CONFIRM_REQUIRED', prompt: string, token: string }`.
+- Envelope, verbatim. Success `{ ok: true, lines: string[], data?: object }`. Failures all carry `{ ok: false, error: string, code }` with one of:
+  - `SLASH_ERR` — the command failed, or the line was not a command.
+  - `CONFIRM_REQUIRED` — destructive; adds `prompt: string, token: string`. The only code a consumer MUST branch on.
+  - `NO_SESSION` — the command mutates conversation state and this call has no session to mutate. Added in Task 3 rather than letting the command report a success that persisted nothing.
+  - `NEEDS_TERMINAL` — the command needs an interactive REPL step (`/setup` and the config wizard items) that HTTP cannot run. Adds `hint: string`. This is what the spec called `TTY_ONLY`; it is named for the condition rather than the terminal capability, and it was found by auditing what each command RETURNS, not by the throw-based gate-coverage test — these commands return `'EXIT'` rather than throwing.
+  - `CONFIG_DIR_MISMATCH` — `cfgDir` disagrees with `POMPOS_CONFIG_DIR`. A wiring bug, not an operator error.
+
+  Consumers (the route in Task 4, the browser client in Task 6) forward every envelope unchanged and branch only on `ok` and `CONFIRM_REQUIRED`; the rest render as errors. A new code must be added to this list in the same commit that introduces it.
 - Confirm tokens: 60000 ms TTL, single-use, bound to the exact `line`.
 - File-size gate: 500 lines per file (`npm run lint:size`). Never add an `ALLOW` entry — split instead.
 - Every new file must be reachable from the published package (`npm run lint:pack`).
