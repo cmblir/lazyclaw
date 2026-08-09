@@ -264,6 +264,44 @@ test('/provider <name> and /model <name> persist to config.json (real dispatcher
   }
 });
 
+// --- /provider and /model must not claim success when persistence silently
+//     failed — the same defect class Critical 2 removed, reopened in this
+//     narrower path by making corrupt-config reads no longer throw eagerly --
+
+test('/provider <name> against a corrupt config.json does not report success', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-slash-http-pfail-'));
+  const prevEnv = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
+  try {
+    fs.writeFileSync(path.join(dir, 'config.json'), 'not json {');
+    const r = makeSlashRunner({ cfgDir: dir, confirmStore: makeConfirmStore() }); // real dispatcher, no mock
+    const out = await r.run({ line: '/provider anthropic' });
+    assert.equal(out.ok, false, 'nothing changed — the envelope must not claim it did');
+    assert.notEqual(out.code, 'CONFIG_DIR_MISMATCH', 'cfgDir and POMPOS_CONFIG_DIR agree here');
+    assert.match(out.error, /provider/i);
+  } finally {
+    process.env.POMPOS_CONFIG_DIR = prevEnv;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('/model <name> against a corrupt config.json does not report success', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-slash-http-mfail-'));
+  const prevEnv = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
+  try {
+    fs.writeFileSync(path.join(dir, 'config.json'), 'not json {');
+    const r = makeSlashRunner({ cfgDir: dir, confirmStore: makeConfirmStore() });
+    const out = await r.run({ line: '/model claude-x' });
+    assert.equal(out.ok, false, 'nothing changed — the envelope must not claim it did');
+    assert.notEqual(out.code, 'CONFIG_DIR_MISMATCH');
+    assert.match(out.error, /model/i);
+  } finally {
+    process.env.POMPOS_CONFIG_DIR = prevEnv;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --- a corrupt config.json must not take down commands that never touch it,
 //     and must not be mislabelled as a cfgDir/env mismatch when it does -----
 
@@ -296,6 +334,32 @@ test('a config-reading command against a corrupt config.json names the parse pro
     assert.match(out.error, /not valid JSON/i, 'the operator must learn the FILE is bad, not go hunting for an env mismatch');
     assert.match(out.error, new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'the message must name the config file');
   } finally {
+    process.env.POMPOS_CONFIG_DIR = prevEnv;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the corrupt-config stderr diagnostic is deduped per file mtime, not printed once per request', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-slash-http-corrupt3-'));
+  const prevEnv = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
+  const origWrite = process.stderr.write.bind(process.stderr);
+  try {
+    fs.writeFileSync(path.join(dir, 'config.json'), 'not json {');
+    const r = makeSlashRunner({ cfgDir: dir, confirmStore: makeConfirmStore() });
+    let calls = 0;
+    process.stderr.write = (...a) => { calls += 1; return origWrite(...a); };
+    for (let i = 0; i < 5; i++) await r.run({ line: '/status' });
+    assert.equal(calls, 1, 'five requests against the SAME unchanged corrupt file must log the diagnostic once, not five times');
+
+    // A genuine change to the file (new mtime) must be re-detected, not
+    // masked forever by the dedup cache.
+    fs.writeFileSync(path.join(dir, 'config.json'), 'still not json {{');
+    calls = 0;
+    await r.run({ line: '/status' });
+    assert.equal(calls, 1, 'a file that actually changed must log again, not stay silent');
+  } finally {
+    process.stderr.write = origWrite;
     process.env.POMPOS_CONFIG_DIR = prevEnv;
     fs.rmSync(dir, { recursive: true, force: true });
   }

@@ -31,10 +31,38 @@
 //                too. Contrast /provider <name> and /model <name>, which
 //                persist to config.json (a real, global, disk-backed value)
 //                via setActiveProvName/setActiveModel below — those DO work.
+import fs from 'node:fs';
 import { dispatchSlash as _dispatchSlash, parseSlashLine, SLASH_HANDLERS } from '../../tui/slash_dispatcher.mjs';
 import { SLASH_COMMANDS } from '../../tui/slash_commands.mjs';
 import { destructivePrompt } from './slash_destructive.mjs';
-import { readConfig, writeConfig, persistActiveProvider, persistActiveModel } from '../../lib/config.mjs';
+import { readConfig, writeConfig, persistActiveProvider, persistActiveModel, configPath } from '../../lib/config.mjs';
+
+// readConfig() (lib/config.mjs) prints a multi-line stderr diagnostic every
+// time it is called against a present-but-corrupt config.json — reasonable
+// for a rare, one-off CLI invocation, but this ctx is rebuilt on every HTTP
+// request, so an operator running with a corrupt config would get that block
+// logged once per request — even for a command like /help that never ends up
+// needing it — until they fix the file. Remember the outcome per (path,
+// mtime) so the diagnostic only fires again once the file actually changes.
+// Only the FAILURE is cached: an Error is safe to share read-only across
+// requests, but a successful parse is NOT cached here — lib/config.mjs
+// already caches that internally (by the same path+mtime key) and a fresh
+// call returns an independent clone, so sharing one object across requests
+// would risk one request's ctx.writeConfig mutating another's ctx.cfg.
+const _lastCorruptAttempt = new Map(); // configPath() -> { mtimeMs, error }
+function loadConfigOrThrow() {
+  const p = configPath();
+  let mtimeMs = null;
+  try { mtimeMs = fs.statSync(p).mtimeMs; } catch { /* missing file — readConfig() below just returns {} */ }
+  const cached = _lastCorruptAttempt.get(p);
+  if (cached && cached.mtimeMs === mtimeMs) throw cached.error;
+  try {
+    return readConfig();
+  } catch (err) {
+    _lastCorruptAttempt.set(p, { mtimeMs, error: err });
+    throw err;
+  }
+}
 
 // readConfig()/writeConfig() (lib/config.mjs) resolve the config directory
 // from process.env.POMPOS_CONFIG_DIR internally — cfgDir is never passed
@@ -90,7 +118,7 @@ export function buildHttpCtx({ cfgDir, autoApprove = false }) {
   let cfg = null;
   let configLoadError = null;
   try {
-    cfg = readConfig();
+    cfg = loadConfigOrThrow();
   } catch (err) {
     configLoadError = err;
   }
@@ -127,9 +155,10 @@ export function buildHttpCtx({ cfgDir, autoApprove = false }) {
     // that never reaches disk. persistActiveProvider/persistActiveModel are
     // the SAME functions commands/chat.mjs wires its own ctx to, so a switch
     // made over HTTP is visible to a later /status exactly as it would be
-    // from the terminal.
-    setActiveProvName: (name) => persistActiveProvider(cfg || {}, name),
-    setActiveModel: (name) => persistActiveModel(cfg || {}, name),
+    // from the terminal — WHEN it lands. See persistAndVerify below for what
+    // happens when it doesn't.
+    setActiveProvName: (name) => persistAndVerify(ctx, cfg, 'provider', name, persistActiveProvider),
+    setActiveModel: (name) => persistAndVerify(ctx, cfg, 'model', name, persistActiveModel),
   };
   if (autoApprove) {
     // The operator already answered this question at the HTTP layer; the
@@ -157,6 +186,40 @@ export function listCommands() {
 
 function fail(error, code = 'SLASH_ERR') {
   return { ok: false, error: String(error), code };
+}
+
+// persistActiveProvider/persistActiveModel (lib/config.mjs:92-117) are
+// best-effort: each does its OWN readConfig()/writeConfig() and swallows any
+// failure internally (`catch { /* best-effort */ }`), returning nothing to
+// signal it — reasonable for the terminal REPL, where the in-memory
+// activeProvName/activeModel updates regardless (commands/chat.mjs:224,226)
+// and disk persistence is just "stick across a restart". Here there IS no
+// in-memory session to fall back on — cfg.provider/cfg.model on disk is the
+// ONLY thing getActiveProvName/getActiveModel read — so a swallowed failure
+// here is a straight false claim: tui/slash_dispatcher.mjs calls the setter
+// and unconditionally returns "provider → X" / "model → X"
+// (:203-204,214,238,252-253,256-257) with no outcome to check, and that file
+// cannot be modified to check one.
+//
+// The fix does not try to enumerate every reason a write might not land
+// (corrupt JSON, a permissions error, persistActiveProvider's own
+// orchestrator-routing guard, a race with a concurrent writer) — it compares
+// the claimed new value against a FRESH, independent read afterward. Whatever
+// the reason a write silently fails to land, the disk copy will not equal
+// what was asked for, so this cannot be defeated by a different failure mode
+// than the one that surfaced it: it does not check WHY, only WHETHER.
+function persistAndVerify(ctx, cfg, field, value, persistFn) {
+  persistFn(cfg || {}, value);
+  let disk;
+  try {
+    disk = readConfig();
+  } catch (err) {
+    ctx.__persistFailed = `${field} was not saved — config.json could not be read back to confirm it: ${err.message}`;
+    return;
+  }
+  if (disk[field] !== value) {
+    ctx.__persistFailed = `${field} was not saved (config.json still has ${JSON.stringify(disk[field] ?? null)}) — check that config.json is valid JSON and writable`;
+  }
 }
 
 // /skill and /skills (which forwards to the same _skill body once it has an
@@ -217,6 +280,13 @@ export function makeSlashRunner({ cfgDir, confirmStore, dispatch = _dispatchSlas
         result = await dispatch(cmd, args, ctx, (chunk) => { lines.push(String(chunk)); });
       } catch (err) {
         return fail(err?.message || err);
+      }
+      if (ctx.__persistFailed) {
+        // Set by persistAndVerify (above) when /provider or /model's setter
+        // ran but the value did not actually land on disk. The handler
+        // already built and returned its "provider → X" success string — we
+        // are refusing to let THAT out, not reporting a dispatch error.
+        return { ok: false, code: 'PERSIST_FAILED', error: ctx.__persistFailed };
       }
       if (result === 'EXIT' && (ctx.requestSetup || ctx.requestConfigStep)) {
         // The dispatcher's own contract for this combination (see
