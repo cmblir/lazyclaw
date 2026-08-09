@@ -2,9 +2,10 @@
 //
 // Everything the dashboard changes goes through here, so the CLI and the
 // browser cannot drift: both run the same dispatcher over the same commands.
-import { readJson, writeJson } from './_deps.mjs';
-import { makeSlashRunner, listCommands } from '../lib/slash_http.mjs';
+import { readJson, writeJson, writeSseHead, writeSse } from './_deps.mjs';
+import { makeSlashRunner, listCommands, STREAMING } from '../lib/slash_http.mjs';
 import { makeConfirmStore } from '../lib/confirm_tokens.mjs';
+import { parseSlashLine } from '../../tui/slash_dispatcher.mjs';
 
 // One store per daemon process: a token issued by one request is redeemed by
 // the next, so it cannot live inside a handler call.
@@ -17,6 +18,27 @@ export async function slashRun(c) {
   catch (e) { return writeJson(res, 400, { ok: false, error: e?.message || String(e), code: 'SLASH_ERR' }); }
 
   const runner = makeSlashRunner({ cfgDir: gwConfigDir, confirmStore });
+
+  // Upgrade to SSE only when the client explicitly asked for it AND the
+  // command is one long enough to make a buffered reply look hung
+  // (STREAMING — see daemon/lib/slash_http.mjs). Every other request —
+  // including a malformed or unrecognised line — falls through to the exact
+  // buffered JSON behaviour below unchanged, so sending
+  // `Accept: text/event-stream` never changes the response shape for a
+  // command that didn't ask to stream.
+  const { cmd } = parseSlashLine(String(body?.line || '').trim());
+  const wantsStream = /text\/event-stream/.test(String(req.headers.accept || ''));
+  if (wantsStream && STREAMING.has(cmd)) {
+    writeSseHead(res);
+    const out = await runner.runStreaming({
+      line: body?.line,
+      confirm: body?.confirm,
+      onLine: (l) => writeSse(res, 'line', { text: l }),
+    });
+    writeSse(res, 'done', out);
+    return res.end();
+  }
+
   const out = await runner.run({ line: body?.line, confirm: body?.confirm });
   // Every envelope the adapter can return is forwarded unchanged; only the
   // status code is decided here. CONFIRM_REQUIRED -> 409: the request
