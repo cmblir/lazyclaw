@@ -1709,3 +1709,189 @@ git commit -m "docs: dashboard operations in the READMEs and CHANGELOG"
 **Placeholder scan:** no TBD/TODO; every code step carries real code; Task 7 Step 5 and Task 9 Step 3 describe repetitive DOM edits with one complete worked example each rather than repeating it five times.
 
 **Type consistency:** `makeConfirmStore` → `{issue, redeem, size}` used identically in Tasks 3-4. `destructivePrompt(cmd, args)` returns `string|null`, matching Task 3's `if (prompt)`. `runSlash` → envelope, consumed by `runSlashConfirmed`, consumed by panels and chat. `buildHttpCtx({cfgDir, autoApprove})` is called in exactly that shape in Task 3's implementation and tests.
+
+---
+
+### Task 12: `/config set` and `/config unset` as real slash commands
+
+**Execute this task BEFORE Task 8** — Task 8's config composers depend on the grammar it creates. It is numbered 12 only so Tasks 1-2, already implemented, keep their numbers.
+
+**Files:**
+- Modify: `tui/config_picker.mjs` (`runConfigSlash`)
+- Test: `tests/f-config-slash-set.test.mjs`
+
+**Interfaces:**
+- Consumes: `readConfig`/`writeConfig` off the slash `ctx`; `validateConfig` from `config-validate.mjs`; `PROVIDERS` from `providers/registry.mjs`.
+- Produces: `/config set <key> <value>` and `/config unset <key>` accepted by the existing `/config` handler, returning a human string.
+
+**Why:** `runConfigSlash(_args, ctx, handlers)` ignores its arguments and only opens a picker. Over HTTP there is no picker, so it sets `ctx.requestSetup` and returns `'EXIT'` — which the adapter collapses to `{ok: true, lines: []}`. A dashboard config edit would report success and change nothing. Rather than give the dashboard a grammar the CLI lacks, the command learns to take arguments; the no-argument picker path is untouched.
+
+`daemon/routes/config.mjs`'s `configKeyPut` is the reference for the rules this must match: nested cargo is refused, the whole config is re-validated before persisting, and `api-key` is masked in the echo.
+
+- [ ] **Step 1: Write the failing test**
+
+```js
+// tests/f-config-slash-set.test.mjs — /config learns to take arguments.
+//
+// Before this, `/config set provider claude-cli` opened a picker and ignored
+// every argument. Over HTTP, where there is no picker, it reported success and
+// changed nothing — the worst failure shape available: silent.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { runConfigSlash } from '../tui/config_picker.mjs';
+
+// A ctx with no openPicker is exactly what the HTTP adapter supplies.
+function mkCtx(initial = {}) {
+  let cfg = { ...initial };
+  return {
+    readConfig: () => ({ ...cfg }),
+    writeConfig: (next) => { cfg = { ...next }; },
+    _read: () => cfg,
+  };
+}
+
+test('set writes the key and reports what it stored', async () => {
+  const ctx = mkCtx({ provider: 'claude-cli' });
+  const out = await runConfigSlash('set model opus', ctx, new Map());
+  assert.match(String(out), /model/);
+  assert.equal(ctx._read().model, 'opus');
+});
+
+test('unset deletes the key', async () => {
+  const ctx = mkCtx({ provider: 'claude-cli', model: 'opus' });
+  await runConfigSlash('unset model', ctx, new Map());
+  assert.equal('model' in ctx._read(), false);
+});
+
+test('a numeric-looking value is stored as a number, not a string', async () => {
+  // config.json is typed; storing "4096" where a number belongs fails
+  // validation later, far from the command that caused it.
+  const ctx = mkCtx({ provider: 'claude-cli' });
+  await runConfigSlash('set maxTokens 4096', ctx, new Map());
+  assert.strictEqual(ctx._read().maxTokens, 4096);
+  await runConfigSlash('set someFlag true', ctx, new Map());
+  assert.strictEqual(ctx._read().someFlag, true);
+  await runConfigSlash('set note hello', ctx, new Map());
+  assert.strictEqual(ctx._read().note, 'hello');
+});
+
+test('a quoted value keeps its spaces', async () => {
+  const ctx = mkCtx({ provider: 'claude-cli' });
+  await runConfigSlash('set note "hello world"', ctx, new Map());
+  assert.equal(ctx._read().note, 'hello world');
+});
+
+test('nested cargo is refused, exactly as the daemon route refuses it', async () => {
+  // daemon/routes/config.mjs sends customProviders / rates / authProfiles to
+  // dedicated endpoints so schema validation cannot be bypassed. The slash
+  // path must not become the bypass.
+  const ctx = mkCtx({ provider: 'claude-cli' });
+  for (const key of ['customProviders', 'rates', 'authProfiles']) {
+    const out = await runConfigSlash(`set ${key} x`, ctx, new Map());
+    assert.match(String(out), /dedicated endpoint|not settable/i, `${key} must be refused`);
+    assert.equal(key in ctx._read(), false);
+  }
+});
+
+test('a write that would break the config is rejected and nothing is persisted', async () => {
+  const ctx = mkCtx({ provider: 'claude-cli' });
+  const out = await runConfigSlash('set provider not-a-real-provider', ctx, new Map());
+  assert.match(String(out), /invalid|unknown|not/i);
+  assert.equal(ctx._read().provider, 'claude-cli', 'the previous value survives a rejected write');
+});
+
+test('an api-key value is not echoed back in the clear', async () => {
+  const ctx = mkCtx({ provider: 'claude-cli' });
+  const out = await runConfigSlash('set api-key sk-ant-SECRETVALUE', ctx, new Map());
+  assert.doesNotMatch(String(out), /SECRETVALUE/, 'the reply is rendered into a browser and a terminal');
+  assert.equal(ctx._read()['api-key'], 'sk-ant-SECRETVALUE', 'but the real value is stored');
+});
+
+test('usage is reported for a malformed line, and nothing is written', async () => {
+  const ctx = mkCtx({ provider: 'claude-cli' });
+  for (const line of ['set', 'set onlykey', 'unset']) {
+    const out = await runConfigSlash(line, ctx, new Map());
+    assert.match(String(out), /usage/i, `"${line}" must explain itself`);
+  }
+  assert.deepEqual(ctx._read(), { provider: 'claude-cli' });
+});
+
+test('no arguments still opens the picker — the existing behaviour is untouched', async () => {
+  let opened = false;
+  const ctx = { ...mkCtx({}), openPicker: async () => { opened = true; return { id: 'CANCEL' }; } };
+  await runConfigSlash('', ctx, new Map());
+  assert.equal(opened, true);
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `node --test tests/f-config-slash-set.test.mjs`
+Expected: FAIL — every argument is ignored, so the set/unset assertions fail.
+
+- [ ] **Step 3: Write minimal implementation**
+
+At the top of `runConfigSlash`, before the picker path, parse an argument line. Reuse `splitWhitespace` from `tui/slash_helpers.mjs` (it already handles quoted values) rather than writing a second tokenizer.
+
+```js
+// `/config set <key> <value>` / `/config unset <key>`. Added because the
+// dashboard needs to change a setting and this command ignored its arguments
+// entirely — over HTTP, where there is no picker, it reported success and
+// wrote nothing. The rules mirror daemon/routes/config.mjs's configKeyPut:
+// nested cargo goes to its dedicated endpoint, the whole config is
+// re-validated before it is persisted, and api-key is never echoed.
+const NESTED = new Set(['customProviders', 'rates', 'authProfiles']);
+const USAGE = 'usage: /config set <key> <value>  ·  /config unset <key>  ·  /config with no arguments opens the picker';
+
+// Values arrive as text but config.json is typed.
+function coerce(raw) {
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  if (raw === 'null') return null;
+  if (raw !== '' && !Number.isNaN(Number(raw))) return Number(raw);
+  return raw;
+}
+```
+
+and inside `runConfigSlash`, first thing:
+
+```js
+  const tokens = splitWhitespace(String(_args || '').trim());
+  const verb = (tokens[0] || '').toLowerCase();
+  if (verb === 'set' || verb === 'unset') {
+    if (typeof ctx.readConfig !== 'function' || typeof ctx.writeConfig !== 'function') {
+      return 'config: this session cannot write config';
+    }
+    const key = tokens[1];
+    if (!key || (verb === 'set' && tokens.length < 3)) return USAGE;
+    if (NESTED.has(key)) {
+      return `config: "${key}" is not settable here — use the dedicated endpoint (POST /providers · PUT /rates/<key> · authProfiles via CLI)`;
+    }
+    const cfg = ctx.readConfig();
+    if (verb === 'unset') delete cfg[key];
+    else cfg[key] = coerce(tokens.slice(2).join(' '));
+    const v = validateConfig(cfg, PROVIDERS);
+    if (!v.ok) return `config: invalid — ${(v.errors || []).join('; ') || 'validation failed'}`;
+    ctx.writeConfig(cfg);
+    if (verb === 'unset') return `config: unset ${key}`;
+    const shown = key === 'api-key' ? maskApiKey(String(cfg[key])) : JSON.stringify(cfg[key]);
+    return `config: set ${key} = ${shown}`;
+  }
+```
+
+Add the imports this needs (`splitWhitespace`, `validateConfig`, `PROVIDERS`, `maskApiKey`) alongside the file's existing imports. Check the exact export names before importing — `maskApiKey` comes from `providers/registry.mjs`.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `node --test tests/f-config-slash-set.test.mjs && node --test tests/*.test.mjs`
+Expected: PASS. The REPL's own `/config` tests must stay green — the no-argument path is unchanged.
+
+- [ ] **Step 5: Commit**
+
+```bash
+npm run lint:size
+git add tui/config_picker.mjs tests/f-config-slash-set.test.mjs
+git commit -m "feat(config): /config set and /config unset take arguments"
+```
+
+---
