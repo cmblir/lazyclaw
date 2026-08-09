@@ -579,7 +579,9 @@ export function makeSlashRunner({ cfgDir, confirmStore, dispatch = _dispatchSlas
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node --test tests/f-slash-http.test.mjs`
-Expected: PASS, 13 tests. If the gate-coverage test lists commands, add each to a `TTY_ONLY` set in this file and return `{ ok: false, code: 'TTY_ONLY', error, hint }` for them before dispatch — then re-run.
+Expected: PASS, 13 tests.
+
+**TTY_ONLY ruling:** the gate-coverage test decides whether this exists at all. If it names zero commands, do NOT add a `TTY_ONLY` set or envelope branch — unused code is not shipped. If it names any, add exactly those to a `TTY_ONLY` set in this file, return `{ ok: false, code: 'TTY_ONLY', error, hint }` for them before dispatch, and add a test asserting one of them produces that envelope.
 
 - [ ] **Step 5: Verify file sizes and commit**
 
@@ -759,7 +761,208 @@ git commit -m "feat(daemon): POST /slash and GET /slash/commands"
 
 ---
 
-### Task 5: Browser slash client
+### Task 5: SSE streaming for long-running commands
+
+**Files:**
+- Modify: `daemon/routes/slash.mjs`, `daemon/lib/slash_http.mjs`
+- Test: `tests/f-slash-sse.test.mjs`
+
+**Interfaces:**
+- Consumes: `makeSlashRunner` (Task 3); `writeSseHead`, `writeSse` from `daemon/routes/_deps.mjs` (the helpers `POST /conversation` already uses).
+- Produces: `STREAMING: Set<string>` exported from `daemon/lib/slash_http.mjs`; `runner.runStreaming({line, confirm, onLine}) -> Promise<Envelope>`; `runSlashStream(line, {onLine, confirm}) -> Promise<Envelope>` in `web/ui/slash_client.mjs`.
+
+**Why:** without this, a `/loop` or agent run shows nothing until it finishes — the dashboard looks hung for the exact commands that take longest. The buffered path stays for everything else; only members of `STREAMING` upgrade.
+
+- [ ] **Step 1: Write the failing test**
+
+```js
+// tests/f-slash-sse.test.mjs — long commands must show progress as it happens.
+import test, { after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { makeSlashRunner, STREAMING } from '../daemon/lib/slash_http.mjs';
+import { makeConfirmStore } from '../daemon/lib/confirm_tokens.mjs';
+
+const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-slash-sse-'));
+process.env.POMPOS_CONFIG_DIR = CFG;
+after(() => fs.rmSync(CFG, { recursive: true, force: true }));
+
+test('STREAMING names the commands that can run long', () => {
+  assert.ok(STREAMING.has('/loop'), '/loop runs until stopped');
+  assert.ok(STREAMING.size > 0);
+  assert.equal(STREAMING.has('/status'), false, 'instant commands stay buffered');
+});
+
+test('runStreaming delivers each line as it is produced, not at the end', async () => {
+  const seen = [];
+  let resolveSecond;
+  const gate = new Promise((r) => { resolveSecond = r; });
+  const runner = makeSlashRunner({
+    cfgDir: CFG, confirmStore: makeConfirmStore(),
+    dispatch: async (_c, _a, _ctx, write) => {
+      write('step one\n');
+      // The test only proceeds once the first line has been observed, which
+      // is impossible if lines are buffered until the handler returns.
+      await gate;
+      write('step two\n');
+      return 'finished';
+    },
+  });
+  const done = runner.runStreaming({
+    line: '/loop',
+    onLine: (l) => { seen.push(l); if (seen.length === 1) resolveSecond(); },
+  });
+  const out = await done;
+  assert.deepEqual(seen, ['step one\n', 'step two\n', 'finished']);
+  assert.deepEqual(out, { ok: true, lines: ['step one\n', 'step two\n', 'finished'] });
+});
+
+test('a streaming command still honours the confirmation gate', async () => {
+  let ran = false;
+  const runner = makeSlashRunner({
+    cfgDir: CFG, confirmStore: makeConfirmStore(),
+    dispatch: async () => { ran = true; return 'x'; },
+  });
+  const out = await runner.runStreaming({ line: '/clear', onLine: () => {} });
+  assert.equal(out.code, 'CONFIRM_REQUIRED');
+  assert.equal(ran, false, 'confirmation precedes streaming, same as the buffered path');
+});
+
+test('a thrown handler ends the stream with an error envelope', async () => {
+  const runner = makeSlashRunner({
+    cfgDir: CFG, confirmStore: makeConfirmStore(),
+    dispatch: async (_c, _a, _ctx, write) => { write('partial\n'); throw new Error('boom'); },
+  });
+  const seen = [];
+  const out = await runner.runStreaming({ line: '/loop', onLine: (l) => seen.push(l) });
+  assert.deepEqual(seen, ['partial\n'], 'what was produced before the failure still reached the client');
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'SLASH_ERR');
+  assert.match(out.error, /boom/);
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `node --test tests/f-slash-sse.test.mjs`
+Expected: FAIL — `STREAMING` is not exported.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Add to `daemon/lib/slash_http.mjs`:
+
+```js
+// Commands that can run long enough that buffering their output would make
+// the dashboard look hung. Everything else answers in one response.
+export const STREAMING = new Set(['/loop', '/agent', '/team', '/workflow']);
+```
+
+and, inside the object `makeSlashRunner` returns, a sibling of `run`:
+
+```js
+    /**
+     * Same contract as run(), but each line is handed to onLine the moment it
+     * is produced. The envelope still carries the full list so a caller that
+     * missed the start is not left with a partial record.
+     */
+    async runStreaming({ line, confirm, onLine } = {}) {
+      const raw = typeof line === 'string' ? line.trim() : '';
+      if (!raw.startsWith('/')) return fail('a slash command is required, e.g. /status');
+      const { cmd, args } = parseSlashLine(raw);
+      let autoApprove = false;
+      const prompt = destructivePrompt(cmd, args);
+      if (prompt) {
+        if (!confirmStore.redeem(confirm, raw)) {
+          return { ok: false, code: 'CONFIRM_REQUIRED', prompt, token: confirmStore.issue(raw) };
+        }
+        autoApprove = true;
+      }
+      const lines = [];
+      const emit = (chunk) => { const s = String(chunk); lines.push(s); onLine?.(s); };
+      const ctx = buildHttpCtx({ cfgDir, autoApprove });
+      let result;
+      try {
+        result = await dispatch(cmd, args, ctx, emit);
+      } catch (err) {
+        return fail(err?.message || err);
+      }
+      if (typeof result === 'string' && result !== 'EXIT' && result !== 'NEW' && result.length) emit(result);
+      return { ok: true, lines };
+    },
+```
+
+In `daemon/routes/slash.mjs`, upgrade when the client asks for it AND the command is in `STREAMING`:
+
+```js
+  const { cmd } = parseSlashLine(String(body?.line || '').trim());
+  const wantsStream = /text\/event-stream/.test(String(req.headers.accept || ''));
+  if (wantsStream && STREAMING.has(cmd)) {
+    writeSseHead(res);
+    const out = await runner.runStreaming({
+      line: body.line, confirm: body.confirm,
+      onLine: (l) => writeSse(res, 'line', { text: l }),
+    });
+    writeSse(res, 'done', out);
+    return res.end();
+  }
+```
+
+Add `runSlashStream` to `web/ui/slash_client.mjs`:
+
+```js
+/**
+ * Run a command that may take a while, delivering lines as they arrive.
+ * Falls back to the buffered result if the server did not upgrade.
+ */
+export async function runSlashStream(line, { onLine, confirm } = {}) {
+  const body = confirm ? { line, confirm } : { line };
+  const res = await apiRaw('/slash', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+    body: JSON.stringify(body),
+  });
+  if (!/text\/event-stream/.test(res.headers.get('content-type') || '')) return res.json();
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let final = { ok: false, error: 'stream ended without a result', code: 'SLASH_ERR' };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const frames = buf.split('\n\n');
+    buf = frames.pop() || '';
+    for (const f of frames) {
+      const ev = /event: (\w+)/.exec(f)?.[1];
+      const data = /data: (.*)/.exec(f)?.[1];
+      if (!data) continue;
+      const payload = JSON.parse(data);
+      if (ev === 'line') onLine?.(payload.text);
+      else if (ev === 'done') final = payload;
+    }
+  }
+  return final;
+}
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `node --test tests/f-slash-sse.test.mjs && node --test tests/f-slash-http.test.mjs tests/f-slash-routes.test.mjs`
+Expected: PASS all — the buffered path must not regress.
+
+- [ ] **Step 5: Commit**
+
+```bash
+npm run lint:size
+git add daemon/lib/slash_http.mjs daemon/routes/slash.mjs web/ui/slash_client.mjs tests/f-slash-sse.test.mjs
+git commit -m "feat(daemon): stream long-running slash commands over SSE"
+```
+
+---
+
+### Task 6: Browser slash client
 
 **Files:**
 - Create: `web/ui/slash_client.mjs`
@@ -897,14 +1100,14 @@ git commit -m "feat(dashboard): browser client for the slash write path"
 
 ---
 
-### Task 6: Confirm dialog
+### Task 7: Confirm dialog
 
 **Files:**
 - Create: `web/ui/confirm_dialog.mjs`
 - Test: `tests/f-confirm-dialog.test.mjs`
 
 **Interfaces:**
-- Consumes: `runSlash` (Task 5); `openModal`, `closeModal` from `web/ui/modal.mjs` (existing, already used by `web/ui/panels/tasks.mjs`); `el` from `web/ui/dom.mjs`.
+- Consumes: `runSlash` (Task 6); `openModal`, `closeModal` from `web/ui/modal.mjs` (existing, already used by `web/ui/panels/tasks.mjs`); `el` from `web/ui/dom.mjs`.
 - Produces: `runSlashConfirmed(line, { confirm: askFn }) -> Promise<Envelope>` — runs a line and, on `CONFIRM_REQUIRED`, asks via `askFn(prompt) -> Promise<boolean>` and retries with the token. `askFn` defaults to a modal.
 
 Every panel calls `runSlashConfirmed`, never `runSlash` directly, so no panel can forget the confirmation step.
@@ -1043,7 +1246,7 @@ git commit -m "feat(dashboard): one confirm flow shared by every destructive act
 
 ---
 
-### Task 7: Panel write actions
+### Task 8: Panel write actions
 
 **Files:**
 - Modify: `web/ui/panels/agents.mjs`, `web/ui/panels/teams.mjs`, `web/ui/panels/tasks.mjs`, `web/ui/panels/config.mjs`, `web/ui/panels/workflows.mjs`
@@ -1051,7 +1254,7 @@ git commit -m "feat(dashboard): one confirm flow shared by every destructive act
 - Test: `tests/f-slash-actions.test.mjs`
 
 **Interfaces:**
-- Consumes: `runSlashConfirmed` (Task 6).
+- Consumes: `runSlashConfirmed` (Task 7).
 - Produces: `web/ui/slash_actions.mjs` exporting pure composers used by the panels:
   - `agentCreate({name, role, model}) -> string`
   - `agentRemove(name) -> string`
@@ -1212,14 +1415,14 @@ git commit -m "feat(dashboard): write actions on the agents, teams, tasks, confi
 
 ---
 
-### Task 8: Chat slash routing and autocomplete
+### Task 9: Chat slash routing and autocomplete
 
 **Files:**
 - Modify: `web/ui/panels/chat.mjs`
 - Test: `tests/f-chat-slash-routing.test.mjs`
 
 **Interfaces:**
-- Consumes: `runSlashConfirmed` (Task 6), `fetchCommands` (Task 5).
+- Consumes: `runSlashConfirmed` (Task 7), `fetchCommands` (Task 6).
 - Produces: `isSlashLine(text) -> boolean` and `filterCommands(all, prefix) -> Array<{name, description}>`, both exported from `web/ui/panels/chat.mjs` so the routing rule is testable without a DOM.
 
 - [ ] **Step 1: Write the failing test**
@@ -1322,7 +1525,7 @@ git commit -m "feat(dashboard): route slash input to the dispatcher, with autoco
 
 ---
 
-### Task 9: The terminal-zero E2E
+### Task 10: The terminal-zero E2E
 
 **Files:**
 - Create: `tests/phaseI-dashboard-operations.spec.ts`
@@ -1461,13 +1664,13 @@ git commit -m "test(dashboard): terminal-zero operating loop as the phase-2 done
 
 ---
 
-### Task 10: Documentation
+### Task 11: Documentation
 
 **Files:**
 - Modify: `README.md` (the `## The dashboard` section), `README.ko.md` (the `## 대시보드` section), `CHANGELOG.md` (Unreleased)
 
 **Interfaces:**
-- Consumes: the shipped behaviour of Tasks 1-9.
+- Consumes: the shipped behaviour of Tasks 1-10.
 
 - [ ] **Step 1: Update the dashboard section in both READMEs**
 
@@ -1501,7 +1704,7 @@ git commit -m "docs: dashboard operations in the READMEs and CHANGELOG"
 
 ## Self-Review
 
-**Spec coverage:** architecture → Tasks 3-4; envelope → Task 3; confirm tokens → Tasks 1, 3, 4, 6; capability gating → Task 3 (gate-coverage test); destructive actions → Tasks 2, 6; panels → Task 7; chat → Task 8; done bar → Task 9; unit tests → Tasks 1-8; file map → all tasks. `data` on the envelope is declared optional in the spec and no task populates it, which matches "introduced per-command as panels need structure" — the panels here need only `lines`.
+**Spec coverage:** architecture → Tasks 3-4; envelope → Task 3; confirm tokens → Tasks 1, 3, 4, 6; capability gating → Task 3 (gate-coverage test); destructive actions → Tasks 2, 6; panels → Task 7; chat → Task 8; done bar → Task 9; unit tests → Tasks 1-10; file map → all tasks. `data` on the envelope is declared optional in the spec and no task populates it, which matches "introduced per-command as panels need structure" — the panels here need only `lines`.
 
 **Placeholder scan:** no TBD/TODO; every code step carries real code; Task 7 Step 5 and Task 9 Step 3 describe repetitive DOM edits with one complete worked example each rather than repeating it five times.
 
