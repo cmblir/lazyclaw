@@ -2,13 +2,27 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { destructivePrompt } from '../daemon/lib/slash_destructive.mjs';
 
-test('remove/delete subcommands are recognised and name their target', () => {
+test('remove/delete/rm subcommands are recognised and name their target', () => {
   const p = destructivePrompt('/team', 'remove crew');
   assert.match(p, /crew/, 'the prompt must name what is about to be destroyed');
   assert.match(p, /remove|delete/i);
   assert.ok(destructivePrompt('/agent', 'remove dev'));
-  assert.ok(destructivePrompt('/skill', 'remove note-taker'));
+  assert.ok(destructivePrompt('/team', 'rm crew'), 'rm alias is gated');
+  assert.ok(destructivePrompt('/agent', 'rm dev'), 'rm alias is gated');
+  assert.ok(destructivePrompt('/task', 'rm t_123'), 'rm alias is gated');
   assert.ok(destructivePrompt('/task', 'abandon t_123'));
+});
+
+test('/skill clear and unset are gated (the real destructive path)', () => {
+  const clear = destructivePrompt('/skill', 'clear');
+  assert.ok(clear, '/skill clear must be gated');
+  assert.match(clear, /system prompt/i);
+  const unset = destructivePrompt('/skill', 'unset');
+  assert.ok(unset, '/skill unset must be gated');
+  assert.match(unset, /system prompt/i);
+  // Case-insensitive
+  assert.ok(destructivePrompt('/skill', 'CLEAR'));
+  assert.ok(destructivePrompt('/skill', '  UNSET  '));
 });
 
 test('the reset family is destructive even with no arguments', () => {
@@ -20,7 +34,7 @@ test('the reset family is destructive even with no arguments', () => {
 test('read-only and additive commands are not gated', () => {
   for (const [cmd, args] of [
     ['/status', ''], ['/help', ''], ['/team', 'list'], ['/team', 'add crew'],
-    ['/agent', 'list'], ['/skill', 'list'], ['/model', ''], ['/config', 'get provider'],
+    ['/agent', 'list'], ['/skill', 'list'], ['/skill', 'refactor'], ['/model', ''], ['/config', 'get provider'],
   ]) {
     assert.equal(destructivePrompt(cmd, args), null, `${cmd} ${args} must not prompt`);
   }

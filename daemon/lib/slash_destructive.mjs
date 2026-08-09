@@ -12,11 +12,11 @@
 
 // cmd -> { sub: RegExp on the FIRST token only, prompt(target) }
 const RULES = new Map([
-  ['/team', { sub: /^(remove|delete)$/i, prompt: (t) => `Remove team ${t || '(unnamed)'}? Its members stay, the team does not.` }],
-  ['/agent', { sub: /^(remove|delete)$/i, prompt: (t) => `Remove agent ${t || '(unnamed)'}? Any team referencing it keeps the dangling name.` }],
-  ['/skill', { sub: /^(remove|delete|uninstall)$/i, prompt: (t) => `Uninstall skill ${t || '(unnamed)'}? The file is deleted from disk.` }],
-  ['/task', { sub: /^(abandon|cancel|delete|remove)$/i, prompt: (t) => `Abandon task ${t || '(unnamed)'}? It stops and cannot be resumed.` }],
-  ['/workflow', { sub: /^(clear|delete|remove|stop)$/i, prompt: (t) => `Clear workflow state for ${t || '(all)'}? Saved progress is discarded.` }],
+  ['/team', { sub: /^(remove|rm|delete)$/i, prompt: (t) => `Remove team ${t || '(unnamed)'}? Its members stay, the team does not.` }],
+  ['/agent', { sub: /^(remove|rm|delete)$/i, prompt: (t) => `Remove agent ${t || '(unnamed)'}? Any team referencing it keeps the dangling name.` }],
+  ['/skill', { sub: /^(clear|unset)$/i, prompt: () => `Clear the system prompt? Any active skills are unset.` }],
+  ['/task', { sub: /^(abandon|remove|rm|delete)$/i, prompt: (t) => `Abandon task ${t || '(unnamed)'}? It stops and cannot be resumed.` }],
+  ['/personality', { sub: /^(remove|rm|delete)$/i, prompt: (t) => `Remove personality ${t || '(unnamed)'}? The file is deleted from disk.` }],
   ['/config', { sub: /^(unset|delete|remove)$/i, prompt: (t) => `Unset config key ${t || '(unnamed)'}?` }],
 ]);
 
@@ -39,7 +39,13 @@ export function destructivePrompt(cmd, args) {
   if (always) return always;
   const rule = RULES.get(key);
   if (!rule) return null;
-  // Only the FIRST token is the subcommand; a later "remove" is data, not verb.
+  // /skill clear|unset tests the entire args string (no subcommand, no target).
+  // All other rules test only the FIRST token (later tokens are data, not verbs).
+  if (key === '/skill') {
+    const trimmed = String(args || '').trim();
+    if (!rule.sub.test(trimmed)) return null;
+    return rule.prompt('');
+  }
   const tokens = String(args || '').trim().split(/\s+/).filter(Boolean);
   if (!tokens.length || !rule.sub.test(tokens[0])) return null;
   return rule.prompt(tokens[1] || '');
