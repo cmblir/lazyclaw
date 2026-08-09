@@ -317,19 +317,23 @@ function needsHostProcess(cmd, args) {
 
 // Every ctx.request* flag a handler can set to ask the REPL host to run an
 // interactive step AFTER it unmounts on 'EXIT' (commands/chat.mjs:336-338) —
-// /setup's full wizard, /config's single-item wizard step, and /login's (or
-// /provider's) foreground CLI-login flow. This adapter has no REPL host, so
-// none of those steps ever run — an 'EXIT' paired with any of these flags
-// must NOT collapse to the ordinary {ok:true, lines:[]} envelope, or the
-// caller is told a login/setup step succeeded when nothing happened.
+// /setup's full wizard, /config's or /channels setup's single-item wizard
+// step, and /login's (or /provider's) foreground CLI-login flow. This
+// adapter has no REPL host, so none of those steps ever run — an 'EXIT'
+// paired with any of these flags must NOT collapse to the ordinary
+// {ok:true, lines:[]} envelope, or the caller is told a login/setup step
+// succeeded when nothing happened.
 //
 // This list is not guessed: derived by grepping every module reachable from
 // SLASH_HANDLERS for an assignment to ctx.request*,
 //   grep -rn "ctx\.request[A-Za-z]*\s*=" tui/*.mjs commands/*.mjs
-// which finds exactly these three (tui/slash_dispatcher.mjs's inline /setup
-// handler, tui/config_picker.mjs, tui/login_flow.mjs). A handler that adds a
-// FOURTH ctx.request* flag and returns 'EXIT' needs to be added here too —
-// re-run that grep and diff its output against this array.
+// which finds exactly these four sites — tui/slash_dispatcher.mjs's inline
+// /setup handler (requestSetup), tui/config_picker.mjs (requestSetup and
+// requestConfigStep), tui/slash_channels.mjs's /channels setup no-picker
+// fallback (requestConfigStep), and tui/login_flow.mjs (requestLogin) — over
+// these three distinct flag names. A handler that adds a FOURTH flag NAME
+// and returns 'EXIT' needs to be added here too — re-run that grep and diff
+// its output against this array.
 const FOREGROUND_ACTION_FLAGS = ['requestSetup', 'requestConfigStep', 'requestLogin'];
 
 export function makeSlashRunner({ cfgDir, confirmStore, dispatch = _dispatchSlash }) {
