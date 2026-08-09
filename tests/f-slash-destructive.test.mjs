@@ -53,3 +53,20 @@ test('matching is case-insensitive and tolerant of extra whitespace', () => {
 test('an unknown command is never gated — dispatch reports it', () => {
   assert.equal(destructivePrompt('/nope', 'remove everything'), null);
 });
+
+test('/personality remove/rm/delete are gated and name the target', () => {
+  const p = destructivePrompt('/personality', 'remove novelist');
+  assert.ok(p, '/personality remove must be gated');
+  assert.match(p, /novelist/, 'the prompt must name the personality');
+  assert.match(p, /remove|delete/i);
+  assert.ok(destructivePrompt('/personality', 'rm poet'), '/personality rm is gated');
+  assert.ok(destructivePrompt('/personality', 'delete critic'), '/personality delete is gated');
+  assert.equal(destructivePrompt('/personality', 'list'), null, '/personality list is not gated');
+});
+
+test('/workflow is not gated because it is not a slash command', () => {
+  // /workflow is a CLI subcommand (commands/workflow.mjs), not in SLASH_HANDLERS.
+  // A rule here would imply dashboard coverage that does not exist.
+  assert.equal(destructivePrompt('/workflow', 'clear'), null);
+  assert.equal(destructivePrompt('/workflow', 'stop'), null);
+});
