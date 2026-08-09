@@ -13,6 +13,7 @@ import path from 'node:path';
 import { makeSlashRunner, buildHttpCtx, listCommands } from '../daemon/lib/slash_http.mjs';
 import { makeConfirmStore } from '../daemon/lib/confirm_tokens.mjs';
 import { SLASH_HANDLERS } from '../tui/slash_dispatcher.mjs';
+import { readConfig } from '../lib/config.mjs';
 
 // Handlers resolve the config directory for themselves; keep every write in a
 // temp dir so a test run never touches the operator's own state.
@@ -132,12 +133,146 @@ test('the auto-approve ctx answers a confirm picker affirmatively', async () => 
   assert.equal(picked.id, 'approve');
 });
 
+// --- ctx.cfg must be real, and must not go stale mid-request --------------
+
+test('ctx.cfg is populated — /status does not blank out a key that is actually configured', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-slash-http-cfg-'));
+  const prevEnv = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
+  try {
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({
+      provider: 'anthropic', model: 'claude-x', 'api-key': 'sk-ant-seeded-secret-value',
+    }));
+    const ctx = buildHttpCtx({ cfgDir: dir });
+    assert.deepEqual(ctx.cfg, readConfig(), 'ctx.cfg must be the real, current config — not absent, not a stale copy');
+    const { dispatchSlash } = await import('../tui/slash_dispatcher.mjs');
+    const status = await dispatchSlash('/status', '', ctx, () => {});
+    assert.doesNotMatch(status, /api key:\s*\n/, '/status must not print a blank key line for a config that has one');
+    assert.match(status, /api key:\s+\S/, 'the masked key must actually appear');
+  } finally {
+    process.env.POMPOS_CONFIG_DIR = prevEnv;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('ctx.writeConfig keeps ctx.cfg in sync within the SAME request — no stale read after a write', async () => {
+  const r = runnerWith(async (_cmd, _args, ctx) => {
+    ctx.writeConfig({ ...ctx.cfg, marker: 'written-mid-request' });
+    // A handler reading ctx.cfg again later in the same call (e.g. a second
+    // in-chat step chained off /menu) must see what it JUST wrote, not the
+    // snapshot taken when the request started.
+    return ctx.cfg.marker;
+  });
+  const out = await r.run({ line: '/anything' });
+  assert.deepEqual(out, { ok: true, lines: ['written-mid-request'] });
+});
+
+// --- cfgDir must actually govern the request, or fail loudly --------------
+
+test('buildHttpCtx refuses a cfgDir that does not match POMPOS_CONFIG_DIR', () => {
+  assert.throws(
+    () => buildHttpCtx({ cfgDir: '/not/the/active/config/dir' }),
+    /POMPOS_CONFIG_DIR/,
+    'readConfig/writeConfig resolve the directory from the env var, not from cfgDir — a mismatch must not pass silently',
+  );
+});
+
+test('a mismatched cfgDir surfaces as a clean envelope through run(), not a crash', async () => {
+  const r = makeSlashRunner({ cfgDir: '/not/the/active/config/dir', confirmStore: makeConfirmStore() });
+  const out = await r.run({ line: '/status' });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'CONFIG_DIR_MISMATCH');
+});
+
+// --- commands that cannot honor what they claim over a one-shot call ------
+
+test('/skill <name> is refused before dispatch — there is no chat session to persist it into', async () => {
+  let ran = false;
+  const r = runnerWith(async () => { ran = true; return 'active skills: review'; });
+  const out = await r.run({ line: '/skill review' });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'NO_SESSION');
+  assert.match(out.error, /session/i);
+  assert.equal(ran, false, 'nothing reaches the dispatcher — it would falsely report success');
+});
+
+test('/skill clear is refused the same way (no point confirming a no-op)', async () => {
+  let ran = false;
+  const r = runnerWith(async () => { ran = true; return 'cleared system prompt (no active skills)'; });
+  const out = await r.run({ line: '/skill clear' });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'NO_SESSION');
+  assert.equal(ran, false);
+});
+
+test('/skill with no args is read-only (list/usage) and still reaches the dispatcher', async () => {
+  const r = runnerWith(async () => 'usage: /skill <name>[,<name>]');
+  const out = await r.run({ line: '/skill' });
+  assert.equal(out.ok, true);
+});
+
+test('/skills <name> is refused the same way — it forwards straight into _skill', async () => {
+  let ran = false;
+  const r = runnerWith(async () => { ran = true; return 'active skills: review'; });
+  const out = await r.run({ line: '/skills review' });
+  assert.equal(out.code, 'NO_SESSION');
+  assert.equal(ran, false);
+});
+
+test('/goal <name> (switch) is refused before dispatch — same reason as /skill', async () => {
+  let ran = false;
+  const r = runnerWith(async () => { ran = true; return '✓ switched to goal: mygoal (session: goal:mygoal, 0 prior turn(s))'; });
+  const out = await r.run({ line: '/goal mygoal' });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'NO_SESSION');
+  assert.equal(ran, false);
+});
+
+test('/goal add|list|show|close persist through goals.mjs, not a session — they reach the dispatcher', async () => {
+  const r = runnerWith(async (cmd, args) => `${cmd} ${args}`);
+  for (const line of ['/goal add myname --desc hi', '/goal list', '/goal show myname', '/goal close myname done']) {
+    const out = await r.run({ line });
+    assert.equal(out.ok, true, `${line} must not be treated as session-only`);
+  }
+});
+
+// --- /provider and /model must actually persist, not just claim to --------
+
+test('/provider <name> and /model <name> persist to config.json (real dispatcher, no mock)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-slash-http-persist-'));
+  const prevEnv = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
+  try {
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ provider: 'openai', model: 'gpt-4' }));
+    const r = makeSlashRunner({ cfgDir: dir, confirmStore: makeConfirmStore() }); // default dispatch = the real one
+    const p = await r.run({ line: '/provider anthropic' });
+    assert.equal(p.ok, true);
+    assert.equal(readConfig().provider, 'anthropic', 'the switch must land on disk, not just in the response string');
+
+    const m = await r.run({ line: '/model claude-x' });
+    assert.equal(m.ok, true);
+    assert.equal(readConfig().model, 'claude-x');
+
+    // A later, independent request (a fresh ctx, same as a new HTTP call)
+    // must see the switch too — proving it is not an artifact of one ctx.
+    const status = await r.run({ line: '/status' });
+    assert.match(status.lines[0], /provider:\s+anthropic/);
+    assert.match(status.lines[0], /model:\s+claude-x/);
+  } finally {
+    process.env.POMPOS_CONFIG_DIR = prevEnv;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --- gate coverage --------------------------------------------------------
 
 test('every registered command survives the HTTP ctx without throwing', async () => {
-  // A handler that reaches for a TTY affordance we do not provide would throw
-  // a TypeError and take the route down with it. Running the whole registry
-  // through the real ctx is what keeps a future command from doing that.
+  // A handler that reaches for something the HTTP ctx does not provide would
+  // throw and take the route down with it. Running the whole registry through
+  // the real ctx is what keeps a future command from doing that. Every thrown
+  // class is recorded, not just TypeError — a handler that throws a plain
+  // Error, a ReferenceError, or anything else given this ctx is just as much
+  // a crash, and filtering by class let that whole category pass silently.
   const { dispatchSlash } = await import('../tui/slash_dispatcher.mjs');
   const ctx = buildHttpCtx({ cfgDir: CFG });
   const broke = [];
@@ -145,10 +280,10 @@ test('every registered command survives the HTTP ctx without throwing', async ()
     try {
       await dispatchSlash(name, '', { ...ctx }, () => {});
     } catch (err) {
-      if (err instanceof TypeError) broke.push(`${name}: ${err.message}`);
+      broke.push(`${name}: ${err?.constructor?.name || typeof err}: ${err?.message || err}`);
     }
   }
-  assert.deepEqual(broke, [], 'these reach for something the HTTP ctx does not provide');
+  assert.deepEqual(broke, [], 'these throw when run through the HTTP ctx');
 });
 
 test('listCommands mirrors the dispatcher registry exactly', () => {
