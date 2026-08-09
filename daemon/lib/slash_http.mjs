@@ -157,7 +157,7 @@ export function buildHttpCtx({ cfgDir, autoApprove = false }) {
     // made over HTTP is visible to a later /status exactly as it would be
     // from the terminal — WHEN it lands. See persistAndVerify below for what
     // happens when it doesn't.
-    setActiveProvName: (name) => persistAndVerify(ctx, cfg, 'provider', name, persistActiveProvider),
+    setActiveProvName: (name) => persistAndVerify(ctx, cfg, 'provider', name, persistActiveProvider, explainProviderMismatch),
     setActiveModel: (name) => persistAndVerify(ctx, cfg, 'model', name, persistActiveModel),
   };
   if (autoApprove) {
@@ -208,7 +208,14 @@ function fail(error, code = 'SLASH_ERR') {
 // the reason a write silently fails to land, the disk copy will not equal
 // what was asked for, so this cannot be defeated by a different failure mode
 // than the one that surfaced it: it does not check WHY, only WHETHER.
-function persistAndVerify(ctx, cfg, field, value, persistFn) {
+//
+// "Whether" is not the whole story, though: a mismatch is not always a
+// config.json problem. `explainMismatch`, when given, gets first look at a
+// detected mismatch and can name a KNOWN, deliberate reason a write of this
+// specific kind never lands — see explainProviderMismatch below — so the
+// generic "check that config.json is valid JSON and writable" is reserved
+// for when nothing already explains it, rather than guessed every time.
+function persistAndVerify(ctx, cfg, field, value, persistFn, explainMismatch) {
   persistFn(cfg || {}, value);
   let disk;
   try {
@@ -218,8 +225,28 @@ function persistAndVerify(ctx, cfg, field, value, persistFn) {
     return;
   }
   if (disk[field] !== value) {
-    ctx.__persistFailed = `${field} was not saved (config.json still has ${JSON.stringify(disk[field] ?? null)}) — check that config.json is valid JSON and writable`;
+    const known = explainMismatch && explainMismatch(cfg, value, disk);
+    ctx.__persistFailed = known
+      || `${field} was not saved (config.json still has ${JSON.stringify(disk[field] ?? null)}) — check that config.json is valid JSON and writable`;
   }
+}
+
+// persistActiveProvider (lib/config.mjs:108-117) has two deliberate no-op
+// guards, read directly from its source rather than guessed: it never writes
+// the literal name "orchestrator" (that routing is owned by /orchestrator
+// on|off, not a provider switch — lib/config.mjs:104-107's comment), and it
+// never overwrites an ALREADY-active "orchestrator" provider with anything
+// else (protecting that routing from a plain /provider switch). Either one
+// produces a mismatch persistAndVerify would otherwise blame on config.json,
+// which has nothing wrong with it in this case.
+function explainProviderMismatch(cfg, requested) {
+  if (requested === 'orchestrator') {
+    return 'provider was not saved — "orchestrator" is not set via /provider; orchestrator routing is controlled by /orchestrator on|off';
+  }
+  if ((cfg || {}).provider === 'orchestrator') {
+    return 'provider was not saved — the active provider is "orchestrator", which /provider deliberately leaves alone; run /orchestrator off first, then /provider <name>';
+  }
+  return null;
 }
 
 // /skill and /skills (which forwards to the same _skill body once it has an

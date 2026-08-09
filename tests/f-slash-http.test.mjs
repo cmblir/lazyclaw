@@ -302,6 +302,30 @@ test('/model <name> against a corrupt config.json does not report success', asyn
   }
 });
 
+test('/provider orchestrator does not report success, and does not blame config.json', async () => {
+  // config.json here is perfectly valid — persistActiveProvider's OWN
+  // deliberate guard (lib/config.mjs:109) refuses to write the literal name
+  // "orchestrator" (that routing is owned by /orchestrator on|off). The
+  // outcome (ok:false) is correct; the earlier version of this fix invented
+  // "check that config.json is valid JSON and writable" as the cause, which
+  // sends an operator to inspect a file that has nothing wrong with it.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-slash-http-orch-'));
+  const prevEnv = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
+  try {
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ provider: 'openai', model: 'gpt-4' }));
+    const r = makeSlashRunner({ cfgDir: dir, confirmStore: makeConfirmStore() });
+    const out = await r.run({ line: '/provider orchestrator' });
+    assert.equal(out.ok, false, 'nothing changed — /provider deliberately never sets this value');
+    assert.doesNotMatch(out.error, /valid JSON|writable/i,
+      'config.json is fine here — the message must not send the operator to inspect it');
+    assert.match(out.error, /orchestrator/i, 'the message should name the actual reason: orchestrator routing');
+  } finally {
+    process.env.POMPOS_CONFIG_DIR = prevEnv;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --- a corrupt config.json must not take down commands that never touch it,
 //     and must not be mislabelled as a cfgDir/env mismatch when it does -----
 
