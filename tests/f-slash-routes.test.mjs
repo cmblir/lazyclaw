@@ -112,3 +112,31 @@ test('POST /slash refuses /dashboard stop the same way (it would pkill host proc
   assert.equal(res.statusCode, 400);
   assert.equal(res.body.code, 'NEEDS_TERMINAL');
 });
+
+// ── fix round 1: /gateway start|stop is the sibling the first pass of this
+// guard missed — same class as /dashboard (spawns/kills a process on the
+// daemon's own host), caught by review rather than by this test suite. The
+// no-spawn/no-kill proof itself lives in tests/f-slash-http.test.mjs (it
+// injects a spy dispatch to assert dispatch is never called); these confirm
+// the same refusal surfaces correctly through the real route.
+test('POST /slash refuses /gateway start the same way as /dashboard', async () => {
+  const res = mkRes();
+  await slashRun({ req: mkReq({ line: '/gateway start' }), res, gwConfigDir: CFG });
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.ok, false);
+  assert.equal(res.body.code, 'NEEDS_TERMINAL');
+});
+
+test('POST /slash refuses /gateway stop the same way — it would process.kill a real pid', async () => {
+  const res = mkRes();
+  await slashRun({ req: mkReq({ line: '/gateway stop' }), res, gwConfigDir: CFG });
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.code, 'NEEDS_TERMINAL');
+});
+
+test('POST /slash still allows /gateway status — read-only, no process touched', async () => {
+  const res = mkRes();
+  await slashRun({ req: mkReq({ line: '/gateway status' }), res, gwConfigDir: CFG });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.ok, true);
+});

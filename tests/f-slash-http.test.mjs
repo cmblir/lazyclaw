@@ -236,6 +236,72 @@ test('/goal add|list|show|close persist through goals.mjs, not a session — the
   }
 });
 
+// --- commands that spawn or kill a process on the DAEMON'S OWN HOST must
+//     never reach dispatch over HTTP (fix round 1: /gateway start|stop was
+//     the sibling the first pass of this guard missed — /dashboard was
+//     covered, /gateway was not, even though gatewayStop() reaches
+//     process.kill(pid, ...) on a real pidfile'd process). Asserted on the
+//     guard's own behaviour (a spy dispatch that must never run), not by
+//     spawning or killing anything real. ------------------------------------
+
+test('/dashboard is refused before dispatch — it would spawn a process on the daemon host', async () => {
+  let ran = false;
+  const r = runnerWith(async () => { ran = true; return 'started'; });
+  const out = await r.run({ line: '/dashboard' });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'NEEDS_TERMINAL');
+  assert.equal(ran, false, 'nothing reaches the dispatcher — no child process may be spawned');
+});
+
+test('/dashboard stop is refused the same way — it would pkill processes on the daemon host', async () => {
+  let ran = false;
+  const r = runnerWith(async () => { ran = true; return 'stopped'; });
+  const out = await r.run({ line: '/dashboard stop' });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'NEEDS_TERMINAL');
+  assert.equal(ran, false);
+});
+
+test('/gateway start is refused before dispatch — it would spawn a process on the daemon host', async () => {
+  let ran = false;
+  const r = runnerWith(async () => { ran = true; return 'gateway: started'; });
+  const out = await r.run({ line: '/gateway start' });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'NEEDS_TERMINAL', 'same code as /dashboard — same class of problem');
+  assert.equal(ran, false, 'nothing reaches the dispatcher — no child process may be spawned');
+});
+
+test('/gateway stop is refused before dispatch — it would process.kill a real pid on the daemon host', async () => {
+  let ran = false;
+  const r = runnerWith(async () => { ran = true; return 'gateway: stopped'; });
+  const out = await r.run({ line: '/gateway stop' });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'NEEDS_TERMINAL', 'same code as /dashboard — same class of problem');
+  assert.equal(ran, false, 'nothing reaches the dispatcher — no process may be killed');
+});
+
+test('/gateway START (any case) is refused the same way — the guard is not case-sensitive on the subcommand', async () => {
+  let ran = false;
+  const r = runnerWith(async () => { ran = true; });
+  const out = await r.run({ line: '/gateway START' });
+  assert.equal(out.code, 'NEEDS_TERMINAL');
+  assert.equal(ran, false);
+});
+
+test('/gateway status and bare /gateway reach the dispatcher — read-only, no process touched', async () => {
+  const r = runnerWith(async (cmd, args) => `${cmd} ${args}`.trim());
+  for (const line of ['/gateway status', '/gateway']) {
+    const out = await r.run({ line });
+    assert.equal(out.ok, true, `${line} must not be treated as host-only`);
+  }
+});
+
+test('/gateway port reaches the dispatcher — it only reads/writes a config value, no process touched', async () => {
+  const r = runnerWith(async (cmd, args) => `${cmd} ${args}`);
+  const out = await r.run({ line: '/gateway port 19700' });
+  assert.equal(out.ok, true);
+});
+
 // --- /provider and /model must actually persist, not just claim to --------
 
 test('/provider <name> and /model <name> persist to config.json (real dispatcher, no mock)', async () => {

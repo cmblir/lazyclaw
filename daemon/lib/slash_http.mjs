@@ -31,12 +31,14 @@
 //                too. Contrast /provider <name> and /model <name>, which
 //                persist to config.json (a real, global, disk-backed value)
 //                via setActiveProvName/setActiveModel below — those DO work.
-//   · host     — /dashboard spawns a child process and shells out to open a
-//                browser, on whatever machine is running THIS daemon, not
-//                the caller's. Refused before dispatch (like /skill/`/goal`
-//                above) so an HTTP caller can't make the daemon's host pop a
-//                browser window, or worse, kill host processes via its
-//                stop|kill form, just by sending a slash command.
+//   · host     — /dashboard (whole command) and /gateway start|stop spawn or
+//                kill a process on whatever machine is running THIS daemon,
+//                not the caller's. Refused before dispatch (like /skill/
+//                /goal above), by the named HOST_PROCESS_COMMANDS table, so
+//                an HTTP caller can't make the daemon's host pop a browser
+//                window or SIGTERM/pkill a process on it just by sending a
+//                slash command. /gateway status and /gateway port are left
+//                to reach dispatch — neither touches a process.
 import fs from 'node:fs';
 import { dispatchSlash as _dispatchSlash, parseSlashLine, SLASH_HANDLERS } from '../../tui/slash_dispatcher.mjs';
 import { SLASH_COMMANDS } from '../../tui/slash_commands.mjs';
@@ -275,20 +277,42 @@ function needsLiveSession(cmd, args) {
   return false;
 }
 
-// /dashboard (tui/slash_dashboard.mjs `_dashboard`) spawns a detached
-// `pompos dashboard` child process, shells out to `open`/`xdg-open`/`start`
-// to launch a browser, and its stop|kill form SIGTERMs/pkills processes by
-// port — all real side effects on whatever machine is running THIS daemon
-// process. An HTTP caller is not that machine: it is a dashboard already
-// being served BY this daemon, over a network that may not even be
-// loopback. Letting this reach dispatch would let anyone who can POST
-// /slash make the daemon's own host pop a browser window — or, via
-// stop|kill, SIGTERM/pkill processes on it — just by sending a slash
-// command. Refused before dispatch, the same way /skill's live-session gap
-// is above: real only from a terminal on the machine you actually want it
-// to act on.
-function needsHostProcess(cmd) {
-  return cmd === '/dashboard';
+// Rule: any slash command that would spawn, kill, or shell out to a process
+// on the machine hosting THIS daemon — rather than merely reading status or
+// writing a config value — is refused over this one-shot HTTP endpoint. The
+// caller is a browser talking to the daemon, not a shell on the daemon's own
+// host, so letting one of these reach dispatch would let a dashboard user
+// make the SERVER pop a browser window or kill a process on it.
+//
+// This is a named table, not a literal chain, because the set is an audit
+// finding, not an enumeration anyone should trust by inspection: it was
+// built by grepping every module reachable from SLASH_HANDLERS for
+// `child_process` (`grep -rn "from 'node:child_process'\|import('node:child_process')"
+// tui/*.mjs commands/*.mjs`), which finds exactly tui/slash_dashboard.mjs
+// (/dashboard) and tui/slash_gateway.mjs (/gateway start) — but /gateway
+// stop reaches the same class one layer deeper, through
+// commands/gateway.mjs's gatewayStop -> process.kill(pid, ...) on a real
+// pidfile'd process, WITHOUT importing child_process itself, so the grep
+// alone does not find it; it was added by reading the handler body. A
+// future command that reaches process.kill/spawn/execFile through a helper
+// rather than importing child_process directly needs the same read-the-body
+// check, not just a repeat of this grep.
+//
+// null = every subcommand (or bare form) of a command is host-only.
+// Set(...) = only these first-token subcommands are (e.g. /gateway status
+// and /gateway port persist a config value / read status — no process is
+// touched, so they are left to reach dispatch normally).
+const HOST_PROCESS_COMMANDS = new Map([
+  ['/dashboard', null],
+  ['/gateway', new Set(['start', 'stop'])],
+]);
+
+function needsHostProcess(cmd, args) {
+  if (!HOST_PROCESS_COMMANDS.has(cmd)) return false;
+  const gatedSubs = HOST_PROCESS_COMMANDS.get(cmd);
+  if (gatedSubs === null) return true;
+  const first = String(args || '').trim().split(/\s+/)[0]?.toLowerCase() || '';
+  return gatedSubs.has(first);
 }
 
 export function makeSlashRunner({ cfgDir, confirmStore, dispatch = _dispatchSlash }) {
@@ -308,12 +332,14 @@ export function makeSlashRunner({ cfgDir, confirmStore, dispatch = _dispatchSlas
         };
       }
 
-      if (needsHostProcess(cmd)) {
+      if (needsHostProcess(cmd, args)) {
+        const sub = args.trim().split(/\s+/)[0];
+        const label = sub ? `${cmd} ${sub}` : cmd;
         return {
           ok: false,
           code: 'NEEDS_TERMINAL',
-          error: `${cmd} spawns a process and opens a browser on the machine running this daemon, not on your machine — running it over HTTP would do that to the daemon's host.`,
-          hint: 'run `pompos` in a terminal on the machine you want the dashboard to open on, and use /dashboard there — you are already looking at this daemon\'s dashboard, so you likely don\'t need this at all',
+          error: `${label} spawns or kills a process on the machine running this daemon, not on the machine making this HTTP request — refused before it could run.`,
+          hint: `run \`pompos\` in a terminal on the machine you want this to act on, and use ${label} there`,
         };
       }
 
