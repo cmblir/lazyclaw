@@ -1902,3 +1902,166 @@ git commit -m "feat(config): /config set and /config unset take arguments"
 ```
 
 ---
+
+---
+
+### Task 13: a read-merge-write must not treat an unreadable config as an empty one
+
+**Execute after Task 3.** Found by Task 3's corrupt-config audit; the user ruled it fixed at the source rather than guarded in the adapter, so both the terminal and the dashboard get the fix.
+
+**Files:**
+- Modify: `tui/slash_trainer.mjs:116, 139, 164`; `tui/slash_dispatcher.mjs:1014`
+- Test: `tests/f-config-merge-safety.test.mjs`
+
+**Interfaces:**
+- Consumes: nothing new.
+- Produces: nothing new. Behaviour change only.
+
+**The defect.** Four sites do a read-merge-write to preserve unrelated config keys:
+
+```js
+try { diskCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch { /* fresh */ }
+```
+
+The comment above it says "Read-merge-write so unrelated cfg keys survive". The catch defeats exactly that: it treats a file it could not PARSE the same as a file that does not EXIST, starts from `{}`, and writes back only the block it was setting. Reproduced:
+
+```
+before: { "provider": "claude-cli", "maxTokens": 4096, BROKEN
+$ /trainer set claude-cli
+after:  { "trainer": { "provider": "claude-cli" } }        → reported "✓ trainer → claude-cli"
+```
+
+The operator's settings are gone and the command said it succeeded. A missing file genuinely is "fresh"; an unparseable one is a file whose contents we must not discard — a single misplaced comma is recoverable until something overwrites it.
+
+This is a pre-existing bug that the terminal REPL has too. The dashboard is what makes it a click away, which is why it is being fixed now.
+
+- [ ] **Step 1: Write the failing test**
+
+```js
+// tests/f-config-merge-safety.test.mjs
+//
+// Four commands preserve unrelated config keys by reading, merging and writing
+// back. Each swallowed a parse failure and started from {} — so a corrupt
+// config.json was not preserved, it was REPLACED with just the block being
+// set, and the command reported success. A missing file is fresh; an
+// unreadable one is not ours to discard.
+import test, { after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const dirs = [];
+function tmpCfg(contents) {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-merge-'));
+  dirs.push(d);
+  if (contents !== undefined) fs.writeFileSync(path.join(d, 'config.json'), contents);
+  return d;
+}
+after(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); });
+
+const CORRUPT = '{ "provider": "claude-cli", "maxTokens": 4096, BROKEN';
+
+function mkCtx(cfgDir) {
+  return { cfgDir, cfg: {}, readConfig: () => ({}), writeConfig: () => {} };
+}
+
+test('/trainer set refuses to overwrite a config it could not parse', async () => {
+  const dir = tmpCfg(CORRUPT);
+  const { _trainer } = await import('../tui/slash_trainer.mjs');
+  const out = await _trainer('set claude-cli', mkCtx(dir));
+  assert.doesNotMatch(String(out), /^✓/, 'must not claim success');
+  assert.match(String(out), /config\.json/, 'the message must name the file the operator has to fix');
+  assert.equal(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'), CORRUPT,
+    'the unreadable file is left exactly as it was — a misplaced comma is recoverable until something overwrites it');
+});
+
+test('/personality use refuses the same way', async () => {
+  const dir = tmpCfg(CORRUPT);
+  const { dispatchSlash } = await import('../tui/slash_dispatcher.mjs');
+  const out = await dispatchSlash('/personality', 'use anything', mkCtx(dir), () => {});
+  assert.doesNotMatch(String(out), /^✓/);
+  assert.equal(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'), CORRUPT);
+});
+
+test('a MISSING config is still treated as fresh, and the write lands', async () => {
+  // The distinction is the whole point: absent means start clean, unreadable
+  // means stop. Conflating them is what caused the loss.
+  const dir = tmpCfg(undefined);
+  const { _trainer } = await import('../tui/slash_trainer.mjs');
+  const out = await _trainer('set claude-cli', mkCtx(dir));
+  assert.match(String(out), /^✓/, 'no file to protect — this must still work');
+  const written = JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'));
+  assert.equal(written.trainer.provider, 'claude-cli');
+});
+
+test('a VALID config keeps its unrelated keys, which is what the merge is for', async () => {
+  const dir = tmpCfg(JSON.stringify({ provider: 'claude-cli', maxTokens: 4096 }));
+  const { _trainer } = await import('../tui/slash_trainer.mjs');
+  await _trainer('set claude-cli', mkCtx(dir));
+  const written = JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'));
+  assert.equal(written.maxTokens, 4096, 'the unrelated key survives');
+  assert.equal(written.provider, 'claude-cli');
+  assert.equal(written.trainer.provider, 'claude-cli');
+});
+```
+
+If `_trainer` is not exported, export it for the test rather than reaching through `dispatchSlash` for every case — the other three call sites live in the same function family and a direct handle keeps the test honest about which one it is exercising.
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `node --test tests/f-config-merge-safety.test.mjs`
+Expected: FAIL — the corrupt file is replaced and the command returns a `✓` string.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Add one shared helper and use it at all four sites. Put it in `tui/slash_helpers.mjs` (already imported by the dispatcher and available to `slash_trainer.mjs`):
+
+```js
+/**
+ * Read config.json for a read-merge-write.
+ *
+ * Returns `{ cfg }` when the file parsed or is genuinely absent, and
+ * `{ error }` when it exists but could not be read — those are NOT the same
+ * thing. Callers used to swallow both into `{}` and write back only the block
+ * they were setting, which silently replaced an operator's whole config
+ * because of one misplaced comma.
+ */
+export function readConfigForMerge(cfgPath, fs) {
+  let raw;
+  try {
+    raw = fs.readFileSync(cfgPath, 'utf8');
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return { cfg: {} };   // genuinely fresh
+    return { error: `config.json at ${cfgPath} could not be read (${err?.code || err?.message}) — not overwriting it` };
+  }
+  try {
+    return { cfg: JSON.parse(raw) };
+  } catch (err) {
+    return { error: `config.json at ${cfgPath} is not valid JSON (${err?.message}) — refusing to overwrite it; fix the file, or move it aside to start fresh` };
+  }
+}
+```
+
+At each of the four sites, replace the swallowing read with:
+
+```js
+    const merged = readConfigForMerge(cfgPath, fs);
+    if (merged.error) return merged.error;
+    const diskCfg = merged.cfg;
+```
+
+Keep each site's existing merge and write untouched.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `node --test tests/f-config-merge-safety.test.mjs && node --test tests/*.test.mjs`
+Expected: PASS. Existing trainer and personality tests must stay green — the valid-config and missing-config paths are unchanged.
+
+- [ ] **Step 5: Commit**
+
+```bash
+npm run lint:size
+git add tui/slash_helpers.mjs tui/slash_trainer.mjs tui/slash_dispatcher.mjs tests/f-config-merge-safety.test.mjs
+git commit -m "fix(config): never treat an unreadable config.json as an empty one"
+```
