@@ -169,13 +169,36 @@ test('/task tick runs a real multi-agent turn through the REAL dispatcher and st
 
     const runner = makeSlashRunner({ cfgDir: dir, confirmStore: makeConfirmStore() });
     const seen = [];
+    const times = [];
+    const t0 = Date.now();
     const out = await runner.runStreaming({
       line: `/task tick ${task.id} go`,
-      onLine: (l) => seen.push(l),
+      onLine: (l) => { seen.push(l); times.push(Date.now() - t0); },
     });
     assert.equal(out.ok, true, `real /task tick must succeed, got: ${JSON.stringify(out)}`);
     assert.match(out.lines.join(''), /→ paused \(1 agent turn/, 'the real router ran exactly one agent turn against the fake server, then idled with nothing further queued');
-    assert.ok(seen.length > 0, 'onLine must see at least the "running task turn" line the real handler writes before dispatch to the router');
+    // `seen.length > 0` alone proves nothing here: finalizeEnvelope always
+    // emits the trailing return string through the same onLine path, so a
+    // single-element `seen` is exactly what a fully-buffered /task tick
+    // (intermediate write silently dropped) would also produce — the
+    // regression this test exists to catch. The handler writes
+    // "  ↻ running task turn…\n" (tui/slash_dispatcher.mjs:1203) BEFORE
+    // awaiting router.runTaskTurn, and the trailing "✓ task … → paused …"
+    // line only exists AFTER that await resolves (a real network round trip
+    // to the fake server below plus real disk writes), so removing the
+    // intermediate write would collapse `seen` to length 1 AND erase the gap
+    // between the two timestamps — both checked below, not just presence.
+    assert.equal(seen.length, 2, 'expected the intermediate "running task turn" write AND the trailing status line as two distinct onLine events, not one');
+    assert.match(seen[0], /running task turn/, 'the first onLine event must be the write that fires BEFORE dispatching to the router, not the trailing result');
+    assert.match(seen[1], /→ paused \(1 agent turn/, 'the second onLine event is the trailing return value, arriving separately from the first');
+    // Real progressive delivery, not a buffered-then-replayed burst: the
+    // router await does real async work (network + disk) between the two
+    // writes, so their timestamps must be measurably apart. Empirically
+    // ~17-19ms across repeated local runs; 5ms is a generous floor for a
+    // slower CI machine while still being far above "fired in the same
+    // tick" (~0ms), which is what a collapsed-to-one-write regression would
+    // look like.
+    assert.ok(times[1] - times[0] >= 5, `onLine calls should be measurably spread over real time, not fired all at once (got ${times[1] - times[0]}ms apart)`);
     assert.equal(captured.calls, 1, 'the fake OpenAI-compatible server must have actually been called once — proves runAgentTurn really reached the network layer');
     assert.equal(captured.authorization, 'Bearer sk-test-real-key-123', 'ctx.resolveAuthKey must deliver the REAL persisted config.json key, not a stub or null');
   } finally {
