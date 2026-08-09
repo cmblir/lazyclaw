@@ -49,7 +49,7 @@ import { attachGoalCron, detachGoalCron } from '../goals_cron.mjs';
 import { loadDotenvIfAny } from '../dotenv_min.mjs';
 import { SUBCOMMAND_GROUPS } from './subcommands.mjs';
 import { redactSecrets } from '../mas/redact.mjs';
-import { splitWhitespace, _mod, _promptText, _promptConfirm } from './slash_helpers.mjs';
+import { splitWhitespace, _mod, _promptText, _promptConfirm, readConfigForMerge } from './slash_helpers.mjs';
 import { _dashboard, parseDashboardUrl } from './slash_dashboard.mjs';
 import { _channels, _context } from './slash_channels.mjs';
 import { _trainer } from './slash_trainer.mjs';
@@ -1010,8 +1010,14 @@ function _personalityUse(name, ctx, fs, path) {
   if (!fs.existsSync(p)) return `personality not installed: ${name}`;
   // Read-merge-write config.json so we never clobber unrelated keys.
   const cfgPath = path.join(ctx.cfgDir, 'config.json');
-  let diskCfg = {};
-  try { diskCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch { /* fresh */ }
+  // A missing file is fresh; an unparseable one is not ours to discard — see
+  // readConfigForMerge's doc comment. Refusing also trips ctx.__persistFailed,
+  // the same signal /provider and /model use (daemon/lib/slash_ctx.mjs), so
+  // the HTTP envelope reports {ok:false} instead of the caller reading prose
+  // to guess whether this succeeded.
+  const merged = readConfigForMerge(cfgPath, fs);
+  if (merged.error) { ctx.__persistFailed = merged.error; return merged.error; }
+  const diskCfg = merged.cfg;
   diskCfg.persona = { ...(diskCfg.persona || {}), personality: name };
   try { fs.mkdirSync(ctx.cfgDir, { recursive: true }); } catch {}
   fs.writeFileSync(cfgPath, JSON.stringify(diskCfg, null, 2));

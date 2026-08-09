@@ -7,7 +7,7 @@
 
 import { pickProviderModel, providerLookup as _providerLookup } from './model_pick.mjs';
 import { renderRecord } from '../lib/render.mjs';
-import { splitWhitespace, _mod, _parseProvModel, _promptConfirm } from './slash_helpers.mjs';
+import { splitWhitespace, _mod, _parseProvModel, _promptConfirm, readConfigForMerge } from './slash_helpers.mjs';
 
 export async function _trainer(args, ctx) {
   const registry = await _mod(ctx, 'registryMod', () => import('../providers/registry.mjs'));
@@ -112,8 +112,14 @@ export async function _trainer(args, ctx) {
     const fs = await import('node:fs');
     const path = await import('node:path');
     const cfgPath = path.join(ctx.cfgDir, 'config.json');
-    let diskCfg = {};
-    try { diskCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch { /* fresh */ }
+    // A missing file is fresh; an unparseable one is not ours to discard —
+    // see readConfigForMerge's doc comment. Refusing also trips
+    // ctx.__persistFailed, the same signal /provider and /model use
+    // (daemon/lib/slash_ctx.mjs), so the HTTP envelope reports {ok:false}
+    // instead of the caller reading prose to guess whether this succeeded.
+    const merged = readConfigForMerge(cfgPath, fs);
+    if (merged.error) { ctx.__persistFailed = merged.error; return merged.error; }
+    const diskCfg = merged.cfg;
     diskCfg.trainer = { ...(diskCfg.trainer || {}), provider: parsed.provider };
     if (parsed.model) diskCfg.trainer.model = parsed.model;
     else delete diskCfg.trainer.model;
@@ -135,8 +141,14 @@ export async function _trainer(args, ctx) {
     const fs = await import('node:fs');
     const path = await import('node:path');
     const cfgPath = path.join(ctx.cfgDir, 'config.json');
-    let diskCfg = {};
-    try { diskCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch { /* fresh */ }
+    // A missing file is fresh; an unparseable one is not ours to discard —
+    // see readConfigForMerge's doc comment. Refusing also trips
+    // ctx.__persistFailed, the same signal /provider and /model use
+    // (daemon/lib/slash_ctx.mjs), so the HTTP envelope reports {ok:false}
+    // instead of the caller reading prose to guess whether this succeeded.
+    const merged = readConfigForMerge(cfgPath, fs);
+    if (merged.error) { ctx.__persistFailed = merged.error; return merged.error; }
+    const diskCfg = merged.cfg;
     if (spec === 'clear' || spec === 'unset') {
       if (diskCfg.trainer) delete diskCfg.trainer.fallback;
       try { fs.mkdirSync(ctx.cfgDir, { recursive: true }); } catch {}
@@ -160,8 +172,14 @@ export async function _trainer(args, ctx) {
     const fs = await import('node:fs');
     const path = await import('node:path');
     const cfgPath = path.join(ctx.cfgDir, 'config.json');
-    let diskCfg = {};
-    try { diskCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch { /* fresh */ }
+    // A missing file is fresh; an unparseable one is not ours to discard —
+    // see readConfigForMerge's doc comment. Refusing also trips
+    // ctx.__persistFailed, the same signal /provider and /model use
+    // (daemon/lib/slash_ctx.mjs), so the HTTP envelope reports {ok:false}
+    // instead of the caller reading prose to guess whether this succeeded.
+    const merged = readConfigForMerge(cfgPath, fs);
+    if (merged.error) { ctx.__persistFailed = merged.error; return merged.error; }
+    const diskCfg = merged.cfg;
     delete diskCfg.trainer;
     try { fs.mkdirSync(ctx.cfgDir, { recursive: true }); } catch {}
     fs.writeFileSync(cfgPath, JSON.stringify(diskCfg, null, 2));
