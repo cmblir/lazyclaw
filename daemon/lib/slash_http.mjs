@@ -73,16 +73,25 @@ function fail(error, code = 'SLASH_ERR') {
 
 // Commands that can run long enough that buffering their output would make
 // the dashboard look hung. Checked, not assumed, against the real handlers
-// in tui/slash_dispatcher.mjs (see the report for task 5): /loop is the only
-// SLASH_HANDLERS entry that iterates a provider call and streams through
-// write() for as long as the operator lets it run — /agent and /team are
-// registry CRUD (list/show/add/edit/remove), each a single fast call, so
-// buffering them is not the "looks hung" problem this set exists to fix; and
-// /workflow is not a SLASH_HANDLERS key at all (it is a CLI-only subcommand —
-// see tests/f-slash-destructive.test.mjs's "/workflow is not gated because it
-// is not a slash command"), so it can never reach this endpoint as a real
-// command and adding it here would be a rule for nothing.
-export const STREAMING = new Set(['/loop']);
+// in tui/slash_dispatcher.mjs (see the task-5 report, including fix round 1):
+//   - /loop iterates a real provider call and streams through write() for as
+//     long as the operator lets it run.
+//   - /task tick runs one multi-agent router turn (mas/mention_router.mjs's
+//     runTaskTurn), which can itself run several agent turns and streams its
+//     logger output through write() the same way /loop streams its chunks.
+//     Only the `tick` subcommand is long — list/show/start/abandon/done/
+//     remove are single fast disk ops — but STREAMING is per top-level
+//     command (same granularity /loop already used, which also has an
+//     instant bare-args usage branch); the fast subcommands are unaffected
+//     because a caller only sees SSE when it explicitly asks for it.
+// /agent and /team are excluded: both are registry CRUD (list/show/add/edit/
+// remove), each a single fast call, so buffering them is not the "looks
+// hung" problem this set exists to fix. /workflow is not a SLASH_HANDLERS key
+// at all (it is a CLI-only subcommand — see tests/f-slash-destructive.test.mjs's
+// "/workflow is not gated because it is not a slash command"), so it can
+// never reach this endpoint as a real command and adding it here would be a
+// rule for nothing.
+export const STREAMING = new Set(['/loop', '/task']);
 
 // /skill and /skills (which forwards to the same _skill body once it has an
 // arg) persist a composed system prompt only via ctx.setMessages() and — if

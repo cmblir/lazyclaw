@@ -133,6 +133,75 @@ test('the auto-approve ctx answers a confirm picker affirmatively', async () => 
   assert.equal(picked.id, 'approve');
 });
 
+// --- ctx.getProv / resolveAuthKey / resolveBaseUrl (fix round 1) ----------
+//
+// /loop and /dream (tui/slash_dispatcher.mjs:660,433) call ctx.getProv()
+// UNGUARDED — its absence is a crash (`ctx.getProv is not a function`), not a
+// graceful fallback, which is exactly what shipped in task 5's first pass:
+// STREAMING advertised /loop as runnable but buildHttpCtx never set
+// ctx.getProv at all. These pin the fix directly against a real config.json,
+// separately from the heavier real-dispatcher SSE tests in
+// tests/f-slash-sse.test.mjs, so a regression here is diagnosed in one line
+// instead of by chasing a deep integration failure.
+test('ctx.getProv resolves the REAL provider named by the persisted config, not a stub', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-slash-http-getprov-'));
+  const prevEnv = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
+  try {
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ provider: 'mock', model: 'mock-model' }));
+    const ctx = buildHttpCtx({ cfgDir: dir });
+    assert.equal(typeof ctx.getProv, 'function', '/loop and /dream call this unguarded — its absence is a crash, not a fallback');
+    const prov = ctx.getProv();
+    assert.equal(prov?.name, 'mock', 'must be the actual registry entry for the persisted provider, not a placeholder');
+    assert.equal(typeof prov.sendMessage, 'function');
+  } finally {
+    process.env.POMPOS_CONFIG_DIR = prevEnv;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('ctx.getProv returns undefined (not a throw) for an unconfigured/unknown provider — /loop already turns that into "no active provider"', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-slash-http-getprov-none-'));
+  const prevEnv = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
+  try {
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ provider: 'not-a-real-provider' }));
+    const ctx = buildHttpCtx({ cfgDir: dir });
+    assert.equal(ctx.getProv(), undefined);
+  } finally {
+    process.env.POMPOS_CONFIG_DIR = prevEnv;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('ctx.resolveAuthKey returns the REAL persisted api-key, the same resolver daemon/routes/providers.mjs already uses', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-slash-http-authkey-'));
+  const prevEnv = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
+  try {
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ provider: 'openai', 'api-key': 'sk-real-persisted-key' }));
+    const ctx = buildHttpCtx({ cfgDir: dir });
+    assert.equal(typeof ctx.resolveAuthKey, 'function', '/loop and /task tick call this — guarded, but silently wrong without a real value');
+    assert.equal(ctx.resolveAuthKey('openai'), 'sk-real-persisted-key');
+  } finally {
+    process.env.POMPOS_CONFIG_DIR = prevEnv;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('ctx.resolveBaseUrl honours the same POMPOS_*_BASE_URL env override the CLI uses', () => {
+  const ctx = buildHttpCtx({ cfgDir: CFG });
+  assert.equal(typeof ctx.resolveBaseUrl, 'function');
+  const prev = process.env.POMPOS_OPENAI_BASE_URL;
+  process.env.POMPOS_OPENAI_BASE_URL = 'http://127.0.0.1:9/v1';
+  try {
+    assert.equal(ctx.resolveBaseUrl('openai'), 'http://127.0.0.1:9/v1');
+  } finally {
+    if (prev === undefined) delete process.env.POMPOS_OPENAI_BASE_URL;
+    else process.env.POMPOS_OPENAI_BASE_URL = prev;
+  }
+});
+
 // --- ctx.cfg must be real, and must not go stale mid-request --------------
 
 test('ctx.cfg is populated — /status does not blank out a key that is actually configured', async () => {
@@ -516,6 +585,60 @@ test('every registered command survives the HTTP ctx without throwing', async ()
     }
   }
   assert.deepEqual(broke, [], 'these throw when run through the HTTP ctx');
+});
+
+// Empty args alone is not a strong enough gate: it only exercises the usage/
+// no-op branch of many handlers (e.g. /loop's `if (!args) return usage...`,
+// tui/slash_dispatcher.mjs:645), which is exactly how the missing
+// ctx.getProv() crash slipped past this suite (task 5, fix round 1) — /loop
+// only reaches ctx.getProv() when given an actual prompt, and the fake
+// `dispatch` every OTHER test in this file injects never reaches a real
+// handler at all. A single non-empty token is enough to fall past every
+// "no args" branch in tui/slash_dispatcher.mjs without hand-crafting real
+// syntax per command: for a multi-subcommand handler it becomes an
+// unrecognised `sub` (verified by reading each one — /agent, /team, /task,
+// /goal, /gateway, /trainer, /channels, /config, /orchestrator, /personality
+// all answer an unknown first token with a safe "unknown sub"/"unknown
+// subcommand" string rather than acting on it), and for a single-value
+// command (/loop, /provider, /model, /skill, /login, /recall, ...) it is
+// exactly the representative argument the review round asked for. Isolated
+// cfgDir + real ctx (not the shared CFG / not a fake dispatch) so a command
+// that DOES persist on a real arg (e.g. /model) can't leak into any other
+// test in this file.
+test('every registered command survives the HTTP ctx without throwing OR silently reporting a missing ctx accessor, given a representative arg', async () => {
+  const { dispatchSlash } = await import('../tui/slash_dispatcher.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-slash-http-gate-'));
+  const prevEnv = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
+  try {
+    const ctx = buildHttpCtx({ cfgDir: dir });
+    const broke = [];
+    for (const args of ['', 'hello']) {
+      for (const name of SLASH_HANDLERS.keys()) {
+        let out;
+        try {
+          out = await dispatchSlash(name, args, { ...ctx }, () => {});
+        } catch (err) {
+          broke.push(`${name} ${JSON.stringify(args)}: threw ${err?.constructor?.name || typeof err}: ${err?.message || err}`);
+          continue;
+        }
+        // A handler that catches its own TypeError internally and reports it
+        // as a plain string (this is exactly how /dream — which also calls
+        // ctx.getProv() unconditionally — masked the same bug: its own
+        // try/catch turned the TypeError into a returned "dream error: ctx.
+        // getProv is not a function" string, so it never threw at all) would
+        // pass the throw-only check above either way. This is the check that
+        // actually would have caught it.
+        if (typeof out === 'string' && /is not a function/i.test(out)) {
+          broke.push(`${name} ${JSON.stringify(args)}: returned "${out}" — a ctx accessor this command needs is missing`);
+        }
+      }
+    }
+    assert.deepEqual(broke, [], 'these throw, or silently report a missing ctx accessor, when run through the HTTP ctx with a real argument');
+  } finally {
+    process.env.POMPOS_CONFIG_DIR = prevEnv;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('listCommands mirrors the dispatcher registry exactly', () => {

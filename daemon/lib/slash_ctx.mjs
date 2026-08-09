@@ -7,7 +7,8 @@
 // else. Envelope routing (which lines may even reach dispatch, and what
 // happens to the result) stays in slash_http.mjs.
 import fs from 'node:fs';
-import { readConfig, writeConfig, persistActiveProvider, persistActiveModel, configPath } from '../../lib/config.mjs';
+import { readConfig, writeConfig, persistActiveProvider, persistActiveModel, configPath, _resolveAuthKey, _resolveBaseUrl } from '../../lib/config.mjs';
+import { PROVIDERS } from '../../providers/registry.mjs';
 
 // readConfig() (lib/config.mjs) prints a multi-line stderr diagnostic every
 // time it is called against a present-but-corrupt config.json — reasonable
@@ -119,6 +120,39 @@ export function buildHttpCtx({ cfgDir, autoApprove = false }) {
     // claim (we don't know the provider; we know the file is broken).
     getActiveProvName: () => { if (configLoadError) throw configLoadError; return cfg.provider || null; },
     getActiveModel: () => { if (configLoadError) throw configLoadError; return cfg.model || null; },
+    // /loop (tui/slash_dispatcher.mjs:660) and /dream (:433) call ctx.getProv()
+    // UNGUARDED — no `typeof` check, unlike ctx.openPicker — so its absence is
+    // not a graceful fallback, it is a crash (`ctx.getProv is not a function`,
+    // task 5 fix round 1). The real provider object, keyed off the SAME
+    // persisted cfg.provider getActiveProvName reads, is the only honest
+    // answer: a stub that always returns *something* would let /loop appear
+    // to run while silently talking to the wrong (or no) provider. PROVIDERS
+    // is the same registry daemon/lib/provider.mjs's resolveProvider() looks
+    // up for POST /chat and /agent, so a provider that works over those
+    // routes works here too; one absent here (unknown name, or a custom /
+    // orchestrator provider never registered in THIS process) legitimately
+    // has no provider, and returning undefined lets /loop's own existing
+    // `if (!prov ...) return 'loop error: no active provider'` (line 661)
+    // report that honestly instead of throwing.
+    getProv: () => {
+      if (configLoadError) throw configLoadError;
+      const name = cfg.provider || null;
+      return name ? PROVIDERS[name] : undefined;
+    },
+    // /loop (:668) and /task tick (:1199-1200) resolve the API key/base URL
+    // for a NAMED provider through these — guarded (`ctx.resolveAuthKey ?
+    // ... : null`), so their absence does not crash, but it silently starves
+    // every key-requiring provider of the key config.json actually has,
+    // which is the same "looks like it runs, cannot do real work" defect one
+    // layer down from the getProv crash. _resolveAuthKey/_resolveBaseUrl
+    // (lib/config.mjs) are the SAME resolvers daemon/routes/providers.mjs
+    // already uses server-side (`_resolveAuthKey(cfg, pid) || cfg['api-key']`)
+    // — real, persisted, authProfiles-aware values, not a stub.
+    resolveAuthKey: (providerName) => {
+      if (configLoadError) throw configLoadError;
+      return _resolveAuthKey(cfg || {}, providerName) || (cfg && cfg['api-key']) || '';
+    },
+    resolveBaseUrl: (providerName) => _resolveBaseUrl(providerName),
     getMessages: () => [],
     getSessionId: () => null,
     // /provider <name> and /model <name> only take effect through these
