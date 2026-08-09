@@ -264,6 +264,43 @@ test('/provider <name> and /model <name> persist to config.json (real dispatcher
   }
 });
 
+// --- a corrupt config.json must not take down commands that never touch it,
+//     and must not be mislabelled as a cfgDir/env mismatch when it does -----
+
+test('/help succeeds even when config.json is present but corrupt', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-slash-http-corrupt-'));
+  const prevEnv = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
+  try {
+    fs.writeFileSync(path.join(dir, 'config.json'), '{ this is not json');
+    const r = makeSlashRunner({ cfgDir: dir, confirmStore: makeConfirmStore() });
+    const out = await r.run({ line: '/help' });
+    assert.equal(out.ok, true, '/help reads no config at all — a broken config.json must not block it');
+    assert.match(out.lines[0], /slash commands:/);
+  } finally {
+    process.env.POMPOS_CONFIG_DIR = prevEnv;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a config-reading command against a corrupt config.json names the parse problem, not a cfgDir mismatch', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-slash-http-corrupt2-'));
+  const prevEnv = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
+  try {
+    fs.writeFileSync(path.join(dir, 'config.json'), '{ this is not json');
+    const r = makeSlashRunner({ cfgDir: dir, confirmStore: makeConfirmStore() });
+    const out = await r.run({ line: '/status' });
+    assert.equal(out.ok, false);
+    assert.notEqual(out.code, 'CONFIG_DIR_MISMATCH', 'cfgDir and POMPOS_CONFIG_DIR actually agree here — this is not that failure');
+    assert.match(out.error, /not valid JSON/i, 'the operator must learn the FILE is bad, not go hunting for an env mismatch');
+    assert.match(out.error, new RegExp(dir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), 'the message must name the config file');
+  } finally {
+    process.env.POMPOS_CONFIG_DIR = prevEnv;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --- gate coverage --------------------------------------------------------
 
 test('every registered command survives the HTTP ctx without throwing', async () => {

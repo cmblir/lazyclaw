@@ -76,23 +76,49 @@ export function buildHttpCtx({ cfgDir, autoApprove = false }) {
   // instead of mutating this object, e.g. providers/auth_store.mjs — never
   // sees stale data. Without this, /status prints a blank api-key line on a
   // config that has one (tui/slash_basics.mjs:22 reads ctx.cfg unconditionally).
-  const cfg = readConfig();
+  //
+  // A PRESENT-BUT-CORRUPT config.json makes readConfig() throw ConfigError
+  // (lib/config.mjs) — this is caught HERE, separately from the cfgDir/env
+  // check above, for two reasons: (1) a command that never touches config at
+  // all (e.g. /help) must still work — it must not be held hostage by a file
+  // it never reads — and (2) when a command DOES need config, the resulting
+  // failure must say the FILE is unparseable (ConfigError's own message
+  // already names the path and the parse error), not be mislabelled as a
+  // cfgDir/env mismatch that never happened. So a load failure here does not
+  // throw out of buildHttpCtx; it is deferred to the specific accessors that
+  // actually need a successfully-parsed config, re-thrown at the point of use.
+  let cfg = null;
+  let configLoadError = null;
+  try {
+    cfg = readConfig();
+  } catch (err) {
+    configLoadError = err;
+  }
   const ctx = {
     cfgDir,
-    cfg,
-    readConfig: () => readConfig(),
+    // Guarded reads throughout the dispatcher (`ctx.cfg && ...`) degrade the
+    // same way they already do for a MISSING config.json — undefined, not a
+    // crash. Only the accessors below, which represent an explicit "give me
+    // the config" request, surface the real parse error.
+    cfg: cfg || undefined,
+    readConfig: () => readConfig(), // always a live re-read; still throws the real ConfigError if still corrupt
     writeConfig: (next) => {
       writeConfig(next);
-      for (const k of Object.keys(cfg)) delete cfg[k];
-      Object.assign(cfg, next);
+      if (cfg) { // nothing to keep in sync if the initial read never produced an object
+        for (const k of Object.keys(cfg)) delete cfg[k];
+        Object.assign(cfg, next);
+      }
     },
     // /status, /usage, /provider, /model and /skill call these unconditionally
     // (no `typeof` guard, unlike ctx.openPicker), so omitting them would turn
     // an ordinary status/info command into a crash rather than a text
     // fallback. Backed by the SAME `cfg` object above, not a fresh disk read,
-    // so an in-place ctx.cfg mutation elsewhere is reflected here too.
-    getActiveProvName: () => cfg.provider || null,
-    getActiveModel: () => cfg.model || null,
+    // so an in-place ctx.cfg mutation elsewhere is reflected here too. When
+    // the initial load failed, these re-throw that SAME error rather than
+    // reporting "no provider configured" — that would be a different, untrue
+    // claim (we don't know the provider; we know the file is broken).
+    getActiveProvName: () => { if (configLoadError) throw configLoadError; return cfg.provider || null; },
+    getActiveModel: () => { if (configLoadError) throw configLoadError; return cfg.model || null; },
     getMessages: () => [],
     getSessionId: () => null,
     // /provider <name> and /model <name> only take effect through these
@@ -102,8 +128,8 @@ export function buildHttpCtx({ cfgDir, autoApprove = false }) {
     // the SAME functions commands/chat.mjs wires its own ctx to, so a switch
     // made over HTTP is visible to a later /status exactly as it would be
     // from the terminal.
-    setActiveProvName: (name) => persistActiveProvider(cfg, name),
-    setActiveModel: (name) => persistActiveModel(cfg, name),
+    setActiveProvName: (name) => persistActiveProvider(cfg || {}, name),
+    setActiveModel: (name) => persistActiveModel(cfg || {}, name),
   };
   if (autoApprove) {
     // The operator already answered this question at the HTTP layer; the
