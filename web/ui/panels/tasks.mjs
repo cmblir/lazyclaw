@@ -1,9 +1,13 @@
-// web/ui/panels/tasks.mjs — read-mostly task list with done/abandon actions.
-// Tasks are created via the CLI (`pompos task start`), not from here.
+// web/ui/panels/tasks.mjs — task list with issue/mark-done/abandon actions.
+// Writes go through the slash dispatcher (runSlashConfirmed +
+// slash_actions.mjs), same grammar a user would type in the REPL — not a
+// typed REST call.
 import { el, phead, chip, banner, clear, kvlist } from '../dom.mjs';
 import { api, apiRaw } from '../api.mjs';
 import { openModal, closeModal } from '../modal.mjs';
 import { reconcile } from '../reconcile.mjs';
+import { runSlashConfirmed } from '../confirm_dialog.mjs';
+import { taskIssue, taskAbandon, taskDone } from '../slash_actions.mjs';
 
 // Same columns table() would have used — kept here so the header can be
 // built once, up front, instead of every load().
@@ -101,7 +105,17 @@ export async function transcriptModal(t) {
 }
 
 export async function render(host) {
-  host.append(phead('Tasks', 'Tasks are created via pompos task start.'));
+  host.append(phead('Tasks', null));
+  host.append(el('div', { class: 'toolbar' },
+    el('button', { class: 'btn', type: 'button', text: '+ Issue task', onclick: () => openIssueModal() }),
+    el('button', { class: 'btn btn-secondary', type: 'button', text: 'Refresh', onclick: () => load() })));
+
+  // Cleared on every load() and every write attempt; holds the one error
+  // banner for whichever write just failed (never for a cancellation). Kept
+  // separate from postureBanner below, which reflects the fetched data, not
+  // the outcome of the last write.
+  const errorBox = el('div', {});
+  host.append(errorBox);
 
   // Cleared and re-populated by load(): a banner appears only while at least
   // one listed task ran unattended AND allowed to write/exec (see
@@ -111,6 +125,36 @@ export async function render(host) {
   // does not trigger this.
   const postureBanner = el('div', {});
   host.append(postureBanner);
+
+  // Shared by issue/mark-done/abandon — see agents.mjs's runWrite for the
+  // full rationale (truthy `out.ok` check, CANCELLED is silent, hint
+  // appended). `out.ok` is checked for truthiness, not `=== true`: a 401
+  // body is {error:'unauthorized'} with no `ok` field at all.
+  async function runWrite(line) {
+    errorBox.replaceChildren();
+    const out = await runSlashConfirmed(line);
+    if (out.ok) { load(); return; }
+    if (out.code === 'CANCELLED') return;
+    const msg = out.hint ? `${out.error || 'failed'} — ${out.hint}` : (out.error || 'failed');
+    errorBox.replaceChildren(banner('err', '✗', msg));
+  }
+
+  async function openIssueModal() {
+    // Guide the flow the same way teams.mjs does for its own create modal:
+    // list registered teams so the operator picks a real one instead of
+    // guessing a name /task start would then reject.
+    let teams = [];
+    try { teams = (await api('/teams')).map((t) => t.name); } catch { /* fall through with empty list */ }
+    if (teams.length === 0) {
+      alert('Create a team first (Teams tab → + New team). A task needs a team to run it.');
+      return;
+    }
+    const team = (prompt(`Team (one of ${teams.join(', ')}):`, teams[0]) || '').trim();
+    if (!team) return;
+    const title = (prompt('Task title:') || '').trim();
+    if (!title) return;
+    await runWrite(taskIssue({ team, title }));
+  }
 
   // The table shell is built once; only its rows are reconciled per load(),
   // so an in-place status change no longer discards every other row's node.
@@ -128,8 +172,8 @@ export async function render(host) {
     const kids = [el('button', { class: 'btn btn-secondary', type: 'button', text: 'Transcript', onclick: () => transcriptModal(t) })];
     if (t.status === 'running' || t.status === 'pending' || t.status === 'paused') {
       kids.push(
-        el('button', { class: 'btn btn-secondary', type: 'button', text: 'Mark done', onclick: () => closeTask(t.id, 'done') }),
-        el('button', { class: 'btn btn-secondary', type: 'button', text: 'Abandon', onclick: () => closeTask(t.id, 'abandon') }));
+        el('button', { class: 'btn btn-secondary', type: 'button', text: 'Mark done', onclick: () => runWrite(taskDone(t.id)) }),
+        el('button', { class: 'btn btn-secondary', type: 'button', text: 'Abandon', onclick: () => runWrite(taskAbandon(t.id)) }));
     }
     return el('div', {}, kids);
   }
@@ -164,8 +208,7 @@ export async function render(host) {
       const arr = await api('/tasks');
       clear(postureBanner);
       if (arr.length === 0) {
-        show(el('div', { class: 'empty' },
-          'No tasks yet. Run ', el('code', { text: 'pompos task start --team X --title "..."' }), '.'));
+        show(el('div', { class: 'empty' }, 'No tasks yet. Click + Issue task above, or run /task start in the REPL.'));
         return;
       }
       if (arr.some(isUnattendedWithExec)) {
@@ -178,12 +221,6 @@ export async function render(host) {
     } catch (e) {
       show(el('div', { class: 'empty', text: 'Error: ' + e.message }));
     }
-  }
-
-  async function closeTask(id, action) {
-    if (!confirm(`${action === 'done' ? 'Mark done' : 'Abandon'} task ${id}?`)) return;
-    try { await api(`/tasks/${encodeURIComponent(id)}/${action}`, { method: 'POST' }); load(); }
-    catch (e) { alert(`${action} failed: ` + e.message); }
   }
 
   await load();
