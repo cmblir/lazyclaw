@@ -31,6 +31,12 @@
 //                too. Contrast /provider <name> and /model <name>, which
 //                persist to config.json (a real, global, disk-backed value)
 //                via setActiveProvName/setActiveModel below — those DO work.
+//   · host     — /dashboard spawns a child process and shells out to open a
+//                browser, on whatever machine is running THIS daemon, not
+//                the caller's. Refused before dispatch (like /skill/`/goal`
+//                above) so an HTTP caller can't make the daemon's host pop a
+//                browser window, or worse, kill host processes via its
+//                stop|kill form, just by sending a slash command.
 import fs from 'node:fs';
 import { dispatchSlash as _dispatchSlash, parseSlashLine, SLASH_HANDLERS } from '../../tui/slash_dispatcher.mjs';
 import { SLASH_COMMANDS } from '../../tui/slash_commands.mjs';
@@ -269,6 +275,22 @@ function needsLiveSession(cmd, args) {
   return false;
 }
 
+// /dashboard (tui/slash_dashboard.mjs `_dashboard`) spawns a detached
+// `pompos dashboard` child process, shells out to `open`/`xdg-open`/`start`
+// to launch a browser, and its stop|kill form SIGTERMs/pkills processes by
+// port — all real side effects on whatever machine is running THIS daemon
+// process. An HTTP caller is not that machine: it is a dashboard already
+// being served BY this daemon, over a network that may not even be
+// loopback. Letting this reach dispatch would let anyone who can POST
+// /slash make the daemon's own host pop a browser window — or, via
+// stop|kill, SIGTERM/pkill processes on it — just by sending a slash
+// command. Refused before dispatch, the same way /skill's live-session gap
+// is above: real only from a terminal on the machine you actually want it
+// to act on.
+function needsHostProcess(cmd) {
+  return cmd === '/dashboard';
+}
+
 export function makeSlashRunner({ cfgDir, confirmStore, dispatch = _dispatchSlash }) {
   return {
     async run({ line, confirm } = {}) {
@@ -283,6 +305,15 @@ export function makeSlashRunner({ cfgDir, confirmStore, dispatch = _dispatchSlas
           code: 'NO_SESSION',
           error: `${cmd} changes the active chat session, but this endpoint runs each command as a one-shot call with no session behind it — nothing was saved.`,
           hint: 'this command only works from an interactive chat session (the terminal REPL), not a one-shot HTTP call',
+        };
+      }
+
+      if (needsHostProcess(cmd)) {
+        return {
+          ok: false,
+          code: 'NEEDS_TERMINAL',
+          error: `${cmd} spawns a process and opens a browser on the machine running this daemon, not on your machine — running it over HTTP would do that to the daemon's host.`,
+          hint: 'run `pompos` in a terminal on the machine you want the dashboard to open on, and use /dashboard there — you are already looking at this daemon\'s dashboard, so you likely don\'t need this at all',
         };
       }
 
