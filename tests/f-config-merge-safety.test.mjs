@@ -87,3 +87,56 @@ test('a VALID config keeps its unrelated keys, which is what the merge is for', 
   assert.equal(written.trainer.provider, 'claude-cli');
   assert.equal(ctx.__persistFailed, undefined);
 });
+
+// --- fix round 2: the non-interactive CLI twin + the migration script -----
+
+test('CLI `pompos personality use` refuses the same way (commands/config.mjs)', async () => {
+  // The exact non-interactive twin of the /personality use fix above —
+  // wired at cli.mjs:106 as `process.exit(await cmdPersonality(...))`, so a
+  // refusal MUST come back as a nonzero exit code, not a string a shell
+  // script has no way to check.
+  const dir = tmpCfg(CORRUPT);
+  fs.mkdirSync(path.join(dir, 'personalities'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'personalities', 'anything.md'), '# anything');
+  const prevEnv = process.env.POMPOS_CONFIG_DIR;
+  process.env.POMPOS_CONFIG_DIR = dir;
+  let code;
+  try {
+    const { cmdPersonality } = await import('../commands/config.mjs');
+    code = await cmdPersonality('use', 'anything');
+  } finally {
+    if (prevEnv === undefined) delete process.env.POMPOS_CONFIG_DIR;
+    else process.env.POMPOS_CONFIG_DIR = prevEnv;
+  }
+  assert.notEqual(code, 0, 'a nonzero exit code is this command\'s only success/failure signal — must not be 0');
+  assert.equal(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'), CORRUPT,
+    'the unreadable file is left exactly as it was');
+});
+
+test('migrateV5 (scripts/migrate-v5.mjs) refuses to overwrite a config it could not parse', async () => {
+  // backupOnce() runs first and copies the corrupt file into backup-v4-<ts>/
+  // regardless — that backup existing is not an excuse for rewriteConfig to
+  // also destroy the LIVE config.json. rewriteConfig must throw before ever
+  // calling writeFileSync, matching rewriteConfigPhaseG's existing behavior
+  // (same file) instead of swallowing the parse error into {}.
+  const dir = tmpCfg(CORRUPT);
+  const { migrateV5 } = await import('../scripts/migrate-v5.mjs');
+  await assert.rejects(() => migrateV5({ configDir: dir }), /not valid JSON/,
+    'a corrupt config.json must fail the migration loudly, not silently reset to {}');
+  assert.equal(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'), CORRUPT,
+    'the live config.json must be untouched even though backupOnce() already copied it elsewhere');
+});
+
+test('readConfigForMerge gives actionable guidance on a non-ENOENT read failure (EACCES/EISDIR)', async () => {
+  // A directory sitting where config.json should be is the easiest way to
+  // reproduce a non-ENOENT, non-parse read failure without relying on chmod
+  // (which root ignores, making EACCES flaky in CI/sandboxes).
+  const dir = tmpCfg(undefined);
+  const cfgPath = path.join(dir, 'config.json');
+  fs.mkdirSync(cfgPath);
+  const { readConfigForMerge } = await import('../tui/slash_helpers.mjs');
+  const result = readConfigForMerge(cfgPath, fs);
+  assert.ok(result.error, 'a directory in place of the file must refuse, not silently start fresh');
+  assert.match(result.error, /permission|not a directory|regular file/i,
+    'the EACCES/EISDIR branch needs the same actionable remediation as the parse-failure branch, not just the raw errno');
+});

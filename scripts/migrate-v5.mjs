@@ -54,7 +54,14 @@ function rewriteConfig(configDir) {
   const cfgPath = path.join(configDir, 'config.json');
   let cfg = {};
   if (fs.existsSync(cfgPath)) {
-    try { cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch { cfg = {}; }
+    // A missing file is fresh (cfg stays {} and the trainer default below
+    // still gets written — that bootstrap is this step's whole job). An
+    // unparseable one is not ours to discard: mirror rewriteConfigPhaseG
+    // below, which already throws instead of silently resetting a corrupt
+    // config to {} and overwriting it — backupOnce() ran first, but that
+    // backup existing is no excuse to also destroy the live file.
+    try { cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); }
+    catch (e) { throw new Error(`migrate: config.json is not valid JSON: ${e.message}`); }
   }
   if (!cfg.trainer || !cfg.trainer.provider) {
     cfg.trainer = { provider: 'auto', ...(cfg.trainer || {}) };

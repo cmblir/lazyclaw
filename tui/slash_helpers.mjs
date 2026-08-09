@@ -42,7 +42,11 @@ export function readConfigForMerge(cfgPath, fs) {
     raw = fs.readFileSync(cfgPath, 'utf8');
   } catch (err) {
     if (err && err.code === 'ENOENT') return { cfg: {} };   // genuinely fresh
-    return { error: `config.json at ${cfgPath} could not be read (${err?.code || err?.message}) — not overwriting it` };
+    // EACCES (permissions) / EISDIR (a directory sits where the file should
+    // be) / etc. — same "don't discard it" rule as a parse failure, and the
+    // operator needs the same kind of actionable next step, not just the
+    // raw errno.
+    return { error: `config.json at ${cfgPath} could not be read (${err?.code || err?.message}) — not overwriting it; check its permissions and that it is a regular file (not a directory), or move it aside to start fresh` };
   }
   try {
     return { cfg: JSON.parse(raw) };

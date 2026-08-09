@@ -6,6 +6,7 @@ import { configPath, readConfig, writeConfig, readVersionFromRepo } from '../lib
 import { ensureRegistry, getRegistry } from '../lib/registry_boot.mjs';
 import { bashCompletion, zshCompletion } from '../lib/args.mjs';
 import { defaultConfigDir as _persDefaultCfg } from '../memory.mjs';
+import { readConfigForMerge } from '../tui/slash_helpers.mjs';
 
 export async function cmdPersonality(sub, a, b) {
   const cfgDir = process.env.POMPOS_CONFIG_DIR || _persDefaultCfg();
@@ -53,8 +54,15 @@ export async function cmdPersonality(sub, a, b) {
     const p = path.join(dir, `${a}.md`);
     if (!fs.existsSync(p)) { console.error(`personality not installed: ${a}`); return 1; }
     const cfgPath = path.join(cfgDir, 'config.json');
-    let cfg = {};
-    try { cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch {}
+    // A missing file is fresh; an unparseable one is not ours to discard —
+    // see readConfigForMerge's doc comment. This is the non-interactive CLI
+    // twin of tui/slash_dispatcher.mjs's _personalityUse: `process.exit(code)`
+    // (cli.mjs:106) is this function's success/failure signal, so the refusal
+    // must return a nonzero exit code, not just print — a caller scripting
+    // `pompos personality use` needs $? to reflect that nothing was written.
+    const merged = readConfigForMerge(cfgPath, fs);
+    if (merged.error) { console.error(merged.error); return 1; }
+    const cfg = merged.cfg;
     cfg.persona = { ...(cfg.persona || {}), personality: a };
     fs.mkdirSync(cfgDir, { recursive: true });
     fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
