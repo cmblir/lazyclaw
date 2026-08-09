@@ -8,11 +8,11 @@
 //                become `lines`, in the order they were produced.
 //   · sentinels— 'EXIT' and 'NEW' are things the REPL does to itself. Over
 //                HTTP they are neither output nor errors — UNLESS the
-//                handler also set ctx.requestSetup/requestConfigStep, which
-//                means it wants an interactive wizard step the REPL host runs
-//                after unmounting (commands/chat.mjs:336-338). This adapter
-//                has no such host, so that combination is reported as an
-//                honest failure instead of a silent no-op success.
+//                handler also set one of FOREGROUND_ACTION_FLAGS below, which
+//                means it wants an interactive step the REPL host runs after
+//                unmounting (commands/chat.mjs:336-338). This adapter has no
+//                such host, so that combination is reported as an honest
+//                failure instead of a silent no-op success.
 //   · pickers  — every ctx.openPicker call site in the dispatcher is guarded
 //                by `typeof ctx.openPicker === 'function'`, so OMITTING it is
 //                what selects each handler's text fallback. The one exception
@@ -315,6 +315,23 @@ function needsHostProcess(cmd, args) {
   return gatedSubs.has(first);
 }
 
+// Every ctx.request* flag a handler can set to ask the REPL host to run an
+// interactive step AFTER it unmounts on 'EXIT' (commands/chat.mjs:336-338) —
+// /setup's full wizard, /config's single-item wizard step, and /login's (or
+// /provider's) foreground CLI-login flow. This adapter has no REPL host, so
+// none of those steps ever run — an 'EXIT' paired with any of these flags
+// must NOT collapse to the ordinary {ok:true, lines:[]} envelope, or the
+// caller is told a login/setup step succeeded when nothing happened.
+//
+// This list is not guessed: derived by grepping every module reachable from
+// SLASH_HANDLERS for an assignment to ctx.request*,
+//   grep -rn "ctx\.request[A-Za-z]*\s*=" tui/*.mjs commands/*.mjs
+// which finds exactly these three (tui/slash_dispatcher.mjs's inline /setup
+// handler, tui/config_picker.mjs, tui/login_flow.mjs). A handler that adds a
+// FOURTH ctx.request* flag and returns 'EXIT' needs to be added here too —
+// re-run that grep and diff its output against this array.
+const FOREGROUND_ACTION_FLAGS = ['requestSetup', 'requestConfigStep', 'requestLogin'];
+
 export function makeSlashRunner({ cfgDir, confirmStore, dispatch = _dispatchSlash }) {
   return {
     async run({ line, confirm } = {}) {
@@ -372,17 +389,17 @@ export function makeSlashRunner({ cfgDir, confirmStore, dispatch = _dispatchSlas
         // are refusing to let THAT out, not reporting a dispatch error.
         return { ok: false, code: 'PERSIST_FAILED', error: ctx.__persistFailed };
       }
-      if (result === 'EXIT' && (ctx.requestSetup || ctx.requestConfigStep)) {
+      if (result === 'EXIT' && FOREGROUND_ACTION_FLAGS.some((flag) => ctx[flag])) {
         // The dispatcher's own contract for this combination (see
         // commands/chat.mjs:336-338) is "unmount, then the REPL host runs an
-        // interactive wizard step". There is no REPL host here, so the step
-        // never runs — collapsing this to the ordinary {ok:true, lines:[]}
-        // EXIT envelope would report success for something that did nothing.
+        // interactive step". There is no REPL host here, so the step never
+        // runs — collapsing this to the ordinary {ok:true, lines:[]} EXIT
+        // envelope would report success for something that did nothing.
         return {
           ok: false,
           code: 'NEEDS_TERMINAL',
-          error: `${cmd} needs an interactive setup step that only runs in the terminal REPL — this HTTP endpoint cannot run it.`,
-          hint: 'run `pompos` in a terminal and use /setup (or the matching /config item) there',
+          error: `${cmd} needs an interactive step that only runs in the terminal REPL — this HTTP endpoint cannot run it.`,
+          hint: 'run `pompos` in a terminal and use /setup, the matching /config item, or /login there',
         };
       }
       if (typeof result === 'string' && result !== 'EXIT' && result !== 'NEW' && result.length) {

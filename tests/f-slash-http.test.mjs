@@ -302,6 +302,47 @@ test('/gateway port reaches the dispatcher — it only reads/writes a config val
   assert.equal(out.ok, true);
 });
 
+// --- EXIT + a foreground-action flag must never collapse to a silent
+//     success — fix round 2 found /login was missing from this check
+//     (only requestSetup/requestConfigStep were covered). All three flags
+//     tested here by name, via a spy dispatch, so a regression on ANY of
+//     them — not just the one that was reported — fails loudly. ------------
+
+test('EXIT + ctx.requestSetup collapses to NEEDS_TERMINAL, not a silent success', async () => {
+  const r = runnerWith(async (_cmd, _args, ctx) => { ctx.requestSetup = true; return 'EXIT'; });
+  const out = await r.run({ line: '/setup' });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'NEEDS_TERMINAL');
+});
+
+test('EXIT + ctx.requestConfigStep collapses to NEEDS_TERMINAL, not a silent success', async () => {
+  const r = runnerWith(async (_cmd, _args, ctx) => { ctx.requestConfigStep = 'channel'; return 'EXIT'; });
+  const out = await r.run({ line: '/config' });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'NEEDS_TERMINAL');
+});
+
+test('EXIT + ctx.requestLogin collapses to NEEDS_TERMINAL, not {ok:true, lines:[]} (fix round 2)', async () => {
+  // tui/login_flow.mjs's maybeLoginForCli really sets ctx.requestLogin and
+  // returns 'EXIT' this way once ctx.openPicker exists and the operator
+  // picks "browser"/"install" — proven directly against the real handler in
+  // tests/f-cli-login.test.mjs ("browser pick queues a foreground login").
+  // This adapter's plain HTTP ctx has no openPicker (buildHttpCtx only adds
+  // one for a redeemed destructive confirmation, and /login isn't
+  // destructive), so a bare `/login <provider>` can't reach that branch
+  // TODAY — but the moment anything gives this ctx a picker, it will, and
+  // this is the mechanism that must catch it. The spy reproduces exactly
+  // that shape without needing a picker plumbed all the way through.
+  const r = runnerWith(async (_cmd, _args, ctx) => {
+    ctx.requestLogin = { provider: 'codex-cli', mode: 'browser' };
+    return 'EXIT';
+  });
+  const out = await r.run({ line: '/login codex-cli' });
+  assert.equal(out.ok, false, 'a foreground login was queued and never ran — this must not read as success');
+  assert.equal(out.code, 'NEEDS_TERMINAL');
+  assert.notDeepEqual(out, { ok: true, lines: [] });
+});
+
 // --- /provider and /model must actually persist, not just claim to --------
 
 test('/provider <name> and /model <name> persist to config.json (real dispatcher, no mock)', async () => {
