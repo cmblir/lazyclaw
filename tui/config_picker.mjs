@@ -52,6 +52,21 @@ function tokenizeConfigArgs(raw) {
   }
 }
 
+// Signal "nothing was written" the SAME way setActiveProvName/setActiveModel
+// already do (ctx.__persistFailed, set in daemon/lib/slash_ctx.mjs's
+// persistAndVerify). The dispatcher's contract is "a handler returns a
+// string", so daemon/lib/slash_http.mjs's adapter cannot tell a refusal from
+// a success by reading prose — and must not try to, because rewording a
+// message would silently break that. finalizeEnvelope (slash_http.mjs) turns
+// a truthy ctx.__persistFailed into {ok:false, code:'PERSIST_FAILED',
+// error:...} regardless of the string this function returns. The REPL path
+// never reads this property, so setting it changes nothing there — the
+// returned string is still what the terminal displays.
+function refuse(ctx, message) {
+  ctx.__persistFailed = message;
+  return message;
+}
+
 const CONFIG_ITEMS = [
   { id: 'provider',     label: 'provider',            desc: 'switch the chat provider (family → vendor picker)' },
   { id: 'model',        label: 'model',               desc: 'switch the model (live list when the provider supports it)' },
@@ -68,16 +83,16 @@ export async function runConfigSlash(args, ctx, handlers) {
   const raw = String(args || '').trim();
   if (raw) {
     const tokens = tokenizeConfigArgs(raw);
-    if (tokens === null) return USAGE;
+    if (tokens === null) return refuse(ctx, USAGE);
     const verb = (tokens[0] || '').toLowerCase();
     if (verb === 'set' || verb === 'unset') {
       if (typeof ctx.readConfig !== 'function' || typeof ctx.writeConfig !== 'function') {
-        return 'config: this session cannot write config';
+        return refuse(ctx, 'config: this session cannot write config');
       }
       const key = tokens[1];
-      if (!key || (verb === 'set' && tokens.length < 3)) return USAGE;
+      if (!key || (verb === 'set' && tokens.length < 3)) return refuse(ctx, USAGE);
       if (NESTED.has(key)) {
-        return `config: "${key}" is not settable here — use the dedicated endpoint (POST /providers · PUT /rates/<key> · authProfiles via CLI)`;
+        return refuse(ctx, `config: "${key}" is not settable here — use the dedicated endpoint (POST /providers · PUT /rates/<key> · authProfiles via CLI)`);
       }
       const cfg = ctx.readConfig();
       if (verb === 'unset') delete cfg[key];
@@ -86,7 +101,7 @@ export async function runConfigSlash(args, ctx, handlers) {
       // configKeyPut applies, so a slash edit can't persist a state the
       // daemon's PUT would have refused.
       const v = validateConfig(cfg, PROVIDERS);
-      if (!v.ok) return `config: invalid — ${(v.issues || []).join('; ') || 'validation failed'}`;
+      if (!v.ok) return refuse(ctx, `config: invalid — ${(v.issues || []).join('; ') || 'validation failed'}`);
       ctx.writeConfig(cfg);
       if (verb === 'unset') return `config: unset ${key}`;
       // api-key is rendered into a browser and a terminal — never in the clear.
