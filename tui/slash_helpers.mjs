@@ -78,6 +78,16 @@ export async function _promptText(ctx, { title, subtitle, allowEmpty, secret } =
   return null;
 }
 
+// An attempted mutation that did nothing must not read as success over HTTP —
+// same lever /config and /provider/model use (tui/config_picker.mjs's
+// refuse(), daemon/lib/slash_ctx.mjs's persistAndVerify); finalizeEnvelope
+// (daemon/lib/slash_http.mjs) turns a truthy ctx.__persistFailed into
+// {ok:false}. The REPL never reads it, so its displayed text is unchanged.
+export function _refuse(ctx, message) {
+  ctx.__persistFailed = message;
+  return message;
+}
+
 // Yes/no confirmation modal for sensitive-tool approval. Esc (or no modal
 // available) DENIES — approval is never granted by omission.
 export async function _promptConfirm(ctx, { title, subtitle } = {}) {

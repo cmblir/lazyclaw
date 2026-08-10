@@ -76,11 +76,33 @@ test('/workflow names an unknown workflow rather than reporting success', async 
 // "value" is itself another recognized flag (an empty composer field can
 // produce exactly this shape) used to be swallowed silently: provider got set
 // to the literal string "--model" and "opus" leaked into the role text.
-test('/agent add rejects --provider/--model when the value is itself another flag', async () => {
-  const out = await dispatchSlash('/agent', 'add flagtest --provider --model opus researcher', ctx(), () => {});
+// Fix round 2 — the refusal itself still reported ok:true: the agent was
+// genuinely not created, but a dashboard "Create agent" button would have
+// shown a success toast anyway.
+test('/agent add rejects --provider/--model when the value is itself another flag, and reports ok:false', async () => {
+  const c = ctx();
+  const out = await dispatchSlash('/agent', 'add flagtest --provider --model opus researcher', c, () => {});
   assert.match(String(out), /--provider/, 'names which flag was malformed');
+  assert.ok(c.__persistFailed, 'a malformed flag must not report ok:true over HTTP');
   const { getAgent } = await import('../agents.mjs');
   assert.equal(getAgent('flagtest', CFG), null, 'a malformed flag must not create a corrupted agent');
+});
+
+// Fix round 2 — neighbouring refusal paths in the same /agent add branch,
+// audited for the same "attempted, nothing happened" defect.
+test('/agent add with no name (typed path, no picker) reports ok:false', async () => {
+  const c = ctx();
+  const out = await dispatchSlash('/agent', 'add', c, () => {});
+  assert.match(String(out), /usage/i);
+  assert.ok(c.__persistFailed, 'a missing required name must not report ok:true over HTTP');
+});
+
+test('/agent add on an already-registered name reports ok:false instead of the generic outer catch swallowing it', async () => {
+  // 'm1' is registered by an earlier test in this file (member add/remove).
+  const c = ctx();
+  const out = await dispatchSlash('/agent', 'add m1 duplicate attempt', c, () => {});
+  assert.match(String(out), /already exists/);
+  assert.ok(c.__persistFailed, 're-adding an existing agent must not report ok:true over HTTP');
 });
 
 // The end-of-args case (a flag with nothing after it at all) must stay a
@@ -100,6 +122,25 @@ test('/team member add|remove report ok:false over HTTP when the team or agent i
   const c2 = ctx();
   await dispatchSlash('/team', 'member add crew nosuchagent', c2, () => {});
   assert.ok(c2.__persistFailed, 'a missing agent must not report ok:true over HTTP');
+});
+
+// Fix round 2 — neighbouring refusal paths in the same /team member branch.
+test('/team member with a bad action verb reports ok:false, not a usage-as-success', async () => {
+  const c = ctx();
+  const out = await dispatchSlash('/team', 'member frobnicate crew m1', c, () => {});
+  assert.match(String(out), /usage/i);
+  assert.ok(c.__persistFailed, 'a bad action verb must not report ok:true over HTTP');
+});
+
+test('/team member remove that would empty a team reports ok:false — patchTeam throws, caught, refused', async () => {
+  await dispatchSlash('/agent', 'add solodev', ctx(), () => {});
+  await dispatchSlash('/team', 'add solo --agents solodev', ctx(), () => {});
+  const c = ctx();
+  const out = await dispatchSlash('/team', 'member remove solo solodev', c, () => {});
+  assert.match(String(out), /agents must be a non-empty array|TEAM_NO_AGENTS/);
+  assert.ok(c.__persistFailed, 'a patchTeam validation failure must not report ok:true over HTTP');
+  const { getTeam } = await import('../teams.mjs');
+  assert.deepEqual(getTeam('solo', CFG).agents, ['solodev'], 'the team must be unchanged when the write is refused');
 });
 
 // /workflow's real success/failure path, and the state-dir precedence fix —
