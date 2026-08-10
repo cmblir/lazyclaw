@@ -63,10 +63,15 @@ function assertCfgDirMatchesEnv(cfgDir) {
 /**
  * The slash ctx for HTTP callers.
  *
- * @param {{cfgDir: string, autoApprove?: boolean}} opts
- *   autoApprove is set only when replaying a confirmed line.
+ * @param {{cfgDir: string, autoApprove?: boolean, workflowStateDir?: () => string}} opts
+ *   autoApprove is set only when replaying a confirmed line. workflowStateDir,
+ *   when supplied, is the SAME resolver daemon/routes/workflows.mjs's REST
+ *   handlers call (threaded from daemon/routes/slash.mjs's c.workflowStateDir,
+ *   itself daemon.mjs's --workflow-state-dir/env resolution) — without it,
+ *   /workflow (tui/slash_workflow.mjs) falls back to reading the env var
+ *   directly, which disagrees with a daemon started with the CLI flag.
  */
-export function buildHttpCtx({ cfgDir, autoApprove = false }) {
+export function buildHttpCtx({ cfgDir, autoApprove = false, workflowStateDir } = {}) {
   assertCfgDirMatchesEnv(cfgDir);
   // One real config snapshot for the life of this request — not a getter
   // that re-reads disk on every access. Handlers mutate it in place (the
@@ -166,6 +171,12 @@ export function buildHttpCtx({ cfgDir, autoApprove = false }) {
     setActiveProvName: (name) => persistAndVerify(ctx, cfg, 'provider', name, persistActiveProvider, explainProviderMismatch),
     setActiveModel: (name) => persistAndVerify(ctx, cfg, 'model', name, persistActiveModel),
   };
+  // /workflow (tui/slash_workflow.mjs) resolves its state dir from this when
+  // present, so a daemon started with --workflow-state-dir agrees with
+  // itself across the slash surface and the REST /workflows routes. Absent
+  // (a caller that never passed one) → the handler falls back to the env
+  // var / CWD-relative default on its own; no need to fabricate one here.
+  if (typeof workflowStateDir === 'function') ctx.workflowStateDir = workflowStateDir;
   if (autoApprove) {
     // The operator already answered this question at the HTTP layer; the
     // handler's own prompt is the second half of the same decision.

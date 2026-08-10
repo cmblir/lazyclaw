@@ -12,12 +12,17 @@ import { parseSlashLine } from '../../tui/slash_dispatcher.mjs';
 const confirmStore = makeConfirmStore();
 
 export async function slashRun(c) {
-  const { req, res, gwConfigDir } = c;
+  // workflowStateDir: the SAME resolver daemon/routes/workflows.mjs's REST
+  // handlers call (c.workflowStateDir, from daemon.mjs's --workflow-state-dir/
+  // env resolution) — threaded through so /workflow run|resume|clear reads
+  // and writes the identical directory those routes do, instead of only ever
+  // checking POMPOS_WORKFLOW_STATE_DIR itself.
+  const { req, res, gwConfigDir, workflowStateDir } = c;
   let body;
   try { body = await readJson(req); }
   catch (e) { return writeJson(res, 400, { ok: false, error: e?.message || String(e), code: 'SLASH_ERR' }); }
 
-  const runner = makeSlashRunner({ cfgDir: gwConfigDir, confirmStore });
+  const runner = makeSlashRunner({ cfgDir: gwConfigDir, confirmStore, workflowStateDir });
 
   // Upgrade to SSE only when the client explicitly asked for it AND the
   // command is one long enough to make a buffered reply look hung

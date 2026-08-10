@@ -74,10 +74,19 @@ test('/workflow clear is gated and names the target; run/resume are not (task 14
   assert.equal(destructivePrompt('/workflow', 'resume nightly'), null, '/workflow resume is not destructive');
 });
 
-test('/team member remove is gated and names the agent and team; member add is not', () => {
+test('/team member remove is gated and names the agent and team IN THE RIGHT ROLES; member add is not', () => {
   const p = destructivePrompt('/team', 'member remove crew dev');
   assert.ok(p, '/team member remove must be gated — it changes membership');
-  assert.match(p, /dev/, 'the prompt must name the agent');
-  assert.match(p, /crew/, 'the prompt must name the team');
+  // Order-aware, not just order-blind substrings: /dev/ + /crew/ alone would
+  // still pass even if the implementation swapped which token is the team and
+  // which is the agent. Anchor each name to the word naming its role instead.
+  assert.match(p, /agent dev\b/i, '"dev" (the 4th token) must fill the AGENT role');
+  assert.match(p, /team crew\b/i, '"crew" (the 3rd token) must fill the TEAM role');
+
+  // Swap which token is which — the prompt must swap with it.
+  const swapped = destructivePrompt('/team', 'member remove dev crew');
+  assert.match(swapped, /agent crew\b/i, '"crew" now fills the AGENT role');
+  assert.match(swapped, /team dev\b/i, '"dev" now fills the TEAM role');
+
   assert.equal(destructivePrompt('/team', 'member add crew dev'), null, '/team member add is not destructive');
 });

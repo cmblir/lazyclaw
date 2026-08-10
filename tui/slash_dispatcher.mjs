@@ -487,15 +487,26 @@ async function _agent(args, ctx) {
     if (sub === 'add') {
       let name = aname;
       // --provider/--model so the dashboard can create an agent as fully as
-      // the REST route it replaced. Parsed out first; whatever remains is the
-      // role, which is how this command has always read its trailing free
-      // text — mirrors /team add's --agents/--lead loop below.
+      // the REST route it replaced; the rest becomes the role, as always.
+      // Missing value at end-of-args stays a silent default (unchanged); a
+      // value that is itself another flag (an empty composer field produces
+      // `--provider --model opus`) is rejected instead of silently storing
+      // provider:"--model" and leaking "opus" into the role text.
       let provider, model;
       const roleWords = [];
       for (let i = 1; i < rest.length; i += 1) {
-        if (rest[i] === '--provider') provider = rest[++i];
-        else if (rest[i] === '--model') model = rest[++i];
-        else roleWords.push(rest[i]);
+        const t = rest[i];
+        if (t === '--provider' || t === '--model') {
+          const value = rest[i + 1];
+          if (value !== undefined && value.startsWith('--')) {
+            return `/agent add: ${t} needs a value, got "${value}"`;
+          }
+          if (t === '--provider') provider = value;
+          else model = value;
+          i += 1; // consume the value token too
+        } else {
+          roleWords.push(t);
+        }
       }
       let roleText = roleWords.join(' ').trim();
       // Guided fill: no name typed + a modal available → prompt for it.
@@ -592,8 +603,17 @@ async function _team(args, ctx) {
         return 'usage: /team member add|remove <team> <agent>';
       }
       const team = teamsMod.getTeam(teamName, ctx.cfgDir);
-      if (!team) return `team not found: ${teamName}`;
-      if (action === 'add' && !agentsMod.getAgent(agentName, ctx.cfgDir)) return `agent not found: ${agentName}`;
+      // ctx.__persistFailed — same signal /config set/unset and /provider use
+      // (daemon/lib/slash_ctx.mjs's persistAndVerify, tui/config_picker.mjs's
+      // refuse()) — so the HTTP adapter reports ok:false instead of a browser
+      // click on a deleted team/agent reading as a successful membership
+      // change. The REPL never reads this property, so the returned string
+      // (still named below) is unaffected there.
+      if (!team) { ctx.__persistFailed = `team not found: ${teamName}`; return ctx.__persistFailed; }
+      if (action === 'add' && !agentsMod.getAgent(agentName, ctx.cfgDir)) {
+        ctx.__persistFailed = `agent not found: ${agentName}`;
+        return ctx.__persistFailed;
+      }
       const next = action === 'add'
         ? [...new Set([...(team.agents || []), agentName])]
         : (team.agents || []).filter((a) => a !== agentName);

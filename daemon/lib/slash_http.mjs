@@ -182,7 +182,7 @@ const FOREGROUND_ACTION_FLAGS = ['requestSetup', 'requestConfigStep', 'requestLo
 // neither has its own copy of this decision. Returns either
 // { ok:false, envelope } to send straight back without dispatching, or
 // { ok:true, cmd, args, ctx } ready to hand to dispatch.
-function prepareDispatch({ line, confirm, cfgDir, confirmStore }) {
+function prepareDispatch({ line, confirm, cfgDir, confirmStore, workflowStateDir }) {
   const raw = typeof line === 'string' ? line.trim() : '';
   if (!raw.startsWith('/')) return { ok: false, envelope: fail('a slash command is required, e.g. /status') };
 
@@ -225,7 +225,7 @@ function prepareDispatch({ line, confirm, cfgDir, confirmStore }) {
 
   let ctx;
   try {
-    ctx = buildHttpCtx({ cfgDir, autoApprove });
+    ctx = buildHttpCtx({ cfgDir, autoApprove, workflowStateDir });
   } catch (err) {
     return { ok: false, envelope: fail(err?.message || err, 'CONFIG_DIR_MISMATCH') };
   }
@@ -266,10 +266,10 @@ function finalizeEnvelope({ cmd, ctx, lines, result, emit }) {
   return { ok: true, lines };
 }
 
-export function makeSlashRunner({ cfgDir, confirmStore, dispatch = _dispatchSlash }) {
+export function makeSlashRunner({ cfgDir, confirmStore, dispatch = _dispatchSlash, workflowStateDir }) {
   return {
     async run({ line, confirm } = {}) {
-      const prep = prepareDispatch({ line, confirm, cfgDir, confirmStore });
+      const prep = prepareDispatch({ line, confirm, cfgDir, confirmStore, workflowStateDir });
       if (!prep.ok) return prep.envelope;
       const { cmd, args, ctx } = prep;
 
@@ -293,7 +293,7 @@ export function makeSlashRunner({ cfgDir, confirmStore, dispatch = _dispatchSlas
      * partial record.
      */
     async runStreaming({ line, confirm, onLine } = {}) {
-      const prep = prepareDispatch({ line, confirm, cfgDir, confirmStore });
+      const prep = prepareDispatch({ line, confirm, cfgDir, confirmStore, workflowStateDir });
       if (!prep.ok) return prep.envelope;
       const { cmd, args, ctx } = prep;
 

@@ -64,6 +64,30 @@ test('a destructive line answers 409 with a token, and the token completes it', 
   assert.notEqual(second.statusCode, 409, 'the confirmed line is not asked about again');
 });
 
+test('POST /slash threads c.workflowStateDir through to /workflow (fix round 1 — daemon-level wiring)', async () => {
+  // c.workflowStateDir is the SAME resolver daemon/routes/workflows.mjs's
+  // REST handlers call (daemon.mjs). Pre-seed a state file in a directory
+  // ONLY reachable via that resolver, then prove /workflow clear consulted
+  // it — not POMPOS_WORKFLOW_STATE_DIR or the CWD-relative default.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-slash-route-wfdir-'));
+  fs.writeFileSync(path.join(dir, 'ghost.json'), JSON.stringify({ sessionId: 'ghost', order: [], nodes: {} }));
+  const line = '/workflow clear ghost';
+
+  const first = mkRes();
+  await slashRun({ req: mkReq({ line }), res: first, gwConfigDir: CFG, workflowStateDir: () => dir });
+  assert.equal(first.statusCode, 409, '/workflow clear is destructive, so it asks first');
+
+  const second = mkRes();
+  await slashRun({
+    req: mkReq({ line, confirm: first.body.token }),
+    res: second, gwConfigDir: CFG, workflowStateDir: () => dir,
+  });
+  assert.equal(second.statusCode, 200);
+  assert.match(second.body.lines[0], /cleared/);
+  assert.equal(fs.existsSync(path.join(dir, 'ghost.json')), false, 'the c.workflowStateDir-supplied directory is what got consulted');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('the confirm store is shared across requests to one daemon', async () => {
   // A token issued by one request must be redeemable by the next; a per-call
   // store would make every confirmation impossible.
