@@ -125,7 +125,12 @@ export async function render(host) {
   function updateSlashPop() {
     const matches = filterCommands(slashCommands, input.value);
     if (!matches.length) { hideSlashPop(); return; }
-    slashPop.replaceChildren(matches.map((c) => el('button', {
+    // Spread, not a bare array: replaceChildren(...nodes) is variadic — a
+    // single array argument is not a Node, so the DOM would coerce it to a
+    // string ("[object HTMLButtonElement]") instead of inserting elements
+    // (see web/ui/panels/team.mjs's sel.replaceChildren(...teams.map(...))
+    // for the same spread on an already-established call site).
+    slashPop.replaceChildren(...matches.map((c) => el('button', {
       class: 'slash-pop-item', type: 'button',
       onclick: () => { input.value = c.name + ' '; hideSlashPop(); input.focus(); },
     }, el('span', { class: 'cmd', text: c.name }), el('span', { class: 'desc', text: c.description || '' }))));
