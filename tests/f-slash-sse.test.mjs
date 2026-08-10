@@ -43,12 +43,22 @@ test('runStreaming delivers each line as it is produced, not at the end', async 
 });
 
 test('a streaming command still honours the confirmation gate', async () => {
+  // Fixture: /clear used to double as both "destructive" and "streaming",
+  // but needsLiveSession (daemon/lib/slash_http.mjs) now refuses it with
+  // NO_SESSION before destructivePrompt ever runs, so it can no longer prove
+  // this. The fixture must be a genuine member of STREAMING (checked below)
+  // AND trigger destructivePrompt (daemon/lib/slash_destructive.mjs) — of
+  // STREAMING's two entries, only /task has a destructive subcommand
+  // (abandon|remove|rm|delete); /loop has none. `/task abandon <id>` is a
+  // command that would actually reach the SSE path in production and must
+  // still be gated before it does.
+  assert.ok(STREAMING.has('/task'), 'the fixture below must be a real streaming command, not an arbitrary one');
   let ran = false;
   const runner = makeSlashRunner({
     cfgDir: CFG, confirmStore: makeConfirmStore(),
     dispatch: async () => { ran = true; return 'x'; },
   });
-  const out = await runner.runStreaming({ line: '/clear', onLine: () => {} });
+  const out = await runner.runStreaming({ line: '/task abandon nosuchtask', onLine: () => {} });
   assert.equal(out.code, 'CONFIRM_REQUIRED');
   assert.equal(ran, false, 'confirmation precedes streaming, same as the buffered path');
 });

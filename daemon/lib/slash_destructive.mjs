@@ -15,6 +15,7 @@ const RULES = new Map([
   ['/team', { sub: /^(remove|rm|delete)$/i, prompt: (t) => `Remove team ${t || '(unnamed)'}? Its members stay, the team does not.` }],
   ['/agent', { sub: /^(remove|rm|delete)$/i, prompt: (t) => `Remove agent ${t || '(unnamed)'}? Any team referencing it keeps the dangling name.` }],
   ['/skill', { sub: /^(clear|unset)$/i, prompt: () => `Clear the system prompt? Any active skills are unset.` }],
+  ['/trainer', { sub: /^(clear|unset)$/i, prompt: () => `Clear the trainer override? It reverts to mirroring the chat provider/model.` }],
   ['/task', { sub: /^(abandon|remove|rm|delete)$/i, prompt: (t) => `Abandon task ${t || '(unnamed)'}? It stops and cannot be resumed.` }],
   ['/personality', { sub: /^(remove|rm|delete)$/i, prompt: (t) => `Remove personality ${t || '(unnamed)'}? The file is deleted from disk.` }],
   ['/config', { sub: /^(unset|delete|remove)$/i, prompt: (t) => `Unset config key ${t || '(unnamed)'}?` }],
@@ -47,6 +48,18 @@ export function destructivePrompt(cmd, args) {
     const t = String(args || '').trim().split(/\s+/).filter(Boolean);
     if (t[0] === 'member' && /^(remove|rm)$/i.test(t[1] || '')) {
       return `Remove agent ${t[3] || '(unnamed)'} from team ${t[2] || '(unnamed)'}? It stops receiving that team's tasks.`;
+    }
+  }
+
+  // /trainer fallback clear|unset — same second-token-is-the-verb shape as
+  // /team member above: the RULES entry for /trainer only tests the FIRST
+  // token, which here is "fallback" (data, not a verb), so it would never
+  // match this without a dedicated check. tui/slash_trainer.mjs treats
+  // "clear" and "unset" identically for the fallback spec.
+  if (key === '/trainer') {
+    const t = String(args || '').trim().split(/\s+/).filter(Boolean);
+    if (t[0] === 'fallback' && /^(clear|unset)$/i.test(t[1] || '')) {
+      return `Clear the trainer's fallback provider/model? The primary trainer setting is unaffected.`;
     }
   }
 

@@ -143,6 +143,144 @@ test('/team member remove that would empty a team reports ok:false — patchTeam
   assert.deepEqual(getTeam('solo', CFG).agents, ['solodev'], 'the team must be unchanged when the write is refused');
 });
 
+// --- final review, BLOCKING 1 — six panel-reachable paths reported ok:true
+// on a failed write, three of them via an OUTER CATCH that turned a thrown
+// TeamError/AgentError/TaskError into a returned string. Reproduced against
+// this same temp CFG before the fix; each assertion below failed against
+// pre-fix HEAD. ---------------------------------------------------------
+
+test('/team add on a duplicate name reports ok:false — the outer catch used to swallow it', async () => {
+  await dispatchSlash('/team', 'add dupcrew --agents m1', ctx(), () => {});
+  const c = ctx();
+  const out = await dispatchSlash('/team', 'add dupcrew --agents m1', c, () => {});
+  assert.match(String(out), /already exists/);
+  assert.ok(c.__persistFailed, 'a duplicate team must not report ok:true over HTTP');
+});
+
+test('/team add with an unregistered agent reports ok:false — the outer catch used to swallow it', async () => {
+  const c = ctx();
+  const out = await dispatchSlash('/team', 'add unregteam --agents nosuchagent', c, () => {});
+  assert.match(String(out), /not registered/);
+  assert.ok(c.__persistFailed, 'an unregistered agent must not report ok:true over HTTP');
+});
+
+test('/team add rejects an unknown flag token and reports ok:false', async () => {
+  const c = ctx();
+  const out = await dispatchSlash('/team', 'add badflagteam --nope x', c, () => {});
+  assert.match(String(out), /unknown token/);
+  assert.ok(c.__persistFailed);
+});
+
+test('/team add with no name, and with no --agents, both report ok:false (typed path, no picker)', async () => {
+  const c1 = ctx();
+  const out1 = await dispatchSlash('/team', 'add', c1, () => {});
+  assert.match(String(out1), /usage/i);
+  assert.ok(c1.__persistFailed, 'a missing team name must not report ok:true over HTTP');
+
+  const c2 = ctx();
+  const out2 = await dispatchSlash('/team', 'add noagentsteam', c2, () => {});
+  assert.match(String(out2), /--agents is required/);
+  assert.ok(c2.__persistFailed, 'missing --agents must not report ok:true over HTTP');
+});
+
+test('/team remove reports ok:false for a missing name (usage) and a missing team (outer catch)', async () => {
+  const c1 = ctx();
+  const out1 = await dispatchSlash('/team', 'remove', c1, () => {});
+  assert.match(String(out1), /usage/i);
+  assert.ok(c1.__persistFailed, 'a missing team name must not report ok:true over HTTP');
+
+  const c2 = ctx();
+  const out2 = await dispatchSlash('/team', 'remove nosuchteam', c2, () => {});
+  assert.match(String(out2), /no team/i);
+  assert.ok(c2.__persistFailed, 'removing a nonexistent team must not report ok:true over HTTP — this is the exact case the review named');
+});
+
+test('/agent remove reports ok:false for a missing name (usage) and a missing agent (outer catch, named by the review)', async () => {
+  const c1 = ctx();
+  const out1 = await dispatchSlash('/agent', 'remove', c1, () => {});
+  assert.match(String(out1), /usage/i);
+  assert.ok(c1.__persistFailed, 'a missing agent name must not report ok:true over HTTP');
+
+  const c2 = ctx();
+  const out2 = await dispatchSlash('/agent', 'remove nosuchagent', c2, () => {});
+  assert.match(String(out2), /no agent/i);
+  assert.ok(c2.__persistFailed, 'removing a nonexistent agent must not report ok:true over HTTP');
+});
+
+test('/agent edit reports ok:false for a missing name (usage) and an unknown agent — unnamed siblings, same shape', async () => {
+  const c1 = ctx();
+  const out1 = await dispatchSlash('/agent', 'edit', c1, () => {});
+  assert.match(String(out1), /usage/i);
+  assert.ok(c1.__persistFailed, 'a missing agent name must not report ok:true over HTTP');
+
+  const c2 = ctx();
+  const out2 = await dispatchSlash('/agent', 'edit nosuchagent', c2, () => {});
+  assert.match(String(out2), /no agent/i);
+  assert.ok(c2.__persistFailed, 'editing a nonexistent agent must not report ok:true over HTTP');
+});
+
+test('/task start reports ok:false for a missing team (named by the review) and a usage error', async () => {
+  const c1 = ctx();
+  const out1 = await dispatchSlash('/task', 'start nosuchteam --title "hi"', c1, () => {});
+  assert.match(String(out1), /no team/i);
+  assert.ok(c1.__persistFailed, 'starting a task against a nonexistent team must not report ok:true over HTTP');
+
+  const c2 = ctx();
+  const out2 = await dispatchSlash('/task', 'start crew', c2, () => {});
+  assert.match(String(out2), /usage/i);
+  assert.ok(c2.__persistFailed, 'a missing --title must not report ok:true over HTTP');
+});
+
+test('/task done and /task abandon report ok:false for a bad id (named by the review) — the outer catch used to swallow it', async () => {
+  const c1 = ctx();
+  const out1 = await dispatchSlash('/task', 'done nosuchtask', c1, () => {});
+  assert.match(String(out1), /bad task id/i);
+  assert.ok(c1.__persistFailed, 'marking a nonexistent task done must not report ok:true over HTTP');
+
+  const c2 = ctx();
+  const out2 = await dispatchSlash('/task', 'abandon nosuchtask', c2, () => {});
+  assert.match(String(out2), /bad task id/i);
+  assert.ok(c2.__persistFailed, 'abandoning a nonexistent task must not report ok:true over HTTP');
+});
+
+test('/task done, /task abandon and /task remove report ok:false for a missing id (usage) — unnamed siblings', async () => {
+  for (const sub of ['done', 'abandon', 'remove']) {
+    const c = ctx();
+    const out = await dispatchSlash('/task', sub, c, () => {});
+    assert.match(String(out), /usage/i, `${sub} with no id must be a usage error`);
+    assert.ok(c.__persistFailed, `${sub} with no id must not report ok:true over HTTP`);
+  }
+});
+
+test('/task remove reports ok:false for a missing id — same outer catch as done/abandon', async () => {
+  const c = ctx();
+  const out = await dispatchSlash('/task', 'remove nosuchtask', c, () => {});
+  assert.match(String(out), /bad task id/i);
+  assert.ok(c.__persistFailed, 'removing a nonexistent task must not report ok:true over HTTP');
+});
+
+// Found while auditing /task start for every branch that returns without
+// writing: registerTask already ran by the time the Slack kickoff post can
+// fail, so the best-effort rollback (removeTask) is the only thing between
+// "the post failed" and "a task exists nobody was told about" — either way,
+// the /task start the caller asked for did not complete.
+test('/task start rolls back and reports ok:false when the Slack kickoff post fails', async () => {
+  const { registerTeam } = await import('../teams.mjs');
+  registerTeam({ name: 'slackteam', agents: ['m1'], lead: 'm1', slackChannel: 'C123456' }, CFG);
+  class FailingSlack {
+    async start() {}
+    async send() { throw new Error('slack down'); }
+    async stop() {}
+  }
+  const c = { ...ctx(), SlackChannel: FailingSlack };
+  const out = await dispatchSlash('/task', 'start slackteam --title "hi"', c, () => {});
+  assert.match(String(out), /slack down/);
+  assert.ok(c.__persistFailed, 'a Slack post failure must not report ok:true over HTTP');
+  const { listTasks } = await import('../tasks.mjs');
+  assert.equal(listTasks(CFG).filter((t) => t.team === 'slackteam').length, 0,
+    'the best-effort rollback must have removed the half-created task');
+});
+
 // /workflow's real success/failure path, and the state-dir precedence fix —
 // only usage/not-found were pinned before; nothing proved run/resume actually
 // execute a real stored workflow, or that resume reuses saved state instead

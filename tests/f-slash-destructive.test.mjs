@@ -25,6 +25,28 @@ test('/skill clear and unset are gated (the real destructive path)', () => {
   assert.ok(destructivePrompt('/skill', '  UNSET  '));
 });
 
+// /trainer clear|unset and /trainer fallback clear|unset wipe config.json's
+// trainer override with no confirmation at all before this fix — the same
+// clear/wipe family /config unset and /workflow clear are already gated in.
+test('/trainer clear and unset are gated, and name what is lost', () => {
+  const clear = destructivePrompt('/trainer', 'clear');
+  assert.ok(clear, '/trainer clear must be gated');
+  assert.match(clear, /trainer/i);
+  const unset = destructivePrompt('/trainer', 'unset');
+  assert.ok(unset, '/trainer unset must be gated');
+  assert.equal(destructivePrompt('/trainer', 'show'), null, '/trainer show is read-only');
+  assert.equal(destructivePrompt('/trainer', 'set anthropic:opus'), null, '/trainer set is additive, not destructive');
+});
+
+test('/trainer fallback clear|unset is gated separately from the top-level clear', () => {
+  const p = destructivePrompt('/trainer', 'fallback clear');
+  assert.ok(p, '/trainer fallback clear must be gated');
+  assert.match(p, /fallback/i);
+  assert.ok(destructivePrompt('/trainer', 'fallback unset'), '/trainer fallback unset is gated the same way');
+  assert.equal(destructivePrompt('/trainer', 'fallback anthropic:opus'), null, '/trainer fallback <spec> is additive, not destructive');
+  assert.equal(destructivePrompt('/trainer', 'fallback'), null, '/trainer fallback with no spec is not destructive (it opens a picker)');
+});
+
 test('the reset family is destructive even with no arguments', () => {
   for (const cmd of ['/new', '/reset', '/clear']) {
     assert.ok(destructivePrompt(cmd, ''), `${cmd} discards the conversation`);

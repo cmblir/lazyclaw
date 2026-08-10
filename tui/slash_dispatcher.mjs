@@ -533,9 +533,9 @@ async function _agent(args, ctx) {
       return `✓ added agent ${a.name} (tools=${(a.tools || []).join(',')})${modelHint}`;
     }
     if (sub === 'edit') {
-      if (!aname) return 'usage: /agent edit <name>';
+      if (!aname) return _refuse(ctx, 'usage: /agent edit <name>');
       const existing = agentsMod.getAgent(aname, ctx.cfgDir);
-      if (!existing) return `no agent "${aname}"`;
+      if (!existing) return _refuse(ctx, `no agent "${aname}"`);
       if (typeof ctx.openPicker !== 'function') {
         return `agent edit: picker unavailable here — use: pompos agent edit ${aname} --provider <p> --model <m>`;
       }
@@ -546,7 +546,7 @@ async function _agent(args, ctx) {
       return `✓ ${patched.name} → ${patched.provider}${patched.model ? '/' + patched.model : ''}`;
     }
     if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
-      if (!aname) return 'usage: /agent remove <name>';
+      if (!aname) return _refuse(ctx, 'usage: /agent remove <name>');
       if (typeof ctx.openPicker === 'function') {
         const ok = await _promptConfirm(ctx, { title: `Remove agent "${aname}"?`, subtitle: 'This cannot be undone. Enter selects · Esc cancels' });
         if (!ok) return `agent remove: cancelled — "${aname}" not removed`;
@@ -556,7 +556,12 @@ async function _agent(args, ctx) {
     }
     return `/agent: unknown sub "${sub}" — list|show|add|edit|remove`;
   } catch (e) {
-    return `/agent error: ${e?.message || e}`;
+    // removeAgent (and patchAgent, via `edit`) validate/check existence
+    // BEFORE writing — e.g. removing a name that is not registered — so
+    // nothing changed on disk when this throws. Returning the message
+    // directly used to report ok:true over HTTP for the same reason the
+    // explicit refusals above exist.
+    return _refuse(ctx, `/agent error: ${e?.message || e}`);
   }
 }
 
@@ -1010,7 +1015,7 @@ async function _task(args, ctx, write) {
       return JSON.stringify(t.turns || [], null, 2);
     }
     if (sub === 'abandon' || sub === 'done') {
-      if (!id) return `usage: /task ${sub} <id>`;
+      if (!id) return _refuse(ctx, `usage: /task ${sub} <id>`);
       const target = sub === 'done' ? 'done' : 'abandoned';
       const next = tasksMod.patchTask(id, { status: target }, ctx.cfgDir);
       // Best-effort closing post in the original Slack thread (parity with the
@@ -1035,7 +1040,7 @@ async function _task(args, ctx, write) {
       return `✓ task ${id} → ${next?.status || target}${slackNote}`;
     }
     if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
-      if (!id) return 'usage: /task remove <id>';
+      if (!id) return _refuse(ctx, 'usage: /task remove <id>');
       if (typeof ctx.openPicker === 'function') {
         const ok = await _promptConfirm(ctx, { title: `Remove task ${id}?`, subtitle: 'This cannot be undone. Enter selects · Esc cancels' });
         if (!ok) return `task remove: cancelled — ${id} not removed`;
@@ -1061,7 +1066,7 @@ async function _task(args, ctx, write) {
       if ((!teamName || !title) && typeof ctx.openPicker === 'function') {
         if (!teamName) {
           const teams = teamsMod.listTeams(ctx.cfgDir);
-          if (!teams.length) return 'task start: no teams yet — create one with /team add first';
+          if (!teams.length) return _refuse(ctx, 'task start: no teams yet — create one with /team add first');
           const tp = await ctx.openPicker({ kind: 'menu', title: 'Start task — pick a team', items: teams.map((t) => ({ id: t.name, label: t.name, desc: `lead=${t.lead || '?'} · agents=${(t.agents || []).join(',')}` })) });
           teamName = tp && typeof tp === 'object' ? tp.id : tp;
           if (!teamName || typeof teamName !== 'string') return 'task start: cancelled';
@@ -1075,9 +1080,9 @@ async function _task(args, ctx, write) {
           description = d || '';
         }
       }
-      if (!teamName || !title) return 'usage: /task start <team> --title "..." [--description "..."] [--lead <name>]';
+      if (!teamName || !title) return _refuse(ctx, 'usage: /task start <team> --title "..." [--description "..."] [--lead <name>]');
       const team = teamsMod.getTeam(teamName, ctx.cfgDir);
-      if (!team) return `no team "${teamName}"`;
+      if (!team) return _refuse(ctx, `no team "${teamName}"`);
       const leadName = lead || team.lead;
       const leadAgent = agentsMod.getAgent(leadName, ctx.cfgDir);
       const seeded = tasksMod.registerTask(
@@ -1100,8 +1105,13 @@ async function _task(args, ctx, write) {
           ts = (res && res.ts) || '';
           await slack.stop().catch(() => {});
         } catch (e) {
+          // The task record was already written above (registerTask); this
+          // best-effort rollback is the only thing standing between "the
+          // Slack post failed" and "a task now exists that nobody was told
+          // about" — either way, the /task start the operator asked for did
+          // not complete, so this must not read as success over HTTP.
           try { tasksMod.removeTask(seeded.id, ctx.cfgDir); } catch { /* best-effort */ }
-          return `task start: ${e?.message || e}`;
+          return _refuse(ctx, `task start: ${e?.message || e}`);
         }
       }
       const turns = ts ? [{ agent: 'system', text: `Task opened by user. Lead: ${leadName}.`, ts }] : [];
@@ -1153,7 +1163,11 @@ async function _task(args, ctx, write) {
     }
     return `/task: unknown sub "${sub}" — start|tick|list|show|transcript|abandon|done|remove`;
   } catch (e) {
-    return `/task error: ${e?.message || e}`;
+    // patchTask/removeTask (done, abandon, remove) check existence BEFORE
+    // writing, so a bad id throws with nothing changed on disk. Returning
+    // the message directly used to report ok:true over HTTP for the same
+    // reason the explicit refusals above exist.
+    return _refuse(ctx, `/task error: ${e?.message || e}`);
   }
 }
 

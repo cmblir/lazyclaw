@@ -31,7 +31,12 @@
 //                too. Contrast /provider <name> and /model <name>, which
 //                persist to config.json (a real, global, disk-backed value)
 //                via setActiveProvName/setActiveModel (./slash_ctx.mjs) —
-//                those DO work.
+//                those DO work. /new, /reset and /clear are the same shape
+//                from the other direction: _newReset (tui/slash_dispatcher.mjs)
+//                DISCARDS ctx.getMessages()/setMessages() and resets
+//                ctx.getSessionId() — this ctx has neither, so there is
+//                nothing to discard, yet it always returned "cleared — new
+//                conversation". Refused before dispatch for the same reason.
 //   · host     — /dashboard (whole command) and /gateway start|stop spawn or
 //                kill a process on whatever machine is running THIS daemon,
 //                not the caller's. Refused before dispatch (like /skill/
@@ -106,7 +111,17 @@ export const STREAMING = new Set(['/loop', '/task']);
 // endpoint has no notion of "the active chat" at all, so both would silently
 // no-op and still report success. Their no-arg branches (list/usage text)
 // are read-only and honest, so only a non-empty invocation is refused.
+//
+// /new, /reset and /clear (tui/slash_dispatcher.mjs's _newReset) are the
+// mirror image: they DISCARD ctx.getMessages()/setMessages() and reset
+// ctx.getSessionId() — again, state this ctx does not have — and always
+// returned "cleared — new conversation" regardless. Checked and refused
+// UNCONDITIONALLY, before the `if (!a) return false` short-circuit below:
+// unlike /skill/goal, these three take no argument at all (there is nothing
+// after the command to be empty or not), so that guard would hide them from
+// this function entirely if it ran first.
 function needsLiveSession(cmd, args) {
+  if (cmd === '/new' || cmd === '/reset' || cmd === '/clear') return true;
   const a = String(args || '').trim();
   if (!a) return false;
   if (cmd === '/skill' || cmd === '/skills') return true;
@@ -194,7 +209,11 @@ function prepareDispatch({ line, confirm, cfgDir, confirmStore, workflowStateDir
       envelope: {
         ok: false,
         code: 'NO_SESSION',
-        error: `${cmd} changes the active chat session, but this endpoint runs each command as a one-shot call with no session behind it — nothing was saved.`,
+        // "nothing changed" (not "nothing was saved") on purpose: this
+        // covers both directions — /skill and /goal would have persisted
+        // something that never lands, /new, /reset and /clear would have
+        // discarded something that was never there to discard.
+        error: `${cmd} changes the active chat session, but this endpoint runs each command as a one-shot call with no session behind it — nothing changed.`,
         hint: 'this command only works from an interactive chat session (the terminal REPL), not a one-shot HTTP call',
       },
     };

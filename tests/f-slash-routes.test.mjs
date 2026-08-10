@@ -91,11 +91,19 @@ test('POST /slash threads c.workflowStateDir through to /workflow (fix round 1 â
 test('the confirm store is shared across requests to one daemon', async () => {
   // A token issued by one request must be redeemable by the next; a per-call
   // store would make every confirmation impossible.
+  // Fixture: /new used to be the destructive stand-in here, but
+  // needsLiveSession (daemon/lib/slash_http.mjs) now refuses it with
+  // NO_SESSION before destructivePrompt is ever consulted, so it can no
+  // longer issue a token. /trainer clear still goes through
+  // destructivePrompt (daemon/lib/slash_destructive.mjs), and its handler
+  // (tui/slash_trainer.mjs) unconditionally deletes cfg.trainer and
+  // succeeds even when it was never set â€” genuinely harmless in a fresh
+  // temp config dir.
   const a = mkRes();
-  await slashRun({ req: mkReq({ line: '/new' }), res: a, gwConfigDir: CFG });
+  await slashRun({ req: mkReq({ line: '/trainer clear' }), res: a, gwConfigDir: CFG });
   assert.equal(a.body.code, 'CONFIRM_REQUIRED');
   const b = mkRes();
-  await slashRun({ req: mkReq({ line: '/new', confirm: a.body.token }), res: b, gwConfigDir: CFG });
+  await slashRun({ req: mkReq({ line: '/trainer clear', confirm: a.body.token }), res: b, gwConfigDir: CFG });
   assert.equal(b.body.ok, true);
 });
 

@@ -305,6 +305,82 @@ test('/goal add|list|show|close persist through goals.mjs, not a session — the
   }
 });
 
+// /new, /reset and /clear (final review, BLOCKING 2) are the discard-shaped
+// mirror of /skill and /goal above: _newReset (tui/slash_dispatcher.mjs)
+// mutates ctx.getMessages()/setMessages()/getSessionId(), state this
+// stateless ctx does not have, yet unconditionally returned "cleared — new
+// conversation". Before this fix they were also gated as destructive
+// (daemon/lib/slash_destructive.mjs's ALWAYS map), so a caller got a
+// confirmation prompt for an effect that could never happen — worse than a
+// false success, it takes a confirmation for nothing. needsLiveSession now
+// runs before that confirm gate is ever reached, so the refusal is immediate
+// and no confirm token is ever issued for these three.
+test('/new, /reset and /clear are refused before dispatch — there is no chat session to discard', async () => {
+  for (const cmd of ['/new', '/reset', '/clear']) {
+    let ran = false;
+    const r = runnerWith(async () => { ran = true; return 'cleared — new conversation'; });
+    const out = await r.run({ line: cmd });
+    assert.equal(out.ok, false, `${cmd} must be refused`);
+    assert.equal(out.code, 'NO_SESSION');
+    assert.equal(ran, false, `${cmd} must not reach the dispatcher — it would falsely report success`);
+  }
+});
+
+test('/clear never reaches the confirm-token dance — needsLiveSession runs first, so no token is issued or consumed', async () => {
+  let ran = false;
+  const r = runnerWith(async () => { ran = true; return 'cleared — new conversation'; });
+  const first = await r.run({ line: '/clear' });
+  assert.equal(first.code, 'NO_SESSION', 'not CONFIRM_REQUIRED — there is nothing worth confirming');
+  assert.equal(first.token, undefined, 'no token is minted for a command that can never succeed');
+  // Supplying a confirm value anyway (e.g. a stale token from another line)
+  // must not smuggle /clear past the guard.
+  const withToken = await r.run({ line: '/clear', confirm: 'anything-at-all' });
+  assert.equal(withToken.ok, false);
+  assert.equal(withToken.code, 'NO_SESSION');
+  assert.equal(ran, false, 'the confirmed run must not report success either');
+});
+
+// --- /trainer clear|unset and /trainer fallback clear|unset are destructive
+//     too (final review, non-blocking) — they wipe config.json's trainer
+//     override with no confirmation at all before this fix, the same
+//     clear/wipe family /config unset and /workflow clear are already gated
+//     in. -----------------------------------------------------------------
+
+test('/trainer clear is answered with a confirmation prompt and does not run', async () => {
+  let ran = false;
+  const r = runnerWith(async () => { ran = true; return '✓ trainer cleared (will mirror chat provider/model)'; });
+  const out = await r.run({ line: '/trainer clear' });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'CONFIRM_REQUIRED');
+  assert.match(out.prompt, /trainer/i);
+  assert.equal(ran, false);
+});
+
+test('/trainer unset is gated the same way as /trainer clear', async () => {
+  let ran = false;
+  const r = runnerWith(async () => { ran = true; });
+  const out = await r.run({ line: '/trainer unset' });
+  assert.equal(out.code, 'CONFIRM_REQUIRED');
+  assert.equal(ran, false);
+});
+
+test('/trainer fallback clear is gated separately from the top-level clear', async () => {
+  let ran = false;
+  const r = runnerWith(async () => { ran = true; return '✓ trainer fallback cleared'; });
+  const out = await r.run({ line: '/trainer fallback clear' });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'CONFIRM_REQUIRED');
+  assert.equal(ran, false);
+});
+
+test('/trainer set and show are not gated — only clear/unset touch disk destructively', async () => {
+  const r = runnerWith(async (cmd, args) => `${cmd} ${args}`);
+  for (const line of ['/trainer show', '/trainer set anthropic:opus', '/trainer fallback anthropic:opus']) {
+    const out = await r.run({ line });
+    assert.equal(out.ok, true, `${line} must not require confirmation`);
+  }
+});
+
 // --- commands that spawn or kill a process on the DAEMON'S OWN HOST must
 //     never reach dispatch over HTTP (fix round 1: /gateway start|stop was
 //     the sibling the first pass of this guard missed — /dashboard was

@@ -83,7 +83,7 @@ export async function _team(args, ctx) {
         if (t === '--agents') agentsCsv = rest[++i] || '';
         else if (t === '--lead') lead = rest[++i] || null;
         else if (t === '--channel') channel = rest[++i] || '';
-        else return `/team error: unknown token "${t}"`;
+        else return _refuse(ctx, `/team error: unknown token "${t}"`);
       }
       // Guided fill: no --agents + a modal available → name prompt, then a
       // multi-pick over registered agents, then a lead pick. Typed form
@@ -95,7 +95,7 @@ export async function _team(args, ctx) {
           if (!teamName) return 'team add: cancelled';
         }
         const all = agentsMod ? agentsMod.listAgents(ctx.cfgDir).map((a) => a.name) : [];
-        if (!all.length) return 'team add: no agents registered yet — add one with /agent add first';
+        if (!all.length) return _refuse(ctx, 'team add: no agents registered yet — add one with /agent add first');
         const chosen = [];
         for (let guard = 0; guard < 50; guard++) {
           const items = all.filter((n) => !chosen.includes(n)).map((n) => ({ id: n, label: n }));
@@ -112,8 +112,8 @@ export async function _team(args, ctx) {
         lead = (lp && typeof lp === 'object' ? lp.id : lp) || chosen[0];
         agentsList = chosen;
       } else {
-        if (!teamName) return 'usage: /team add <name> --agents a,b,c [--lead a] [--channel #x]';
-        if (!agentsCsv) return '/team add: --agents is required';
+        if (!teamName) return _refuse(ctx, 'usage: /team add <name> --agents a,b,c [--lead a] [--channel #x]');
+        if (!agentsCsv) return _refuse(ctx, '/team add: --agents is required');
         agentsList = teamsMod.parseListFlag(agentsCsv);
       }
       const ch = channel ? await teamsMod.resolveSlackChannel(channel, {
@@ -125,7 +125,7 @@ export async function _team(args, ctx) {
       return `✓ added team ${team.name} (lead=${team.lead}, agents=${team.agents.join(',')})`;
     }
     if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
-      if (!tname) return 'usage: /team remove <name>';
+      if (!tname) return _refuse(ctx, 'usage: /team remove <name>');
       if (typeof ctx.openPicker === 'function') {
         const ok = await _promptConfirm(ctx, { title: `Remove team "${tname}"?`, subtitle: 'This cannot be undone. Enter selects · Esc cancels' });
         if (!ok) return `team remove: cancelled — "${tname}" not removed`;
@@ -135,6 +135,11 @@ export async function _team(args, ctx) {
     }
     return `/team: unknown sub "${sub}" — list|show|add|remove`;
   } catch (e) {
-    return `/team error: ${e?.message || e}`;
+    // registerTeam/removeTeam validate (or check existence) BEFORE writing —
+    // a duplicate name, an unregistered --agents entry, or a missing team on
+    // remove all throw here with nothing having changed on disk. Returning
+    // the message directly used to report ok:true over HTTP for exactly the
+    // same reason the explicit refusals above exist.
+    return _refuse(ctx, `/team error: ${e?.message || e}`);
   }
 }
