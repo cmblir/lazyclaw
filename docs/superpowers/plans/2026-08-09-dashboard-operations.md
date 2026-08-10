@@ -12,7 +12,14 @@
 
 - Write path: `dispatchSlash` only. No typed REST route may be added for agents/teams/tasks/config/workflows.
 - Authorization: the existing bearer gate is the only gate. Token holder has full authority; a loopback daemon with no token stays unauthenticated-full-rights. No new permission concept.
-- Envelope, verbatim: success `{ ok: true, lines: string[], data?: object }`; failure `{ ok: false, error: string, code: 'SLASH_ERR' }`; interactive-only `{ ok: false, code: 'TTY_ONLY', error: string, hint: string }`; confirmation `{ ok: false, code: 'CONFIRM_REQUIRED', prompt: string, token: string }`.
+- Envelope, verbatim. Success `{ ok: true, lines: string[], data?: object }`. Failures all carry `{ ok: false, error: string, code }` with one of:
+  - `SLASH_ERR` — the command failed, or the line was not a command.
+  - `CONFIRM_REQUIRED` — destructive; adds `prompt: string, token: string`. The only code a consumer MUST branch on.
+  - `NO_SESSION` — the command mutates conversation state and this call has no session to mutate. Added in Task 3 rather than letting the command report a success that persisted nothing.
+  - `NEEDS_TERMINAL` — the command needs an interactive REPL step (`/setup` and the config wizard items) that HTTP cannot run. Adds `hint: string`. This is what the spec called `TTY_ONLY`; it is named for the condition rather than the terminal capability, and it was found by auditing what each command RETURNS, not by the throw-based gate-coverage test — these commands return `'EXIT'` rather than throwing.
+  - `CONFIG_DIR_MISMATCH` — `cfgDir` disagrees with `POMPOS_CONFIG_DIR`. A wiring bug, not an operator error.
+
+  Consumers (the route in Task 4, the browser client in Task 6) forward every envelope unchanged and branch only on `ok` and `CONFIRM_REQUIRED`; the rest render as errors. A new code must be added to this list in the same commit that introduces it.
 - Confirm tokens: 60000 ms TTL, single-use, bound to the exact `line`.
 - File-size gate: 500 lines per file (`npm run lint:size`). Never add an `ALLOW` entry — split instead.
 - Every new file must be reachable from the published package (`npm run lint:pack`).
@@ -579,7 +586,9 @@ export function makeSlashRunner({ cfgDir, confirmStore, dispatch = _dispatchSlas
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `node --test tests/f-slash-http.test.mjs`
-Expected: PASS, 13 tests. If the gate-coverage test lists commands, add each to a `TTY_ONLY` set in this file and return `{ ok: false, code: 'TTY_ONLY', error, hint }` for them before dispatch — then re-run.
+Expected: PASS, 13 tests.
+
+**TTY_ONLY ruling:** the gate-coverage test decides whether this exists at all. If it names zero commands, do NOT add a `TTY_ONLY` set or envelope branch — unused code is not shipped. If it names any, add exactly those to a `TTY_ONLY` set in this file, return `{ ok: false, code: 'TTY_ONLY', error, hint }` for them before dispatch, and add a test asserting one of them produces that envelope.
 
 - [ ] **Step 5: Verify file sizes and commit**
 
@@ -759,7 +768,208 @@ git commit -m "feat(daemon): POST /slash and GET /slash/commands"
 
 ---
 
-### Task 5: Browser slash client
+### Task 5: SSE streaming for long-running commands
+
+**Files:**
+- Modify: `daemon/routes/slash.mjs`, `daemon/lib/slash_http.mjs`
+- Test: `tests/f-slash-sse.test.mjs`
+
+**Interfaces:**
+- Consumes: `makeSlashRunner` (Task 3); `writeSseHead`, `writeSse` from `daemon/routes/_deps.mjs` (the helpers `POST /conversation` already uses).
+- Produces: `STREAMING: Set<string>` exported from `daemon/lib/slash_http.mjs`; `runner.runStreaming({line, confirm, onLine}) -> Promise<Envelope>`; `runSlashStream(line, {onLine, confirm}) -> Promise<Envelope>` in `web/ui/slash_client.mjs`.
+
+**Why:** without this, a `/loop` or agent run shows nothing until it finishes — the dashboard looks hung for the exact commands that take longest. The buffered path stays for everything else; only members of `STREAMING` upgrade.
+
+- [ ] **Step 1: Write the failing test**
+
+```js
+// tests/f-slash-sse.test.mjs — long commands must show progress as it happens.
+import test, { after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { makeSlashRunner, STREAMING } from '../daemon/lib/slash_http.mjs';
+import { makeConfirmStore } from '../daemon/lib/confirm_tokens.mjs';
+
+const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-slash-sse-'));
+process.env.POMPOS_CONFIG_DIR = CFG;
+after(() => fs.rmSync(CFG, { recursive: true, force: true }));
+
+test('STREAMING names the commands that can run long', () => {
+  assert.ok(STREAMING.has('/loop'), '/loop runs until stopped');
+  assert.ok(STREAMING.size > 0);
+  assert.equal(STREAMING.has('/status'), false, 'instant commands stay buffered');
+});
+
+test('runStreaming delivers each line as it is produced, not at the end', async () => {
+  const seen = [];
+  let resolveSecond;
+  const gate = new Promise((r) => { resolveSecond = r; });
+  const runner = makeSlashRunner({
+    cfgDir: CFG, confirmStore: makeConfirmStore(),
+    dispatch: async (_c, _a, _ctx, write) => {
+      write('step one\n');
+      // The test only proceeds once the first line has been observed, which
+      // is impossible if lines are buffered until the handler returns.
+      await gate;
+      write('step two\n');
+      return 'finished';
+    },
+  });
+  const done = runner.runStreaming({
+    line: '/loop',
+    onLine: (l) => { seen.push(l); if (seen.length === 1) resolveSecond(); },
+  });
+  const out = await done;
+  assert.deepEqual(seen, ['step one\n', 'step two\n', 'finished']);
+  assert.deepEqual(out, { ok: true, lines: ['step one\n', 'step two\n', 'finished'] });
+});
+
+test('a streaming command still honours the confirmation gate', async () => {
+  let ran = false;
+  const runner = makeSlashRunner({
+    cfgDir: CFG, confirmStore: makeConfirmStore(),
+    dispatch: async () => { ran = true; return 'x'; },
+  });
+  const out = await runner.runStreaming({ line: '/clear', onLine: () => {} });
+  assert.equal(out.code, 'CONFIRM_REQUIRED');
+  assert.equal(ran, false, 'confirmation precedes streaming, same as the buffered path');
+});
+
+test('a thrown handler ends the stream with an error envelope', async () => {
+  const runner = makeSlashRunner({
+    cfgDir: CFG, confirmStore: makeConfirmStore(),
+    dispatch: async (_c, _a, _ctx, write) => { write('partial\n'); throw new Error('boom'); },
+  });
+  const seen = [];
+  const out = await runner.runStreaming({ line: '/loop', onLine: (l) => seen.push(l) });
+  assert.deepEqual(seen, ['partial\n'], 'what was produced before the failure still reached the client');
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'SLASH_ERR');
+  assert.match(out.error, /boom/);
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `node --test tests/f-slash-sse.test.mjs`
+Expected: FAIL — `STREAMING` is not exported.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Add to `daemon/lib/slash_http.mjs`:
+
+```js
+// Commands that can run long enough that buffering their output would make
+// the dashboard look hung. Everything else answers in one response.
+export const STREAMING = new Set(['/loop', '/agent', '/team', '/workflow']);
+```
+
+and, inside the object `makeSlashRunner` returns, a sibling of `run`:
+
+```js
+    /**
+     * Same contract as run(), but each line is handed to onLine the moment it
+     * is produced. The envelope still carries the full list so a caller that
+     * missed the start is not left with a partial record.
+     */
+    async runStreaming({ line, confirm, onLine } = {}) {
+      const raw = typeof line === 'string' ? line.trim() : '';
+      if (!raw.startsWith('/')) return fail('a slash command is required, e.g. /status');
+      const { cmd, args } = parseSlashLine(raw);
+      let autoApprove = false;
+      const prompt = destructivePrompt(cmd, args);
+      if (prompt) {
+        if (!confirmStore.redeem(confirm, raw)) {
+          return { ok: false, code: 'CONFIRM_REQUIRED', prompt, token: confirmStore.issue(raw) };
+        }
+        autoApprove = true;
+      }
+      const lines = [];
+      const emit = (chunk) => { const s = String(chunk); lines.push(s); onLine?.(s); };
+      const ctx = buildHttpCtx({ cfgDir, autoApprove });
+      let result;
+      try {
+        result = await dispatch(cmd, args, ctx, emit);
+      } catch (err) {
+        return fail(err?.message || err);
+      }
+      if (typeof result === 'string' && result !== 'EXIT' && result !== 'NEW' && result.length) emit(result);
+      return { ok: true, lines };
+    },
+```
+
+In `daemon/routes/slash.mjs`, upgrade when the client asks for it AND the command is in `STREAMING`:
+
+```js
+  const { cmd } = parseSlashLine(String(body?.line || '').trim());
+  const wantsStream = /text\/event-stream/.test(String(req.headers.accept || ''));
+  if (wantsStream && STREAMING.has(cmd)) {
+    writeSseHead(res);
+    const out = await runner.runStreaming({
+      line: body.line, confirm: body.confirm,
+      onLine: (l) => writeSse(res, 'line', { text: l }),
+    });
+    writeSse(res, 'done', out);
+    return res.end();
+  }
+```
+
+Add `runSlashStream` to `web/ui/slash_client.mjs`:
+
+```js
+/**
+ * Run a command that may take a while, delivering lines as they arrive.
+ * Falls back to the buffered result if the server did not upgrade.
+ */
+export async function runSlashStream(line, { onLine, confirm } = {}) {
+  const body = confirm ? { line, confirm } : { line };
+  const res = await apiRaw('/slash', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'text/event-stream' },
+    body: JSON.stringify(body),
+  });
+  if (!/text\/event-stream/.test(res.headers.get('content-type') || '')) return res.json();
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let final = { ok: false, error: 'stream ended without a result', code: 'SLASH_ERR' };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const frames = buf.split('\n\n');
+    buf = frames.pop() || '';
+    for (const f of frames) {
+      const ev = /event: (\w+)/.exec(f)?.[1];
+      const data = /data: (.*)/.exec(f)?.[1];
+      if (!data) continue;
+      const payload = JSON.parse(data);
+      if (ev === 'line') onLine?.(payload.text);
+      else if (ev === 'done') final = payload;
+    }
+  }
+  return final;
+}
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `node --test tests/f-slash-sse.test.mjs && node --test tests/f-slash-http.test.mjs tests/f-slash-routes.test.mjs`
+Expected: PASS all — the buffered path must not regress.
+
+- [ ] **Step 5: Commit**
+
+```bash
+npm run lint:size
+git add daemon/lib/slash_http.mjs daemon/routes/slash.mjs web/ui/slash_client.mjs tests/f-slash-sse.test.mjs
+git commit -m "feat(daemon): stream long-running slash commands over SSE"
+```
+
+---
+
+### Task 6: Browser slash client
 
 **Files:**
 - Create: `web/ui/slash_client.mjs`
@@ -897,14 +1107,14 @@ git commit -m "feat(dashboard): browser client for the slash write path"
 
 ---
 
-### Task 6: Confirm dialog
+### Task 7: Confirm dialog
 
 **Files:**
 - Create: `web/ui/confirm_dialog.mjs`
 - Test: `tests/f-confirm-dialog.test.mjs`
 
 **Interfaces:**
-- Consumes: `runSlash` (Task 5); `openModal`, `closeModal` from `web/ui/modal.mjs` (existing, already used by `web/ui/panels/tasks.mjs`); `el` from `web/ui/dom.mjs`.
+- Consumes: `runSlash` (Task 6); `openModal`, `closeModal` from `web/ui/modal.mjs` (existing, already used by `web/ui/panels/tasks.mjs`); `el` from `web/ui/dom.mjs`.
 - Produces: `runSlashConfirmed(line, { confirm: askFn }) -> Promise<Envelope>` — runs a line and, on `CONFIRM_REQUIRED`, asks via `askFn(prompt) -> Promise<boolean>` and retries with the token. `askFn` defaults to a modal.
 
 Every panel calls `runSlashConfirmed`, never `runSlash` directly, so no panel can forget the confirmation step.
@@ -1043,7 +1253,7 @@ git commit -m "feat(dashboard): one confirm flow shared by every destructive act
 
 ---
 
-### Task 7: Panel write actions
+### Task 8: Panel write actions
 
 **Files:**
 - Modify: `web/ui/panels/agents.mjs`, `web/ui/panels/teams.mjs`, `web/ui/panels/tasks.mjs`, `web/ui/panels/config.mjs`, `web/ui/panels/workflows.mjs`
@@ -1051,7 +1261,7 @@ git commit -m "feat(dashboard): one confirm flow shared by every destructive act
 - Test: `tests/f-slash-actions.test.mjs`
 
 **Interfaces:**
-- Consumes: `runSlashConfirmed` (Task 6).
+- Consumes: `runSlashConfirmed` (Task 7).
 - Produces: `web/ui/slash_actions.mjs` exporting pure composers used by the panels:
   - `agentCreate({name, role, model}) -> string`
   - `agentRemove(name) -> string`
@@ -1212,14 +1422,14 @@ git commit -m "feat(dashboard): write actions on the agents, teams, tasks, confi
 
 ---
 
-### Task 8: Chat slash routing and autocomplete
+### Task 9: Chat slash routing and autocomplete
 
 **Files:**
 - Modify: `web/ui/panels/chat.mjs`
 - Test: `tests/f-chat-slash-routing.test.mjs`
 
 **Interfaces:**
-- Consumes: `runSlashConfirmed` (Task 6), `fetchCommands` (Task 5).
+- Consumes: `runSlashConfirmed` (Task 7), `fetchCommands` (Task 6).
 - Produces: `isSlashLine(text) -> boolean` and `filterCommands(all, prefix) -> Array<{name, description}>`, both exported from `web/ui/panels/chat.mjs` so the routing rule is testable without a DOM.
 
 - [ ] **Step 1: Write the failing test**
@@ -1322,7 +1532,7 @@ git commit -m "feat(dashboard): route slash input to the dispatcher, with autoco
 
 ---
 
-### Task 9: The terminal-zero E2E
+### Task 10: The terminal-zero E2E
 
 **Files:**
 - Create: `tests/phaseI-dashboard-operations.spec.ts`
@@ -1461,13 +1671,13 @@ git commit -m "test(dashboard): terminal-zero operating loop as the phase-2 done
 
 ---
 
-### Task 10: Documentation
+### Task 11: Documentation
 
 **Files:**
 - Modify: `README.md` (the `## The dashboard` section), `README.ko.md` (the `## 대시보드` section), `CHANGELOG.md` (Unreleased)
 
 **Interfaces:**
-- Consumes: the shipped behaviour of Tasks 1-9.
+- Consumes: the shipped behaviour of Tasks 1-10.
 
 - [ ] **Step 1: Update the dashboard section in both READMEs**
 
@@ -1501,8 +1711,656 @@ git commit -m "docs: dashboard operations in the READMEs and CHANGELOG"
 
 ## Self-Review
 
-**Spec coverage:** architecture → Tasks 3-4; envelope → Task 3; confirm tokens → Tasks 1, 3, 4, 6; capability gating → Task 3 (gate-coverage test); destructive actions → Tasks 2, 6; panels → Task 7; chat → Task 8; done bar → Task 9; unit tests → Tasks 1-8; file map → all tasks. `data` on the envelope is declared optional in the spec and no task populates it, which matches "introduced per-command as panels need structure" — the panels here need only `lines`.
+**Spec coverage:** architecture → Tasks 3-4; envelope → Task 3; confirm tokens → Tasks 1, 3, 4, 6; capability gating → Task 3 (gate-coverage test); destructive actions → Tasks 2, 6; panels → Task 7; chat → Task 8; done bar → Task 9; unit tests → Tasks 1-10; file map → all tasks. `data` on the envelope is declared optional in the spec and no task populates it, which matches "introduced per-command as panels need structure" — the panels here need only `lines`.
 
 **Placeholder scan:** no TBD/TODO; every code step carries real code; Task 7 Step 5 and Task 9 Step 3 describe repetitive DOM edits with one complete worked example each rather than repeating it five times.
 
 **Type consistency:** `makeConfirmStore` → `{issue, redeem, size}` used identically in Tasks 3-4. `destructivePrompt(cmd, args)` returns `string|null`, matching Task 3's `if (prompt)`. `runSlash` → envelope, consumed by `runSlashConfirmed`, consumed by panels and chat. `buildHttpCtx({cfgDir, autoApprove})` is called in exactly that shape in Task 3's implementation and tests.
+
+---
+
+### Task 12: `/config set` and `/config unset` as real slash commands
+
+**Execute this task BEFORE Task 8** — Task 8's config composers depend on the grammar it creates. It is numbered 12 only so Tasks 1-2, already implemented, keep their numbers.
+
+**Files:**
+- Modify: `tui/config_picker.mjs` (`runConfigSlash`)
+- Test: `tests/f-config-slash-set.test.mjs`
+
+**Interfaces:**
+- Consumes: `readConfig`/`writeConfig` off the slash `ctx`; `validateConfig` from `config-validate.mjs`; `PROVIDERS` from `providers/registry.mjs`.
+- Produces: `/config set <key> <value>` and `/config unset <key>` accepted by the existing `/config` handler, returning a human string.
+
+**Why:** `runConfigSlash(_args, ctx, handlers)` ignores its arguments and only opens a picker. Over HTTP there is no picker, so it sets `ctx.requestSetup` and returns `'EXIT'` — which the adapter collapses to `{ok: true, lines: []}`. A dashboard config edit would report success and change nothing. Rather than give the dashboard a grammar the CLI lacks, the command learns to take arguments; the no-argument picker path is untouched.
+
+`daemon/routes/config.mjs`'s `configKeyPut` is the reference for the rules this must match: nested cargo is refused, the whole config is re-validated before persisting, and `api-key` is masked in the echo.
+
+- [ ] **Step 1: Write the failing test**
+
+```js
+// tests/f-config-slash-set.test.mjs — /config learns to take arguments.
+//
+// Before this, `/config set provider claude-cli` opened a picker and ignored
+// every argument. Over HTTP, where there is no picker, it reported success and
+// changed nothing — the worst failure shape available: silent.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { runConfigSlash } from '../tui/config_picker.mjs';
+
+// A ctx with no openPicker is exactly what the HTTP adapter supplies.
+function mkCtx(initial = {}) {
+  let cfg = { ...initial };
+  return {
+    readConfig: () => ({ ...cfg }),
+    writeConfig: (next) => { cfg = { ...next }; },
+    _read: () => cfg,
+  };
+}
+
+test('set writes the key and reports what it stored', async () => {
+  const ctx = mkCtx({ provider: 'claude-cli' });
+  const out = await runConfigSlash('set model opus', ctx, new Map());
+  assert.match(String(out), /model/);
+  assert.equal(ctx._read().model, 'opus');
+});
+
+test('unset deletes the key', async () => {
+  const ctx = mkCtx({ provider: 'claude-cli', model: 'opus' });
+  await runConfigSlash('unset model', ctx, new Map());
+  assert.equal('model' in ctx._read(), false);
+});
+
+test('a numeric-looking value is stored as a number, not a string', async () => {
+  // config.json is typed; storing "4096" where a number belongs fails
+  // validation later, far from the command that caused it.
+  const ctx = mkCtx({ provider: 'claude-cli' });
+  await runConfigSlash('set maxTokens 4096', ctx, new Map());
+  assert.strictEqual(ctx._read().maxTokens, 4096);
+  await runConfigSlash('set someFlag true', ctx, new Map());
+  assert.strictEqual(ctx._read().someFlag, true);
+  await runConfigSlash('set note hello', ctx, new Map());
+  assert.strictEqual(ctx._read().note, 'hello');
+});
+
+test('a quoted value keeps its spaces', async () => {
+  const ctx = mkCtx({ provider: 'claude-cli' });
+  await runConfigSlash('set note "hello world"', ctx, new Map());
+  assert.equal(ctx._read().note, 'hello world');
+});
+
+test('nested cargo is refused, exactly as the daemon route refuses it', async () => {
+  // daemon/routes/config.mjs sends customProviders / rates / authProfiles to
+  // dedicated endpoints so schema validation cannot be bypassed. The slash
+  // path must not become the bypass.
+  const ctx = mkCtx({ provider: 'claude-cli' });
+  for (const key of ['customProviders', 'rates', 'authProfiles']) {
+    const out = await runConfigSlash(`set ${key} x`, ctx, new Map());
+    assert.match(String(out), /dedicated endpoint|not settable/i, `${key} must be refused`);
+    assert.equal(key in ctx._read(), false);
+  }
+});
+
+test('a write that would break the config is rejected and nothing is persisted', async () => {
+  const ctx = mkCtx({ provider: 'claude-cli' });
+  const out = await runConfigSlash('set provider not-a-real-provider', ctx, new Map());
+  assert.match(String(out), /invalid|unknown|not/i);
+  assert.equal(ctx._read().provider, 'claude-cli', 'the previous value survives a rejected write');
+});
+
+test('an api-key value is not echoed back in the clear', async () => {
+  const ctx = mkCtx({ provider: 'claude-cli' });
+  const out = await runConfigSlash('set api-key sk-ant-SECRETVALUE', ctx, new Map());
+  assert.doesNotMatch(String(out), /SECRETVALUE/, 'the reply is rendered into a browser and a terminal');
+  assert.equal(ctx._read()['api-key'], 'sk-ant-SECRETVALUE', 'but the real value is stored');
+});
+
+test('usage is reported for a malformed line, and nothing is written', async () => {
+  const ctx = mkCtx({ provider: 'claude-cli' });
+  for (const line of ['set', 'set onlykey', 'unset']) {
+    const out = await runConfigSlash(line, ctx, new Map());
+    assert.match(String(out), /usage/i, `"${line}" must explain itself`);
+  }
+  assert.deepEqual(ctx._read(), { provider: 'claude-cli' });
+});
+
+test('no arguments still opens the picker — the existing behaviour is untouched', async () => {
+  let opened = false;
+  const ctx = { ...mkCtx({}), openPicker: async () => { opened = true; return { id: 'CANCEL' }; } };
+  await runConfigSlash('', ctx, new Map());
+  assert.equal(opened, true);
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `node --test tests/f-config-slash-set.test.mjs`
+Expected: FAIL — every argument is ignored, so the set/unset assertions fail.
+
+- [ ] **Step 3: Write minimal implementation**
+
+At the top of `runConfigSlash`, before the picker path, parse an argument line. Reuse `splitWhitespace` from `tui/slash_helpers.mjs` (it already handles quoted values) rather than writing a second tokenizer.
+
+```js
+// `/config set <key> <value>` / `/config unset <key>`. Added because the
+// dashboard needs to change a setting and this command ignored its arguments
+// entirely — over HTTP, where there is no picker, it reported success and
+// wrote nothing. The rules mirror daemon/routes/config.mjs's configKeyPut:
+// nested cargo goes to its dedicated endpoint, the whole config is
+// re-validated before it is persisted, and api-key is never echoed.
+const NESTED = new Set(['customProviders', 'rates', 'authProfiles']);
+const USAGE = 'usage: /config set <key> <value>  ·  /config unset <key>  ·  /config with no arguments opens the picker';
+
+// Values arrive as text but config.json is typed.
+function coerce(raw) {
+  if (raw === 'true') return true;
+  if (raw === 'false') return false;
+  if (raw === 'null') return null;
+  if (raw !== '' && !Number.isNaN(Number(raw))) return Number(raw);
+  return raw;
+}
+```
+
+and inside `runConfigSlash`, first thing:
+
+```js
+  const tokens = splitWhitespace(String(_args || '').trim());
+  const verb = (tokens[0] || '').toLowerCase();
+  if (verb === 'set' || verb === 'unset') {
+    if (typeof ctx.readConfig !== 'function' || typeof ctx.writeConfig !== 'function') {
+      return 'config: this session cannot write config';
+    }
+    const key = tokens[1];
+    if (!key || (verb === 'set' && tokens.length < 3)) return USAGE;
+    if (NESTED.has(key)) {
+      return `config: "${key}" is not settable here — use the dedicated endpoint (POST /providers · PUT /rates/<key> · authProfiles via CLI)`;
+    }
+    const cfg = ctx.readConfig();
+    if (verb === 'unset') delete cfg[key];
+    else cfg[key] = coerce(tokens.slice(2).join(' '));
+    const v = validateConfig(cfg, PROVIDERS);
+    if (!v.ok) return `config: invalid — ${(v.errors || []).join('; ') || 'validation failed'}`;
+    ctx.writeConfig(cfg);
+    if (verb === 'unset') return `config: unset ${key}`;
+    const shown = key === 'api-key' ? maskApiKey(String(cfg[key])) : JSON.stringify(cfg[key]);
+    return `config: set ${key} = ${shown}`;
+  }
+```
+
+Add the imports this needs (`splitWhitespace`, `validateConfig`, `PROVIDERS`, `maskApiKey`) alongside the file's existing imports. Check the exact export names before importing — `maskApiKey` comes from `providers/registry.mjs`.
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `node --test tests/f-config-slash-set.test.mjs && node --test tests/*.test.mjs`
+Expected: PASS. The REPL's own `/config` tests must stay green — the no-argument path is unchanged.
+
+- [ ] **Step 5: Commit**
+
+```bash
+npm run lint:size
+git add tui/config_picker.mjs tests/f-config-slash-set.test.mjs
+git commit -m "feat(config): /config set and /config unset take arguments"
+```
+
+---
+
+---
+
+### Task 13: a read-merge-write must not treat an unreadable config as an empty one
+
+**Execute after Task 3.** Found by Task 3's corrupt-config audit; the user ruled it fixed at the source rather than guarded in the adapter, so both the terminal and the dashboard get the fix.
+
+**Files:**
+- Modify: `tui/slash_trainer.mjs:116, 139, 164`; `tui/slash_dispatcher.mjs:1014`
+- Test: `tests/f-config-merge-safety.test.mjs`
+
+**Interfaces:**
+- Consumes: nothing new.
+- Produces: nothing new. Behaviour change only.
+
+**The defect.** Four sites do a read-merge-write to preserve unrelated config keys:
+
+```js
+try { diskCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch { /* fresh */ }
+```
+
+The comment above it says "Read-merge-write so unrelated cfg keys survive". The catch defeats exactly that: it treats a file it could not PARSE the same as a file that does not EXIST, starts from `{}`, and writes back only the block it was setting. Reproduced:
+
+```
+before: { "provider": "claude-cli", "maxTokens": 4096, BROKEN
+$ /trainer set claude-cli
+after:  { "trainer": { "provider": "claude-cli" } }        → reported "✓ trainer → claude-cli"
+```
+
+The operator's settings are gone and the command said it succeeded. A missing file genuinely is "fresh"; an unparseable one is a file whose contents we must not discard — a single misplaced comma is recoverable until something overwrites it.
+
+This is a pre-existing bug that the terminal REPL has too. The dashboard is what makes it a click away, which is why it is being fixed now.
+
+- [ ] **Step 1: Write the failing test**
+
+```js
+// tests/f-config-merge-safety.test.mjs
+//
+// Four commands preserve unrelated config keys by reading, merging and writing
+// back. Each swallowed a parse failure and started from {} — so a corrupt
+// config.json was not preserved, it was REPLACED with just the block being
+// set, and the command reported success. A missing file is fresh; an
+// unreadable one is not ours to discard.
+import test, { after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const dirs = [];
+function tmpCfg(contents) {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-merge-'));
+  dirs.push(d);
+  if (contents !== undefined) fs.writeFileSync(path.join(d, 'config.json'), contents);
+  return d;
+}
+after(() => { for (const d of dirs) fs.rmSync(d, { recursive: true, force: true }); });
+
+const CORRUPT = '{ "provider": "claude-cli", "maxTokens": 4096, BROKEN';
+
+function mkCtx(cfgDir) {
+  return { cfgDir, cfg: {}, readConfig: () => ({}), writeConfig: () => {} };
+}
+
+test('/trainer set refuses to overwrite a config it could not parse', async () => {
+  const dir = tmpCfg(CORRUPT);
+  const { _trainer } = await import('../tui/slash_trainer.mjs');
+  const out = await _trainer('set claude-cli', mkCtx(dir));
+  assert.doesNotMatch(String(out), /^✓/, 'must not claim success');
+  assert.match(String(out), /config\.json/, 'the message must name the file the operator has to fix');
+  assert.equal(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'), CORRUPT,
+    'the unreadable file is left exactly as it was — a misplaced comma is recoverable until something overwrites it');
+});
+
+test('/personality use refuses the same way', async () => {
+  const dir = tmpCfg(CORRUPT);
+  const { dispatchSlash } = await import('../tui/slash_dispatcher.mjs');
+  const out = await dispatchSlash('/personality', 'use anything', mkCtx(dir), () => {});
+  assert.doesNotMatch(String(out), /^✓/);
+  assert.equal(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'), CORRUPT);
+});
+
+test('a MISSING config is still treated as fresh, and the write lands', async () => {
+  // The distinction is the whole point: absent means start clean, unreadable
+  // means stop. Conflating them is what caused the loss.
+  const dir = tmpCfg(undefined);
+  const { _trainer } = await import('../tui/slash_trainer.mjs');
+  const out = await _trainer('set claude-cli', mkCtx(dir));
+  assert.match(String(out), /^✓/, 'no file to protect — this must still work');
+  const written = JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'));
+  assert.equal(written.trainer.provider, 'claude-cli');
+});
+
+test('a VALID config keeps its unrelated keys, which is what the merge is for', async () => {
+  const dir = tmpCfg(JSON.stringify({ provider: 'claude-cli', maxTokens: 4096 }));
+  const { _trainer } = await import('../tui/slash_trainer.mjs');
+  await _trainer('set claude-cli', mkCtx(dir));
+  const written = JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8'));
+  assert.equal(written.maxTokens, 4096, 'the unrelated key survives');
+  assert.equal(written.provider, 'claude-cli');
+  assert.equal(written.trainer.provider, 'claude-cli');
+});
+```
+
+If `_trainer` is not exported, export it for the test rather than reaching through `dispatchSlash` for every case — the other three call sites live in the same function family and a direct handle keeps the test honest about which one it is exercising.
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `node --test tests/f-config-merge-safety.test.mjs`
+Expected: FAIL — the corrupt file is replaced and the command returns a `✓` string.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Add one shared helper and use it at all four sites. Put it in `tui/slash_helpers.mjs` (already imported by the dispatcher and available to `slash_trainer.mjs`):
+
+```js
+/**
+ * Read config.json for a read-merge-write.
+ *
+ * Returns `{ cfg }` when the file parsed or is genuinely absent, and
+ * `{ error }` when it exists but could not be read — those are NOT the same
+ * thing. Callers used to swallow both into `{}` and write back only the block
+ * they were setting, which silently replaced an operator's whole config
+ * because of one misplaced comma.
+ */
+export function readConfigForMerge(cfgPath, fs) {
+  let raw;
+  try {
+    raw = fs.readFileSync(cfgPath, 'utf8');
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return { cfg: {} };   // genuinely fresh
+    return { error: `config.json at ${cfgPath} could not be read (${err?.code || err?.message}) — not overwriting it` };
+  }
+  try {
+    return { cfg: JSON.parse(raw) };
+  } catch (err) {
+    return { error: `config.json at ${cfgPath} is not valid JSON (${err?.message}) — refusing to overwrite it; fix the file, or move it aside to start fresh` };
+  }
+}
+```
+
+At each of the four sites, replace the swallowing read with:
+
+```js
+    const merged = readConfigForMerge(cfgPath, fs);
+    if (merged.error) return merged.error;
+    const diskCfg = merged.cfg;
+```
+
+Keep each site's existing merge and write untouched.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `node --test tests/f-config-merge-safety.test.mjs && node --test tests/*.test.mjs`
+Expected: PASS. Existing trainer and personality tests must stay green — the valid-config and missing-config paths are unchanged.
+
+- [ ] **Step 5: Commit**
+
+```bash
+npm run lint:size
+git add tui/slash_helpers.mjs tui/slash_trainer.mjs tui/slash_dispatcher.mjs tests/f-config-merge-safety.test.mjs
+git commit -m "fix(config): never treat an unreadable config.json as an empty one"
+```
+
+---
+
+### Task 14: the three slash commands the panels need
+
+**Execute BEFORE finishing Task 8** — the panel composers depend on this grammar.
+
+**Files:**
+- Modify: `tui/slash_dispatcher.mjs` (`_agent`'s `add` branch, `_team`), and add a `/workflow` handler
+- Test: `tests/f-slash-panel-grammar.test.mjs`
+
+**Interfaces:**
+- Produces: `/workflow run|resume|clear <name>`, `/team member add|remove <team> <agent>`, and `--provider`/`--model` flags on `/agent add`.
+
+**Why:** Task 8 found the slash grammar narrower than the REST surface the dashboard already had. Three composers in its brief named commands that do not exist, so the dashboard would either lose capability it has today (creating an agent with a provider and model) or need a second write path. The user ruled: extend the dispatcher, so both surfaces gain and the single write path holds.
+
+**Everything these wrap already exists** — this task adds a slash surface, not new behaviour:
+- `commands/workflow.mjs`'s `dispatch` already implements `run`, `resume`, `clear`, `inspect`, `validate`, `graph` (lines 271-330).
+- `teams.mjs` exports `patchTeam(name, patch, configDir)`, `getTeam`, `listTeams`.
+- `agents.mjs`'s `registerAgent({name, role, provider = 'claude-cli', model = '', …})` already takes both.
+
+**Follow the existing flag-parsing precedent.** `/team add` parses `--agents a,b --lead x` at `tui/slash_dispatcher.mjs:578-579` with a simple token loop. Match that style rather than inventing a parser.
+
+- [ ] **Step 1: Write the failing test**
+
+```js
+// tests/f-slash-panel-grammar.test.mjs — the grammar the dashboard panels compose.
+//
+// Task 8 discovered its composers named commands that did not exist: an agent
+// could not be given a provider or model, a team member could not be added, and
+// /workflow was not a slash command at all. The dashboard would have lost
+// capability the REST surface already had. These pin the grammar the panels
+// speak, so a composer and its command cannot drift apart again.
+import test, { after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { dispatchSlash, SLASH_HANDLERS } from '../tui/slash_dispatcher.mjs';
+
+const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-grammar-'));
+process.env.POMPOS_CONFIG_DIR = CFG;
+after(() => fs.rmSync(CFG, { recursive: true, force: true }));
+
+const ctx = () => ({ cfgDir: CFG, cfg: {}, readConfig: () => ({}), writeConfig: () => {} });
+
+test('/agent add takes --provider and --model', async () => {
+  await dispatchSlash('/agent', 'add scout --provider anthropic --model opus researcher', ctx(), () => {});
+  const { getAgent } = await import('../agents.mjs');
+  const a = getAgent('scout', CFG);
+  assert.equal(a.provider, 'anthropic');
+  assert.equal(a.model, 'opus');
+  assert.match(a.role, /researcher/, 'the trailing free text is still the role');
+});
+
+test('/agent add without the flags keeps its existing defaults', async () => {
+  await dispatchSlash('/agent', 'add plain just a role', ctx(), () => {});
+  const { getAgent } = await import('../agents.mjs');
+  const a = getAgent('plain', CFG);
+  assert.equal(a.provider, 'claude-cli', 'unchanged default');
+  assert.equal(a.role, 'just a role');
+});
+
+test('/team member add and remove change membership', async () => {
+  await dispatchSlash('/agent', 'add m1', ctx(), () => {});
+  await dispatchSlash('/agent', 'add m2', ctx(), () => {});
+  await dispatchSlash('/team', 'add crew --agents m1', ctx(), () => {});
+
+  await dispatchSlash('/team', 'member add crew m2', ctx(), () => {});
+  const { getTeam } = await import('../teams.mjs');
+  assert.deepEqual(getTeam('crew', CFG).agents.sort(), ['m1', 'm2']);
+
+  await dispatchSlash('/team', 'member remove crew m2', ctx(), () => {});
+  assert.deepEqual(getTeam('crew', CFG).agents, ['m1']);
+});
+
+test('/team member reports a missing team or agent instead of silently doing nothing', async () => {
+  const a = await dispatchSlash('/team', 'member add nosuchteam m1', ctx(), () => {});
+  assert.match(String(a), /nosuchteam/, 'names what was not found');
+  const b = await dispatchSlash('/team', 'member add crew nosuchagent', ctx(), () => {});
+  assert.match(String(b), /nosuchagent/);
+});
+
+test('/workflow is a registered command with run, resume and clear', async () => {
+  assert.ok(SLASH_HANDLERS.has('/workflow'), 'the panels compose /workflow lines');
+  const usage = await dispatchSlash('/workflow', '', ctx(), () => {});
+  for (const sub of ['run', 'resume', 'clear']) {
+    assert.match(String(usage), new RegExp(sub), `usage must mention ${sub}`);
+  }
+});
+
+test('/workflow names an unknown workflow rather than reporting success', async () => {
+  const out = await dispatchSlash('/workflow', 'run nosuchworkflow', ctx(), () => {});
+  assert.match(String(out), /nosuchworkflow/);
+  assert.doesNotMatch(String(out), /^✓/, 'a failure must not read as success');
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `node --test tests/f-slash-panel-grammar.test.mjs`
+Expected: FAIL — `/workflow` is not registered, `--provider`/`--model` are swallowed into the role text, and `member` is an unknown `/team` subcommand.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Three changes, each following an existing pattern in the same file.
+
+`_agent`'s `add` branch — parse the two flags out of `rest` before the remainder becomes the role, mirroring `/team add`'s loop at :578:
+
+```js
+      // --provider/--model so the dashboard can create an agent as fully as the
+      // REST route it replaced. Parsed out first; whatever remains is the role,
+      // which is how this command has always read its trailing free text.
+      let provider, model;
+      const roleWords = [];
+      for (let i = 1; i < rest.length; i += 1) {
+        if (rest[i] === '--provider') provider = rest[++i];
+        else if (rest[i] === '--model') model = rest[++i];
+        else roleWords.push(rest[i]);
+      }
+      const roleText = roleWords.join(' ').trim();
+```
+
+and pass `provider`/`model` through to `registerAgent` only when set, so the existing defaults stand.
+
+`_team` — a `member` subcommand using `patchTeam`:
+
+```js
+    if (sub === 'member') {
+      const [action, teamName, agentName] = rest.slice(1);
+      if (!/^(add|remove|rm)$/.test(action || '') || !teamName || !agentName) {
+        return 'usage: /team member add|remove <team> <agent>';
+      }
+      const team = teamsMod.getTeam(teamName, ctx.cfgDir);
+      if (!team) return `team not found: ${teamName}`;
+      const { getAgent } = await import('../agents.mjs');
+      if (action === 'add' && !getAgent(agentName, ctx.cfgDir)) return `agent not found: ${agentName}`;
+      const next = action === 'add'
+        ? [...new Set([...(team.agents || []), agentName])]
+        : (team.agents || []).filter((a) => a !== agentName);
+      teamsMod.patchTeam(teamName, { agents: next }, ctx.cfgDir);
+      return `team ${teamName}: ${action === 'add' ? 'added' : 'removed'} ${agentName}`;
+    }
+```
+
+`/workflow` — a handler delegating to the CLI implementation that already exists:
+
+```js
+// /workflow — a slash surface over commands/workflow.mjs, which already
+// implements these. Added so the dashboard's workflows panel composes a real
+// command instead of calling a REST route directly; the CLI gains the same
+// spelling for free.
+async function _workflow(args, ctx) {
+  const [sub, ...rest] = splitWhitespace(String(args || '').trim());
+  if (!/^(run|resume|clear)$/.test(sub || '')) {
+    return 'usage: /workflow run|resume|clear <name>';
+  }
+  const name = rest[0];
+  if (!name) return `usage: /workflow ${sub} <name>`;
+  const mod = await import('../commands/workflow.mjs');
+  return mod.dispatch(sub, [name]);
+}
+```
+
+Register it beside the other entries in `SLASH_HANDLERS`, and add it to `tui/slash_commands.mjs` so `/help` and the dashboard autocomplete list it.
+
+**Then update `daemon/lib/slash_destructive.mjs`:** `/workflow clear` discards saved progress and `/team member remove` changes membership. Decide which need confirmation and add them, with a prompt naming the target — the table is the only thing that makes the dashboard ask.
+
+**And check `daemon/lib/slash_http.mjs`'s `STREAMING` set:** `/workflow run` can run long. If it streams through `write`, add it; if it does not, say why in your report.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `node --test tests/f-slash-panel-grammar.test.mjs && node --test tests/*.test.mjs`
+Expected: PASS. Existing `/agent` and `/team` tests must stay green — the flags are additive and the role text still works as before.
+
+- [ ] **Step 5: Commit**
+
+```bash
+npm run lint:size
+git add tui/slash_dispatcher.mjs tui/slash_commands.mjs daemon/lib/slash_destructive.mjs tests/f-slash-panel-grammar.test.mjs
+git commit -m "feat(slash): /workflow, /team member, and provider/model flags on /agent add"
+```
+
+---
+
+### Task 15: a bound baseUrl must not be erased by an implicit undefined
+
+**Files:**
+- Modify: `mas/provider_adapters.mjs:83` (and `agent_turn.mjs:261` if that is the cleaner seam)
+- Test: `tests/f-provider-baseurl-binding.test.mjs`
+
+**Why.** Found while scripting the E2E. `_openAICompatAdapter` binds a registered provider's endpoint:
+
+```js
+callOnce: (opts = {}) => base.callOnce({ baseUrl: info.baseUrl, ...opts }),
+```
+
+The comment says "an explicit baseUrl in the call still wins". An IMPLICIT one wins too: `mas/agent_turn.mjs:261` forwards `baseUrl` unconditionally, and it is `undefined` whenever the caller did not set one. The spread then overwrites the bound value with `undefined`, so the request falls back to the vendor default. Verified:
+
+```
+{ baseUrl: 'https://internal.example/v1', ...{ baseUrl: undefined } }  →  {}
+```
+
+Consequence: run a task through a registered custom or OpenAI-compatible provider and the traffic goes to the **real vendor endpoint** instead of the configured one. On a corporate network or with a self-hosted gateway that is prompts leaving for a destination the operator never configured. Pre-existing, unrelated to the dashboard, and worth fixing on its own.
+
+- [ ] **Step 1: Write the failing test**
+
+```js
+// tests/f-provider-baseurl-binding.test.mjs
+//
+// A registered provider's endpoint is bound once by the adapter. Callers forward
+// `baseUrl` unconditionally (mas/agent_turn.mjs:261), so it arrives as undefined
+// whenever nobody set one — and a spread let that undefined erase the binding,
+// silently redirecting the request to the vendor's own endpoint. For a
+// self-hosted or corporate gateway that means prompts leaving for a host the
+// operator never configured.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+test('an undefined baseUrl in the call does not erase the provider binding', async () => {
+  const seen = [];
+  const base = { callOnce: async (opts) => { seen.push(opts.baseUrl); return { text: 'ok' }; } };
+  const { _bindBaseUrl } = await import('../mas/provider_adapters.mjs');
+  const bound = _bindBaseUrl(base, 'https://internal.example/v1');
+
+  await bound.callOnce({ model: 'm' });                     // nothing set
+  await bound.callOnce({ model: 'm', baseUrl: undefined }); // forwarded as undefined
+  assert.deepEqual(seen, ['https://internal.example/v1', 'https://internal.example/v1'],
+    'both calls must reach the configured endpoint');
+});
+
+test('an explicit baseUrl still wins — that part of the contract is real', async () => {
+  const seen = [];
+  const base = { callOnce: async (opts) => { seen.push(opts.baseUrl); return { text: 'ok' }; } };
+  const { _bindBaseUrl } = await import('../mas/provider_adapters.mjs');
+  const bound = _bindBaseUrl(base, 'https://internal.example/v1');
+  await bound.callOnce({ baseUrl: 'https://override.example/v1' });
+  assert.deepEqual(seen, ['https://override.example/v1']);
+});
+
+test('an explicit empty string is a caller error, not an override', async () => {
+  // '' would resolve to the vendor default just as undefined did. Refusing it
+  // is safer than honouring it, because no caller means "use the default" by
+  // passing an empty string.
+  const seen = [];
+  const base = { callOnce: async (opts) => { seen.push(opts.baseUrl); return { text: 'ok' }; } };
+  const { _bindBaseUrl } = await import('../mas/provider_adapters.mjs');
+  const bound = _bindBaseUrl(base, 'https://internal.example/v1');
+  await bound.callOnce({ baseUrl: '' });
+  assert.deepEqual(seen, ['https://internal.example/v1']);
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `node --test tests/f-provider-baseurl-binding.test.mjs`
+Expected: FAIL — `_bindBaseUrl` is not exported, and the current spread drops the binding.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Extract the binding so it is testable and correct:
+
+```js
+/**
+ * Bind a provider's configured endpoint to an adapter.
+ *
+ * Only a caller-supplied, non-empty baseUrl overrides it. Callers forward
+ * `baseUrl` unconditionally (mas/agent_turn.mjs), so an object spread would let
+ * `undefined` erase the binding and send the request to the vendor's default
+ * host instead of the configured one — for a self-hosted or corporate gateway,
+ * prompts leaving for somewhere the operator never configured.
+ *
+ * Exported for the test; not part of the module's public surface.
+ */
+export function _bindBaseUrl(base, boundUrl) {
+  return {
+    ...base,
+    callOnce: (opts = {}) => base.callOnce({
+      ...opts,
+      baseUrl: opts.baseUrl || boundUrl,
+    }),
+  };
+}
+```
+
+and use it at the existing call site in place of the inline spread. Check whether the same pattern appears elsewhere in the file (there is a second `callOnce` wrapper around line 109) and fix any sibling.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `node --test tests/f-provider-baseurl-binding.test.mjs && node --test tests/*.test.mjs`
+Expected: PASS. Existing provider and agent-turn tests must stay green — a caller that DID pass an explicit baseUrl must be unaffected.
+
+- [ ] **Step 5: Commit**
+
+```bash
+npm run lint:size
+git add mas/provider_adapters.mjs tests/f-provider-baseurl-binding.test.mjs
+git commit -m "fix(providers): an undefined baseUrl must not erase a configured endpoint"
+```

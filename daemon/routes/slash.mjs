@@ -1,0 +1,62 @@
+// daemon/routes/slash.mjs — the dashboard's single write path.
+//
+// Everything the dashboard changes goes through here, so the CLI and the
+// browser cannot drift: both run the same dispatcher over the same commands.
+import { readJson, writeJson, writeSseHead, writeSse } from './_deps.mjs';
+import { makeSlashRunner, listCommands, STREAMING } from '../lib/slash_http.mjs';
+import { makeConfirmStore } from '../lib/confirm_tokens.mjs';
+import { parseSlashLine } from '../../tui/slash_dispatcher.mjs';
+
+// One store per daemon process: a token issued by one request is redeemed by
+// the next, so it cannot live inside a handler call.
+const confirmStore = makeConfirmStore();
+
+export async function slashRun(c) {
+  // workflowStateDir: the SAME resolver daemon/routes/workflows.mjs's REST
+  // handlers call (c.workflowStateDir, from daemon.mjs's --workflow-state-dir/
+  // env resolution) — threaded through so /workflow run|resume|clear reads
+  // and writes the identical directory those routes do, instead of only ever
+  // checking POMPOS_WORKFLOW_STATE_DIR itself.
+  const { req, res, gwConfigDir, workflowStateDir } = c;
+  let body;
+  try { body = await readJson(req); }
+  catch (e) { return writeJson(res, 400, { ok: false, error: e?.message || String(e), code: 'SLASH_ERR' }); }
+
+  const runner = makeSlashRunner({ cfgDir: gwConfigDir, confirmStore, workflowStateDir });
+
+  // Upgrade to SSE only when the client explicitly asked for it AND the
+  // command is one long enough to make a buffered reply look hung
+  // (STREAMING — see daemon/lib/slash_http.mjs). Every other request —
+  // including a malformed or unrecognised line — falls through to the exact
+  // buffered JSON behaviour below unchanged, so sending
+  // `Accept: text/event-stream` never changes the response shape for a
+  // command that didn't ask to stream.
+  const { cmd } = parseSlashLine(String(body?.line || '').trim());
+  const wantsStream = /text\/event-stream/.test(String(req.headers.accept || ''));
+  if (wantsStream && STREAMING.has(cmd)) {
+    writeSseHead(res);
+    const out = await runner.runStreaming({
+      line: body?.line,
+      confirm: body?.confirm,
+      onLine: (l) => writeSse(res, 'line', { text: l }),
+    });
+    writeSse(res, 'done', out);
+    return res.end();
+  }
+
+  const out = await runner.run({ line: body?.line, confirm: body?.confirm });
+  // Every envelope the adapter can return is forwarded unchanged; only the
+  // status code is decided here. CONFIRM_REQUIRED -> 409: the request
+  // conflicts with a policy the client can resolve and retry, which is
+  // exactly what a confirmation is. Any other failure code (SLASH_ERR,
+  // NO_SESSION, NEEDS_TERMINAL, CONFIG_DIR_MISMATCH, PERSIST_FAILED, or a
+  // future code this route doesn't know about yet) -> 400, so a client can
+  // still branch on `body.code` without this route inventing a status per
+  // code or swallowing one it doesn't recognise. ok:true -> 200.
+  const status = out.ok ? 200 : (out.code === 'CONFIRM_REQUIRED' ? 409 : 400);
+  return writeJson(res, status, out);
+}
+
+export async function slashCommands(c) {
+  return writeJson(c.res, 200, listCommands());
+}

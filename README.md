@@ -131,9 +131,12 @@ The REPL has slash commands for everything you'd otherwise edit config for — p
 
 | Slash | Does |
 |---|---|
-| `/config` | change one setting in-chat (provider/model/context/channel creds/webhook/…); `/setup` re-runs the whole wizard |
+| `/config` · `/config set <key> <value>` · `/config unset <key>` | change one setting via a picker, or set/unset a key directly by name; `/setup` re-runs the whole wizard |
 | `/provider` · `/model` | pick provider / model from a searchable list |
 | `/trainer [set\|fallback]` · `/agent edit <name>` | pick the trainer / an agent's provider+model from the same list (with an `auto` and a custom-id row) |
+| `/agent add <name> [--provider <p>] [--model <m>] [role…]` | register a new agent, optionally pinning its provider and model up front |
+| `/team member add\|remove <team> <agent>` | add or remove a member from a team |
+| `/workflow run\|resume\|clear <name>` | run a saved workflow, resume it from where it left off, or clear its saved progress |
 | `/channels [<name> on\|off\|setup]` | view / toggle channels; `setup` sets the bot token & credentials in-chat |
 | `/orchestrator [on\|off\|…]` | view / toggle multi-agent (picker on bare call) |
 | `/context [turns N\|tokens N]` | resize the chat history window |
@@ -172,9 +175,13 @@ From chat, `/dashboard [--port N]` (or `/dashboard stop`) does the same.
 
 A framework-free, zero-build SPA (`web/` ships as source — native ES modules, no bundler, no `dist/`) over the daemon's JSON API: a grouped sidebar over 21 panels — Work, Agents, Automate, Knowledge, Gateway, System — a **⌘K** / **Ctrl+K** command palette, and a "Live" activity strip under the topbar, all fed by one Server-Sent Events connection (`GET /events`). Motion — the palette, the live rail, reordering rows — respects `prefers-reduced-motion`.
 
+The dashboard stopped being read-only. Agents, teams, tasks, config keys and workflows can now be created, edited and run from the browser, and the chat input takes every slash command the terminal REPL does, with the same autocomplete. Destructive actions ask first, naming what they're about to affect, instead of acting immediately. All of it runs through one endpoint, `POST /slash`, which calls the exact same dispatcher the CLI does — a command added to the terminal shows up in the dashboard with no extra wiring, and the two surfaces cannot disagree about what a command means. Authorization is unchanged: the same bearer token that has always gated the daemon gates these actions too.
+
+Two gaps worth knowing about: creating an agent from the dashboard can't set a custom tool list yet (`--tools` has no slash-command form) — the agent is created correctly, just with the default tool set. And a long-running command like `/loop` or `/task` streams its progress to the browser, but closing the tab doesn't cancel the run underneath it; there's no abort wiring yet.
+
 - **Team Live** now draws the real reporting hierarchy: each manager's reports sit under them, joined by edges, instead of a lead plus one flat row. Avatar tiles carry status rings + harness badges (`provider · model`); click one to drill into its harness, current task, and recent activity.
 - **Tasks** shows where a task came from — a Slack channel + thread, or `pompos task start` from the CLI — and the permission mode it actually ran under (attended, unattended-but-read-only, or the unattended-with-execution case worth flagging), plus a transcript viewer; a `task:` hit in Recall links straight to the same transcript.
-- **Approvals** and **Devices** are new panels, both **read-only**: resolving an approval needs a paired device's Ed25519 token, which the dashboard isn't — approve from a paired device or with `pompos nodes`. The Approvals sidebar badge itself only refreshes when you open the Approvals panel; those events don't yet reach the dashboard's SSE stream, so the badge doesn't move while you're on another panel.
+- **Approvals** and **Devices** are new panels, both **read-only** — the Approvals panel's resolve buttons are disabled on purpose: resolving one needs a paired device's Ed25519 token, which the dashboard isn't. Approve from a paired device or with `pompos nodes`. The Approvals sidebar badge itself only refreshes when you open the Approvals panel; those events don't yet reach the dashboard's SSE stream, so the badge doesn't move while you're on another panel.
 - The live rail picks up four new event types: `workflow.step`, `cost.tick`, `channel.inbound`, `provider.error`. `cost.tick` only fires for team-routed traffic — the plain `/chat` and `/agent` paths never feed the configured cap to the cost accountant. There's no `cron.fire`: a scheduled job runs in whatever subprocess launchd/cron spawns, with no link back to the daemon's event bus, so a fire isn't observable here at all.
 - **⌘K** jumps to any panel plus four fixed actions (start a task, new team, review approvals, rebuild the search index) — it doesn't resolve a team or agent by name.
 - **Chat**'s model picker lists each provider's live model catalogue when one is reachable (grouped per provider, since a live fetch can return hundreds), instead of a fixed curated set, and tags the picker `live`/`builtin` so a fetched list is never mistaken for a frozen one. Without a live fetch it falls back to `npm run models:sync`'s last run, then the hand-written defaults — so the list is never empty just because a credential isn't configured on this machine.

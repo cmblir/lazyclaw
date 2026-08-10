@@ -54,6 +54,33 @@ function _withToolSchemas(mod, pick) {
   return { ...mod, toolSchemas: pick(mod) };
 }
 
+/**
+ * Bind a provider's configured endpoint to an adapter.
+ *
+ * Only a caller-supplied, non-empty baseUrl overrides it. Callers forward
+ * `baseUrl` unconditionally (mas/agent_turn.mjs), so an object spread would let
+ * `undefined` erase the binding and send the request to the vendor's default
+ * host instead of the configured one — for a self-hosted or corporate gateway,
+ * prompts leaving for somewhere the operator never configured. Resolving with
+ * `||` instead of a spread makes that erasure structurally impossible: there
+ * is no key order for a spread to get wrong.
+ *
+ * An explicit empty string is treated as "no override" (falls back to
+ * boundUrl), not as "target the vendor default" — no caller means "use the
+ * default" by passing an empty string, so '' is a caller error, not a signal.
+ *
+ * Exported for the test; not part of the module's public surface.
+ */
+export function _bindBaseUrl(base, boundUrl) {
+  return {
+    ...base,
+    callOnce: (opts = {}) => base.callOnce({
+      ...opts,
+      baseUrl: opts.baseUrl || boundUrl,
+    }),
+  };
+}
+
 // Any OpenAI-wire-compatible provider — the built-in compat vendors
 // (nim/openrouter/groq/together/xai/deepseek/mistral/fireworks) and custom
 // providers — can drive tool-use through the OpenAI adapter, just at a
@@ -78,9 +105,8 @@ async function _openAICompatAdapter(provider) {
   // OpenAI tool-schema mapper so the agentic loop can run.
   if (!info.baseUrl) return _withToolSchemas(base, (m) => m.toOpenAITools);
   return {
-    ...base,
+    ..._bindBaseUrl(base, info.baseUrl),
     toolSchemas: base.toOpenAITools,
-    callOnce: (opts = {}) => base.callOnce({ baseUrl: info.baseUrl, ...opts }),
   };
 }
 

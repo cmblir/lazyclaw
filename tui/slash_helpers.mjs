@@ -27,6 +27,34 @@ export async function _mod(ctx, key, importer) {
   return importer();
 }
 
+/**
+ * Read config.json for a read-merge-write.
+ *
+ * Returns `{ cfg }` when the file parsed or is genuinely absent, and
+ * `{ error }` when it exists but could not be read — those are NOT the same
+ * thing. Callers used to swallow both into `{}` and write back only the block
+ * they were setting, which silently replaced an operator's whole config
+ * because of one misplaced comma.
+ */
+export function readConfigForMerge(cfgPath, fs) {
+  let raw;
+  try {
+    raw = fs.readFileSync(cfgPath, 'utf8');
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return { cfg: {} };   // genuinely fresh
+    // EACCES (permissions) / EISDIR (a directory sits where the file should
+    // be) / etc. — same "don't discard it" rule as a parse failure, and the
+    // operator needs the same kind of actionable next step, not just the
+    // raw errno.
+    return { error: `config.json at ${cfgPath} could not be read (${err?.code || err?.message}) — not overwriting it; check its permissions and that it is a regular file (not a directory), or move it aside to start fresh` };
+  }
+  try {
+    return { cfg: JSON.parse(raw) };
+  } catch (err) {
+    return { error: `config.json at ${cfgPath} is not valid JSON (${err?.message}) — refusing to overwrite it; fix the file, or move it aside to start fresh` };
+  }
+}
+
 // Single free-text prompt reusing the modal's filter buffer (no dedicated
 // input widget). Returns the typed value, '' (only when allowEmpty), or null
 // on cancel / required-but-empty.
@@ -48,6 +76,16 @@ export async function _promptText(ctx, { title, subtitle, allowEmpty, secret } =
     return v;
   }
   return null;
+}
+
+// An attempted mutation that did nothing must not read as success over HTTP —
+// same lever /config and /provider/model use (tui/config_picker.mjs's
+// refuse(), daemon/lib/slash_ctx.mjs's persistAndVerify); finalizeEnvelope
+// (daemon/lib/slash_http.mjs) turns a truthy ctx.__persistFailed into
+// {ok:false}. The REPL never reads it, so its displayed text is unchanged.
+export function _refuse(ctx, message) {
+  ctx.__persistFailed = message;
+  return message;
 }
 
 // Yes/no confirmation modal for sensitive-tool approval. Esc (or no modal

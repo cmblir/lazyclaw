@@ -1,10 +1,45 @@
-// web/ui/panels/chat.mjs — one-shot prompt chat. The assignee picker is
-// sourced from GET /providers (grouped by suggested model), preselected from
-// GET /status's configured default; sending posts { prompt, provider, model }
-// to POST /agent, which is one-shot, so prior turns are flattened into the
-// prompt text (buildAgentPrompt) rather than sent as a message array.
+// web/ui/panels/chat.mjs — one-shot prompt chat, plus REPL slash commands.
+// The assignee picker is sourced from GET /providers (grouped by suggested
+// model), preselected from GET /status's configured default; an ordinary
+// message posts { prompt, provider, model } to POST /agent, which is
+// one-shot, so prior turns are flattened into the prompt text
+// (buildAgentPrompt) rather than sent as a message array.
+//
+// A line starting with '/' never reaches /agent — it goes through
+// runSlashConfirmed (web/ui/confirm_dialog.mjs), the same dispatcher every
+// other panel writes through, so a destructive command typed here still
+// gets its confirmation and there is no second write path to keep in step.
 import { el, phead, chip } from '../dom.mjs';
 import { api } from '../api.mjs';
+import { runSlashConfirmed } from '../confirm_dialog.mjs';
+import { runSlashStream, fetchCommands } from '../slash_client.mjs';
+
+// Mirrors daemon/lib/slash_http.mjs's STREAMING set: the two commands long
+// enough that a buffered wait would make the dashboard look hung. Kept as a
+// literal copy rather than an import — that module pulls in the REPL
+// dispatcher and Node-only ctx wiring, which has no business in browser
+// source shipped without a bundler.
+const STREAM_COMMANDS = new Set(['/loop', '/task']);
+
+/**
+ * A leading slash routes to the dispatcher; anything else is a message.
+ * Exported so the rule is testable without a DOM.
+ */
+export function isSlashLine(text) {
+  const s = String(text ?? '').trim();
+  return s.length > 1 && s.startsWith('/');
+}
+
+/**
+ * Autocomplete candidates for what has been typed so far. Returns nothing
+ * once an argument has been typed — the popover is for choosing a command,
+ * not for hovering over one already chosen.
+ */
+export function filterCommands(all, prefix) {
+  const p = String(prefix ?? '').trim().toLowerCase();
+  if (!p.startsWith('/') || /\s/.test(p)) return [];
+  return (all || []).filter((c) => c.name.toLowerCase().startsWith(p));
+}
 
 // Build the ordered {value, label, isDefault} options for one provider's
 // models. Pure — no DOM — so it's unit-testable without a browser stub (see
@@ -66,9 +101,41 @@ export async function render(host) {
   const stream = el('div', { id: 'chat-stream' }, el('div', { class: 'empty', text: 'Type below to start.' }));
   host.append(stream);
 
-  const input = el('textarea', { placeholder: 'Send a message — Enter to send, Shift+Enter for newline.' });
+  const input = el('textarea', { placeholder: 'Send a message or a /command — Enter to send, Shift+Enter for newline.' });
   host.append(el('div', { class: 'input-row' }, input,
     el('button', { class: 'btn', type: 'button', text: 'Send', onclick: () => sendChat() })));
+
+  // Slash autocomplete: a static box under the input, not an absolute
+  // overlay — this list is short and the input never scrolls out from
+  // under it, so the extra positioning complexity buys nothing.
+  const slashPop = el('div', { id: 'chat-slash-pop', class: 'slash-pop' });
+  host.append(slashPop);
+
+  // GET /slash/commands once per mount. On a token-gated daemon where the
+  // operator declines the auth prompt, api() throws (see web/ui/api.mjs) —
+  // caught here so a rejected prompt degrades to "no autocomplete" instead
+  // of an unhandled rejection that keeps the rest of this panel from
+  // rendering.
+  let slashCommands = [];
+  fetchCommands().then((list) => { slashCommands = Array.isArray(list) ? list : []; })
+    .catch(() => { slashCommands = []; });
+
+  function hideSlashPop() { slashPop.replaceChildren(); }
+
+  function updateSlashPop() {
+    const matches = filterCommands(slashCommands, input.value);
+    if (!matches.length) { hideSlashPop(); return; }
+    // Spread, not a bare array: replaceChildren(...nodes) is variadic — a
+    // single array argument is not a Node, so the DOM would coerce it to a
+    // string ("[object HTMLButtonElement]") instead of inserting elements
+    // (see web/ui/panels/team.mjs's sel.replaceChildren(...teams.map(...))
+    // for the same spread on an already-established call site).
+    slashPop.replaceChildren(...matches.map((c) => el('button', {
+      class: 'slash-pop-item', type: 'button',
+      onclick: () => { input.value = c.name + ' '; hideSlashPop(); input.focus(); },
+    }, el('span', { class: 'cmd', text: c.name }), el('span', { class: 'desc', text: c.description || '' }))));
+  }
+  input.addEventListener('input', updateSlashPop);
 
   function resetChat() {
     chatHistory = [];
@@ -102,9 +169,70 @@ export async function render(host) {
     return lines.join('\n\n');
   }
 
+  // Slash lines never touch POST /agent — see the module comment. `/loop`
+  // and `/task` (STREAM_COMMANDS, mirroring daemon/lib/slash_http.mjs's
+  // STREAMING) run through runSlashStream so a long /loop run shows each
+  // line as it is produced instead of looking hung until it finishes; every
+  // other command is buffered through runSlashConfirmed, same as the other
+  // five panels' writes.
+  //
+  // Streaming bypasses the confirm-and-retry loop runSlashConfirmed wraps
+  // around runSlash — but neither /loop nor /task's long subcommand
+  // (`tick`) is ever destructive (daemon/lib/slash_destructive.mjs has no
+  // rule for either), so the common case has nothing to confirm. The one
+  // case that IS destructive under /task (abandon/remove/rm/delete) is also
+  // a single fast disk op with nothing worth streaming, and the server
+  // refuses it before dispatch — no side effect has happened yet — so a
+  // CONFIRM_REQUIRED answer here falls back to the exact same
+  // runSlashConfirmed path every other command takes, and the confirmation
+  // (and the actual run) happens there instead.
+  async function sendSlashLine(text) {
+    input.value = '';
+    hideSlashPop();
+    appendMsg('user', text);
+    meta.textContent = '⏳ running…';
+    const cmd = text.split(/\s+/)[0];
+    let out;
+    let streamed = false;
+    try {
+      if (STREAM_COMMANDS.has(cmd)) {
+        out = await runSlashStream(text, { onLine: (line) => appendMsg('system', line) });
+        streamed = out.code !== 'CONFIRM_REQUIRED';
+        if (!streamed) out = await runSlashConfirmed(text);
+      } else {
+        out = await runSlashConfirmed(text);
+      }
+    } catch (e) {
+      // A throw here (network failure, a rejected auth prompt, ...) must
+      // reach the operator, not vanish as an unhandled rejection behind a
+      // fire-and-forget onclick — see agents.mjs's runWrite for the same
+      // discipline in the other five panels.
+      appendMsg('error', '⚠ ' + (e.message || String(e)));
+      meta.textContent = '';
+      return;
+    }
+    meta.textContent = '';
+    // `out.ok` is checked for truthiness, never `=== false`: a 401 body is
+    // {error:'unauthorized'} with no `ok` field at all, and that must render
+    // as a failure below, not silently fall through as neither.
+    if (out.ok) {
+      // Streamed lines were already appended one at a time via onLine —
+      // appending out.lines here too would show every line twice.
+      if (!streamed) for (const line of out.lines || []) appendMsg('system', line);
+      return;
+    }
+    // A decline renders as neither success nor failure — the operator said
+    // no, nothing ran, and a red error banner here would misreport a
+    // deliberate choice as something having gone wrong.
+    if (out.code === 'CANCELLED') { appendMsg('cancelled', 'Cancelled — nothing ran.'); return; }
+    const msg = out.hint ? `${out.error || 'command failed'} — ${out.hint}` : (out.error || 'command failed');
+    appendMsg('error', '⚠ ' + msg);
+  }
+
   async function sendChat() {
     const text = input.value.trim();
     if (!text) return;
+    if (isSlashLine(text)) { await sendSlashLine(text); return; }
     const assignee = select.value;
     if (!assignee) { appendMsg('error', 'No provider selected. Run `pompos onboard` first.'); return; }
     input.value = '';

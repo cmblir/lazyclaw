@@ -49,10 +49,12 @@ import { attachGoalCron, detachGoalCron } from '../goals_cron.mjs';
 import { loadDotenvIfAny } from '../dotenv_min.mjs';
 import { SUBCOMMAND_GROUPS } from './subcommands.mjs';
 import { redactSecrets } from '../mas/redact.mjs';
-import { splitWhitespace, _mod, _promptText, _promptConfirm } from './slash_helpers.mjs';
+import { splitWhitespace, _mod, _promptText, _promptConfirm, readConfigForMerge, _refuse } from './slash_helpers.mjs';
 import { _dashboard, parseDashboardUrl } from './slash_dashboard.mjs';
 import { _channels, _context } from './slash_channels.mjs';
 import { _trainer } from './slash_trainer.mjs';
+import { _workflow } from './slash_workflow.mjs';
+import { _team } from './slash_team.mjs';
 import { _help, _status, _version, _usage } from './slash_basics.mjs';
 import { gatewaySlash } from './slash_gateway.mjs';
 
@@ -485,8 +487,31 @@ async function _agent(args, ctx) {
     }
     if (sub === 'add') {
       let name = aname;
-      let roleText = rest.slice(1).join(' ').trim();
-      // Guided fill: no name typed + a modal available → prompt for it.
+      // --provider/--model so the dashboard can create an agent as fully as
+      // the REST route it replaced; the rest becomes the role, as always. A
+      // value that is itself another flag (`--provider --model opus`) is
+      // rejected rather than silently stored as provider:"--model"; a flag
+      // with nothing after it at all (end-of-args) still defaults silently.
+      let provider, model;
+      const roleWords = [];
+      for (let i = 1; i < rest.length; i += 1) {
+        const t = rest[i];
+        if (t === '--provider' || t === '--model') {
+          const value = rest[i + 1];
+          if (value !== undefined && value.startsWith('--')) {
+            return _refuse(ctx, `/agent add: ${t} needs a value, got "${value}"`);
+          }
+          if (t === '--provider') provider = value;
+          else model = value;
+          i += 1; // consume the value token too
+        } else {
+          roleWords.push(t);
+        }
+      }
+      let roleText = roleWords.join(' ').trim();
+      // Guided fill: no name typed + a modal available → prompt for it. A
+      // declined prompt (Esc) is "cancelled", not a refusal — left off
+      // ctx.__persistFailed, matching how the dashboard treats CANCELLED.
       if (!name && typeof ctx.openPicker === 'function') {
         name = await _promptText(ctx, { title: 'New agent — name', subtitle: 'short id, e.g. scout (Esc cancels)' });
         if (!name) return 'agent add: cancelled';
@@ -495,14 +520,22 @@ async function _agent(args, ctx) {
           roleText = r || '';
         }
       }
-      if (!name) return 'usage: /agent add <name> [role text…]';
-      const a = agentsMod.registerAgent({ name, role: roleText }, ctx.cfgDir);
-      return `✓ added agent ${a.name} (tools=${(a.tools || []).join(',')}) — set its model with /agent edit ${a.name}`;
+      if (!name) return _refuse(ctx, 'usage: /agent add <name> [--provider <p>] [--model <m>] [role text…]');
+      let a;
+      try {
+        a = agentsMod.registerAgent({ name, role: roleText, provider, model }, ctx.cfgDir);
+      } catch (e) {
+        // e.g. AGENT_EXISTS — throws before any write, so nothing changed;
+        // the outer catch below used to return this ok:true.
+        return _refuse(ctx, `/agent add: ${e?.message || e}`);
+      }
+      const modelHint = a.model ? '' : ` — set its model with /agent edit ${a.name}`;
+      return `✓ added agent ${a.name} (tools=${(a.tools || []).join(',')})${modelHint}`;
     }
     if (sub === 'edit') {
-      if (!aname) return 'usage: /agent edit <name>';
+      if (!aname) return _refuse(ctx, 'usage: /agent edit <name>');
       const existing = agentsMod.getAgent(aname, ctx.cfgDir);
-      if (!existing) return `no agent "${aname}"`;
+      if (!existing) return _refuse(ctx, `no agent "${aname}"`);
       if (typeof ctx.openPicker !== 'function') {
         return `agent edit: picker unavailable here — use: pompos agent edit ${aname} --provider <p> --model <m>`;
       }
@@ -513,7 +546,7 @@ async function _agent(args, ctx) {
       return `✓ ${patched.name} → ${patched.provider}${patched.model ? '/' + patched.model : ''}`;
     }
     if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
-      if (!aname) return 'usage: /agent remove <name>';
+      if (!aname) return _refuse(ctx, 'usage: /agent remove <name>');
       if (typeof ctx.openPicker === 'function') {
         const ok = await _promptConfirm(ctx, { title: `Remove agent "${aname}"?`, subtitle: 'This cannot be undone. Enter selects · Esc cancels' });
         if (!ok) return `agent remove: cancelled — "${aname}" not removed`;
@@ -523,114 +556,12 @@ async function _agent(args, ctx) {
     }
     return `/agent: unknown sub "${sub}" — list|show|add|edit|remove`;
   } catch (e) {
-    return `/agent error: ${e?.message || e}`;
-  }
-}
-
-async function _team(args, ctx) {
-  let teamsMod, loopMod, agentsMod;
-  try {
-    teamsMod = await import('../teams.mjs');
-    loopMod = await import('../loop-engine.mjs');
-    agentsMod = await import('../agents.mjs');
-  } catch (e) { return `/team unavailable: ${e?.message || e}`; }
-  let tokens;
-  try { tokens = loopMod.splitArgs(args); }
-  catch (e) { return `/team error: ${e?.message || e}`; }
-  const sub = tokens[0];
-  const rest = tokens.slice(1);
-  const tname = rest[0];
-  try {
-    if (!sub && typeof ctx.openPicker === 'function') {
-      const picked = await ctx.openPicker({
-        kind: 'menu', title: 'Teams', subtitle: `${teamsMod.listTeams(ctx.cfgDir).length} registered`,
-        items: [
-          { id: 'list', label: 'List teams', desc: 'show all' },
-          { id: 'add', label: 'Add team…', desc: '/team add <name> --agents a,b --lead a' },
-          { id: 'show', label: 'Show team…', desc: 'print one record' },
-          { id: 'remove', label: 'Remove team…', desc: 'delete a team' },
-        ],
-      });
-      const pid = picked && typeof picked === 'object' ? picked.id : picked;
-      return _team(typeof pid === 'string' && pid ? pid : 'list', ctx);
-    }
-    if (!sub || sub === 'list') {
-      const teams = teamsMod.listTeams(ctx.cfgDir);
-      if (teams.length === 0) return 'no teams registered. /team add <name> --agents a,b --lead a [--channel #x]';
-      return teams.map((t) => {
-        const chLine = t.slackChannel ? ` — ${t.slackChannel}` : '';
-        return `• ${t.name} — ${t.displayName} — lead=${t.lead} — agents=[${t.agents.join(',')}]${chLine}`;
-      }).join('\n');
-    }
-    if (sub === 'show') {
-      if (!tname) return 'usage: /team show <name> [json]';
-      const t = teamsMod.getTeam(tname, ctx.cfgDir);
-      if (!t) return `no team "${tname}"`;
-      return rest[1] === 'json'
-        ? JSON.stringify(t, null, 2)
-        : renderRecord(t, { fields: ['name', 'displayName', 'lead', 'agents', 'slackChannel', 'createdAt', 'updatedAt'] });
-    }
-    if (sub === 'add') {
-      let agentsCsv = null, lead = null, channel = '';
-      let teamName = tname;
-      for (let i = 1; i < rest.length; i++) {
-        const t = rest[i];
-        if (t === '--agents') agentsCsv = rest[++i] || '';
-        else if (t === '--lead') lead = rest[++i] || null;
-        else if (t === '--channel') channel = rest[++i] || '';
-        else return `/team error: unknown token "${t}"`;
-      }
-      // Guided fill: no --agents + a modal available → name prompt, then a
-      // multi-pick over registered agents, then a lead pick. Typed form
-      // (--agents …) and the no-modal path are unchanged.
-      let agentsList;
-      if (!agentsCsv && typeof ctx.openPicker === 'function') {
-        if (!teamName) {
-          teamName = await _promptText(ctx, { title: 'New team — name', subtitle: 'short id (Esc cancels)' });
-          if (!teamName) return 'team add: cancelled';
-        }
-        const all = agentsMod ? agentsMod.listAgents(ctx.cfgDir).map((a) => a.name) : [];
-        if (!all.length) return 'team add: no agents registered yet — add one with /agent add first';
-        const chosen = [];
-        for (let guard = 0; guard < 50; guard++) {
-          const items = all.filter((n) => !chosen.includes(n)).map((n) => ({ id: n, label: n }));
-          if (chosen.length) items.unshift({ id: '__done__', label: `✓ done (${chosen.length} selected)`, pinned: true });
-          if (!items.length) break;
-          const p = await ctx.openPicker({ kind: 'menu', title: `Team agents — ${chosen.length} picked`, subtitle: 'pick agents one at a time · ✓ done to finish · Esc cancels', items });
-          const id = p && typeof p === 'object' ? p.id : p;
-          if (!id) { if (chosen.length) break; return 'team add: cancelled'; }
-          if (id === '__done__') break;
-          chosen.push(id);
-        }
-        if (!chosen.length) return 'team add: cancelled (no agents picked)';
-        const lp = await ctx.openPicker({ kind: 'menu', title: 'Team lead', subtitle: 'who leads this team?', items: chosen.map((n) => ({ id: n, label: n })) });
-        lead = (lp && typeof lp === 'object' ? lp.id : lp) || chosen[0];
-        agentsList = chosen;
-      } else {
-        if (!teamName) return 'usage: /team add <name> --agents a,b,c [--lead a] [--channel #x]';
-        if (!agentsCsv) return '/team add: --agents is required';
-        agentsList = teamsMod.parseListFlag(agentsCsv);
-      }
-      const ch = channel ? await teamsMod.resolveSlackChannel(channel, {
-        botToken: process.env.SLACK_BOT_TOKEN || null,
-        apiBase: process.env.SLACK_API_BASE || 'https://slack.com/api',
-        logger: () => {},
-      }) : '';
-      const team = teamsMod.registerTeam({ name: teamName, agents: agentsList, lead, slackChannel: ch }, ctx.cfgDir);
-      return `✓ added team ${team.name} (lead=${team.lead}, agents=${team.agents.join(',')})`;
-    }
-    if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
-      if (!tname) return 'usage: /team remove <name>';
-      if (typeof ctx.openPicker === 'function') {
-        const ok = await _promptConfirm(ctx, { title: `Remove team "${tname}"?`, subtitle: 'This cannot be undone. Enter selects · Esc cancels' });
-        if (!ok) return `team remove: cancelled — "${tname}" not removed`;
-      }
-      teamsMod.removeTeam(tname, ctx.cfgDir);
-      return `✓ removed team ${tname}`;
-    }
-    return `/team: unknown sub "${sub}" — list|show|add|remove`;
-  } catch (e) {
-    return `/team error: ${e?.message || e}`;
+    // removeAgent (and patchAgent, via `edit`) validate/check existence
+    // BEFORE writing — e.g. removing a name that is not registered — so
+    // nothing changed on disk when this throws. Returning the message
+    // directly used to report ok:true over HTTP for the same reason the
+    // explicit refusals above exist.
+    return _refuse(ctx, `/agent error: ${e?.message || e}`);
   }
 }
 
@@ -1010,8 +941,14 @@ function _personalityUse(name, ctx, fs, path) {
   if (!fs.existsSync(p)) return `personality not installed: ${name}`;
   // Read-merge-write config.json so we never clobber unrelated keys.
   const cfgPath = path.join(ctx.cfgDir, 'config.json');
-  let diskCfg = {};
-  try { diskCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch { /* fresh */ }
+  // A missing file is fresh; an unparseable one is not ours to discard — see
+  // readConfigForMerge's doc comment. Refusing also trips ctx.__persistFailed,
+  // the same signal /provider and /model use (daemon/lib/slash_ctx.mjs), so
+  // the HTTP envelope reports {ok:false} instead of the caller reading prose
+  // to guess whether this succeeded.
+  const merged = readConfigForMerge(cfgPath, fs);
+  if (merged.error) { ctx.__persistFailed = merged.error; return merged.error; }
+  const diskCfg = merged.cfg;
   diskCfg.persona = { ...(diskCfg.persona || {}), personality: name };
   try { fs.mkdirSync(ctx.cfgDir, { recursive: true }); } catch {}
   fs.writeFileSync(cfgPath, JSON.stringify(diskCfg, null, 2));
@@ -1078,7 +1015,7 @@ async function _task(args, ctx, write) {
       return JSON.stringify(t.turns || [], null, 2);
     }
     if (sub === 'abandon' || sub === 'done') {
-      if (!id) return `usage: /task ${sub} <id>`;
+      if (!id) return _refuse(ctx, `usage: /task ${sub} <id>`);
       const target = sub === 'done' ? 'done' : 'abandoned';
       const next = tasksMod.patchTask(id, { status: target }, ctx.cfgDir);
       // Best-effort closing post in the original Slack thread (parity with the
@@ -1103,7 +1040,7 @@ async function _task(args, ctx, write) {
       return `✓ task ${id} → ${next?.status || target}${slackNote}`;
     }
     if (sub === 'remove' || sub === 'rm' || sub === 'delete') {
-      if (!id) return 'usage: /task remove <id>';
+      if (!id) return _refuse(ctx, 'usage: /task remove <id>');
       if (typeof ctx.openPicker === 'function') {
         const ok = await _promptConfirm(ctx, { title: `Remove task ${id}?`, subtitle: 'This cannot be undone. Enter selects · Esc cancels' });
         if (!ok) return `task remove: cancelled — ${id} not removed`;
@@ -1129,7 +1066,7 @@ async function _task(args, ctx, write) {
       if ((!teamName || !title) && typeof ctx.openPicker === 'function') {
         if (!teamName) {
           const teams = teamsMod.listTeams(ctx.cfgDir);
-          if (!teams.length) return 'task start: no teams yet — create one with /team add first';
+          if (!teams.length) return _refuse(ctx, 'task start: no teams yet — create one with /team add first');
           const tp = await ctx.openPicker({ kind: 'menu', title: 'Start task — pick a team', items: teams.map((t) => ({ id: t.name, label: t.name, desc: `lead=${t.lead || '?'} · agents=${(t.agents || []).join(',')}` })) });
           teamName = tp && typeof tp === 'object' ? tp.id : tp;
           if (!teamName || typeof teamName !== 'string') return 'task start: cancelled';
@@ -1143,9 +1080,9 @@ async function _task(args, ctx, write) {
           description = d || '';
         }
       }
-      if (!teamName || !title) return 'usage: /task start <team> --title "..." [--description "..."] [--lead <name>]';
+      if (!teamName || !title) return _refuse(ctx, 'usage: /task start <team> --title "..." [--description "..."] [--lead <name>]');
       const team = teamsMod.getTeam(teamName, ctx.cfgDir);
-      if (!team) return `no team "${teamName}"`;
+      if (!team) return _refuse(ctx, `no team "${teamName}"`);
       const leadName = lead || team.lead;
       const leadAgent = agentsMod.getAgent(leadName, ctx.cfgDir);
       const seeded = tasksMod.registerTask(
@@ -1168,8 +1105,13 @@ async function _task(args, ctx, write) {
           ts = (res && res.ts) || '';
           await slack.stop().catch(() => {});
         } catch (e) {
+          // The task record was already written above (registerTask); this
+          // best-effort rollback is the only thing standing between "the
+          // Slack post failed" and "a task now exists that nobody was told
+          // about" — either way, the /task start the operator asked for did
+          // not complete, so this must not read as success over HTTP.
           try { tasksMod.removeTask(seeded.id, ctx.cfgDir); } catch { /* best-effort */ }
-          return `task start: ${e?.message || e}`;
+          return _refuse(ctx, `task start: ${e?.message || e}`);
         }
       }
       const turns = ts ? [{ agent: 'system', text: `Task opened by user. Lead: ${leadName}.`, ts }] : [];
@@ -1221,7 +1163,11 @@ async function _task(args, ctx, write) {
     }
     return `/task: unknown sub "${sub}" — start|tick|list|show|transcript|abandon|done|remove`;
   } catch (e) {
-    return `/task error: ${e?.message || e}`;
+    // patchTask/removeTask (done, abandon, remove) check existence BEFORE
+    // writing, so a bad id throws with nothing changed on disk. Returning
+    // the message directly used to report ok:true over HTTP for the same
+    // reason the explicit refusals above exist.
+    return _refuse(ctx, `/task error: ${e?.message || e}`);
   }
 }
 
@@ -1310,6 +1256,7 @@ export const SLASH_HANDLERS = new Map([
   ['/handoff', _handoff],
   ['/personality', _personality],
   ['/task', _task],
+  ['/workflow', _workflow],
   ['/trainer', _trainer],
   ['/dashboard', _dashboard],
   ['/gateway', gatewaySlash],

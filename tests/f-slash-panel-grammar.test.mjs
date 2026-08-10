@@ -1,0 +1,353 @@
+// tests/f-slash-panel-grammar.test.mjs — the grammar the dashboard panels compose.
+//
+// Task 8 discovered its composers named commands that did not exist: an agent
+// could not be given a provider or model, a team member could not be added, and
+// /workflow was not a slash command at all. The dashboard would have lost
+// capability the REST surface already had. These pin the grammar the panels
+// speak, so a composer and its command cannot drift apart again.
+import test, { after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { dispatchSlash, SLASH_HANDLERS } from '../tui/slash_dispatcher.mjs';
+
+const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-grammar-'));
+process.env.POMPOS_CONFIG_DIR = CFG;
+after(() => fs.rmSync(CFG, { recursive: true, force: true }));
+
+const ctx = () => ({ cfgDir: CFG, cfg: {}, readConfig: () => ({}), writeConfig: () => {} });
+
+test('/agent add takes --provider and --model', async () => {
+  await dispatchSlash('/agent', 'add scout --provider anthropic --model opus researcher', ctx(), () => {});
+  const { getAgent } = await import('../agents.mjs');
+  const a = getAgent('scout', CFG);
+  assert.equal(a.provider, 'anthropic');
+  assert.equal(a.model, 'opus');
+  assert.match(a.role, /researcher/, 'the trailing free text is still the role');
+});
+
+test('/agent add without the flags keeps its existing defaults', async () => {
+  await dispatchSlash('/agent', 'add plain just a role', ctx(), () => {});
+  const { getAgent } = await import('../agents.mjs');
+  const a = getAgent('plain', CFG);
+  assert.equal(a.provider, 'claude-cli', 'unchanged default');
+  assert.equal(a.role, 'just a role');
+});
+
+test('/team member add and remove change membership', async () => {
+  await dispatchSlash('/agent', 'add m1', ctx(), () => {});
+  await dispatchSlash('/agent', 'add m2', ctx(), () => {});
+  await dispatchSlash('/team', 'add crew --agents m1', ctx(), () => {});
+
+  await dispatchSlash('/team', 'member add crew m2', ctx(), () => {});
+  const { getTeam } = await import('../teams.mjs');
+  assert.deepEqual(getTeam('crew', CFG).agents.sort(), ['m1', 'm2']);
+
+  await dispatchSlash('/team', 'member remove crew m2', ctx(), () => {});
+  assert.deepEqual(getTeam('crew', CFG).agents, ['m1']);
+});
+
+test('/team member reports a missing team or agent instead of silently doing nothing', async () => {
+  const a = await dispatchSlash('/team', 'member add nosuchteam m1', ctx(), () => {});
+  assert.match(String(a), /nosuchteam/, 'names what was not found');
+  const b = await dispatchSlash('/team', 'member add crew nosuchagent', ctx(), () => {});
+  assert.match(String(b), /nosuchagent/);
+});
+
+test('/workflow is a registered command with run, resume and clear', async () => {
+  assert.ok(SLASH_HANDLERS.has('/workflow'), 'the panels compose /workflow lines');
+  const usage = await dispatchSlash('/workflow', '', ctx(), () => {});
+  for (const sub of ['run', 'resume', 'clear']) {
+    assert.match(String(usage), new RegExp(sub), `usage must mention ${sub}`);
+  }
+});
+
+test('/workflow names an unknown workflow rather than reporting success', async () => {
+  const out = await dispatchSlash('/workflow', 'run nosuchworkflow', ctx(), () => {});
+  assert.match(String(out), /nosuchworkflow/);
+  assert.doesNotMatch(String(out), /^✓/, 'a failure must not read as success');
+  const c = ctx();
+  await dispatchSlash('/workflow', 'run nosuchworkflow', c, () => {});
+  assert.ok(c.__persistFailed, 'a missing workflow must not report ok:true over HTTP');
+});
+
+// Fix round 1 — the flag-value validation gap: a --provider/--model whose
+// "value" is itself another recognized flag (an empty composer field can
+// produce exactly this shape) used to be swallowed silently: provider got set
+// to the literal string "--model" and "opus" leaked into the role text.
+// Fix round 2 — the refusal itself still reported ok:true: the agent was
+// genuinely not created, but a dashboard "Create agent" button would have
+// shown a success toast anyway.
+test('/agent add rejects --provider/--model when the value is itself another flag, and reports ok:false', async () => {
+  const c = ctx();
+  const out = await dispatchSlash('/agent', 'add flagtest --provider --model opus researcher', c, () => {});
+  assert.match(String(out), /--provider/, 'names which flag was malformed');
+  assert.ok(c.__persistFailed, 'a malformed flag must not report ok:true over HTTP');
+  const { getAgent } = await import('../agents.mjs');
+  assert.equal(getAgent('flagtest', CFG), null, 'a malformed flag must not create a corrupted agent');
+});
+
+// Fix round 2 — neighbouring refusal paths in the same /agent add branch,
+// audited for the same "attempted, nothing happened" defect.
+test('/agent add with no name (typed path, no picker) reports ok:false', async () => {
+  const c = ctx();
+  const out = await dispatchSlash('/agent', 'add', c, () => {});
+  assert.match(String(out), /usage/i);
+  assert.ok(c.__persistFailed, 'a missing required name must not report ok:true over HTTP');
+});
+
+test('/agent add on an already-registered name reports ok:false instead of the generic outer catch swallowing it', async () => {
+  // 'm1' is registered by an earlier test in this file (member add/remove).
+  const c = ctx();
+  const out = await dispatchSlash('/agent', 'add m1 duplicate attempt', c, () => {});
+  assert.match(String(out), /already exists/);
+  assert.ok(c.__persistFailed, 're-adding an existing agent must not report ok:true over HTTP');
+});
+
+// The end-of-args case (a flag with nothing after it at all) must stay a
+// silent default, not a new rejection — this is what "already safe" meant.
+test('/agent add with --provider at the very end of args still defaults cleanly', async () => {
+  const out = await dispatchSlash('/agent', 'add trailing --provider', ctx(), () => {});
+  assert.match(String(out), /added agent trailing/);
+  const { getAgent } = await import('../agents.mjs');
+  const a = getAgent('trailing', CFG);
+  assert.equal(a.provider, 'claude-cli', 'a flag with no value at all still falls back to the default');
+});
+
+test('/team member add|remove report ok:false over HTTP when the team or agent is missing', async () => {
+  const c1 = ctx();
+  await dispatchSlash('/team', 'member add nosuchteam m1', c1, () => {});
+  assert.ok(c1.__persistFailed, 'a missing team must not report ok:true over HTTP');
+  const c2 = ctx();
+  await dispatchSlash('/team', 'member add crew nosuchagent', c2, () => {});
+  assert.ok(c2.__persistFailed, 'a missing agent must not report ok:true over HTTP');
+});
+
+// Fix round 2 — neighbouring refusal paths in the same /team member branch.
+test('/team member with a bad action verb reports ok:false, not a usage-as-success', async () => {
+  const c = ctx();
+  const out = await dispatchSlash('/team', 'member frobnicate crew m1', c, () => {});
+  assert.match(String(out), /usage/i);
+  assert.ok(c.__persistFailed, 'a bad action verb must not report ok:true over HTTP');
+});
+
+test('/team member remove that would empty a team reports ok:false — patchTeam throws, caught, refused', async () => {
+  await dispatchSlash('/agent', 'add solodev', ctx(), () => {});
+  await dispatchSlash('/team', 'add solo --agents solodev', ctx(), () => {});
+  const c = ctx();
+  const out = await dispatchSlash('/team', 'member remove solo solodev', c, () => {});
+  assert.match(String(out), /agents must be a non-empty array|TEAM_NO_AGENTS/);
+  assert.ok(c.__persistFailed, 'a patchTeam validation failure must not report ok:true over HTTP');
+  const { getTeam } = await import('../teams.mjs');
+  assert.deepEqual(getTeam('solo', CFG).agents, ['solodev'], 'the team must be unchanged when the write is refused');
+});
+
+// --- final review, BLOCKING 1 — six panel-reachable paths reported ok:true
+// on a failed write, three of them via an OUTER CATCH that turned a thrown
+// TeamError/AgentError/TaskError into a returned string. Reproduced against
+// this same temp CFG before the fix; each assertion below failed against
+// pre-fix HEAD. ---------------------------------------------------------
+
+test('/team add on a duplicate name reports ok:false — the outer catch used to swallow it', async () => {
+  await dispatchSlash('/team', 'add dupcrew --agents m1', ctx(), () => {});
+  const c = ctx();
+  const out = await dispatchSlash('/team', 'add dupcrew --agents m1', c, () => {});
+  assert.match(String(out), /already exists/);
+  assert.ok(c.__persistFailed, 'a duplicate team must not report ok:true over HTTP');
+});
+
+test('/team add with an unregistered agent reports ok:false — the outer catch used to swallow it', async () => {
+  const c = ctx();
+  const out = await dispatchSlash('/team', 'add unregteam --agents nosuchagent', c, () => {});
+  assert.match(String(out), /not registered/);
+  assert.ok(c.__persistFailed, 'an unregistered agent must not report ok:true over HTTP');
+});
+
+test('/team add rejects an unknown flag token and reports ok:false', async () => {
+  const c = ctx();
+  const out = await dispatchSlash('/team', 'add badflagteam --nope x', c, () => {});
+  assert.match(String(out), /unknown token/);
+  assert.ok(c.__persistFailed);
+});
+
+test('/team add with no name, and with no --agents, both report ok:false (typed path, no picker)', async () => {
+  const c1 = ctx();
+  const out1 = await dispatchSlash('/team', 'add', c1, () => {});
+  assert.match(String(out1), /usage/i);
+  assert.ok(c1.__persistFailed, 'a missing team name must not report ok:true over HTTP');
+
+  const c2 = ctx();
+  const out2 = await dispatchSlash('/team', 'add noagentsteam', c2, () => {});
+  assert.match(String(out2), /--agents is required/);
+  assert.ok(c2.__persistFailed, 'missing --agents must not report ok:true over HTTP');
+});
+
+test('/team remove reports ok:false for a missing name (usage) and a missing team (outer catch)', async () => {
+  const c1 = ctx();
+  const out1 = await dispatchSlash('/team', 'remove', c1, () => {});
+  assert.match(String(out1), /usage/i);
+  assert.ok(c1.__persistFailed, 'a missing team name must not report ok:true over HTTP');
+
+  const c2 = ctx();
+  const out2 = await dispatchSlash('/team', 'remove nosuchteam', c2, () => {});
+  assert.match(String(out2), /no team/i);
+  assert.ok(c2.__persistFailed, 'removing a nonexistent team must not report ok:true over HTTP — this is the exact case the review named');
+});
+
+test('/agent remove reports ok:false for a missing name (usage) and a missing agent (outer catch, named by the review)', async () => {
+  const c1 = ctx();
+  const out1 = await dispatchSlash('/agent', 'remove', c1, () => {});
+  assert.match(String(out1), /usage/i);
+  assert.ok(c1.__persistFailed, 'a missing agent name must not report ok:true over HTTP');
+
+  const c2 = ctx();
+  const out2 = await dispatchSlash('/agent', 'remove nosuchagent', c2, () => {});
+  assert.match(String(out2), /no agent/i);
+  assert.ok(c2.__persistFailed, 'removing a nonexistent agent must not report ok:true over HTTP');
+});
+
+test('/agent edit reports ok:false for a missing name (usage) and an unknown agent — unnamed siblings, same shape', async () => {
+  const c1 = ctx();
+  const out1 = await dispatchSlash('/agent', 'edit', c1, () => {});
+  assert.match(String(out1), /usage/i);
+  assert.ok(c1.__persistFailed, 'a missing agent name must not report ok:true over HTTP');
+
+  const c2 = ctx();
+  const out2 = await dispatchSlash('/agent', 'edit nosuchagent', c2, () => {});
+  assert.match(String(out2), /no agent/i);
+  assert.ok(c2.__persistFailed, 'editing a nonexistent agent must not report ok:true over HTTP');
+});
+
+test('/task start reports ok:false for a missing team (named by the review) and a usage error', async () => {
+  const c1 = ctx();
+  const out1 = await dispatchSlash('/task', 'start nosuchteam --title "hi"', c1, () => {});
+  assert.match(String(out1), /no team/i);
+  assert.ok(c1.__persistFailed, 'starting a task against a nonexistent team must not report ok:true over HTTP');
+
+  const c2 = ctx();
+  const out2 = await dispatchSlash('/task', 'start crew', c2, () => {});
+  assert.match(String(out2), /usage/i);
+  assert.ok(c2.__persistFailed, 'a missing --title must not report ok:true over HTTP');
+});
+
+test('/task done and /task abandon report ok:false for a bad id (named by the review) — the outer catch used to swallow it', async () => {
+  const c1 = ctx();
+  const out1 = await dispatchSlash('/task', 'done nosuchtask', c1, () => {});
+  assert.match(String(out1), /bad task id/i);
+  assert.ok(c1.__persistFailed, 'marking a nonexistent task done must not report ok:true over HTTP');
+
+  const c2 = ctx();
+  const out2 = await dispatchSlash('/task', 'abandon nosuchtask', c2, () => {});
+  assert.match(String(out2), /bad task id/i);
+  assert.ok(c2.__persistFailed, 'abandoning a nonexistent task must not report ok:true over HTTP');
+});
+
+test('/task done, /task abandon and /task remove report ok:false for a missing id (usage) — unnamed siblings', async () => {
+  for (const sub of ['done', 'abandon', 'remove']) {
+    const c = ctx();
+    const out = await dispatchSlash('/task', sub, c, () => {});
+    assert.match(String(out), /usage/i, `${sub} with no id must be a usage error`);
+    assert.ok(c.__persistFailed, `${sub} with no id must not report ok:true over HTTP`);
+  }
+});
+
+test('/task remove reports ok:false for a missing id — same outer catch as done/abandon', async () => {
+  const c = ctx();
+  const out = await dispatchSlash('/task', 'remove nosuchtask', c, () => {});
+  assert.match(String(out), /bad task id/i);
+  assert.ok(c.__persistFailed, 'removing a nonexistent task must not report ok:true over HTTP');
+});
+
+// Found while auditing /task start for every branch that returns without
+// writing: registerTask already ran by the time the Slack kickoff post can
+// fail, so the best-effort rollback (removeTask) is the only thing between
+// "the post failed" and "a task exists nobody was told about" — either way,
+// the /task start the caller asked for did not complete.
+test('/task start rolls back and reports ok:false when the Slack kickoff post fails', async () => {
+  const { registerTeam } = await import('../teams.mjs');
+  registerTeam({ name: 'slackteam', agents: ['m1'], lead: 'm1', slackChannel: 'C123456' }, CFG);
+  class FailingSlack {
+    async start() {}
+    async send() { throw new Error('slack down'); }
+    async stop() {}
+  }
+  const c = { ...ctx(), SlackChannel: FailingSlack };
+  const out = await dispatchSlash('/task', 'start slackteam --title "hi"', c, () => {});
+  assert.match(String(out), /slack down/);
+  assert.ok(c.__persistFailed, 'a Slack post failure must not report ok:true over HTTP');
+  const { listTasks } = await import('../tasks.mjs');
+  assert.equal(listTasks(CFG).filter((t) => t.team === 'slackteam').length, 0,
+    'the best-effort rollback must have removed the half-created task');
+});
+
+// /workflow's real success/failure path, and the state-dir precedence fix —
+// only usage/not-found were pinned before; nothing proved run/resume actually
+// execute a real stored workflow, or that resume reuses saved state instead
+// of re-running it.
+test('/workflow run succeeds against a real stored workflow, resume reuses saved state, clear removes it', async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-wf-state-'));
+  const wfCtx = () => ({
+    cfgDir: CFG,
+    cfg: { workflows: { greet: { def: { nodes: [{ id: 'msg', type: 'set', config: { value: 'hi' } }] } } } },
+    readConfig: () => ({}), writeConfig: () => {},
+    workflowStateDir: () => stateDir,
+  });
+  try {
+    const ran = await dispatchSlash('/workflow', 'run greet', wfCtx(), () => {});
+    assert.match(String(ran), /^✓/, 'a genuine success reads as success');
+    assert.match(String(ran), /\(1 node\(s\)\)/, 'the fresh run actually executed the one node');
+
+    const resumed = await dispatchSlash('/workflow', 'resume greet', wfCtx(), () => {});
+    assert.match(String(resumed), /^✓/);
+    assert.match(String(resumed), /\(0 node\(s\)\)/, 'resume reused saved state instead of re-running the node');
+
+    const cleared = await dispatchSlash('/workflow', 'clear greet', wfCtx(), () => {});
+    assert.match(String(cleared), /^✓/);
+    assert.equal(fs.existsSync(path.join(stateDir, 'greet.json')), false);
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('/workflow run that genuinely fails reports ok:false, not a success line', async () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-wf-fail-'));
+  const c = {
+    cfgDir: CFG,
+    // http's own guard throws synchronously when no url is configured — a
+    // deterministic, network-free way to make a REAL run genuinely fail (the
+    // workflow entry exists and is used; this is not a "not found" case).
+    cfg: { workflows: { broken: { def: { nodes: [{ id: 'x', type: 'http', config: {} }] } } } },
+    readConfig: () => ({}), writeConfig: () => {},
+    workflowStateDir: () => stateDir,
+  };
+  try {
+    const out = await dispatchSlash('/workflow', 'run broken', c, () => {});
+    assert.doesNotMatch(String(out), /^✓/, 'a genuine execution failure must not read as success');
+    assert.ok(c.__persistFailed, 'a genuine execution failure must report ok:false over HTTP — the clearest instance of this defect class');
+  } finally {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  }
+});
+
+test('/workflow resolves the state dir from ctx.workflowStateDir, which wins over the env var', async () => {
+  const envDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-wf-env-'));
+  const ctxDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-wf-ctxdir-'));
+  const prevEnv = process.env.POMPOS_WORKFLOW_STATE_DIR;
+  process.env.POMPOS_WORKFLOW_STATE_DIR = envDir;
+  try {
+    const wfCtx = {
+      cfgDir: CFG,
+      cfg: { workflows: { pinger: { def: { nodes: [{ id: 'x', type: 'set', config: { value: 1 } }] } } } },
+      readConfig: () => ({}), writeConfig: () => {},
+      workflowStateDir: () => ctxDir,
+    };
+    await dispatchSlash('/workflow', 'run pinger', wfCtx, () => {});
+    assert.ok(fs.existsSync(path.join(ctxDir, 'pinger.json')), 'state landed in the ctx-supplied dir');
+    assert.equal(fs.existsSync(path.join(envDir, 'pinger.json')), false, 'must NOT fall back to the env var when ctx supplies a resolver');
+  } finally {
+    process.env.POMPOS_WORKFLOW_STATE_DIR = prevEnv;
+    fs.rmSync(envDir, { recursive: true, force: true });
+    fs.rmSync(ctxDir, { recursive: true, force: true });
+  }
+});
