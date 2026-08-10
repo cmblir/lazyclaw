@@ -2247,3 +2247,120 @@ npm run lint:size
 git add tui/slash_dispatcher.mjs tui/slash_commands.mjs daemon/lib/slash_destructive.mjs tests/f-slash-panel-grammar.test.mjs
 git commit -m "feat(slash): /workflow, /team member, and provider/model flags on /agent add"
 ```
+
+---
+
+### Task 15: a bound baseUrl must not be erased by an implicit undefined
+
+**Files:**
+- Modify: `mas/provider_adapters.mjs:83` (and `agent_turn.mjs:261` if that is the cleaner seam)
+- Test: `tests/f-provider-baseurl-binding.test.mjs`
+
+**Why.** Found while scripting the E2E. `_openAICompatAdapter` binds a registered provider's endpoint:
+
+```js
+callOnce: (opts = {}) => base.callOnce({ baseUrl: info.baseUrl, ...opts }),
+```
+
+The comment says "an explicit baseUrl in the call still wins". An IMPLICIT one wins too: `mas/agent_turn.mjs:261` forwards `baseUrl` unconditionally, and it is `undefined` whenever the caller did not set one. The spread then overwrites the bound value with `undefined`, so the request falls back to the vendor default. Verified:
+
+```
+{ baseUrl: 'https://internal.example/v1', ...{ baseUrl: undefined } }  →  {}
+```
+
+Consequence: run a task through a registered custom or OpenAI-compatible provider and the traffic goes to the **real vendor endpoint** instead of the configured one. On a corporate network or with a self-hosted gateway that is prompts leaving for a destination the operator never configured. Pre-existing, unrelated to the dashboard, and worth fixing on its own.
+
+- [ ] **Step 1: Write the failing test**
+
+```js
+// tests/f-provider-baseurl-binding.test.mjs
+//
+// A registered provider's endpoint is bound once by the adapter. Callers forward
+// `baseUrl` unconditionally (mas/agent_turn.mjs:261), so it arrives as undefined
+// whenever nobody set one — and a spread let that undefined erase the binding,
+// silently redirecting the request to the vendor's own endpoint. For a
+// self-hosted or corporate gateway that means prompts leaving for a host the
+// operator never configured.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+test('an undefined baseUrl in the call does not erase the provider binding', async () => {
+  const seen = [];
+  const base = { callOnce: async (opts) => { seen.push(opts.baseUrl); return { text: 'ok' }; } };
+  const { _bindBaseUrl } = await import('../mas/provider_adapters.mjs');
+  const bound = _bindBaseUrl(base, 'https://internal.example/v1');
+
+  await bound.callOnce({ model: 'm' });                     // nothing set
+  await bound.callOnce({ model: 'm', baseUrl: undefined }); // forwarded as undefined
+  assert.deepEqual(seen, ['https://internal.example/v1', 'https://internal.example/v1'],
+    'both calls must reach the configured endpoint');
+});
+
+test('an explicit baseUrl still wins — that part of the contract is real', async () => {
+  const seen = [];
+  const base = { callOnce: async (opts) => { seen.push(opts.baseUrl); return { text: 'ok' }; } };
+  const { _bindBaseUrl } = await import('../mas/provider_adapters.mjs');
+  const bound = _bindBaseUrl(base, 'https://internal.example/v1');
+  await bound.callOnce({ baseUrl: 'https://override.example/v1' });
+  assert.deepEqual(seen, ['https://override.example/v1']);
+});
+
+test('an explicit empty string is a caller error, not an override', async () => {
+  // '' would resolve to the vendor default just as undefined did. Refusing it
+  // is safer than honouring it, because no caller means "use the default" by
+  // passing an empty string.
+  const seen = [];
+  const base = { callOnce: async (opts) => { seen.push(opts.baseUrl); return { text: 'ok' }; } };
+  const { _bindBaseUrl } = await import('../mas/provider_adapters.mjs');
+  const bound = _bindBaseUrl(base, 'https://internal.example/v1');
+  await bound.callOnce({ baseUrl: '' });
+  assert.deepEqual(seen, ['https://internal.example/v1']);
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `node --test tests/f-provider-baseurl-binding.test.mjs`
+Expected: FAIL — `_bindBaseUrl` is not exported, and the current spread drops the binding.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Extract the binding so it is testable and correct:
+
+```js
+/**
+ * Bind a provider's configured endpoint to an adapter.
+ *
+ * Only a caller-supplied, non-empty baseUrl overrides it. Callers forward
+ * `baseUrl` unconditionally (mas/agent_turn.mjs), so an object spread would let
+ * `undefined` erase the binding and send the request to the vendor's default
+ * host instead of the configured one — for a self-hosted or corporate gateway,
+ * prompts leaving for somewhere the operator never configured.
+ *
+ * Exported for the test; not part of the module's public surface.
+ */
+export function _bindBaseUrl(base, boundUrl) {
+  return {
+    ...base,
+    callOnce: (opts = {}) => base.callOnce({
+      ...opts,
+      baseUrl: opts.baseUrl || boundUrl,
+    }),
+  };
+}
+```
+
+and use it at the existing call site in place of the inline spread. Check whether the same pattern appears elsewhere in the file (there is a second `callOnce` wrapper around line 109) and fix any sibling.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `node --test tests/f-provider-baseurl-binding.test.mjs && node --test tests/*.test.mjs`
+Expected: PASS. Existing provider and agent-turn tests must stay green — a caller that DID pass an explicit baseUrl must be unaffected.
+
+- [ ] **Step 5: Commit**
+
+```bash
+npm run lint:size
+git add mas/provider_adapters.mjs tests/f-provider-baseurl-binding.test.mjs
+git commit -m "fix(providers): an undefined baseUrl must not erase a configured endpoint"
+```
