@@ -6,6 +6,64 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Security
+
+- **A registered custom or OpenAI-compatible provider's traffic could reach
+  the wrong host, carrying the operator's real API key.** The OpenAI-compat
+  adapter bound a provider's configured `baseUrl` with an object spread
+  (`{ baseUrl: info.baseUrl, ...opts }`), so a caller that also passed
+  `baseUrl` — `mas/agent_turn.mjs` does, on every call — overwrote it with
+  `undefined` and fell through to the vendor's hardcoded default host, while
+  the request still carried the `Authorization` header built for the
+  *originally configured* endpoint. A key issued for Groq, OpenRouter,
+  DeepSeek, Together, xAI, Mistral, Fireworks, NIM, or a self-hosted gateway
+  behind a `custom` provider would have been sent to that vendor's built-in
+  default (typically `api.openai.com`) instead of the operator's own
+  endpoint. `anthropic`, `openai` and `gemini` are handled before this code
+  path and were never affected. Binding now resolves with `||` instead of a
+  spread, so a caller-side `undefined` can no longer erase the configured
+  endpoint.
+
+### Added
+
+- **The dashboard is now a working surface, not just a view.** Agents, teams,
+  tasks, config keys and workflows can be created, edited and run from the
+  browser, and the chat input accepts every slash command the terminal REPL
+  does, with autocomplete. Destructive actions ask first, naming what they
+  will affect.
+
+  Everything routes through one endpoint (`POST /slash`) that runs the same
+  dispatcher the CLI uses, so a command added to the terminal appears in the
+  dashboard with no extra work and the two cannot disagree about what a
+  command means. Authorization is unchanged: the existing bearer token
+  carries the same authority it always did.
+
+  Two things stay out of reach from the browser: resolving an approval still
+  needs the terminal or a paired device (the Approvals panel's buttons are
+  disabled — approving is gated on an Ed25519-paired device, which a browser
+  is not), and creating an agent from the dashboard can't set a custom tool
+  list yet (`--tools` has no slash-command form; the agent is created with
+  the default tool set).
+- Three new slash commands, useful from the terminal too: `/workflow
+  run|resume|clear`, `/team member add|remove`, and `--provider`/`--model` on
+  `/agent add`. `/config set <key> <value>` and `/config unset <key>` now
+  write directly — before, `/config` only opened the picker.
+
+### Fixed
+
+- **A command that couldn't parse `config.json` silently discarded every
+  other setting in it.** `/trainer`'s set/fallback/clear paths, `/personality
+  use` (both the in-chat command and the CLI's `pompos personality use`), and
+  the v5 upgrade migration each read the file, merge in one change, and write
+  it back — and each used to swallow a parse failure into `{}` first. One
+  misplaced comma in `config.json` meant the next `/trainer set` replaced the
+  whole file with just the block being set, taking every other setting with
+  it, while still reporting success. All of them now refuse and name the file
+  instead of overwriting it; a genuinely missing file is still treated as
+  fresh, so a first-time write is unaffected. An unreadable file (`EACCES` /
+  `EISDIR`) gets the same refusal with an actionable message instead of
+  failing silently.
+
 ## [6.11.0] - 2026-08-07
 
 ### Security
