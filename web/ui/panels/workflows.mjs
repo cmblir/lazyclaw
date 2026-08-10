@@ -1,9 +1,17 @@
 // web/ui/panels/workflows.mjs — workflow run sessions: filterable list with
-// aggregate stats, a per-session detail modal (node table), and delete.
-import { el, phead, table } from '../dom.mjs';
+// aggregate stats, a per-session detail modal (node table), run/resume/clear.
+// Writes go through the slash dispatcher (runSlashConfirmed +
+// slash_actions.mjs), same grammar a user would type in the REPL — not a
+// typed REST call. /workflow run|resume|clear (tui/slash_workflow.mjs, Task
+// 14) operates on STORED named workflows (cfg.workflows[name]); the name is
+// also the sessionId once a workflow has run at least once, so it is the
+// same identifier this panel already lists rows by.
+import { el, phead, table, banner } from '../dom.mjs';
 import { api } from '../api.mjs';
 import { openModal } from '../modal.mjs';
 import { reconcile } from '../reconcile.mjs';
+import { runSlashConfirmed } from '../confirm_dialog.mjs';
+import { workflowRun, workflowResume, workflowClear } from '../slash_actions.mjs';
 
 function fmtDuration(ms) {
   if (!Number.isFinite(ms) || ms < 0) return '—';
@@ -27,12 +35,47 @@ export function render(host) {
     el('option', { value: 'done', text: 'done' }));
   const filterInput = el('input', { type: 'search', placeholder: 'filter by id substring' });
   const meta = el('span', { class: 'dim' });
-  host.append(el('div', { class: 'toolbar' }, statusSel, filterInput,
+  host.append(el('div', { class: 'toolbar' },
+    el('button', { class: 'btn', type: 'button', text: '+ Run workflow', onclick: () => openRunModal() }),
+    statusSel, filterInput,
     el('button', { class: 'btn btn-secondary', type: 'button', text: 'Refresh', onclick: () => load() }),
     meta));
+  // Cleared on every load() and every write attempt; holds the one error
+  // banner for whichever write just failed (never for a cancellation).
+  const errorBox = el('div', {});
+  host.append(errorBox);
 
   let grid = el('div', { class: 'grid' });
   host.append(grid);
+
+  // Shared by run/resume/clear — see web/ui/panels/agents.mjs's runWrite for
+  // the full rationale (truthy `out.ok` check, CANCELLED is silent, hint
+  // appended). A refused run (e.g. "workflow not found") is exactly as real
+  // a failure as a network error and must not refresh as though it worked.
+  async function runWrite(line) {
+    errorBox.replaceChildren();
+    const out = await runSlashConfirmed(line);
+    if (out.ok) { load(); return; }
+    if (out.code === 'CANCELLED') return;
+    const msg = out.hint ? `${out.error || 'failed'} — ${out.hint}` : (out.error || 'failed');
+    errorBox.replaceChildren(banner('err', '✗', msg));
+  }
+
+  // /workflow run <name> only works against a name stored under
+  // cfg.workflows — guide the flow the same way teams.mjs does for its own
+  // create modal, rather than letting the operator type a name that /workflow
+  // will just refuse as "workflow not found".
+  async function openRunModal() {
+    let names = [];
+    try { const cfg = await api('/config'); names = Object.keys(cfg.workflows || {}); } catch { /* fall through with empty list */ }
+    if (names.length === 0) {
+      alert('No stored workflows configured yet — add one under cfg.workflows (see docs) before running it from here.');
+      return;
+    }
+    const name = (prompt(`Workflow (one of ${names.join(', ')}):`, names[0]) || '').trim();
+    if (!name) return;
+    await runWrite(workflowRun(name));
+  }
 
   // The sessions table shell is built once; reconcile() only touches the
   // fields that change on a re-fetch (state pills, counts, updated time),
@@ -56,6 +99,26 @@ export function render(host) {
     return tags.length ? tags : [el('span', { class: 'dim', text: '—' })];
   }
 
+  // Resume only offered when the session itself reports resumable — Clear
+  // (== /workflow clear, a confirmed destructive action, see
+  // daemon/lib/slash_destructive.mjs) is always available, matching the old
+  // Delete button's reach.
+  function actionsFor(s) {
+    const sm = s.summary || {};
+    const kids = [];
+    if (sm.resumable) {
+      kids.push(el('button', {
+        class: 'btn btn-secondary btn-sm', type: 'button', text: 'Resume',
+        onclick: (e) => { e.stopPropagation(); runWrite(workflowResume(s.sessionId)); },
+      }));
+    }
+    kids.push(el('button', {
+      class: 'btn btn-danger btn-sm', type: 'button', text: 'Clear',
+      onclick: (e) => { e.stopPropagation(); runWrite(workflowClear(s.sessionId)); },
+    }));
+    return el('div', {}, kids);
+  }
+
   function createRow(s) {
     const sm = s.summary || {};
     const tr = el('tr', { class: 'clickable', '--i': s.i },
@@ -64,14 +127,15 @@ export function render(host) {
       el('td', { class: 'num', 'data-f': 'counts', text: `${sm.success ?? 0} / ${sm.total ?? ''}` }),
       el('td', { class: 'num', 'data-f': 'failed', text: String(sm.failed ?? 0) }),
       el('td', { class: 'dim', 'data-f': 'updated', text: s.updatedAt || s.startedAt || '' }),
-      el('td', {}, el('button', { class: 'btn btn-danger btn-sm', type: 'button', text: 'Delete', onclick: (e) => { e.stopPropagation(); deleteWorkflow(s.sessionId); } })));
+      el('td', { 'data-f': 'actions' }, actionsFor(s)));
     tr.addEventListener('click', () => openWorkflowDetail(s.sessionId));
     return tr;
   }
 
   // Only the fields a re-fetch can actually change: state, done/total,
-  // failed count, and the updated timestamp. sessionId and the click/delete
-  // handlers are fixed for the life of a session, so the row they belong to
+  // failed count, updated timestamp, and now the actions available (Resume
+  // depends on the freshly-fetched `resumable` flag). sessionId and the
+  // click handler are fixed for the life of a session, so the row itself
   // never needs to be rebuilt.
   function updateRow(tr, s) {
     const sm = s.summary || {};
@@ -79,6 +143,7 @@ export function render(host) {
     tr.querySelector('[data-f="counts"]').textContent = `${sm.success ?? 0} / ${sm.total ?? ''}`;
     tr.querySelector('[data-f="failed"]').textContent = String(sm.failed ?? 0);
     tr.querySelector('[data-f="updated"]').textContent = s.updatedAt || s.startedAt || '';
+    tr.querySelector('[data-f="actions"]').replaceChildren(actionsFor(s));
   }
 
   let debounceTimer = null;
@@ -89,6 +154,7 @@ export function render(host) {
   });
 
   async function load() {
+    errorBox.replaceChildren();
     // Only show the transient placeholder when there's nothing on screen
     // yet — once the table is up, a Refresh reconciles it in place instead
     // of flashing back to "Loading…" and losing every row's node for that.
@@ -126,7 +192,8 @@ export function render(host) {
       );
       if (sessions.length === 0) {
         showList(el('div', { class: 'empty' },
-          'No workflow runs yet. Run one with ', el('code', { text: 'pompos run <id> ./flow.mjs' }), '.'));
+          'No workflow runs yet. Click + Run workflow above (for a stored, named workflow), ',
+          'or run an ad hoc one with ', el('code', { text: 'pompos run <id> ./flow.mjs' }), '.'));
         return;
       }
       if (list !== tableWrap) showList(tableWrap);
@@ -165,19 +232,6 @@ export function render(host) {
       openModal({ title: `Workflow — ${id}`, body });
     } catch (e) {
       openModal({ title: `Workflow — ${id}`, body: el('div', { class: 'empty', text: '⚠ ' + e.message }) });
-    }
-  }
-
-  async function deleteWorkflow(id) {
-    if (!confirm(`Delete workflow session "${id}"?\nState file will be permanently removed.`)) return;
-    try {
-      // api() throws on a non-ok status, carrying the server's own error text.
-      // apiRaw did not, so a refused delete — including the 400 the route now
-      // returns for a sessionId that escapes the state dir — looked like success.
-      await api('/workflows/' + encodeURIComponent(id), { method: 'DELETE' });
-      load();
-    } catch (e) {
-      alert('Delete failed: ' + e.message);
     }
   }
 

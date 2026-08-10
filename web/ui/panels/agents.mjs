@@ -1,11 +1,15 @@
-// web/ui/panels/agents.mjs — registered agents: list, create (prompt-driven),
-// delete. Writes go through the slash dispatcher (runSlashConfirmed +
-// slash_actions.mjs), same grammar a user would type in the REPL — not a
-// typed REST call.
+// web/ui/panels/agents.mjs — registered agents: list, create (prompt-driven,
+// provider/model optional), delete. Writes go through the slash dispatcher
+// (runSlashConfirmed + slash_actions.mjs), same grammar a user would type in
+// the REPL — not a typed REST call.
 import { el, phead, table, banner } from '../dom.mjs';
 import { api } from '../api.mjs';
 import { runSlashConfirmed } from '../confirm_dialog.mjs';
 import { agentCreate, agentRemove } from '../slash_actions.mjs';
+
+// Provider ids the REPL onboarding wizard offers, mirrored here so the
+// prompt below shows the same options rather than a bare free-text field.
+const PROVIDER_HINT = 'anthropic / openai / gemini / claude-cli';
 
 export async function render(host) {
   const meta = el('span', { class: 'dim' });
@@ -62,16 +66,18 @@ export async function render(host) {
     }
   }
 
-  // /agent add <name> [role] has no --provider/--model/--tools flag (only
-  // tui/slash_dispatcher.mjs's `/agent edit`, which needs an interactive
-  // picker unavailable over HTTP, can set those) — so creation from here is
-  // name + role only, same as the REPL's arg form. This is narrower than
-  // the REST call it replaces; see task-8-report.md.
+  // /agent add <name> [--provider <p>] [--model <m>] [role] (Task 14 added
+  // the flags; --tools is still not settable here — that remains narrower
+  // than the REST call this replaced, see task-8-report.md). Leaving either
+  // prompt blank omits the flag, so the agent keeps the dispatcher's default
+  // provider — same as typing `/agent add <name>` with no flags at all.
   async function openAgentModal() {
     const name = (prompt('Agent name (e.g. planner, backend, frontend):') || '').trim();
     if (!name) return;
+    const provider = (prompt(`Provider (${PROVIDER_HINT}) — blank keeps the default:`) || '').trim();
+    const model = (prompt('Model id (blank = provider default):') || '').trim();
     const role = prompt('Role / system prompt (optional):') || '';
-    await runWrite(agentCreate({ name, role }));
+    await runWrite(agentCreate({ name, role, provider, model }));
   }
 
   await load();

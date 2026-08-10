@@ -4,9 +4,16 @@
 // unnoticed.
 //
 // Every line below was checked against the real handler
-// (tui/slash_dispatcher.mjs, tui/config_picker.mjs) rather than assumed.
-// Three composers from the original draft did not survive that check and
-// are intentionally absent — see the bottom of this file.
+// (tui/slash_dispatcher.mjs, tui/slash_team.mjs, tui/slash_workflow.mjs,
+// tui/config_picker.mjs) rather than assumed.
+//
+// Task 8 originally shipped without teamMemberAdd/Remove and
+// workflowRun/Resume/Clear: no backing command existed for any of them (see
+// git history). The user ruled the dispatcher should be extended rather than
+// the dashboard shipping narrower or making a typed REST call — Task 14
+// added `/team member add|remove` and `/workflow run|resume|clear`, and
+// `--provider`/`--model` on `/agent add`. All five composers below are
+// restored against that real, tested grammar.
 
 function req(value, what) {
   const s = String(value ?? '').trim();
@@ -28,16 +35,17 @@ function arg(value) {
   return /\s/.test(s) ? `"${s}"` : s;
 }
 
-// /agent add <name> [role text…] — tui/slash_dispatcher.mjs's `_agent`
-// handler (sub === 'add') takes everything after the name as free-form
-// role text (rest.slice(1).join(' ')); there is no --role or --model flag.
-// A model can only be set afterward via `/agent edit <name>`, which opens
-// an interactive picker (ctx.openPicker) that does not exist over HTTP —
-// so it is not offered here.
-export function agentCreate({ name, role } = {}) {
-  const n = req(name, 'agent name');
+// /agent add <name> [--provider <p>] [--model <m>] [role text…] —
+// tui/slash_dispatcher.mjs's `_agent` handler (sub === 'add'). Flags are
+// optional and additive (Task 14); everything else after the name is
+// free-form role text, in whatever order it appears relative to the flags —
+// putting the flags first keeps the role text contiguous and easy to read.
+export function agentCreate({ name, role, provider, model } = {}) {
+  let line = `/agent add ${req(name, 'agent name')}`;
+  if (provider) line += ` --provider ${arg(provider)}`;
+  if (model) line += ` --model ${arg(model)}`;
   const r = String(role ?? '').trim();
-  return r ? `/agent add ${n} ${r}` : `/agent add ${n}`;
+  return r ? `${line} ${r}` : line;
 }
 export function agentRemove(name) { return `/agent remove ${req(name, 'agent name')}`; }
 
@@ -53,6 +61,16 @@ export function teamCreate({ name, agents, lead, channel } = {}) {
   return line;
 }
 export function teamRemove(name) { return `/team remove ${req(name, 'team name')}`; }
+
+// /team member add|remove <team> <agent> — tui/slash_team.mjs's `member`
+// branch (Task 14). Positional, in that exact order; the dispatcher rejects
+// any other action verb with a usage error.
+export function teamMemberAdd(team, agent) {
+  return `/team member add ${req(team, 'team name')} ${req(agent, 'agent name')}`;
+}
+export function teamMemberRemove(team, agent) {
+  return `/team member remove ${req(team, 'team name')} ${req(agent, 'agent name')}`;
+}
 
 // /task start <team> --title "..." — `_task`'s `start` handler only
 // recognises --title/--description/--lead; a bare positional title after
@@ -70,27 +88,12 @@ export function taskDone(id) { return `/task done ${req(id, 'task id')}`; }
 export function configSet(key, value) { return `/config set ${req(key, 'config key')} ${arg(value)}`; }
 export function configUnset(key) { return `/config unset ${req(key, 'config key')}`; }
 
-// ─── Composers NOT implemented — no real command exists to back them ─────
-//
-// teamMemberAdd({team, agent}): `/team member …` does not exist.
-// tui/slash_dispatcher.mjs's `_team` handler has exactly four subcommands
-// — list, show, add, remove — and `add` refuses an existing name
-// (teams.mjs's registerTeam throws TEAM_EXISTS). The one function that
-// *can* add a member to an existing team, teams.mjs's patchTeam, is wired
-// only to a typed REST route (PATCH /teams/:name, daemon/routes/registry.mjs)
-// and the CLI — never to the slash dispatcher — so composing a line for it
-// would either invent a non-existent command or require a typed REST call
-// from a panel, both against this task's constraints.
-//
-// workflowRun(name) / workflowResume(name): `/workflow` is not in
-// SLASH_HANDLERS (tui/slash_dispatcher.mjs) at all — the full table has no
-// entry for "workflow", "run", or "resume" under any spelling. Workflow
-// execution is a CLI-only surface (`pompos run <session> <file>` /
-// `pompos resume <session>`, commands/workflow.mjs's dispatch()), entirely
-// outside the REPL slash grammar the dashboard drives. workflows.mjs's own
-// empty-state text already points operators at the CLI for this reason.
-//
-// Both gaps need a dispatcher change (a new `/team member` subcommand, a
-// `/workflow run|resume` command or HTTP-reachable equivalent) before a
-// dashboard button can compose a line for them without inventing a second
-// grammar — out of scope for this task's file list. See task-8-report.md.
+// /workflow run|resume|clear <name> — tui/slash_workflow.mjs (Task 14). Runs
+// a STORED, declarative workflow (cfg.workflows[name]) through the
+// persisted engine keyed by sessionId=name; a second run resumes. `name` is
+// therefore both the config key under cfg.workflows and the workflow
+// panel's sessionId once it has run at least once — the same identifier the
+// panel already lists rows by.
+export function workflowRun(name) { return `/workflow run ${req(name, 'workflow name')}`; }
+export function workflowResume(name) { return `/workflow resume ${req(name, 'workflow name')}`; }
+export function workflowClear(name) { return `/workflow clear ${req(name, 'workflow name')}`; }

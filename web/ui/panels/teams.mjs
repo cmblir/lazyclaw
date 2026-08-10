@@ -1,11 +1,12 @@
 // web/ui/panels/teams.mjs — registered teams: list, create (prompt-driven,
-// guided by the already-registered agent names), delete. Writes go through
-// the slash dispatcher (runSlashConfirmed + slash_actions.mjs), same
-// grammar a user would type in the REPL — not a typed REST call.
+// guided by the already-registered agent names), member add/remove,
+// delete. Writes go through the slash dispatcher (runSlashConfirmed +
+// slash_actions.mjs), same grammar a user would type in the REPL — not a
+// typed REST call.
 import { el, phead, table, banner } from '../dom.mjs';
 import { api } from '../api.mjs';
 import { runSlashConfirmed } from '../confirm_dialog.mjs';
-import { teamCreate, teamRemove } from '../slash_actions.mjs';
+import { teamCreate, teamRemove, teamMemberAdd, teamMemberRemove } from '../slash_actions.mjs';
 
 export async function render(host) {
   const meta = el('span', { class: 'dim' });
@@ -43,9 +44,21 @@ export async function render(host) {
       const rows = arr.map((t) => ({
         name: el('div', {}, el('strong', { text: t.name }), el('br'), el('span', { class: 'dim', text: t.displayName || '' })),
         lead: t.lead || '',
-        agents: (t.agents || []).join(', '),
+        // Each member is removable in place — /team member remove <team>
+        // <agent> (Task 14) — rather than only being editable by recreating
+        // the whole team.
+        agents: (t.agents || []).length
+          ? el('div', {}, (t.agents || []).map((a) => el('span', { class: 'chip' }, a,
+              el('button', {
+                class: 'btn btn-secondary btn-sm', type: 'button', text: '×',
+                title: `remove ${a} from ${t.name}`,
+                onclick: () => runWrite(teamMemberRemove(t.name, a)),
+              }))))
+          : el('span', { class: 'dim', text: '(none)' }),
         slack: t.slackChannel ? el('code', { text: t.slackChannel }) : el('span', { class: 'dim', text: '(none)' }),
-        actions: el('button', { class: 'btn btn-secondary', type: 'button', text: 'Delete', onclick: () => runWrite(teamRemove(t.name)) }),
+        actions: el('div', {},
+          el('button', { class: 'btn btn-secondary btn-sm', type: 'button', text: '+ Member', onclick: () => addMember(t.name) }),
+          el('button', { class: 'btn btn-secondary', type: 'button', text: 'Delete', onclick: () => runWrite(teamRemove(t.name)) })),
       }));
       list.replaceWith(list = table(
         [{ key: 'name', label: 'name' }, { key: 'lead', label: 'lead' }, { key: 'agents', label: 'agents' },
@@ -75,6 +88,18 @@ export async function render(host) {
     const lead = (prompt(`Lead (one of ${agents.join(', ')}):`, agents[0]) || agents[0]).trim();
     const channel = (prompt('Slack channel id or #name (optional):') || '').trim();
     await runWrite(teamCreate({ name, agents, lead, channel }));
+  }
+
+  async function addMember(teamName) {
+    let registered = [];
+    try { registered = (await api('/agents')).map((a) => a.name); } catch { /* fall through with empty list */ }
+    if (registered.length === 0) {
+      alert('Create an agent first (Agents tab → + New agent) before adding it to a team.');
+      return;
+    }
+    const agentName = (prompt(`Add which agent to "${teamName}"? (registered: ${registered.join(', ')})`) || '').trim();
+    if (!agentName) return;
+    await runWrite(teamMemberAdd(teamName, agentName));
   }
 
   await load();

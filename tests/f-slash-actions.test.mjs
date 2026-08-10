@@ -3,18 +3,27 @@
 // These are the exact lines a user would type. Pinning them here means a
 // panel cannot quietly invent a variant the CLI does not accept. Every
 // expected line was checked against the real handler in
-// tui/slash_dispatcher.mjs / tui/config_picker.mjs, not assumed — see
-// web/ui/slash_actions.mjs's header for the composers dropped because no
-// real command backs them (team member add, workflow run/resume).
+// tui/slash_dispatcher.mjs / tui/slash_team.mjs / tui/slash_workflow.mjs /
+// tui/config_picker.mjs, not assumed.
+//
+// Task 8 originally shipped without teamMemberAdd/Remove and
+// workflowRun/Resume/Clear — no backing command existed. Task 14 added
+// `/team member add|remove`, `/workflow run|resume|clear`, and
+// `--provider`/`--model` on `/agent add`; those composers are pinned below
+// against that grammar, verified end-to-end through dispatchSlash (not just
+// string-matched) — see the git history around this file for the trace.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as A from '../web/ui/slash_actions.mjs';
 
 test('agent lines', () => {
-  // /agent add takes the role as free trailing text — tui/slash_dispatcher.mjs's
-  // _agent handler has no --role/--model flag.
+  // /agent add takes --provider/--model as optional flags (Task 14) plus
+  // free trailing role text — tui/slash_dispatcher.mjs's _agent handler.
   assert.equal(A.agentCreate({ name: 'dev', role: 'backend' }), '/agent add dev backend');
   assert.equal(A.agentCreate({ name: 'dev' }), '/agent add dev');
+  assert.equal(A.agentCreate({ name: 'dev', provider: 'anthropic', model: 'opus', role: 'backend' }),
+    '/agent add dev --provider anthropic --model opus backend');
+  assert.equal(A.agentCreate({ name: 'dev', provider: 'anthropic' }), '/agent add dev --provider anthropic');
   assert.equal(A.agentRemove('dev'), '/agent remove dev');
 });
 
@@ -25,6 +34,19 @@ test('team lines', () => {
   assert.equal(A.teamCreate({ name: 'crew', agents: ['dev'], channel: '#ops' }),
     '/team add crew --agents dev --channel #ops');
   assert.equal(A.teamRemove('crew'), '/team remove crew');
+});
+
+test('team member lines', () => {
+  // /team member add|remove <team> <agent> — tui/slash_team.mjs (Task 14).
+  assert.equal(A.teamMemberAdd('crew', 'qa'), '/team member add crew qa');
+  assert.equal(A.teamMemberRemove('crew', 'qa'), '/team member remove crew qa');
+});
+
+test('workflow lines', () => {
+  // /workflow run|resume|clear <name> — tui/slash_workflow.mjs (Task 14).
+  assert.equal(A.workflowRun('nightly'), '/workflow run nightly');
+  assert.equal(A.workflowResume('nightly'), '/workflow resume nightly');
+  assert.equal(A.workflowClear('nightly'), '/workflow clear nightly');
 });
 
 test('task and config lines', () => {
@@ -57,7 +79,16 @@ test('a literal double quote cannot be represented on this grammar — refuse ra
 test('a missing required name is a thrown programming error, not a malformed line', () => {
   // A blank name would compose '/team remove ' — which the confirm table
   // reads as a destructive command with no target.
-  for (const fn of [() => A.agentRemove(''), () => A.teamRemove(null), () => A.taskAbandon(undefined)]) {
+  for (const fn of [
+    () => A.agentRemove(''),
+    () => A.teamRemove(null),
+    () => A.taskAbandon(undefined),
+    () => A.teamMemberAdd('crew', ''),
+    () => A.teamMemberRemove('', 'qa'),
+    () => A.workflowRun(''),
+    () => A.workflowResume(null),
+    () => A.workflowClear(undefined),
+  ]) {
     assert.throws(fn, /required/);
   }
 });
