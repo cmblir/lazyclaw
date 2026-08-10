@@ -2065,3 +2065,185 @@ npm run lint:size
 git add tui/slash_helpers.mjs tui/slash_trainer.mjs tui/slash_dispatcher.mjs tests/f-config-merge-safety.test.mjs
 git commit -m "fix(config): never treat an unreadable config.json as an empty one"
 ```
+
+---
+
+### Task 14: the three slash commands the panels need
+
+**Execute BEFORE finishing Task 8** — the panel composers depend on this grammar.
+
+**Files:**
+- Modify: `tui/slash_dispatcher.mjs` (`_agent`'s `add` branch, `_team`), and add a `/workflow` handler
+- Test: `tests/f-slash-panel-grammar.test.mjs`
+
+**Interfaces:**
+- Produces: `/workflow run|resume|clear <name>`, `/team member add|remove <team> <agent>`, and `--provider`/`--model` flags on `/agent add`.
+
+**Why:** Task 8 found the slash grammar narrower than the REST surface the dashboard already had. Three composers in its brief named commands that do not exist, so the dashboard would either lose capability it has today (creating an agent with a provider and model) or need a second write path. The user ruled: extend the dispatcher, so both surfaces gain and the single write path holds.
+
+**Everything these wrap already exists** — this task adds a slash surface, not new behaviour:
+- `commands/workflow.mjs`'s `dispatch` already implements `run`, `resume`, `clear`, `inspect`, `validate`, `graph` (lines 271-330).
+- `teams.mjs` exports `patchTeam(name, patch, configDir)`, `getTeam`, `listTeams`.
+- `agents.mjs`'s `registerAgent({name, role, provider = 'claude-cli', model = '', …})` already takes both.
+
+**Follow the existing flag-parsing precedent.** `/team add` parses `--agents a,b --lead x` at `tui/slash_dispatcher.mjs:578-579` with a simple token loop. Match that style rather than inventing a parser.
+
+- [ ] **Step 1: Write the failing test**
+
+```js
+// tests/f-slash-panel-grammar.test.mjs — the grammar the dashboard panels compose.
+//
+// Task 8 discovered its composers named commands that did not exist: an agent
+// could not be given a provider or model, a team member could not be added, and
+// /workflow was not a slash command at all. The dashboard would have lost
+// capability the REST surface already had. These pin the grammar the panels
+// speak, so a composer and its command cannot drift apart again.
+import test, { after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { dispatchSlash, SLASH_HANDLERS } from '../tui/slash_dispatcher.mjs';
+
+const CFG = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-grammar-'));
+process.env.POMPOS_CONFIG_DIR = CFG;
+after(() => fs.rmSync(CFG, { recursive: true, force: true }));
+
+const ctx = () => ({ cfgDir: CFG, cfg: {}, readConfig: () => ({}), writeConfig: () => {} });
+
+test('/agent add takes --provider and --model', async () => {
+  await dispatchSlash('/agent', 'add scout --provider anthropic --model opus researcher', ctx(), () => {});
+  const { getAgent } = await import('../agents.mjs');
+  const a = getAgent('scout', CFG);
+  assert.equal(a.provider, 'anthropic');
+  assert.equal(a.model, 'opus');
+  assert.match(a.role, /researcher/, 'the trailing free text is still the role');
+});
+
+test('/agent add without the flags keeps its existing defaults', async () => {
+  await dispatchSlash('/agent', 'add plain just a role', ctx(), () => {});
+  const { getAgent } = await import('../agents.mjs');
+  const a = getAgent('plain', CFG);
+  assert.equal(a.provider, 'claude-cli', 'unchanged default');
+  assert.equal(a.role, 'just a role');
+});
+
+test('/team member add and remove change membership', async () => {
+  await dispatchSlash('/agent', 'add m1', ctx(), () => {});
+  await dispatchSlash('/agent', 'add m2', ctx(), () => {});
+  await dispatchSlash('/team', 'add crew --agents m1', ctx(), () => {});
+
+  await dispatchSlash('/team', 'member add crew m2', ctx(), () => {});
+  const { getTeam } = await import('../teams.mjs');
+  assert.deepEqual(getTeam('crew', CFG).agents.sort(), ['m1', 'm2']);
+
+  await dispatchSlash('/team', 'member remove crew m2', ctx(), () => {});
+  assert.deepEqual(getTeam('crew', CFG).agents, ['m1']);
+});
+
+test('/team member reports a missing team or agent instead of silently doing nothing', async () => {
+  const a = await dispatchSlash('/team', 'member add nosuchteam m1', ctx(), () => {});
+  assert.match(String(a), /nosuchteam/, 'names what was not found');
+  const b = await dispatchSlash('/team', 'member add crew nosuchagent', ctx(), () => {});
+  assert.match(String(b), /nosuchagent/);
+});
+
+test('/workflow is a registered command with run, resume and clear', async () => {
+  assert.ok(SLASH_HANDLERS.has('/workflow'), 'the panels compose /workflow lines');
+  const usage = await dispatchSlash('/workflow', '', ctx(), () => {});
+  for (const sub of ['run', 'resume', 'clear']) {
+    assert.match(String(usage), new RegExp(sub), `usage must mention ${sub}`);
+  }
+});
+
+test('/workflow names an unknown workflow rather than reporting success', async () => {
+  const out = await dispatchSlash('/workflow', 'run nosuchworkflow', ctx(), () => {});
+  assert.match(String(out), /nosuchworkflow/);
+  assert.doesNotMatch(String(out), /^✓/, 'a failure must not read as success');
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `node --test tests/f-slash-panel-grammar.test.mjs`
+Expected: FAIL — `/workflow` is not registered, `--provider`/`--model` are swallowed into the role text, and `member` is an unknown `/team` subcommand.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Three changes, each following an existing pattern in the same file.
+
+`_agent`'s `add` branch — parse the two flags out of `rest` before the remainder becomes the role, mirroring `/team add`'s loop at :578:
+
+```js
+      // --provider/--model so the dashboard can create an agent as fully as the
+      // REST route it replaced. Parsed out first; whatever remains is the role,
+      // which is how this command has always read its trailing free text.
+      let provider, model;
+      const roleWords = [];
+      for (let i = 1; i < rest.length; i += 1) {
+        if (rest[i] === '--provider') provider = rest[++i];
+        else if (rest[i] === '--model') model = rest[++i];
+        else roleWords.push(rest[i]);
+      }
+      const roleText = roleWords.join(' ').trim();
+```
+
+and pass `provider`/`model` through to `registerAgent` only when set, so the existing defaults stand.
+
+`_team` — a `member` subcommand using `patchTeam`:
+
+```js
+    if (sub === 'member') {
+      const [action, teamName, agentName] = rest.slice(1);
+      if (!/^(add|remove|rm)$/.test(action || '') || !teamName || !agentName) {
+        return 'usage: /team member add|remove <team> <agent>';
+      }
+      const team = teamsMod.getTeam(teamName, ctx.cfgDir);
+      if (!team) return `team not found: ${teamName}`;
+      const { getAgent } = await import('../agents.mjs');
+      if (action === 'add' && !getAgent(agentName, ctx.cfgDir)) return `agent not found: ${agentName}`;
+      const next = action === 'add'
+        ? [...new Set([...(team.agents || []), agentName])]
+        : (team.agents || []).filter((a) => a !== agentName);
+      teamsMod.patchTeam(teamName, { agents: next }, ctx.cfgDir);
+      return `team ${teamName}: ${action === 'add' ? 'added' : 'removed'} ${agentName}`;
+    }
+```
+
+`/workflow` — a handler delegating to the CLI implementation that already exists:
+
+```js
+// /workflow — a slash surface over commands/workflow.mjs, which already
+// implements these. Added so the dashboard's workflows panel composes a real
+// command instead of calling a REST route directly; the CLI gains the same
+// spelling for free.
+async function _workflow(args, ctx) {
+  const [sub, ...rest] = splitWhitespace(String(args || '').trim());
+  if (!/^(run|resume|clear)$/.test(sub || '')) {
+    return 'usage: /workflow run|resume|clear <name>';
+  }
+  const name = rest[0];
+  if (!name) return `usage: /workflow ${sub} <name>`;
+  const mod = await import('../commands/workflow.mjs');
+  return mod.dispatch(sub, [name]);
+}
+```
+
+Register it beside the other entries in `SLASH_HANDLERS`, and add it to `tui/slash_commands.mjs` so `/help` and the dashboard autocomplete list it.
+
+**Then update `daemon/lib/slash_destructive.mjs`:** `/workflow clear` discards saved progress and `/team member remove` changes membership. Decide which need confirmation and add them, with a prompt naming the target — the table is the only thing that makes the dashboard ask.
+
+**And check `daemon/lib/slash_http.mjs`'s `STREAMING` set:** `/workflow run` can run long. If it streams through `write`, add it; if it does not, say why in your report.
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `node --test tests/f-slash-panel-grammar.test.mjs && node --test tests/*.test.mjs`
+Expected: PASS. Existing `/agent` and `/team` tests must stay green — the flags are additive and the role text still works as before.
+
+- [ ] **Step 5: Commit**
+
+```bash
+npm run lint:size
+git add tui/slash_dispatcher.mjs tui/slash_commands.mjs daemon/lib/slash_destructive.mjs tests/f-slash-panel-grammar.test.mjs
+git commit -m "feat(slash): /workflow, /team member, and provider/model flags on /agent add"
+```
