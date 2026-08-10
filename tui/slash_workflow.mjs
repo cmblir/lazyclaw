@@ -21,9 +21,21 @@
 // workflows.mjs's workflowDelete exactly, minus the process.exit.
 import fs from 'node:fs';
 import { splitWhitespace } from './slash_helpers.mjs';
-import { getNamedWorkflow, runNamedWorkflow, namedReplyText } from '../workflow/named.mjs';
-import { loadState, statePath, DEFAULT_DIR } from '../workflow/persistent.mjs';
 import { PROVIDERS } from '../providers/registry.mjs';
+
+// `workflow/named.mjs` and `workflow/persistent.mjs` are deliberately NOT
+// imported at the top of this file — they are loaded lazily inside
+// _workflow(), below. named.mjs pulls in the whole declarative-engine chain
+// (run_request.mjs -> builtin_caps.mjs -> mas/tools/web.mjs -> `undici`), and
+// importing `undici` alone costs ~50ms. Because this module used to import
+// named.mjs statically, and tui/slash_dispatcher.mjs statically imports this
+// module (so SLASH_HANDLERS can be a synchronous Map — see that file's
+// contract comment), EVERY `pompos` invocation — including `pompos version`
+// — paid that ~50ms just to build the handler table, whether or not
+// /workflow was ever used. If you are tempted to hoist these back to static
+// imports "for tidiness", don't: run
+// `node --input-type=module -e "await import('../workflow/named.mjs')"` from
+// tui/ and time it first.
 
 // Fix round 1: the daemon also resolves this from --workflow-state-dir
 // (commands/daemon.mjs), threaded onto the request context as
@@ -33,10 +45,12 @@ import { PROVIDERS } from '../providers/registry.mjs';
 // here meant a daemon started with that flag would run/resume/clear into a
 // directory GET /workflows and `pompos inspect` never look at. ctx wins when
 // present; the env var (or the CWD-relative default) is the fallback for
-// callers that don't supply one — the Ink REPL's ctx, and every existing test.
-function resolveStateDir(ctx) {
+// callers that don't supply one — the Ink REPL's ctx, and every existing
+// test. `defaultDir` is workflow/persistent.mjs's DEFAULT_DIR, passed in by
+// the caller since that module is now loaded lazily (see comment above).
+function resolveStateDir(ctx, defaultDir) {
   if (ctx && typeof ctx.workflowStateDir === 'function') return ctx.workflowStateDir();
-  return process.env.POMPOS_WORKFLOW_STATE_DIR || DEFAULT_DIR;
+  return process.env.POMPOS_WORKFLOW_STATE_DIR || defaultDir;
 }
 
 // Sync, not async — run_request.mjs's _capsFromConfig calls this WITHOUT
@@ -64,7 +78,13 @@ export async function _workflow(args, ctx) {
     return 'usage: /workflow run|resume|clear <name>';
   }
   if (!name) return `usage: /workflow ${sub} <name>`; // same — nothing was attempted yet
-  const dir = resolveStateDir(ctx);
+
+  // Deferred to here, past the usage-only returns above, so a malformed
+  // /workflow call (no args, bad verb) never pays for the undici-sized
+  // import chain at all — see the comment on the imports above.
+  const { getNamedWorkflow, runNamedWorkflow, namedReplyText } = await import('../workflow/named.mjs');
+  const { loadState, statePath, DEFAULT_DIR } = await import('../workflow/persistent.mjs');
+  const dir = resolveStateDir(ctx, DEFAULT_DIR);
 
   if (sub === 'clear') {
     let p;
