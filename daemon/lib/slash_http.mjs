@@ -85,12 +85,16 @@ function fail(error, code = 'SLASH_ERR') {
 //     instant bare-args usage branch); the fast subcommands are unaffected
 //     because a caller only sees SSE when it explicitly asks for it.
 // /agent and /team are excluded: both are registry CRUD (list/show/add/edit/
-// remove), each a single fast call, so buffering them is not the "looks
-// hung" problem this set exists to fix. /workflow is not a SLASH_HANDLERS key
-// at all (it is a CLI-only subcommand — see tests/f-slash-destructive.test.mjs's
-// "/workflow is not gated because it is not a slash command"), so it can
-// never reach this endpoint as a real command and adding it here would be a
-// rule for nothing.
+// remove/member), each a single fast call, so buffering them is not the
+// "looks hung" problem this set exists to fix. /workflow (task 14) IS a real
+// SLASH_HANDLERS key now, but its handler (tui/slash_workflow.mjs) takes no
+// `write` parameter at all — run/resume await one runNamedWorkflow() call and
+// return a single string, the same shape as /agent's and /team's CRUD
+// branches, not /loop's per-chunk provider stream or /task tick's per-turn
+// logger. Nothing /workflow produces ever reaches `write`, so adding it here
+// would upgrade the connection to SSE for a command that can never emit more
+// than one line on it — the exact "STREAMING entry that cannot stream"
+// mistake already found once in this phase.
 export const STREAMING = new Set(['/loop', '/task']);
 
 // /skill and /skills (which forwards to the same _skill body once it has an

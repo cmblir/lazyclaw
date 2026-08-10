@@ -53,6 +53,7 @@ import { splitWhitespace, _mod, _promptText, _promptConfirm, readConfigForMerge 
 import { _dashboard, parseDashboardUrl } from './slash_dashboard.mjs';
 import { _channels, _context } from './slash_channels.mjs';
 import { _trainer } from './slash_trainer.mjs';
+import { _workflow } from './slash_workflow.mjs';
 import { _help, _status, _version, _usage } from './slash_basics.mjs';
 import { gatewaySlash } from './slash_gateway.mjs';
 
@@ -485,7 +486,18 @@ async function _agent(args, ctx) {
     }
     if (sub === 'add') {
       let name = aname;
-      let roleText = rest.slice(1).join(' ').trim();
+      // --provider/--model so the dashboard can create an agent as fully as
+      // the REST route it replaced. Parsed out first; whatever remains is the
+      // role, which is how this command has always read its trailing free
+      // text — mirrors /team add's --agents/--lead loop below.
+      let provider, model;
+      const roleWords = [];
+      for (let i = 1; i < rest.length; i += 1) {
+        if (rest[i] === '--provider') provider = rest[++i];
+        else if (rest[i] === '--model') model = rest[++i];
+        else roleWords.push(rest[i]);
+      }
+      let roleText = roleWords.join(' ').trim();
       // Guided fill: no name typed + a modal available → prompt for it.
       if (!name && typeof ctx.openPicker === 'function') {
         name = await _promptText(ctx, { title: 'New agent — name', subtitle: 'short id, e.g. scout (Esc cancels)' });
@@ -495,9 +507,10 @@ async function _agent(args, ctx) {
           roleText = r || '';
         }
       }
-      if (!name) return 'usage: /agent add <name> [role text…]';
-      const a = agentsMod.registerAgent({ name, role: roleText }, ctx.cfgDir);
-      return `✓ added agent ${a.name} (tools=${(a.tools || []).join(',')}) — set its model with /agent edit ${a.name}`;
+      if (!name) return 'usage: /agent add <name> [--provider <p>] [--model <m>] [role text…]';
+      const a = agentsMod.registerAgent({ name, role: roleText, provider, model }, ctx.cfgDir);
+      const modelHint = a.model ? '' : ` — set its model with /agent edit ${a.name}`;
+      return `✓ added agent ${a.name} (tools=${(a.tools || []).join(',')})${modelHint}`;
     }
     if (sub === 'edit') {
       if (!aname) return 'usage: /agent edit <name>';
@@ -569,6 +582,23 @@ async function _team(args, ctx) {
       return rest[1] === 'json'
         ? JSON.stringify(t, null, 2)
         : renderRecord(t, { fields: ['name', 'displayName', 'lead', 'agents', 'slackChannel', 'createdAt', 'updatedAt'] });
+    }
+    if (sub === 'member') {
+      // /team member add|remove <team> <agent> — patchTeam already exists for
+      // this (teams.mjs); it was just never wired to a slash command, so
+      // adding a member meant going around the dispatcher entirely.
+      const [action, teamName, agentName] = rest;
+      if (!/^(add|remove|rm)$/.test(action || '') || !teamName || !agentName) {
+        return 'usage: /team member add|remove <team> <agent>';
+      }
+      const team = teamsMod.getTeam(teamName, ctx.cfgDir);
+      if (!team) return `team not found: ${teamName}`;
+      if (action === 'add' && !agentsMod.getAgent(agentName, ctx.cfgDir)) return `agent not found: ${agentName}`;
+      const next = action === 'add'
+        ? [...new Set([...(team.agents || []), agentName])]
+        : (team.agents || []).filter((a) => a !== agentName);
+      teamsMod.patchTeam(teamName, { agents: next }, ctx.cfgDir);
+      return `team ${teamName}: ${action === 'add' ? 'added' : 'removed'} ${agentName}`;
     }
     if (sub === 'add') {
       let agentsCsv = null, lead = null, channel = '';
@@ -1316,6 +1346,7 @@ export const SLASH_HANDLERS = new Map([
   ['/handoff', _handoff],
   ['/personality', _personality],
   ['/task', _task],
+  ['/workflow', _workflow],
   ['/trainer', _trainer],
   ['/dashboard', _dashboard],
   ['/gateway', gatewaySlash],

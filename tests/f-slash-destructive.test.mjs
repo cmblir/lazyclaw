@@ -64,9 +64,20 @@ test('/personality remove/rm/delete are gated and name the target', () => {
   assert.equal(destructivePrompt('/personality', 'list'), null, '/personality list is not gated');
 });
 
-test('/workflow is not gated because it is not a slash command', () => {
-  // /workflow is a CLI subcommand (commands/workflow.mjs), not in SLASH_HANDLERS.
-  // A rule here would imply dashboard coverage that does not exist.
-  assert.equal(destructivePrompt('/workflow', 'clear'), null);
-  assert.equal(destructivePrompt('/workflow', 'stop'), null);
+test('/workflow clear is gated and names the target; run/resume are not (task 14)', () => {
+  // /workflow became a real slash command in task 14 (tui/slash_workflow.mjs).
+  // Only `clear` discards saved progress; `run`/`resume` are not destructive.
+  const p = destructivePrompt('/workflow', 'clear nightly');
+  assert.ok(p, '/workflow clear must be gated — it discards saved progress');
+  assert.match(p, /nightly/, 'the prompt must name the workflow');
+  assert.equal(destructivePrompt('/workflow', 'run nightly'), null, '/workflow run is not destructive');
+  assert.equal(destructivePrompt('/workflow', 'resume nightly'), null, '/workflow resume is not destructive');
+});
+
+test('/team member remove is gated and names the agent and team; member add is not', () => {
+  const p = destructivePrompt('/team', 'member remove crew dev');
+  assert.ok(p, '/team member remove must be gated — it changes membership');
+  assert.match(p, /dev/, 'the prompt must name the agent');
+  assert.match(p, /crew/, 'the prompt must name the team');
+  assert.equal(destructivePrompt('/team', 'member add crew dev'), null, '/team member add is not destructive');
 });

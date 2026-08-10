@@ -18,6 +18,7 @@ const RULES = new Map([
   ['/task', { sub: /^(abandon|remove|rm|delete)$/i, prompt: (t) => `Abandon task ${t || '(unnamed)'}? It stops and cannot be resumed.` }],
   ['/personality', { sub: /^(remove|rm|delete)$/i, prompt: (t) => `Remove personality ${t || '(unnamed)'}? The file is deleted from disk.` }],
   ['/config', { sub: /^(unset|delete|remove)$/i, prompt: (t) => `Unset config key ${t || '(unnamed)'}?` }],
+  ['/workflow', { sub: /^clear$/i, prompt: (t) => `Clear saved progress for workflow ${t || '(unnamed)'}? It cannot be resumed after this.` }],
 ]);
 
 // Commands whose whole purpose is discarding, so there is no subcommand to
@@ -37,6 +38,18 @@ export function destructivePrompt(cmd, args) {
   const key = String(cmd || '').toLowerCase();
   const always = ALWAYS.get(key);
   if (always) return always;
+
+  // /team member remove <team> <agent> — a second verb this table's generic
+  // first-token check can't express: the verb here is the SECOND token, after
+  // the "member" subcommand. Checked before the generic rule so /team's
+  // ordinary remove|rm|delete (removing the whole team) path is untouched.
+  if (key === '/team') {
+    const t = String(args || '').trim().split(/\s+/).filter(Boolean);
+    if (t[0] === 'member' && /^(remove|rm)$/i.test(t[1] || '')) {
+      return `Remove agent ${t[3] || '(unnamed)'} from team ${t[2] || '(unnamed)'}? It stops receiving that team's tasks.`;
+    }
+  }
+
   const rule = RULES.get(key);
   if (!rule) return null;
   // /skill clear|unset tests the entire args string (no subcommand, no target).
