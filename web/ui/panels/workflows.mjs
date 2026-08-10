@@ -52,8 +52,19 @@ export function render(host) {
   // the full rationale (truthy `out.ok` check, CANCELLED is silent, hint
   // appended). A refused run (e.g. "workflow not found") is exactly as real
   // a failure as a network error and must not refresh as though it worked.
-  async function runWrite(line) {
+  //
+  // Takes a thunk, not an already-composed line, so a composer throw lands
+  // inside this function instead of becoming an unhandled rejection before
+  // runWrite ever starts.
+  async function runWrite(compose) {
     errorBox.replaceChildren();
+    let line;
+    try {
+      line = compose();
+    } catch (e) {
+      errorBox.replaceChildren(banner('err', '✗', e.message || String(e)));
+      return;
+    }
     const out = await runSlashConfirmed(line);
     if (out.ok) { load(); return; }
     if (out.code === 'CANCELLED') return;
@@ -74,7 +85,7 @@ export function render(host) {
     }
     const name = (prompt(`Workflow (one of ${names.join(', ')}):`, names[0]) || '').trim();
     if (!name) return;
-    await runWrite(workflowRun(name));
+    await runWrite(() => workflowRun(name));
   }
 
   // The sessions table shell is built once; reconcile() only touches the
@@ -109,12 +120,12 @@ export function render(host) {
     if (sm.resumable) {
       kids.push(el('button', {
         class: 'btn btn-secondary btn-sm', type: 'button', text: 'Resume',
-        onclick: (e) => { e.stopPropagation(); runWrite(workflowResume(s.sessionId)); },
+        onclick: (e) => { e.stopPropagation(); runWrite(() => workflowResume(s.sessionId)); },
       }));
     }
     kids.push(el('button', {
       class: 'btn btn-danger btn-sm', type: 'button', text: 'Clear',
-      onclick: (e) => { e.stopPropagation(); runWrite(workflowClear(s.sessionId)); },
+      onclick: (e) => { e.stopPropagation(); runWrite(() => workflowClear(s.sessionId)); },
     }));
     return el('div', {}, kids);
   }

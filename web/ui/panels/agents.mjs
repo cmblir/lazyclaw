@@ -32,8 +32,24 @@ export async function render(host) {
   // not `=== true`/`=== false`: a 401 body is {error:'unauthorized'} with
   // no `ok` field at all, and that must read as "did not happen", not as
   // neither success nor failure.
-  async function runWrite(line) {
+  //
+  // Takes a thunk, not an already-composed line. A composer (agentCreate)
+  // can throw — an embedded `"` has no safe encoding on this grammar, see
+  // arg() in slash_actions.mjs — and that throw has to land INSIDE this
+  // function to be shown as a failure. `runWrite(agentCreate(...))` would
+  // evaluate the composer before runWrite ever starts, turning the throw
+  // into an unhandled rejection: no banner, no refresh, silence. A thunk
+  // puts the one guard in the one place every call site shares, instead of
+  // requiring each call site to remember its own try/catch.
+  async function runWrite(compose) {
     errorBox.replaceChildren();
+    let line;
+    try {
+      line = compose();
+    } catch (e) {
+      errorBox.replaceChildren(banner('err', '✗', e.message || String(e)));
+      return;
+    }
     const out = await runSlashConfirmed(line);
     if (out.ok) { load(); return; }
     if (out.code === 'CANCELLED') return;
@@ -54,7 +70,7 @@ export async function render(host) {
         provider: a.model ? `${a.provider}/${a.model}` : a.provider,
         tools: (a.tools || []).map((t) => el('code', { text: t })),
         role: a.role ? el('span', { text: a.role.slice(0, 60) + (a.role.length > 60 ? '…' : '') }) : el('span', { class: 'dim', text: '(none)' }),
-        actions: el('button', { class: 'btn btn-secondary', type: 'button', text: 'Delete', onclick: () => runWrite(agentRemove(a.name)) }),
+        actions: el('button', { class: 'btn btn-secondary', type: 'button', text: 'Delete', onclick: () => runWrite(() => agentRemove(a.name)) }),
       }));
       list.replaceWith(list = table(
         [{ key: 'name', label: 'name' }, { key: 'provider', label: 'provider/model' },
@@ -77,7 +93,7 @@ export async function render(host) {
     const provider = (prompt(`Provider (${PROVIDER_HINT}) — blank keeps the default:`) || '').trim();
     const model = (prompt('Model id (blank = provider default):') || '').trim();
     const role = prompt('Role / system prompt (optional):') || '';
-    await runWrite(agentCreate({ name, role, provider, model }));
+    await runWrite(() => agentCreate({ name, role, provider, model }));
   }
 
   await load();

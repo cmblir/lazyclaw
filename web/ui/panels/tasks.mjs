@@ -130,8 +130,20 @@ export async function render(host) {
   // full rationale (truthy `out.ok` check, CANCELLED is silent, hint
   // appended). `out.ok` is checked for truthiness, not `=== true`: a 401
   // body is {error:'unauthorized'} with no `ok` field at all.
-  async function runWrite(line) {
+  //
+  // Takes a thunk, not an already-composed line, so a composer throw (e.g.
+  // taskIssue's title containing an unrepresentable `"`) lands inside this
+  // function and shows as a failure, instead of throwing before runWrite
+  // ever starts and becoming a silent unhandled rejection.
+  async function runWrite(compose) {
     errorBox.replaceChildren();
+    let line;
+    try {
+      line = compose();
+    } catch (e) {
+      errorBox.replaceChildren(banner('err', '✗', e.message || String(e)));
+      return;
+    }
     const out = await runSlashConfirmed(line);
     if (out.ok) { load(); return; }
     if (out.code === 'CANCELLED') return;
@@ -153,7 +165,7 @@ export async function render(host) {
     if (!team) return;
     const title = (prompt('Task title:') || '').trim();
     if (!title) return;
-    await runWrite(taskIssue({ team, title }));
+    await runWrite(() => taskIssue({ team, title }));
   }
 
   // The table shell is built once; only its rows are reconciled per load(),
@@ -172,8 +184,8 @@ export async function render(host) {
     const kids = [el('button', { class: 'btn btn-secondary', type: 'button', text: 'Transcript', onclick: () => transcriptModal(t) })];
     if (t.status === 'running' || t.status === 'pending' || t.status === 'paused') {
       kids.push(
-        el('button', { class: 'btn btn-secondary', type: 'button', text: 'Mark done', onclick: () => runWrite(taskDone(t.id)) }),
-        el('button', { class: 'btn btn-secondary', type: 'button', text: 'Abandon', onclick: () => runWrite(taskAbandon(t.id)) }));
+        el('button', { class: 'btn btn-secondary', type: 'button', text: 'Mark done', onclick: () => runWrite(() => taskDone(t.id)) }),
+        el('button', { class: 'btn btn-secondary', type: 'button', text: 'Abandon', onclick: () => runWrite(() => taskAbandon(t.id)) }));
     }
     return el('div', {}, kids);
   }

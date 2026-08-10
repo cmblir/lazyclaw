@@ -27,6 +27,16 @@ function req(value, what) {
 // state — so a literal double quote inside a value cannot be represented
 // on this grammar; embedding one would silently shift token boundaries for
 // the rest of the line instead of failing loudly. Refuse instead.
+//
+// Fix round: every interpolated value in this file goes through arg() now,
+// not just the ones that "looked" free-text. Two gaps a review found:
+// agentCreate's `role` was concatenated raw (a quote in it silently
+// vanished instead of being rejected — worse than throwing, since the line
+// still "worked" and saved the wrong role) and teamCreate's `agents` list
+// was joined without it. Names/ids are slug-like in practice, so wrapping
+// them costs nothing (arg() only quotes on whitespace, and only throws on
+// an actual embedded `"`) — but the guard should not depend on a reviewer
+// noticing which call sites "look" risky.
 function arg(value) {
   const s = String(value ?? '');
   if (s.includes('"')) {
@@ -41,35 +51,35 @@ function arg(value) {
 // free-form role text, in whatever order it appears relative to the flags —
 // putting the flags first keeps the role text contiguous and easy to read.
 export function agentCreate({ name, role, provider, model } = {}) {
-  let line = `/agent add ${req(name, 'agent name')}`;
+  let line = `/agent add ${arg(req(name, 'agent name'))}`;
   if (provider) line += ` --provider ${arg(provider)}`;
   if (model) line += ` --model ${arg(model)}`;
   const r = String(role ?? '').trim();
-  return r ? `${line} ${r}` : line;
+  return r ? `${line} ${arg(r)}` : line;
 }
-export function agentRemove(name) { return `/agent remove ${req(name, 'agent name')}`; }
+export function agentRemove(name) { return `/agent remove ${arg(req(name, 'agent name'))}`; }
 
 // /team add <name> --agents a,b[,c] [--lead x] [--channel #x] — matches
 // tui/slash_dispatcher.mjs's `_team` handler (sub === 'add') exactly,
 // including --channel, which the pre-existing dashboard create flow
 // already collects (dropping it here would be a regression).
 export function teamCreate({ name, agents, lead, channel } = {}) {
-  let line = `/team add ${req(name, 'team name')}`;
-  if (agents && agents.length) line += ` --agents ${agents.join(',')}`;
+  let line = `/team add ${arg(req(name, 'team name'))}`;
+  if (agents && agents.length) line += ` --agents ${agents.map((a) => arg(a)).join(',')}`;
   if (lead) line += ` --lead ${arg(lead)}`;
   if (channel) line += ` --channel ${arg(channel)}`;
   return line;
 }
-export function teamRemove(name) { return `/team remove ${req(name, 'team name')}`; }
+export function teamRemove(name) { return `/team remove ${arg(req(name, 'team name'))}`; }
 
 // /team member add|remove <team> <agent> — tui/slash_team.mjs's `member`
 // branch (Task 14). Positional, in that exact order; the dispatcher rejects
 // any other action verb with a usage error.
 export function teamMemberAdd(team, agent) {
-  return `/team member add ${req(team, 'team name')} ${req(agent, 'agent name')}`;
+  return `/team member add ${arg(req(team, 'team name'))} ${arg(req(agent, 'agent name'))}`;
 }
 export function teamMemberRemove(team, agent) {
-  return `/team member remove ${req(team, 'team name')} ${req(agent, 'agent name')}`;
+  return `/team member remove ${arg(req(team, 'team name'))} ${arg(req(agent, 'agent name'))}`;
 }
 
 // /task start <team> --title "..." — `_task`'s `start` handler only
@@ -77,16 +87,16 @@ export function teamMemberRemove(team, agent) {
 // the team name is silently dropped (not an error), so the line always
 // fails usage. --title is required here for that reason.
 export function taskIssue({ team, title } = {}) {
-  return `/task start ${req(team, 'team name')} --title ${arg(req(title, 'task title'))}`;
+  return `/task start ${arg(req(team, 'team name'))} --title ${arg(req(title, 'task title'))}`;
 }
-export function taskAbandon(id) { return `/task abandon ${req(id, 'task id')}`; }
+export function taskAbandon(id) { return `/task abandon ${arg(req(id, 'task id'))}`; }
 // /task done <id> — the same `_task` branch as abandon (sub === 'done'),
 // added so "Mark done" does not stay on a typed REST call while its
 // sibling "Abandon" moves to the slash grammar.
-export function taskDone(id) { return `/task done ${req(id, 'task id')}`; }
+export function taskDone(id) { return `/task done ${arg(req(id, 'task id'))}`; }
 
-export function configSet(key, value) { return `/config set ${req(key, 'config key')} ${arg(value)}`; }
-export function configUnset(key) { return `/config unset ${req(key, 'config key')}`; }
+export function configSet(key, value) { return `/config set ${arg(req(key, 'config key'))} ${arg(value)}`; }
+export function configUnset(key) { return `/config unset ${arg(req(key, 'config key'))}`; }
 
 // /workflow run|resume|clear <name> — tui/slash_workflow.mjs (Task 14). Runs
 // a STORED, declarative workflow (cfg.workflows[name]) through the
@@ -94,6 +104,6 @@ export function configUnset(key) { return `/config unset ${req(key, 'config key'
 // therefore both the config key under cfg.workflows and the workflow
 // panel's sessionId once it has run at least once — the same identifier the
 // panel already lists rows by.
-export function workflowRun(name) { return `/workflow run ${req(name, 'workflow name')}`; }
-export function workflowResume(name) { return `/workflow resume ${req(name, 'workflow name')}`; }
-export function workflowClear(name) { return `/workflow clear ${req(name, 'workflow name')}`; }
+export function workflowRun(name) { return `/workflow run ${arg(req(name, 'workflow name'))}`; }
+export function workflowResume(name) { return `/workflow resume ${arg(req(name, 'workflow name'))}`; }
+export function workflowClear(name) { return `/workflow clear ${arg(req(name, 'workflow name'))}`; }

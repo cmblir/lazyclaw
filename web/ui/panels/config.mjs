@@ -34,9 +34,18 @@ export async function render(host) {
 
   // Shared by the row-level Delete button — see agents.mjs's runWrite for
   // the full rationale (truthy `out.ok` check, CANCELLED is silent, hint
-  // appended).
-  async function runWrite(line) {
+  // appended, and a thunk so a composer throw — e.g. a config key that
+  // itself contains a `"` — lands inside this function instead of becoming
+  // an unhandled rejection before it's ever called).
+  async function runWrite(compose) {
     errorBox.replaceChildren();
+    let line;
+    try {
+      line = compose();
+    } catch (e) {
+      errorBox.replaceChildren(banner('err', '✗', e.message || String(e)));
+      return;
+    }
     const out = await runSlashConfirmed(line);
     if (out.ok) { load(); return; }
     if (out.code === 'CANCELLED') return;
@@ -77,7 +86,7 @@ export async function render(host) {
             ? el('span', { class: 'dim', style: 'font-size:11px;', text: 'use the dedicated tab' })
             : [
                 el('button', { class: 'btn btn-secondary btn-sm', type: 'button', text: 'Edit', onclick: () => openConfigEditModal(k, cfg[k]) }),
-                el('button', { class: 'btn btn-danger btn-sm', type: 'button', text: 'Delete', onclick: () => runWrite(configUnset(k)) }),
+                el('button', { class: 'btn btn-danger btn-sm', type: 'button', text: 'Delete', onclick: () => runWrite(() => configUnset(k)) }),
               ]));
       });
       list.replaceWith(list = el('table', { class: 'tbl' },

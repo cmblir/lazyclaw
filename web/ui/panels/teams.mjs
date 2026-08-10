@@ -22,10 +22,20 @@ export async function render(host) {
   let list = el('div', { class: 'empty', text: 'Loading…' });
   host.append(list);
 
-  // Shared by create/remove — see agents.mjs's runWrite for the full
-  // rationale (truthy `out.ok` check, CANCELLED is silent, hint appended).
-  async function runWrite(line) {
+  // Shared by create/member-add/member-remove/remove — see agents.mjs's
+  // runWrite for the full rationale (truthy `out.ok` check, CANCELLED is
+  // silent, hint appended, and a thunk so a composer throw — e.g. an
+  // embedded `"` — lands inside this function instead of becoming an
+  // unhandled rejection before it's ever called).
+  async function runWrite(compose) {
     errorBox.replaceChildren();
+    let line;
+    try {
+      line = compose();
+    } catch (e) {
+      errorBox.replaceChildren(banner('err', '✗', e.message || String(e)));
+      return;
+    }
     const out = await runSlashConfirmed(line);
     if (out.ok) { load(); return; }
     if (out.code === 'CANCELLED') return;
@@ -52,13 +62,13 @@ export async function render(host) {
               el('button', {
                 class: 'btn btn-secondary btn-sm', type: 'button', text: '×',
                 title: `remove ${a} from ${t.name}`,
-                onclick: () => runWrite(teamMemberRemove(t.name, a)),
+                onclick: () => runWrite(() => teamMemberRemove(t.name, a)),
               }))))
           : el('span', { class: 'dim', text: '(none)' }),
         slack: t.slackChannel ? el('code', { text: t.slackChannel }) : el('span', { class: 'dim', text: '(none)' }),
         actions: el('div', {},
           el('button', { class: 'btn btn-secondary btn-sm', type: 'button', text: '+ Member', onclick: () => addMember(t.name) }),
-          el('button', { class: 'btn btn-secondary', type: 'button', text: 'Delete', onclick: () => runWrite(teamRemove(t.name)) })),
+          el('button', { class: 'btn btn-secondary', type: 'button', text: 'Delete', onclick: () => runWrite(() => teamRemove(t.name)) })),
       }));
       list.replaceWith(list = table(
         [{ key: 'name', label: 'name' }, { key: 'lead', label: 'lead' }, { key: 'agents', label: 'agents' },
@@ -87,7 +97,7 @@ export async function render(host) {
     const agents = agentsRaw.split(',').map((s) => s.trim()).filter(Boolean);
     const lead = (prompt(`Lead (one of ${agents.join(', ')}):`, agents[0]) || agents[0]).trim();
     const channel = (prompt('Slack channel id or #name (optional):') || '').trim();
-    await runWrite(teamCreate({ name, agents, lead, channel }));
+    await runWrite(() => teamCreate({ name, agents, lead, channel }));
   }
 
   async function addMember(teamName) {
@@ -99,7 +109,7 @@ export async function render(host) {
     }
     const agentName = (prompt(`Add which agent to "${teamName}"? (registered: ${registered.join(', ')})`) || '').trim();
     if (!agentName) return;
-    await runWrite(teamMemberAdd(teamName, agentName));
+    await runWrite(() => teamMemberAdd(teamName, agentName));
   }
 
   await load();

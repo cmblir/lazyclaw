@@ -69,11 +69,36 @@ test('a literal double quote cannot be represented on this grammar — refuse ra
   // loop-engine.mjs's splitArgs (the dispatcher's real tokenizer) has no
   // escape for `"` — it only toggles quote state — so a backslash-escaped
   // quote (the original draft's approach) does not round-trip; it silently
-  // mangles the rest of the line instead. Verified against splitArgs
-  // directly: '"say \"hi\" now"' tokenizes to `say \hi\ now`, not the
-  // intended text. Throwing here is the honest alternative.
+  // mangles the rest of the line instead. Throwing here is the honest
+  // alternative.
   assert.throws(() => A.configSet('greeting', 'say "hi"'), /"/);
   assert.throws(() => A.taskIssue({ team: 'crew', title: 'say "hi" now' }), /"/);
+});
+
+// Fix round: a review found agentCreate's `role` was concatenated raw,
+// bypassing arg() entirely — unlike every other free-text field. Verified
+// against the committed code before this fix:
+// agentCreate({name:'dev', role:'"hi" there'}) produced the STRING
+// '/agent add dev "hi" there' with no error, which the real tokenizer
+// (loop-engine.mjs's splitArgs) turns into ['add','dev','hi','there'] — the
+// quote characters silently vanish and the saved role is wrong. That is
+// worse than throwing: it looks like it worked. `role` must get the exact
+// same throw-on-embedded-quote protection every other value gets.
+test('agentCreate protects `role` the same way every other free-text value is protected', () => {
+  assert.throws(() => A.agentCreate({ name: 'dev', role: '"hi" there' }), /"/);
+  // The positive case must still round-trip a plain multi-word role exactly
+  // (verified end-to-end through dispatchSlash during development; pinned
+  // here at the composer level).
+  assert.equal(A.agentCreate({ name: 'dev', role: 'senior backend engineer' }),
+    '/agent add dev "senior backend engineer"');
+});
+
+// Fix round: teamCreate's `--agents` list was `agents.join(',')` — every
+// other value in this file goes through arg(), this one did not. Names are
+// slug-like in practice (low risk), but the guard should not depend on a
+// reviewer noticing which call sites "look" risky.
+test('teamCreate protects each --agents entry the same way, not just lead/channel', () => {
+  assert.throws(() => A.teamCreate({ name: 'crew', agents: ['ok1', 'bad"2'] }), /"/);
 });
 
 test('a missing required name is a thrown programming error, not a malformed line', () => {
