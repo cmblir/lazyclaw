@@ -68,13 +68,18 @@ export async function render(host) {
         slack: t.slackChannel ? el('code', { text: t.slackChannel }) : el('span', { class: 'dim', text: '(none)' }),
         actions: el('div', {},
           el('button', { class: 'btn btn-secondary btn-sm', type: 'button', text: '+ Member', onclick: () => addMember(t.name) }),
-          el('button', { class: 'btn btn-secondary', type: 'button', text: 'Delete', onclick: () => runWrite(() => teamRemove(t.name)) })),
+          // data-action is a test hook only (no behaviour change).
+          el('button', { class: 'btn btn-secondary', type: 'button', text: 'Delete', 'data-action': 'team-remove', onclick: () => runWrite(() => teamRemove(t.name)) })),
       }));
       list.replaceWith(list = table(
         [{ key: 'name', label: 'name' }, { key: 'lead', label: 'lead' }, { key: 'agents', label: 'agents' },
          { key: 'slack', label: 'slack channel' }, { key: 'actions', label: '' }],
         rows,
       ));
+      // data-team is a test hook only (no behaviour change) — table() has no
+      // per-row attribute param, so rows are tagged after the fact, in the
+      // same order they were built.
+      list.querySelectorAll('tbody tr').forEach((tr, i) => tr.setAttribute('data-team', arr[i].name));
     } catch (e) {
       list.replaceWith(list = el('div', { class: 'empty', text: 'Error: ' + e.message }));
     }

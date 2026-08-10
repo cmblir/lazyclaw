@@ -33,9 +33,11 @@ function askInModal(prompt) {
       observer.disconnect();
       resolve(approved);
     }
-    const cancel = el('button', { class: 'btn btn-secondary', type: 'button', text: 'Cancel',
+    // data-action is a test hook only (no behaviour change) — Playwright has
+    // no other stable way to tell these two buttons apart from outside.
+    const cancel = el('button', { class: 'btn btn-secondary', type: 'button', text: 'Cancel', 'data-action': 'cancel',
       onclick: () => { closeModal(); decide(false); } });
-    const go = el('button', { class: 'btn btn-danger', type: 'button', text: 'Confirm',
+    const go = el('button', { class: 'btn btn-danger', type: 'button', text: 'Confirm', 'data-action': 'confirm',
       onclick: () => { closeModal(); decide(true); } });
     // openModal takes an object, not positional args: {title, body, foot}.
     openModal({ title: 'Confirm', body: el('p', { text: prompt }), foot: [cancel, go] });

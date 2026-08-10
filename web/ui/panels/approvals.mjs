@@ -38,7 +38,12 @@ function updateRemaining(tr, a) {
 }
 
 function createRow(a) {
-  const tr = el('tr', { '--i': a.i },
+  // data-approval is a test hook only (no behaviour change). The Approve/Deny
+  // buttons below stay `disabled` — resolving one is gated on a paired
+  // device's Ed25519 token, which the dashboard is not (see the banner
+  // above) — so this hook lets a test find a pending row without implying
+  // the row is actionable from here.
+  const tr = el('tr', { '--i': a.i, 'data-approval': a.id },
     el('td', {}, el('code', { text: a.tool || '' })),
     el('td', {}, a.agentId || ''),
     el('td', { class: 'mono' }, a.summary || ''),

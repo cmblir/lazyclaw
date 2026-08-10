@@ -79,7 +79,8 @@ export async function render(host) {
         const v = cfg[k];
         const display = v && typeof v === 'object' ? JSON.stringify(v) : String(v);
         const nested = NESTED.has(k);
-        return el('tr', {},
+        // data-config-key is a test hook only (no behaviour change).
+        return el('tr', { 'data-config-key': k },
           el('td', {}, el('code', { text: k })),
           el('td', { text: display }),
           el('td', {}, nested
@@ -106,8 +107,11 @@ export async function render(host) {
     if (typeof existingValue === 'string') display = existingValue;
     else if (existingValue != null) display = JSON.stringify(existingValue, null, 2);
     const status = el('div', { class: 'dim', style: 'font-size:12px;' });
-    const keyInput = el('input', { placeholder: 'provider · model · api-key · skills · …', value: existingKey, readonly: !!existingKey || null });
-    const valueInput = el('textarea', { rows: 6, text: display });
+    // name= on both inputs, and data-action on Save, are test hooks only (no
+    // behaviour change) — neither existed before, and there is no other
+    // stable way to address these two fields from outside the module.
+    const keyInput = el('input', { name: 'config-key', placeholder: 'provider · model · api-key · skills · …', value: existingKey, readonly: !!existingKey || null });
+    const valueInput = el('textarea', { name: 'config-value', rows: 6, text: display });
     openModal({
       title: existingKey ? `Edit config — ${existingKey}` : 'Set config key',
       body: [
@@ -122,7 +126,7 @@ export async function render(host) {
       ],
       foot: [
         el('button', { class: 'btn btn-secondary', type: 'button', text: 'Cancel', onclick: () => closeModal() }),
-        el('button', { class: 'btn', type: 'button', text: 'Save', onclick: () => submitConfigEdit(keyInput, valueInput, status) }),
+        el('button', { class: 'btn', type: 'button', text: 'Save', 'data-action': 'config-set', onclick: () => submitConfigEdit(keyInput, valueInput, status) }),
       ],
     });
   }

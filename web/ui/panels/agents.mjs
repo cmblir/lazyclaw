@@ -77,6 +77,10 @@ export async function render(host) {
          { key: 'tools', label: 'tools' }, { key: 'role', label: 'role (excerpt)' }, { key: 'actions', label: '' }],
         rows,
       ));
+      // data-agent is a test hook only (no behaviour change) — table() has no
+      // per-row attribute param, so rows are tagged after the fact, in the
+      // same order they were built.
+      list.querySelectorAll('tbody tr').forEach((tr, i) => tr.setAttribute('data-agent', arr[i].name));
     } catch (e) {
       list.replaceWith(list = el('div', { class: 'empty', text: 'Error: ' + e.message }));
     }

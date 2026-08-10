@@ -191,7 +191,10 @@ export async function render(host) {
   }
 
   function createRow(t) {
-    return el('tr', { '--i': t.i },
+    // data-task-id / data-task-title are test hooks only (no behaviour
+    // change) — a task's id is only generated once it's issued, so a test
+    // needs a way to find "the row for the task I just issued" by title.
+    return el('tr', { '--i': t.i, 'data-task-id': t.id, 'data-task-title': t.title },
       el('td', {}, el('code', { text: t.id })),
       el('td', {}, t.title),
       el('td', {}, t.team),
