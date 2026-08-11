@@ -1417,9 +1417,13 @@ Replace the `banner('warn', …)` block in `render()` with:
 Replace `createRow`'s action cell and add the handler. The whole cell is rebuilt by `_decide`, so `renderActions` is the single place its contents are defined:
 
 ```js
-// The action cell, rebuilt in place by _decide so success, failure and the
-// not-paired prompt all render through one function.
-function renderActions(cell, a, { message = '', pair = false, done = '' } = {}) {
+// The action cell, rebuilt in place so success, failure and the not-paired
+// prompt all render through one function. `deps` is threaded through rather
+// than reached for globally, so _decide's tests swap the two network calls
+// without any module-level state.
+function renderActions(tr, a, { message = '', pair = false, done = '' } = {}, deps = {}) {
+  const cell = tr.querySelector('[data-f="actions"]');
+  if (!cell) return;
   const kids = [];
   if (done) {
     kids.push(chip(done, done === 'approved' ? 'ok' : 'warn'));
@@ -1429,16 +1433,17 @@ function renderActions(cell, a, { message = '', pair = false, done = '' } = {}) 
   } else {
     for (const [label, decision] of [['Approve', 'approve'], ['Deny', 'deny']]) {
       const b = el('button', { class: 'btn btn-secondary', type: 'button', text: label });
-      b.addEventListener('click', () => { _decide(cell.parentNode || cell, a, a.id, decision); });
+      b.addEventListener('click', () => { _decide(tr, a, a.id, decision, deps); });
       kids.push(b);
     }
   }
   if (message) kids.push(el('div', { class: 'err-inline', text: message }));
   if (pair) {
+    const pairFn = deps.pairThisBrowser || pairThisBrowser;
     const b = el('button', { class: 'btn btn-secondary', type: 'button', text: 'Pair this browser' });
     b.addEventListener('click', async () => {
-      const out = await pairThisBrowser();
-      renderActions(cell, a, out.ok ? {} : { message: out.error, pair: out.code !== 'PENDING_APPROVAL' });
+      const out = await pairFn();
+      renderActions(tr, a, out.ok ? {} : { message: out.error, pair: out.code !== 'PENDING_APPROVAL' }, deps);
     });
     kids.push(b);
   }
@@ -1453,7 +1458,6 @@ function renderActions(cell, a, { message = '', pair = false, done = '' } = {}) 
  */
 export async function _decide(tr, a, id, decision, deps = {}) {
   const resolve = deps.resolveApproval || resolveViaDevice;
-  const pair = deps.pairThisBrowser || pairThisBrowser;
   const cell = tr.querySelector('[data-f="actions"]');
   if (!cell) return;
   cell.replaceChildren(el('span', { class: 'muted', text: decision === 'approve' ? 'Approving…' : 'Denying…' }));
@@ -1461,22 +1465,12 @@ export async function _decide(tr, a, id, decision, deps = {}) {
   try { out = await resolve(id, decision); }
   catch (e) { out = { ok: false, code: 'RESOLVE_FAILED', error: e && e.message ? e.message : String(e) }; }
   if (out && out.ok) {
-    renderActionsWith(cell, a, pair, { done: out.approved ? 'approved' : 'denied' });
+    renderActions(tr, a, { done: out.approved ? 'approved' : 'denied' }, deps);
     return;
   }
-  renderActionsWith(cell, a, pair, { message: out.error || 'the decision could not be delivered', pair: out.code === 'NOT_PAIRED' });
+  renderActions(tr, a, { message: out.error || 'the decision could not be delivered', pair: out.code === 'NOT_PAIRED' }, deps);
 }
-
-// renderActions with the pair function injected, so _decide's tests can swap it.
-function renderActionsWith(cell, a, pairFn, opts) {
-  const prev = pairThisBrowserRef;
-  pairThisBrowserRef = pairFn;
-  try { renderActions(cell, a, opts); } finally { pairThisBrowserRef = prev; }
-}
-let pairThisBrowserRef = pairThisBrowser;
 ```
-
-Then in `renderActions`, call `pairThisBrowserRef()` rather than `pairThisBrowser()`.
 
 In `createRow`, replace the two hardcoded-`disabled` buttons with the live cell:
 
@@ -1489,7 +1483,7 @@ function createRow(a) {
     el('td', { 'data-f': 'remaining' }),
     el('td', { 'data-f': 'actions' }));
   updateRemaining(tr, a);
-  renderActions(tr.querySelector('[data-f="actions"]'), a);
+  renderActions(tr, a);
   return tr;
 }
 ```
@@ -1740,4 +1734,4 @@ git commit -m "docs: how the dashboard pairs itself and approves"
 
 **Type consistency.** `getOrCreateIdentity` returns `{deviceId, publicKeyDerBase64}` everywhere it appears; `sign` takes and returns `Uint8Array` and is base64-encoded only at the call site; `pairThisBrowser`/`resolveApproval` return the `{ok:true,…}` / `{ok:false,error,code}` pair uniformly; the store contract is `{get,put,del}` in the module, the fake, and the doc block alike; `fingerprint` is `deviceId.slice(7, 19)` in the route, the route test, and the panel.
 
-**One thing the implementer of Task 4 must watch.** `renderActions` reads `pairThisBrowserRef`, which `renderActionsWith` swaps for the duration of a synchronous call. That is deliberate — it is the smallest way to make the pair button injectable without threading a deps object through every call site — but it only works because `renderActions` is synchronous. Do not make it async.
+**One thing the implementer of Task 4 must watch.** `renderActions` and `_decide` are mutually recursive by design: a button rendered by one calls the other, and `deps` is threaded through both so a test can substitute the network calls at any depth. Keep `deps` on every internal call — dropping it on one path is how a test passes while the real button reaches for the wrong function.
