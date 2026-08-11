@@ -1,6 +1,9 @@
 // web/ui/panels/gateway.mjs — paired devices for the companion-node gateway.
-// Read-only: approve/revoke/rotate happen via `pompos nodes`, never here —
-// see daemon/routes/gateway_views.mjs for why.
+// The devices TABLE is read-only: approving, revoking or rotating ANOTHER
+// device still only happens via `pompos nodes` — see
+// daemon/routes/gateway_views.mjs for why. This browser can pair or forget
+// ITSELF as a device though (see web/ui/pairing.mjs); that self-pairing is
+// what lets the Approvals panel resolve anything from here at all.
 import { el, phead, chip, table, kvlist } from '../dom.mjs';
 import { api } from '../api.mjs';
 import { pairThisBrowser, unpairThisBrowser } from '../pairing.mjs';
@@ -68,11 +71,23 @@ export async function render(host) {
   const status = el('span', { class: 'muted', text: '' });
   const pairBtn = el('button', { class: 'btn btn-secondary', type: 'button', text: 'Pair this browser' });
   pairBtn.addEventListener('click', async () => {
+    // Disabled for the duration of the request — re-enabled in `finally`,
+    // not just on the happy path — so a slow request can't be double-fired
+    // and a rejection (pairThisBrowser promises never to reject, but this
+    // guards the button even if that promise is ever broken) can't leave
+    // "Pairing…" on screen forever with no way forward.
+    pairBtn.disabled = true;
     status.replaceChildren(el('span', { class: 'muted', text: 'Pairing…' }));
-    const out = await pairThisBrowser();
-    status.replaceChildren(out.ok
-      ? chip('paired: ' + out.deviceId.slice(7, 19), 'ok')
-      : el('span', { class: 'err-inline', text: out.error }));
+    try {
+      const out = await pairThisBrowser();
+      status.replaceChildren(out.ok
+        ? chip('paired: ' + out.deviceId.slice(7, 19), 'ok')
+        : el('span', { class: 'err-inline', text: out.error }));
+    } catch (e) {
+      status.replaceChildren(el('span', { class: 'err-inline', text: e && e.message ? e.message : String(e) }));
+    } finally {
+      pairBtn.disabled = false;
+    }
   });
   const forgetBtn = el('button', { class: 'btn btn-secondary', type: 'button', text: "Forget this browser's key" });
   forgetBtn.addEventListener('click', async () => {

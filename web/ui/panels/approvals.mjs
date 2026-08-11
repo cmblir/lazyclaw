@@ -60,19 +60,28 @@ function renderActions(tr, a, { message = '', pair = false, done = '' } = {}, de
       kids.push(b);
     }
   }
-  if (message) kids.push(el('div', { class: 'err-inline', text: message }));
+  // aria-live so a screen-reader user is told the resolve failed, not just
+  // shown a colour change in the row.
+  if (message) kids.push(el('div', { class: 'err-inline', 'aria-live': 'polite', text: message }));
   if (pair) {
     const pairFn = deps.pairThisBrowser || pairThisBrowser;
     const b = el('button', { class: 'btn btn-secondary', type: 'button', text: 'Pair this browser' });
     b.addEventListener('click', async () => {
-      const out = await pairFn();
-      // Offer the button again only when pressing it could plausibly help.
-      // NO_WEBCRYPTO / NO_ED25519 mean this browser can never pair (a
-      // non-secure origin, or no Ed25519 support), and PENDING_APPROVAL means
-      // the operator has to act next — re-offering it in those three cases is a
-      // button that cannot work.
-      const retryable = !['PENDING_APPROVAL', 'NO_WEBCRYPTO', 'NO_ED25519'].includes(out.code);
-      renderActions(tr, a, out.ok ? {} : { message: out.error, pair: retryable }, deps);
+      try {
+        const out = await pairFn();
+        // Offer the button again only when pressing it could plausibly help.
+        // NO_WEBCRYPTO / NO_ED25519 mean this browser can never pair (a
+        // non-secure origin, or no Ed25519 support), and PENDING_APPROVAL means
+        // the operator has to act next — re-offering it in those three cases is a
+        // button that cannot work.
+        const retryable = !['PENDING_APPROVAL', 'NO_WEBCRYPTO', 'NO_ED25519'].includes(out.code);
+        renderActions(tr, a, out.ok ? {} : { message: out.error, pair: retryable }, deps);
+      } catch (e) {
+        // pairFn promises never to reject, but this must not silently no-op
+        // if that promise is ever broken — the row would otherwise sit on
+        // its message with a dead button and no feedback.
+        renderActions(tr, a, { message: e && e.message ? e.message : String(e), pair: true }, deps);
+      }
     });
     kids.push(b);
   }
@@ -126,13 +135,31 @@ async function refreshBadge() {
   } catch { /* a bad poll must not throw into the SSE fan-out */ }
 }
 
+// Set by render() while this panel is mounted, so _onStreamEvent (below) can
+// refresh the visible table too, not just the nav badge, when an approval
+// resolves elsewhere. Cleared by the cleanup function render() returns, so a
+// stale load() from a previous mount is never called once its host is gone.
+let activeLoad = null;
+
 // Registered once, at module load — NOT inside render() — so it keeps
 // running (and the nav badge keeps moving) while some other panel is open.
 // exec.approval.requested/resolved arrive on the shared SSE bus regardless
 // of which panel is mounted (web/ui/stream.mjs).
-subscribe((type) => {
-  if (type === 'exec.approval.requested' || type === 'exec.approval.resolved') refreshBadge();
-});
+//
+// Correctness of reloading on resolve: the server has already dropped the
+// approval from pendingApprovals() by the time exec.approval.resolved fires,
+// so a reload here drops the row. A resolve that FAILED never emits this
+// event at all — the approval is still pending on the server — so a failed
+// row is untouched by this and correctly keeps showing its error.
+//
+// Exported for tests (same underscore convention as _decide) so this
+// contract is exercisable without a live event stream.
+export function _onStreamEvent(type) {
+  if (type !== 'exec.approval.requested' && type !== 'exec.approval.resolved') return;
+  refreshBadge();
+  if (activeLoad) activeLoad();
+}
+subscribe(_onStreamEvent);
 
 export async function render(host) {
   host.append(phead('Approvals', 'Actions waiting on a human before an agent can proceed.'));
@@ -184,6 +211,7 @@ export async function render(host) {
   }
   const timer = setInterval(tick, 1000);
 
+  activeLoad = load;
   await load();
-  return () => clearInterval(timer);
+  return () => { clearInterval(timer); activeLoad = null; };
 }

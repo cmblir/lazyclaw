@@ -268,3 +268,39 @@ test('unpairThisBrowser drops the local key and the held token', async () => {
   assert.equal(store.peek(), null);
   assert.equal(await isPaired(d), false);
 });
+
+// ── network failures must report, never reject ──────────────────────
+// pairThisBrowser/resolveApproval both promise an {ok:false,error,code}
+// envelope; a rejected fetch (offline, daemon restart mid-request) must
+// never propagate past this module as an uncaught exception, or a caller
+// that only awaits the promise (a click handler, say) is left with nothing.
+
+test('a rejected fetch during /devices/pair reports PAIR_FAILED, not a thrown exception', async () => {
+  const rejecting = async () => { throw new Error('network down'); };
+  const { pairThisBrowser } = await freshPairing();
+  const out = await pairThisBrowser(deps(rejecting));
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'PAIR_FAILED');
+  assert.match(out.error, /network down/);
+});
+
+test('a rejected fetch during /gateway/exec/resolve reports RESOLVE_FAILED, not a thrown exception', async () => {
+  const nonce = 'a'.repeat(64);
+  const f = fakeFetch({
+    '/devices/pair': (b) => ({ status: 200, body: { ok: true, status: 'approved', deviceId: deviceIdFromPublicKey(Buffer.from(b.publicKey, 'base64')) } }),
+    '/gateway/connect/challenge': { status: 200, body: { nonce, ts: Date.now() } },
+    '/gateway/connect': (b) => ({ status: 200, body: { ok: true, deviceId: b.deviceId, token: 'tok' } }),
+  });
+  const d = deps(f.fetch);
+  const { pairThisBrowser, resolveApproval } = await freshPairing();
+  await pairThisBrowser(d); // establishes `held` so resolveApproval goes straight to the resolve call
+
+  const rejectingResolve = async (url, opts) => {
+    if (String(url).includes('/gateway/exec/resolve')) throw new Error('network down');
+    return f.fetch(url, opts);
+  };
+  const out = await resolveApproval('ap_1', 'approve', { ...d, fetch: rejectingResolve });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'RESOLVE_FAILED');
+  assert.match(out.error, /network down/);
+});

@@ -53,14 +53,31 @@ function idDeps(d) {
 }
 
 async function postJson(d, path, body, headers = {}) {
-  const r = await d.fetch(path, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...headers },
-    body: JSON.stringify(body),
-  });
+  let r;
+  try {
+    r = await d.fetch(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    // A rejected fetch (offline, daemon restart mid-request) must not throw
+    // past this module — pairThisBrowser/resolveApproval each promise an
+    // {ok:false,...} envelope and may never reject. Status 0 is a sentinel
+    // every call site's existing `status !== 200`/`status === xxx` branches
+    // already treat as "not the success case"; networkFailure() below reads
+    // `networkError` to report the real reason instead of a generic HTTP 0.
+    return { status: 0, body: {}, networkError: err && err.message ? err.message : String(err) };
+  }
   let parsed = null;
   try { parsed = await r.json(); } catch { parsed = null; }
   return { status: r.status, body: parsed || {} };
+}
+
+// A postJson() result whose fetch itself failed. Never let a network blip
+// surface as anything but this envelope shape.
+function networkFailure(r, code) {
+  return { ok: false, code, error: `the gateway could not be reached: ${r.networkError}` };
 }
 
 // Mirrors buildSignPayload in gateway/device_auth.mjs: 11 `|`-joined fields,
@@ -91,6 +108,7 @@ function identityFailure(err) {
 // a failure — never a partial success.
 async function mintToken(d, identity) {
   const ch = await postJson(d, '/gateway/connect/challenge', {});
+  if (ch.networkError) return networkFailure(ch, 'PAIR_FAILED');
   const nonce = ch.body && typeof ch.body.nonce === 'string' ? ch.body.nonce : '';
   if (!nonce) return { ok: false, error: 'the gateway issued no challenge nonce', code: 'PAIR_FAILED' };
 
@@ -104,6 +122,7 @@ async function mintToken(d, identity) {
     payload, signature, publicKey: identity.publicKeyDerBase64, nonce,
     deviceId: identity.deviceId, platform: PLATFORM, label: label(),
   });
+  if (conn.networkError) return networkFailure(conn, 'PAIR_FAILED');
   if (conn.status === 200 && conn.body.token) {
     held = { deviceId: identity.deviceId, token: conn.body.token };
     return { ok: true, deviceId: identity.deviceId };
@@ -131,6 +150,7 @@ export async function pairThisBrowser(deps) {
   const pair = await postJson(d, '/devices/pair', {
     publicKey: identity.publicKeyDerBase64, platform: PLATFORM, label: label(),
   });
+  if (pair.networkError) return networkFailure(pair, 'PAIR_FAILED');
   if (pair.status === 202 && pair.body.status === 'pending') {
     return {
       ok: false, code: 'PENDING_APPROVAL', deviceId: pair.body.deviceId, requestId: pair.body.requestId,
@@ -199,6 +219,7 @@ export async function resolveApproval(id, decision, deps) {
   });
 
   let r = await send();
+  if (r.networkError) return networkFailure(r, 'RESOLVE_FAILED');
   if (r.status === 401) {
     // The token expired or was rotated. Re-mint from the key we still hold and
     // try exactly once more; a second 401 means this device is no longer
@@ -207,8 +228,12 @@ export async function resolveApproval(id, decision, deps) {
     const again = await pairThisBrowser(deps);
     if (!again.ok) return { ok: false, error: again.error, code: pairFailureCode(again) };
     r = await send();
+    if (r.networkError) return networkFailure(r, 'RESOLVE_FAILED');
     if (r.status === 401) {
-      return { ok: false, code: 'NOT_PAIRED', error: 'this browser is no longer a paired device — pair it again, or approve from the terminal with `pompos nodes`' };
+      // NOT the CLI: `pompos nodes` approves a device pairing REQUEST, not an
+      // exec approval — the only thing that can ever resolve one of those is
+      // a paired device (this browser, once it re-pairs).
+      return { ok: false, code: 'NOT_PAIRED', error: 'this browser is no longer a paired device — pair it again to mint a new device token' };
     }
   }
   if (r.status === 200 && r.body.ok) return { ok: true, id: r.body.id, approved: !!r.body.approved };
