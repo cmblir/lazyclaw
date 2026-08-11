@@ -258,7 +258,20 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
       const existing = st.pendingForDevice(deviceId);
       let receipt;
       if (existing) {
-        st.restampPending(existing.requestId, { role, scopes });
+        // Fill-in-once, NEVER widen: only replace an EMPTY stored role/scopes
+        // with the signed payload's. Overwriting an already-set role would
+        // open a privilege-escalation window — the device holds the private
+        // key, so it could reconnect with role:'' AFTER the operator reviews
+        // "read-only" in `pompos nodes pending` but BEFORE they approve, and
+        // silently downgrade the stored role to '' (which the exec-resolve
+        // gate treats as full authority, since it denies only an explicit
+        // "read-only"). This also blocks widening to some OTHER non-empty
+        // role the operator never saw. The bootstrap route's role:'' placeholder
+        // still gets filled from the first signed connect, which is all
+        // finding 2 required.
+        const nextRole = existing.role ? existing.role : role;
+        const nextScopes = Array.isArray(existing.scopes) && existing.scopes.length ? existing.scopes : scopes;
+        st.restampPending(existing.requestId, { role: nextRole, scopes: nextScopes });
         receipt = { requestId: existing.requestId };
       } else {
         try {

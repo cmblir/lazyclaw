@@ -133,4 +133,88 @@ test.describe('Phase 30 — gateway scope + TTL enforcement', () => {
     expect(restamped?.role).toBe('read-only');
     expect(restamped?.scopes).toEqual(['exec:read']);
   });
+
+  // Fix round 2 (Important, introduced by round 1's fix) — the re-stamp above
+  // must be monotonic: fill an EMPTY stored role/scopes, but never overwrite
+  // an already-set one. Without this, the device itself (it holds the
+  // private key) could reconnect with a signed role:'' AFTER the operator
+  // reviews "read-only" in `pompos nodes pending` but BEFORE they approve,
+  // silently downgrading the stored role to '' — which the exec-resolve gate
+  // treats as full authority (it denies only an EXPLICIT "read-only").
+  test('a pending request already "read-only" is NOT reset to "" by a later signed reconnect', async () => {
+    const cfg = tmpDir('p30-restamp-noclear');
+    const da = await loadDeviceAuth();
+    const { PairingStore, ChallengeRegistry, buildSignPayload } = da;
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+    const pubPem = publicKey.export({ type: 'spki', format: 'pem' }) as string;
+    const deviceId = da.deviceIdFromPublicKey(pubPem);
+
+    // The device's FIRST connect already claimed read-only; the request is
+    // stored that way (simulated directly here rather than round-tripping
+    // through /gateway/connect, which the previous test already covers).
+    const store = new PairingStore(cfg);
+    store.requestPairing({ deviceId, role: 'read-only', scopes: ['exec:read'] });
+
+    const challengeRegistry = new ChallengeRegistry();
+    const { nonce } = challengeRegistry.create();
+    // The SAME device reconnects, this time signing an empty role — an
+    // attempt (deliberate or not) to erase its own read-only marker.
+    const payload = buildSignPayload({
+      deviceId, clientId: 'dashboard', clientMode: 'browser', role: '',
+      scopes: [], signedAtMs: Date.now(), token: '', nonce,
+      platform: 'browser', deviceFamily: 'desktop',
+    });
+    const signature = crypto.sign(null, Buffer.from(payload), privateKey).toString('base64');
+
+    const { createGateway } = await loadGateway();
+    const gw = createGateway({ configDir: cfg, challengeRegistry });
+    const res = mockRes();
+    const req = { method: 'POST', url: '/gateway/connect', headers: {}, once() { /* no-op */ } };
+    await gw.handle(req, res, {
+      readBody: async () => JSON.stringify({ payload, signature, publicKey: pubPem, nonce, platform: 'browser' }),
+    });
+
+    expect(res.status).toBe(403);
+    // Re-read from a FRESH PairingStore instance — a disk read, not the
+    // in-memory `store` used to create the original request.
+    const stored = new PairingStore(cfg).pendingForDevice(deviceId);
+    expect(stored?.role).toBe('read-only');
+    expect(stored?.scopes).toEqual(['exec:read']);
+  });
+
+  test('a pending request already "read-only" is NOT widened by a different signed role', async () => {
+    const cfg = tmpDir('p30-restamp-nowiden');
+    const da = await loadDeviceAuth();
+    const { PairingStore, ChallengeRegistry, buildSignPayload } = da;
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+    const pubPem = publicKey.export({ type: 'spki', format: 'pem' }) as string;
+    const deviceId = da.deviceIdFromPublicKey(pubPem);
+
+    const store = new PairingStore(cfg);
+    store.requestPairing({ deviceId, role: 'read-only', scopes: ['exec:read'] });
+
+    const challengeRegistry = new ChallengeRegistry();
+    const { nonce } = challengeRegistry.create();
+    // A different NON-EMPTY role — the monotonic rule must reject widening
+    // just as firmly as it rejects clearing to ''.
+    const payload = buildSignPayload({
+      deviceId, clientId: 'dashboard', clientMode: 'browser', role: 'approver',
+      scopes: ['exec:write'], signedAtMs: Date.now(), token: '', nonce,
+      platform: 'browser', deviceFamily: 'desktop',
+    });
+    const signature = crypto.sign(null, Buffer.from(payload), privateKey).toString('base64');
+
+    const { createGateway } = await loadGateway();
+    const gw = createGateway({ configDir: cfg, challengeRegistry });
+    const res = mockRes();
+    const req = { method: 'POST', url: '/gateway/connect', headers: {}, once() { /* no-op */ } };
+    await gw.handle(req, res, {
+      readBody: async () => JSON.stringify({ payload, signature, publicKey: pubPem, nonce, platform: 'browser' }),
+    });
+
+    expect(res.status).toBe(403);
+    const stored = new PairingStore(cfg).pendingForDevice(deviceId);
+    expect(stored?.role).toBe('read-only');
+    expect(stored?.scopes).toEqual(['exec:read']);
+  });
 });

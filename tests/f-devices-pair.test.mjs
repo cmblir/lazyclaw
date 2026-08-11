@@ -260,3 +260,38 @@ test('fail-closed: a request with an empty socket object is never auto-approved'
   assert.equal(res.statusCode, 202);
   assert.equal(new PairingStore(dir).isApproved(k.deviceId), false);
 });
+
+// ── Fix round 2 — Minor: the reentrancy/unexpected-throw envelope IS
+// reachable through the public interface, with no source edit and no
+// production hook: a non-writable config dir makes PairingStore._persist()
+// raise a real EACCES inside the critical section. ────────────────────────
+
+test('an EACCES inside the critical section answers a named 500 PAIR_BUSY, no path leaked', async (t) => {
+  // Directory mode bits don't restrict root, so this test is meaningless
+  // (and would hang or misbehave) when run as root.
+  if (typeof process.getuid === 'function' && process.getuid() === 0) {
+    t.skip('running as root — directory permission bits do not apply');
+    return;
+  }
+  const dir = tmpDir();
+  // No write bit: PairingStore._persist() -> writeAtomic() cannot
+  // fs.mkdirSync() the not-yet-existing gateway/ subdirectory under it.
+  fs.chmodSync(dir, 0o500);
+  try {
+    const k = freshKey();
+    const res = await call(dir, { publicKey: k.base64 });
+    assert.equal(res.statusCode, 500);
+    // Exact-shape check (not just the code): proves nothing extra — in
+    // particular no absolute filesystem path from the underlying EACCES
+    // message — rides along in the response.
+    assert.deepEqual(res.body, {
+      ok: false,
+      error: 'pairing request could not be completed',
+      code: 'PAIR_BUSY',
+    });
+  } finally {
+    // Restore before the directory is left behind for OS tmp cleanup, so a
+    // failed assertion above can't leave a locked directory around.
+    fs.chmodSync(dir, 0o700);
+  }
+});
