@@ -121,11 +121,17 @@ test('every dashboard request routes through the auth-aware fetch (no bare fetch
   // out) — would bypass the Authorization header and 401 on a token daemon.
   // Walk web/ui/ recursively so a panel added in a later task can't
   // introduce a bare fetch( unnoticed.
-  const files = [DASHBOARD_JS, ...walkFiles(UI_DIR)];
+  //
+  // web/ui/pairing.mjs is a deliberate, documented exception (see its header
+  // and the note in api.mjs's apiRaw comment): its /gateway/* calls carry the
+  // DEVICE token, not the dashboard bearer token, so routing them through
+  // apiRaw would attach the wrong credential. Its calls go through an
+  // injected `d.fetch(...)`, which this scan would otherwise flag.
+  const files = [DASHBOARD_JS, ...walkFiles(UI_DIR)].filter((f) => path.basename(f) !== 'pairing.mjs');
   let bareFetch = 0;
   for (const f of files) {
     const src = fs.readFileSync(f, 'utf8');
     bareFetch += (src.match(/(?<!globalThis\.)\bfetch\(/g) || []).length;
   }
-  assert.equal(bareFetch, 0, 'no bare fetch( may bypass apiRaw; all calls must route through apiRaw/globalThis.fetch (checked across dashboard.js and web/ui/**)');
+  assert.equal(bareFetch, 0, 'no bare fetch( may bypass apiRaw; all calls must route through apiRaw/globalThis.fetch (checked across dashboard.js and web/ui/**, excluding the documented pairing.mjs exception)');
 });

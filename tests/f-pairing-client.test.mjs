@@ -1,0 +1,246 @@
+// tests/f-pairing-client.test.mjs — the browser's side of the handshake.
+//
+// The payload this module signs is checked against the REAL verifyConnect, not
+// against a second copy of the expected string: a browser that builds the
+// canonical payload even slightly differently produces a signature the gateway
+// rejects, and only the real verifier catches that.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { webcrypto, createPublicKey } from 'node:crypto';
+import { verifyConnect, deviceIdFromPublicKey, buildSignPayload } from '../gateway/device_auth.mjs';
+
+globalThis.localStorage = { getItem: () => null, setItem: () => {} };
+globalThis.btoa = (s) => Buffer.from(s, 'binary').toString('base64');
+
+function fakeStore() {
+  let held = null;
+  return { async get() { return held; }, async put(p) { held = p; }, async del() { held = null; }, peek() { return held; } };
+}
+
+// A recording fetch that answers by pathname, so a test states only the
+// responses it cares about and the call log proves the sequence.
+function fakeFetch(routes) {
+  const calls = [];
+  return {
+    calls,
+    fetch: async (url, opts = {}) => {
+      const path = String(url).split('?')[0];
+      const body = opts.body ? JSON.parse(opts.body) : null;
+      calls.push({ path, body, headers: opts.headers || {} });
+      const handler = routes[path];
+      if (!handler) throw new Error(`unstubbed fetch: ${path}`);
+      const r = typeof handler === 'function' ? handler(body, calls.length) : handler;
+      return { ok: r.status >= 200 && r.status < 300, status: r.status, json: async () => r.body };
+    },
+  };
+}
+
+function deps(fetchImpl, store = fakeStore()) {
+  return { fetch: fetchImpl, subtle: webcrypto.subtle, store };
+}
+
+// pairing.mjs keeps its device token in a module-level variable (deliberately
+// not persisted — see the module header). A bare `import('../web/ui/pairing.mjs')`
+// resolves to the SAME cached module across every test in this file, so a
+// token minted by one test would leak into the next and mask exactly the
+// "no session yet" cases this suite exercises. Cache-busting the specifier
+// (the same idiom used by tests/f-phase0-cron.test.mjs and
+// tests/phaseG-prompt-stack.test.mjs for other module-level singletons) gives
+// each test its own fresh module instance instead.
+let importSeq = 0;
+function freshPairing() {
+  return import(`../web/ui/pairing.mjs?t=${Date.now()}-${importSeq++}`);
+}
+
+test('a first-device pair yields a device token the gateway would accept', async () => {
+  const nonce = 'a'.repeat(64);
+  let connected = null;
+  const f = fakeFetch({
+    '/devices/pair': (b) => ({ status: 200, body: { ok: true, status: 'approved', deviceId: b && b.publicKey ? deviceIdFromPublicKey(Buffer.from(b.publicKey, 'base64')) : '' } }),
+    '/gateway/connect/challenge': { status: 200, body: { nonce, ts: Date.now() } },
+    '/gateway/connect': (b) => { connected = b; return { status: 200, body: { ok: true, deviceId: b.deviceId, token: 'dev_tok_1' } }; },
+  });
+  const { pairThisBrowser } = await freshPairing();
+  const out = await pairThisBrowser(deps(f.fetch));
+  assert.equal(out.ok, true);
+
+  // The real verifier is the only judge that matters here.
+  const der = Buffer.from(connected.publicKey, 'base64');
+  const verdict = verifyConnect({
+    payload: connected.payload,
+    signature: connected.signature,
+    publicKey: createPublicKey({ key: der, format: 'der', type: 'spki' }).export({ type: 'spki', format: 'pem' }),
+    challenge: { nonce },
+    nowMs: Date.now(),
+  });
+  // verifyConnect's success shape is { ok: true, reason: 'ok' } (see
+  // gateway/device_auth.mjs) — assert on .ok, not the whole object, so this
+  // doesn't pin an incidental diagnostic string that isn't part of the contract.
+  assert.equal(verdict.ok, true, verdict.reason || '');
+  assert.equal(connected.nonce, nonce, 'the challenge nonce must ride the body as well as the payload');
+  assert.deepEqual(f.calls.map((c) => c.path),
+    ['/devices/pair', '/gateway/connect/challenge', '/gateway/connect'],
+    'pair first, then handshake — the connect can only mint a token once the device is approved');
+});
+
+test('the signed payload matches buildSignPayload field for field', async () => {
+  const nonce = 'b'.repeat(64);
+  let connected = null;
+  const f = fakeFetch({
+    '/devices/pair': (b) => ({ status: 200, body: { ok: true, status: 'approved', deviceId: deviceIdFromPublicKey(Buffer.from(b.publicKey, 'base64')) } }),
+    '/gateway/connect/challenge': { status: 200, body: { nonce, ts: Date.now() } },
+    '/gateway/connect': (b) => { connected = b; return { status: 200, body: { ok: true, deviceId: b.deviceId, token: 't' } }; },
+  });
+  const { pairThisBrowser } = await freshPairing();
+  await pairThisBrowser(deps(f.fetch));
+  const parts = connected.payload.split('|');
+  assert.equal(parts.length, 11, 'buildSignPayload emits exactly 11 fields');
+  const rebuilt = buildSignPayload({
+    deviceId: parts[1], clientId: parts[2], clientMode: parts[3], role: parts[4],
+    scopes: parts[5] ? parts[5].split(',') : [], signedAtMs: parts[6], token: parts[7],
+    nonce: parts[8], platform: parts[9], deviceFamily: parts[10],
+  });
+  assert.equal(connected.payload, rebuilt);
+});
+
+test('a pending pair reports PENDING_APPROVAL with the operator instruction, and never claims success', async () => {
+  const f = fakeFetch({
+    '/devices/pair': { status: 202, body: { ok: true, status: 'pending', deviceId: 'sha256:' + 'c'.repeat(64), requestId: 'pr_1', fingerprint: 'cccccccccccc' } },
+  });
+  const { pairThisBrowser } = await freshPairing();
+  const out = await pairThisBrowser(deps(f.fetch));
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'PENDING_APPROVAL');
+  assert.equal(out.requestId, 'pr_1');
+  assert.equal(out.fingerprint, 'cccccccccccc');
+  assert.match(out.error, /pompos nodes approve/, 'the operator must be told the one command that unblocks them');
+  assert.deepEqual(f.calls.map((c) => c.path), ['/devices/pair'], 'a pending device must not attempt the handshake');
+});
+
+test('resolveApproval sends the DEVICE token, not the dashboard bearer token', async () => {
+  const nonce = 'd'.repeat(64);
+  const f = fakeFetch({
+    '/devices/pair': (b) => ({ status: 200, body: { ok: true, status: 'approved', deviceId: deviceIdFromPublicKey(Buffer.from(b.publicKey, 'base64')) } }),
+    '/gateway/connect/challenge': { status: 200, body: { nonce, ts: Date.now() } },
+    '/gateway/connect': (b) => ({ status: 200, body: { ok: true, deviceId: b.deviceId, token: 'dev_tok_9' } }),
+    '/gateway/exec/resolve': { status: 200, body: { ok: true, id: 'ap_1', approved: true } },
+  });
+  const d = deps(f.fetch);
+  const { pairThisBrowser, resolveApproval } = await freshPairing();
+  const paired = await pairThisBrowser(d);
+  const out = await resolveApproval('ap_1', 'approve', d);
+  assert.deepEqual(out, { ok: true, id: 'ap_1', approved: true });
+  const resolveCall = f.calls.find((c) => c.path === '/gateway/exec/resolve');
+  assert.equal(resolveCall.headers.Authorization, 'Bearer dev_tok_9');
+  assert.equal(resolveCall.headers['x-device-id'], paired.deviceId);
+  assert.deepEqual(resolveCall.body, { id: 'ap_1', decision: 'approve' });
+});
+
+test('resolving without a paired device reports NOT_PAIRED and sends no resolve at all', async () => {
+  const f = fakeFetch({
+    '/devices/pair': { status: 202, body: { ok: true, status: 'pending', deviceId: 'sha256:' + 'e'.repeat(64), requestId: 'pr_2' } },
+  });
+  const { resolveApproval } = await freshPairing();
+  const out = await resolveApproval('ap_2', 'approve', deps(f.fetch));
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'NOT_PAIRED');
+  assert.equal(f.calls.some((c) => c.path === '/gateway/exec/resolve'), false,
+    'the security claim of this phase is that a bearer token alone cannot resolve — so no resolve may be attempted');
+});
+
+test('a stale device token is re-minted once, then the resolve retried', async () => {
+  const nonce = 'f'.repeat(64);
+  let issued = 0;
+  let resolves = 0;
+  const f = fakeFetch({
+    '/devices/pair': (b) => ({ status: 200, body: { ok: true, status: 'approved', deviceId: deviceIdFromPublicKey(Buffer.from(b.publicKey, 'base64')) } }),
+    '/gateway/connect/challenge': { status: 200, body: { nonce, ts: Date.now() } },
+    '/gateway/connect': (b) => ({ status: 200, body: { ok: true, deviceId: b.deviceId, token: `dev_tok_${++issued}` } }),
+    '/gateway/exec/resolve': () => (++resolves === 1
+      ? { status: 401, body: { ok: false, reason: 'invalid device token' } }
+      : { status: 200, body: { ok: true, id: 'ap_3', approved: true } }),
+  });
+  const d = deps(f.fetch);
+  const { pairThisBrowser, resolveApproval } = await freshPairing();
+  await pairThisBrowser(d);
+  const out = await resolveApproval('ap_3', 'approve', d);
+  assert.equal(out.ok, true);
+  assert.equal(issued, 2, 'a 401 must re-mint from the non-extractable key rather than give up');
+  assert.equal(resolves, 2);
+});
+
+test('a 401 that survives the re-mint reports NOT_PAIRED, never success', async () => {
+  const nonce = 'a'.repeat(64);
+  const f = fakeFetch({
+    '/devices/pair': (b) => ({ status: 200, body: { ok: true, status: 'approved', deviceId: deviceIdFromPublicKey(Buffer.from(b.publicKey, 'base64')) } }),
+    '/gateway/connect/challenge': { status: 200, body: { nonce, ts: Date.now() } },
+    '/gateway/connect': (b) => ({ status: 200, body: { ok: true, deviceId: b.deviceId, token: 'stale' } }),
+    '/gateway/exec/resolve': { status: 401, body: { ok: false, reason: 'invalid device token' } },
+  });
+  const d = deps(f.fetch);
+  const { pairThisBrowser, resolveApproval } = await freshPairing();
+  await pairThisBrowser(d);
+  const out = await resolveApproval('ap_4', 'approve', d);
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'NOT_PAIRED');
+});
+
+test('a resolved-or-expired approval reports APPROVAL_GONE', async () => {
+  const nonce = 'a'.repeat(64);
+  const f = fakeFetch({
+    '/devices/pair': (b) => ({ status: 200, body: { ok: true, status: 'approved', deviceId: deviceIdFromPublicKey(Buffer.from(b.publicKey, 'base64')) } }),
+    '/gateway/connect/challenge': { status: 200, body: { nonce, ts: Date.now() } },
+    '/gateway/connect': (b) => ({ status: 200, body: { ok: true, deviceId: b.deviceId, token: 'tok' } }),
+    '/gateway/exec/resolve': { status: 404, body: { ok: false, reason: 'unknown or already resolved' } },
+  });
+  const d = deps(f.fetch);
+  const { pairThisBrowser, resolveApproval } = await freshPairing();
+  await pairThisBrowser(d);
+  const out = await resolveApproval('ap_5', 'approve', d);
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'APPROVAL_GONE');
+  assert.match(out.error, /already resolved|expired/i);
+});
+
+test('a read-only device reports READ_ONLY', async () => {
+  const nonce = 'a'.repeat(64);
+  const f = fakeFetch({
+    '/devices/pair': (b) => ({ status: 200, body: { ok: true, status: 'approved', deviceId: deviceIdFromPublicKey(Buffer.from(b.publicKey, 'base64')) } }),
+    '/gateway/connect/challenge': { status: 200, body: { nonce, ts: Date.now() } },
+    '/gateway/connect': (b) => ({ status: 200, body: { ok: true, deviceId: b.deviceId, token: 'tok' } }),
+    '/gateway/exec/resolve': { status: 403, body: { ok: false, reason: 'insufficient scope: a read-only device cannot resolve exec approvals' } },
+  });
+  const d = deps(f.fetch);
+  const { pairThisBrowser, resolveApproval } = await freshPairing();
+  await pairThisBrowser(d);
+  const out = await resolveApproval('ap_6', 'approve', d);
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'READ_ONLY');
+});
+
+test('no WebCrypto surfaces as NO_WEBCRYPTO with the loopback instruction', async () => {
+  const f = fakeFetch({});
+  const { pairThisBrowser } = await freshPairing();
+  const out = await pairThisBrowser({ fetch: f.fetch, subtle: undefined, store: fakeStore() });
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'NO_WEBCRYPTO');
+  assert.match(out.error, /localhost|127\.0\.0\.1/);
+  assert.deepEqual(f.calls, [], 'nothing to send when no identity can exist');
+});
+
+test('unpairThisBrowser drops the local key and the held token', async () => {
+  const nonce = 'a'.repeat(64);
+  const store = fakeStore();
+  const f = fakeFetch({
+    '/devices/pair': (b) => ({ status: 200, body: { ok: true, status: 'approved', deviceId: deviceIdFromPublicKey(Buffer.from(b.publicKey, 'base64')) } }),
+    '/gateway/connect/challenge': { status: 200, body: { nonce, ts: Date.now() } },
+    '/gateway/connect': (b) => ({ status: 200, body: { ok: true, deviceId: b.deviceId, token: 'tok' } }),
+  });
+  const d = deps(f.fetch, store);
+  const { pairThisBrowser, unpairThisBrowser, isPaired } = await freshPairing();
+  await pairThisBrowser(d);
+  assert.equal(await isPaired(d), true);
+  await unpairThisBrowser(d);
+  assert.equal(store.peek(), null);
+  assert.equal(await isPaired(d), false);
+});
