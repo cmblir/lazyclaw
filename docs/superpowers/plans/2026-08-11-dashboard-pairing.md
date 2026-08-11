@@ -1444,7 +1444,13 @@ function renderActions(tr, a, { message = '', pair = false, done = '' } = {}, de
     const b = el('button', { class: 'btn btn-secondary', type: 'button', text: 'Pair this browser' });
     b.addEventListener('click', async () => {
       const out = await pairFn();
-      renderActions(tr, a, out.ok ? {} : { message: out.error, pair: out.code !== 'PENDING_APPROVAL' }, deps);
+      // Offer the button again only when pressing it could plausibly help.
+      // NO_WEBCRYPTO / NO_ED25519 mean this browser can never pair (a
+      // non-secure origin, or no Ed25519 support), and PENDING_APPROVAL means
+      // the operator has to act next — re-offering it in those three cases is a
+      // button that cannot work.
+      const retryable = !['PENDING_APPROVAL', 'NO_WEBCRYPTO', 'NO_ED25519'].includes(out.code);
+      renderActions(tr, a, out.ok ? {} : { message: out.error, pair: retryable }, deps);
     });
     kids.push(b);
   }
