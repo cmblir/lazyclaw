@@ -88,6 +88,93 @@ test.describe('Phase 30 — gateway scope + TTL enforcement', () => {
     expect(res.status).toBe(200);
   });
 
+  // A real browser (web/ui/pairing.mjs) sends its public key as base64 DER
+  // SPKI — the direct base64 encoding of subtle.exportKey('spki', ...), NOT
+  // a PEM string. Before this fix, /gateway/connect passed that base64 text
+  // straight into deviceIdFromPublicKey, which treats any string argument as
+  // PEM (gateway/device_auth.mjs's toSpkiDer) and threw on it, so the route
+  // answered 400 'invalid public key' for every real browser client — no
+  // dashboard could ever complete a handshake. Mirrors the normalization
+  // daemon/routes/devices_pair.mjs already had for the same field.
+  test('a signed connect whose publicKey is base64 DER SPKI (the browser\'s real wire format) succeeds', async () => {
+    const cfg = tmpDir('p30-connect-b64');
+    const da = await loadDeviceAuth();
+    const { PairingStore, ChallengeRegistry, buildSignPayload } = da;
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+    const der = publicKey.export({ type: 'spki', format: 'der' }) as Buffer;
+    const pubB64 = der.toString('base64');
+    const deviceId = da.deviceIdFromPublicKey(der);
+
+    // Pre-approved, so a correctly-parsed key reaches 200 with a minted
+    // token — not merely past the 400 gate into some other status.
+    const store = new PairingStore(cfg);
+    const { requestId } = store.requestPairing({ deviceId });
+    store.approve(requestId, {});
+
+    const challengeRegistry = new ChallengeRegistry();
+    const { nonce } = challengeRegistry.create();
+    const payload = buildSignPayload({
+      deviceId, clientId: 'pompos-dashboard', clientMode: 'dashboard', role: '',
+      scopes: [], signedAtMs: Date.now(), token: '', nonce,
+      platform: 'browser', deviceFamily: 'dashboard',
+    });
+    const signature = crypto.sign(null, Buffer.from(payload), privateKey).toString('base64');
+
+    const { createGateway } = await loadGateway();
+    const gw = createGateway({ configDir: cfg, challengeRegistry });
+    const res = mockRes();
+    const req = { method: 'POST', url: '/gateway/connect', headers: {}, once() { /* no-op */ } };
+    await gw.handle(req, res, {
+      readBody: async () => JSON.stringify({ payload, signature, publicKey: pubB64, nonce, platform: 'browser' }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body!) as { ok: boolean; deviceId: string; token: string };
+    expect(body.ok).toBe(true);
+    expect(body.deviceId).toBe(deviceId);
+    expect(typeof body.token).toBe('string');
+    expect(body.token.length).toBeGreaterThan(0);
+  });
+
+  // Companion to the base64 case above: the PEM representation other
+  // callers may still send must keep working after the fix — the
+  // normalization branches on a `-----BEGIN` prefix, so this proves that
+  // branch, not just the base64 one, still reaches 200.
+  test('a signed connect whose publicKey is a PEM string still succeeds', async () => {
+    const cfg = tmpDir('p30-connect-pem');
+    const da = await loadDeviceAuth();
+    const { PairingStore, ChallengeRegistry, buildSignPayload } = da;
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+    const pubPem = publicKey.export({ type: 'spki', format: 'pem' }) as string;
+    const deviceId = da.deviceIdFromPublicKey(pubPem);
+
+    const store = new PairingStore(cfg);
+    const { requestId } = store.requestPairing({ deviceId });
+    store.approve(requestId, {});
+
+    const challengeRegistry = new ChallengeRegistry();
+    const { nonce } = challengeRegistry.create();
+    const payload = buildSignPayload({
+      deviceId, clientId: 'pompos-dashboard', clientMode: 'dashboard', role: '',
+      scopes: [], signedAtMs: Date.now(), token: '', nonce,
+      platform: 'browser', deviceFamily: 'dashboard',
+    });
+    const signature = crypto.sign(null, Buffer.from(payload), privateKey).toString('base64');
+
+    const { createGateway } = await loadGateway();
+    const gw = createGateway({ configDir: cfg, challengeRegistry });
+    const res = mockRes();
+    const req = { method: 'POST', url: '/gateway/connect', headers: {}, once() { /* no-op */ } };
+    await gw.handle(req, res, {
+      readBody: async () => JSON.stringify({ payload, signature, publicKey: pubPem, nonce, platform: 'browser' }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body!) as { ok: boolean; deviceId: string; token: string };
+    expect(body.ok).toBe(true);
+    expect(body.deviceId).toBe(deviceId);
+  });
+
   // Fix round 1 (Important 2) — a pending request pre-created WITHOUT a
   // signed payload (e.g. the daemon's unsigned POST /devices/pair bootstrap
   // route, which always records role:'') must be re-stamped with the

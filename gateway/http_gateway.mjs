@@ -206,10 +206,17 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
       const body = await readJsonBody(req, readBody);
       if (body && body.__tooLarge) return writeJson(res, 413, { ok: false, reason: 'request body too large' });
       if (!body) return writeJson(res, 400, { ok: false, reason: 'malformed body' });
-      const { payload, signature, publicKey, nonce, platform = '', label = '' } = body;
-      if (!payload || !signature || !publicKey || !nonce) {
+      const { payload, signature, publicKey: publicKeyIn, nonce, platform = '', label = '' } = body;
+      if (!payload || !signature || !publicKeyIn || !nonce) {
         return writeJson(res, 400, { ok: false, reason: 'payload, signature, publicKey and nonce are required' });
       }
+      // publicKey arrives over JSON as a base64 DER SPKI string (a browser's
+      // exportKey('spki') output, base64-encoded for transport — see
+      // web/ui/device_identity.mjs) or as a PEM string from other callers.
+      // Mirrors daemon/routes/devices_pair.mjs's own normalization: without
+      // it, deviceIdFromPublicKey/verifyConnect below try to parse the raw
+      // base64 text as PEM and fail every real (non-test-mocked) caller.
+      const publicKey = /-----BEGIN/.test(publicKeyIn) ? publicKeyIn : Buffer.from(publicKeyIn, 'base64');
       let deviceId;
       try {
         deviceId = deviceIdFromPublicKey(publicKey);
