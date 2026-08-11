@@ -292,7 +292,11 @@ test.describe('Phase I — the operating-loop done bar', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ tool: 'bash', args: { cmd: 'rm -rf ./build' }, agentId: 'dev', summary: 'delete the build directory' }),
-    }).then((r) => r.json());
+    }).then((r) => r.json())
+      // Never let this float: if an assertion below fails first, the long-poll
+      // is still in flight and afterAll's daemon.stop() severs it. Without this
+      // the rejection surfaces unhandled at teardown, far from the real fault.
+      .catch((e) => ({ __requestFailed: String(e) }));
 
     await nav(page, 'approvals');
     const approval = page.locator('[data-approval]').first();
@@ -307,6 +311,7 @@ test.describe('Phase I — the operating-loop done bar', () => {
     // it — `by` is the paired deviceId, which is the proof the browser acted
     // as a device rather than as a bearer-token holder.
     const decision = await pending;
+    expect(decision.__requestFailed).toBeUndefined();
     expect(decision.approved).toBe(true);
     expect(decision.by).toMatch(/^sha256:[0-9a-f]{64}$/);
 

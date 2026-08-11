@@ -206,7 +206,14 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
       const body = await readJsonBody(req, readBody);
       if (body && body.__tooLarge) return writeJson(res, 413, { ok: false, reason: 'request body too large' });
       if (!body) return writeJson(res, 400, { ok: false, reason: 'malformed body' });
-      const { payload, signature, publicKey: publicKeyIn, nonce, platform = '', label = '' } = body;
+      const { payload, signature, nonce, platform = '', label = '' } = body;
+      // Guarded the same way daemon/routes/devices_pair.mjs guards the
+      // identical field: a non-string is coerced to '' here so it falls
+      // into the very next check as a plain "required" 400, rather than
+      // reaching Buffer.from() below with (e.g.) a number or object and
+      // throwing a raw TypeError that escapes uncaught to daemon.mjs's
+      // outer catch as a 500 reflecting Node's internal error message.
+      const publicKeyIn = typeof body.publicKey === 'string' ? body.publicKey.trim() : '';
       if (!payload || !signature || !publicKeyIn || !nonce) {
         return writeJson(res, 400, { ok: false, reason: 'payload, signature, publicKey and nonce are required' });
       }

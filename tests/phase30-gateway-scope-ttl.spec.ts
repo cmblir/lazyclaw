@@ -175,6 +175,53 @@ test.describe('Phase 30 — gateway scope + TTL enforcement', () => {
     expect(body.deviceId).toBe(deviceId);
   });
 
+  // Task 5, fix round 1 — a non-string publicKey must not reach Buffer.from()
+  // below: that throws a raw TypeError, which escapes gw.handle() uncaught
+  // and becomes a 500 in daemon.mjs's outer catch, reflecting Node's internal
+  // error message back to the caller. A malformed body is this handler's own
+  // concern and must stay its existing 400, matching
+  // daemon/routes/devices_pair.mjs's identical guard on the same field.
+  test('a non-string publicKey (number) is the handler\'s own 400, not a raw 500', async () => {
+    const cfg = tmpDir('p30-connect-badkey-number');
+    const { ChallengeRegistry, PairingStore } = await loadDeviceAuth();
+    const challengeRegistry = new ChallengeRegistry();
+    const { nonce } = challengeRegistry.create();
+    const { createGateway } = await loadGateway();
+    const gw = createGateway({ configDir: cfg, challengeRegistry });
+    const res = mockRes();
+    const req = { method: 'POST', url: '/gateway/connect', headers: {}, once() { /* no-op */ } };
+    await gw.handle(req, res, {
+      readBody: async () => JSON.stringify({ payload: 'x', signature: 'y', publicKey: 123, nonce }),
+    });
+    expect(res.status).toBe(400);
+    const body = JSON.parse(res.body!) as { ok: boolean; reason: string };
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe('payload, signature, publicKey and nonce are required');
+    // No device or pairing request was created as a side effect.
+    expect(new PairingStore(cfg).pending()).toEqual([]);
+    expect(new PairingStore(cfg).devicesList()).toEqual([]);
+  });
+
+  test('a non-string publicKey (object) is the handler\'s own 400, not a raw 500', async () => {
+    const cfg = tmpDir('p30-connect-badkey-object');
+    const { ChallengeRegistry, PairingStore } = await loadDeviceAuth();
+    const challengeRegistry = new ChallengeRegistry();
+    const { nonce } = challengeRegistry.create();
+    const { createGateway } = await loadGateway();
+    const gw = createGateway({ configDir: cfg, challengeRegistry });
+    const res = mockRes();
+    const req = { method: 'POST', url: '/gateway/connect', headers: {}, once() { /* no-op */ } };
+    await gw.handle(req, res, {
+      readBody: async () => JSON.stringify({ payload: 'x', signature: 'y', publicKey: { not: 'a string' }, nonce }),
+    });
+    expect(res.status).toBe(400);
+    const body = JSON.parse(res.body!) as { ok: boolean; reason: string };
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe('payload, signature, publicKey and nonce are required');
+    expect(new PairingStore(cfg).pending()).toEqual([]);
+    expect(new PairingStore(cfg).devicesList()).toEqual([]);
+  });
+
   // Fix round 1 (Important 2) — a pending request pre-created WITHOUT a
   // signed payload (e.g. the daemon's unsigned POST /devices/pair bootstrap
   // route, which always records role:'') must be re-stamped with the
