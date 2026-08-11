@@ -9,6 +9,7 @@ import { test, expect } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import * as crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 const REPO_ROOT = process.cwd();
@@ -19,9 +20,10 @@ const loadGateway = async () => import(pathToFileURL(path.join(REPO_ROOT, 'gatew
 function mockRes() {
   return {
     status: 0,
+    body: undefined as string | undefined,
     writeHead(s: number) { this.status = s; return this; },
     write() { return true; },
-    end() { return this; },
+    end(payload?: string) { this.body = payload; return this; },
     once() { /* no-op */ },
   };
 }
@@ -84,5 +86,51 @@ test.describe('Phase 30 — gateway scope + TTL enforcement', () => {
     const res = mockRes();
     await gw.handle(mkReq('GET', '/gateway/whoami', token, deviceId), res, { readBody: async () => '' });
     expect(res.status).toBe(200);
+  });
+
+  // Fix round 1 (Important 2) — a pending request pre-created WITHOUT a
+  // signed payload (e.g. the daemon's unsigned POST /devices/pair bootstrap
+  // route, which always records role:'') must be re-stamped with the
+  // device's real role/scopes the moment it completes an actual signed
+  // /gateway/connect — otherwise the signed capability is silently
+  // discarded and the device ends up trusted as a full (non-read-only)
+  // approver despite never having claimed that.
+  test('a pending request created with role:"" is re-stamped from the signed connect payload', async () => {
+    const cfg = tmpDir('p30-restamp');
+    const da = await loadDeviceAuth();
+    const { PairingStore, ChallengeRegistry, buildSignPayload } = da;
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+    const pubPem = publicKey.export({ type: 'spki', format: 'pem' }) as string;
+    const deviceId = da.deviceIdFromPublicKey(pubPem);
+
+    // Simulate the bootstrap route: a pending request with no capability.
+    const store = new PairingStore(cfg);
+    const { requestId } = store.requestPairing({ deviceId, role: '', scopes: [] });
+
+    const challengeRegistry = new ChallengeRegistry();
+    const { nonce } = challengeRegistry.create();
+    const payload = buildSignPayload({
+      deviceId, clientId: 'dashboard', clientMode: 'browser', role: 'read-only',
+      scopes: ['exec:read'], signedAtMs: Date.now(), token: '', nonce,
+      platform: 'browser', deviceFamily: 'desktop',
+    });
+    const signature = crypto.sign(null, Buffer.from(payload), privateKey).toString('base64');
+
+    const { createGateway } = await loadGateway();
+    const gw = createGateway({ configDir: cfg, challengeRegistry });
+    const res = mockRes();
+    const req = { method: 'POST', url: '/gateway/connect', headers: {}, once() { /* no-op */ } };
+    await gw.handle(req, res, {
+      readBody: async () => JSON.stringify({ payload, signature, publicKey: pubPem, nonce, platform: 'browser' }),
+    });
+
+    expect(res.status).toBe(403); // still unapproved — this only proves the re-stamp
+    const body = JSON.parse(res.body!) as { status: string; requestId: string };
+    expect(body.status).toBe('pending');
+    expect(body.requestId).toBe(requestId); // the SAME request — no duplicate minted
+
+    const restamped = new PairingStore(cfg).pendingForDevice(deviceId);
+    expect(restamped?.role).toBe('read-only');
+    expect(restamped?.scopes).toEqual(['exec:read']);
   });
 });

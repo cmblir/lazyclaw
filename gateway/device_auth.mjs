@@ -630,6 +630,24 @@ export class PairingStore {
   }
 
   /**
+   * Re-stamp role/scopes on an existing PENDING request from a freshly
+   * signature-verified payload — used when the request was pre-created
+   * without one (e.g. the daemon's unsigned bootstrap pairing route) and the
+   * device has now completed a real, signed /gateway/connect. No-op when the
+   * request is missing or no longer pending, so a stale/foreign id can't
+   * touch an approved/denied record.
+   * @param {string} requestId
+   * @param {{ role?: string, scopes?: string[] }} args
+   */
+  restampPending(requestId, { role = '', scopes = [] } = {}) {
+    const req = this._data.requests[requestId];
+    if (!req || req.status !== 'pending') return;
+    req.role = String(role || '');
+    req.scopes = Array.isArray(scopes) ? scopes.map(String) : [];
+    this._persist();
+  }
+
+  /**
    * Approved devices with the token MASKED — for a CLI/dashboard listing
    * that must never echo a live bearer token.
    * @returns {Array<{deviceId,platform,label,approvedAt,tokenMasked}>}

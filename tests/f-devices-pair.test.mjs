@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { generateKeyPairSync } from 'node:crypto';
-import { PairingStore, deviceIdFromPublicKey } from '../gateway/device_auth.mjs';
+import { PairingStore, deviceIdFromPublicKey, devicesPath } from '../gateway/device_auth.mjs';
 import { devicesPair } from '../daemon/routes/devices_pair.mjs';
 
 function tmpDir() {
@@ -166,4 +166,97 @@ test('two concurrent first-pair requests approve EXACTLY ONE device', async () =
     'both browsers seeing an empty roster and both auto-approving would mint two approvers from one bootstrap slot');
   assert.equal(new PairingStore(dir).devicesList().length, 1,
     'and the loser must still be on disk as a pending request, not have overwritten the winner');
+});
+
+// ── Fix round 1 — a key type /gateway/connect can never authenticate must
+// never burn the one-shot bootstrap slot (Important 1) ──────────────────
+
+test('an RSA-2048 public key is a named 400, not an approved device', async () => {
+  const dir = tmpDir();
+  const { publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const base64 = publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+  const res = await call(dir, { publicKey: base64 });
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.code, 'BAD_PUBLIC_KEY');
+  assert.equal(new PairingStore(dir).devicesList().length, 0,
+    'an unauthenticatable key must not spend the bootstrap slot');
+});
+
+test('a P-256 (EC) public key is a named 400, not an approved device', async () => {
+  const dir = tmpDir();
+  const { publicKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const base64 = publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
+  const res = await call(dir, { publicKey: base64 });
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.code, 'BAD_PUBLIC_KEY');
+  assert.equal(new PairingStore(dir).devicesList().length, 0);
+});
+
+test('an Ed25519 PRIVATE key PEM is rejected, not silently reduced to its public half', async () => {
+  const dir = tmpDir();
+  const { privateKey } = generateKeyPairSync('ed25519');
+  const pem = privateKey.export({ type: 'pkcs8', format: 'pem' });
+  const res = await call(dir, { publicKey: pem });
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.code, 'BAD_PUBLIC_KEY');
+  assert.equal(new PairingStore(dir).devicesList().length, 0);
+});
+
+// ── Fix round 1 — Minor 6: unsigned label/platform are capped ───────────
+
+test('an oversized label/platform is truncated to 64 chars before it is persisted', async () => {
+  const dir = tmpDir();
+  const k = freshKey();
+  const longLabel = 'MacBook Pro — kitchen '.repeat(10);
+  await call(dir, { publicKey: freshKey().base64 }); // consume the bootstrap slot
+  await call(dir, { publicKey: k.base64, label: longLabel, platform: 'x'.repeat(500) });
+  const req = new PairingStore(dir).pending()[0];
+  assert.ok(req.label.length <= 64, `label must be capped, got ${req.label.length} chars`);
+  assert.ok(req.platform.length <= 64, `platform must be capped, got ${req.platform.length} chars`);
+});
+
+// ── Fix round 1 — Minor 7: previously-untested envelopes ─────────────────
+
+test('the pending-requests ceiling answers a named 429, not a 500', async () => {
+  const dir = tmpDir();
+  // Pre-fill devices.json to the cap directly (1000 synchronous
+  // requestPairing() calls would be needlessly slow for the same effect).
+  const requests = {};
+  for (let i = 0; i < 1000; i++) {
+    const id = `pr_fill${i}`;
+    requests[id] = {
+      requestId: id, deviceId: `sha256:fill${i}`, platform: '', label: '',
+      role: '', scopes: [], status: 'pending', createdAt: new Date().toISOString(),
+    };
+  }
+  const p = devicesPath(dir);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify({ version: 1, requests, devices: {} }));
+
+  const res = await call(dir, { publicKey: freshKey().base64 });
+  assert.equal(res.statusCode, 429);
+  assert.equal(res.body.ok, false);
+  assert.equal(res.body.code, 'PAIRING_CAP');
+});
+
+test('fail-closed: a request with no socket at all is never auto-approved', async () => {
+  const dir = tmpDir();
+  const k = freshKey();
+  const req = fakeReq({ publicKey: k.base64 });
+  delete req.socket;
+  const res = fakeRes();
+  await devicesPair({ req, res, gwConfigDir: dir });
+  assert.equal(res.statusCode, 202);
+  assert.equal(new PairingStore(dir).isApproved(k.deviceId), false);
+});
+
+test('fail-closed: a request with an empty socket object is never auto-approved', async () => {
+  const dir = tmpDir();
+  const k = freshKey();
+  const req = fakeReq({ publicKey: k.base64 });
+  req.socket = {};
+  const res = fakeRes();
+  await devicesPair({ req, res, gwConfigDir: dir });
+  assert.equal(res.statusCode, 202);
+  assert.equal(new PairingStore(dir).isApproved(k.deviceId), false);
 });

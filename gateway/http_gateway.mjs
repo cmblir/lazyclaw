@@ -232,27 +232,35 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
       if (st.isApproved(deviceId)) {
         return writeJson(res, 200, { ok: true, deviceId, token: st.tokenFor(deviceId) });
       }
+      // role + scopes come from the SIGNATURE-VERIFIED payload (tamper-
+      // evident), not the unsigned body fields, so a client can't forge its
+      // own capabilities. parsePayload is safe here — verifyConnect passed.
+      // Computed unconditionally (not just for a brand-new request) so a
+      // request that was pre-created WITHOUT a signed payload (e.g. the
+      // daemon's POST /devices/pair bootstrap route, which cannot see one
+      // and always records role:'') gets re-stamped with the device's real
+      // capability the moment it completes an actual signed connect —
+      // otherwise that capability is silently discarded forever.
+      let role = '';
+      let scopes = [];
+      try {
+        const parsed = parsePayload(payload);
+        if (parsed) {
+          role = String(parsed.role || '');
+          scopes = typeof parsed.scopes === 'string' && parsed.scopes
+            ? parsed.scopes.split(',').filter(Boolean)
+            : (Array.isArray(parsed.scopes) ? parsed.scopes : []);
+        }
+      } catch { /* fall back to no capability — default device */ }
+
       // Not approved — record intent once (don't pile up duplicates) and
       // tell the device to wait for the operator's approval.
       const existing = st.pendingForDevice(deviceId);
       let receipt;
       if (existing) {
+        st.restampPending(existing.requestId, { role, scopes });
         receipt = { requestId: existing.requestId };
       } else {
-        // role + scopes come from the SIGNATURE-VERIFIED payload (tamper-
-        // evident), not the unsigned body fields, so a client can't forge its
-        // own capabilities. parsePayload is safe here — verifyConnect passed.
-        let role = '';
-        let scopes = [];
-        try {
-          const parsed = parsePayload(payload);
-          if (parsed) {
-            role = String(parsed.role || '');
-            scopes = typeof parsed.scopes === 'string' && parsed.scopes
-              ? parsed.scopes.split(',').filter(Boolean)
-              : (Array.isArray(parsed.scopes) ? parsed.scopes : []);
-          }
-        } catch { /* fall back to no capability — default device */ }
         try {
           receipt = st.requestPairing({ deviceId, platform, label, role, scopes });
         } catch (err) {
