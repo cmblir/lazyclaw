@@ -38,16 +38,19 @@ Versioning: [SemVer](https://semver.org/).
   command means. Authorization is unchanged: the existing bearer token
   carries the same authority it always did.
 
-  Two things stay out of reach from the browser: resolving an approval still
-  needs the terminal or a paired device (the Approvals panel's buttons are
-  disabled — approving is gated on an Ed25519-paired device, which a browser
-  is not), and creating an agent from the dashboard can't set a custom tool
-  list yet (`--tools` has no slash-command form; the agent is created with
-  the default tool set).
+  One thing still stays out of reach from the browser: creating an agent
+  from the dashboard can't set a custom tool list yet (`--tools` has no
+  slash-command form; the agent is created with the default tool set).
 - Three new slash commands, useful from the terminal too: `/workflow
   run|resume|clear`, `/team member add|remove`, and `--provider`/`--model` on
   `/agent add`. `/config set <key> <value>` and `/config unset <key>` now
   write directly — before, `/config` only opened the picker.
+- The dashboard can pair itself as an Ed25519 device and resolve exec approvals
+  from the browser. `POST /devices/pair` approves the first device
+  automatically over loopback and leaves every later one pending, so a stolen
+  auth token cannot enrol a second approver. The browser's private key is
+  non-extractable and never leaves the browser; its device token is held in
+  memory and re-minted on demand rather than stored.
 
 ### Fixed
 
@@ -63,6 +66,10 @@ Versioning: [SemVer](https://semver.org/).
   fresh, so a first-time write is unaffected. An unreadable file (`EACCES` /
   `EISDIR`) gets the same refusal with an actionable message instead of
   failing silently.
+- `POST /gateway/connect` accepted a public key only as PEM, so a
+  browser-originated handshake — which sends `exportKey('spki')` output as
+  base64 DER — could never succeed. It now normalises base64 DER the same way
+  `POST /devices/pair` does.
 
 ## [6.11.0] - 2026-08-07
 

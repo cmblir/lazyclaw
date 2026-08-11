@@ -181,10 +181,33 @@ Two gaps worth knowing about: creating an agent from the dashboard can't set a c
 
 - **Team Live** now draws the real reporting hierarchy: each manager's reports sit under them, joined by edges, instead of a lead plus one flat row. Avatar tiles carry status rings + harness badges (`provider · model`); click one to drill into its harness, current task, and recent activity.
 - **Tasks** shows where a task came from — a Slack channel + thread, or `pompos task start` from the CLI — and the permission mode it actually ran under (attended, unattended-but-read-only, or the unattended-with-execution case worth flagging), plus a transcript viewer; a `task:` hit in Recall links straight to the same transcript.
-- **Approvals** and **Devices** are new panels, both **read-only** — the Approvals panel's resolve buttons are disabled on purpose: resolving one needs a paired device's Ed25519 token, which the dashboard isn't. Approve from a paired device or with `pompos nodes`. The Approvals sidebar badge itself only refreshes when you open the Approvals panel; those events don't yet reach the dashboard's SSE stream, so the badge doesn't move while you're on another panel.
+- **Approvals** and **Devices** are new panels. Resolving an approval needs a paired device's Ed25519 token — the browser can be that device now; see "Approving from the dashboard" below. The Devices panel's own table stays read-only for any *other* device: approving, revoking or rotating one still only happens via `pompos nodes`. The Approvals sidebar badge itself only refreshes when you open the Approvals panel; those events don't yet reach the dashboard's SSE stream, so the badge doesn't move while you're on another panel.
 - The live rail picks up four new event types: `workflow.step`, `cost.tick`, `channel.inbound`, `provider.error`. `cost.tick` only fires for team-routed traffic — the plain `/chat` and `/agent` paths never feed the configured cap to the cost accountant. There's no `cron.fire`: a scheduled job runs in whatever subprocess launchd/cron spawns, with no link back to the daemon's event bus, so a fire isn't observable here at all.
 - **⌘K** jumps to any panel plus four fixed actions (start a task, new team, review approvals, rebuild the search index) — it doesn't resolve a team or agent by name.
 - **Chat**'s model picker lists each provider's live model catalogue when one is reachable (grouped per provider, since a live fetch can return hundreds), instead of a fixed curated set, and tags the picker `live`/`builtin` so a fetched list is never mistaken for a frozen one. Without a live fetch it falls back to `npm run models:sync`'s last run, then the hand-written defaults — so the list is never empty just because a credential isn't configured on this machine.
+
+### Approving from the dashboard
+
+Resolving an approval requires a paired device, not just the dashboard's auth
+token. The browser can be that device: the first time you press **Approve** (or
+the **Pair this browser** button on the Devices panel) it generates an Ed25519
+keypair, keeps the private half in the browser as a non-extractable key, and
+pairs itself with the daemon.
+
+- The **first** device is approved automatically when it pairs over loopback —
+  otherwise there would be no one to approve it.
+- Every device after that is `pending` until `pompos nodes approve <requestId>`
+  approves it from a terminal. There is deliberately no way to approve a new
+  device from the dashboard — that would let one browser enrol another.
+- The private key cannot be exported, backed up, or moved to another browser.
+  Pairing again from a new browser is the recovery path; drop the old record
+  with `pompos nodes revoke <deviceId>`.
+- WebCrypto only exists on a secure origin, so pairing works on
+  `http://localhost` / `http://127.0.0.1` and over HTTPS. On a plain-HTTP LAN
+  address the browser exposes no `crypto.subtle` at all, and the panel says so
+  and tells you to reopen the dashboard on its loopback address. There is no
+  terminal fallback: answering an approval requires a paired device, and
+  `pompos nodes` manages devices, not approvals.
 
 ## Providers
 
