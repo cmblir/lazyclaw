@@ -1714,7 +1714,10 @@ pairs itself with the daemon.
   with `pompos nodes revoke <deviceId>`.
 - WebCrypto only exists on a secure origin, so pairing works on
   `http://localhost` / `http://127.0.0.1` and over HTTPS. On a plain-HTTP LAN
-  address the panel says so and points you at `pompos nodes`.
+  address the browser exposes no `crypto.subtle` at all, and the panel says so
+  and tells you to reopen the dashboard on its loopback address. There is no
+  terminal fallback: answering an approval requires a paired device, and
+  `pompos nodes` manages devices, not approvals.
 ```
 
 - [ ] **Step 2: Add the CHANGELOG entry**
@@ -1729,6 +1732,12 @@ Under the `Unreleased` heading (Keep a Changelog format, English):
   auth token cannot enrol a second approver. The browser's private key is
   non-extractable and never leaves the browser; its device token is held in
   memory and re-minted on demand rather than stored.
+
+### Fixed
+- `POST /gateway/connect` accepted a public key only as PEM, so a
+  browser-originated handshake — which sends `exportKey('spki')` output as
+  base64 DER — could never succeed. It now normalises base64 DER the same way
+  `POST /devices/pair` does.
 ```
 
 - [ ] **Step 3: Verify the docs match the code**
