@@ -1,11 +1,14 @@
 // web/ui/panels/approvals.mjs — pending approvals for gated agent actions.
-// Read-only: resolving one is gated on a paired device's Ed25519 token (see
-// daemon/routes/gateway_views.mjs), which the dashboard is not.
+// Resolving one is gated on a paired device's Ed25519 token; this browser
+// becomes one via web/ui/pairing.mjs, which mints a device token from a
+// non-extractable key kept in IndexedDB. A bearer token alone still cannot
+// resolve anything — that is the point of the gate.
 import { el, phead, chip, banner } from '../dom.mjs';
 import { api } from '../api.mjs';
 import { reconcile } from '../reconcile.mjs';
 import { subscribe } from '../stream.mjs';
 import { bumpNav } from '../shell.mjs';
+import { resolveApproval as resolveViaDevice, pairThisBrowser } from '../pairing.mjs';
 
 // Matches gateway/http_gateway.mjs's own APPROVAL_TTL_MS. The route's
 // response carries createdAt, not a deadline, so the countdown shown here is
@@ -37,21 +40,75 @@ function updateRemaining(tr, a) {
   cell.replaceChildren(timeChip(ms), meterEl(ms));
 }
 
+// The action cell, rebuilt in place so success, failure and the not-paired
+// prompt all render through one function. `deps` is threaded through rather
+// than reached for globally, so _decide's tests swap the two network calls
+// without any module-level state.
+function renderActions(tr, a, { message = '', pair = false, done = '' } = {}, deps = {}) {
+  const cell = tr.querySelector('[data-f="actions"]');
+  if (!cell) return;
+  const kids = [];
+  if (done) {
+    kids.push(chip(done, done === 'approved' ? 'ok' : 'warn'));
+    for (const label of ['Approve', 'Deny']) {
+      kids.push(el('button', { class: 'btn btn-secondary', type: 'button', disabled: true, text: label }));
+    }
+  } else {
+    for (const [label, decision] of [['Approve', 'approve'], ['Deny', 'deny']]) {
+      const b = el('button', { class: 'btn btn-secondary', type: 'button', text: label });
+      b.addEventListener('click', () => { _decide(tr, a, a.id, decision, deps); });
+      kids.push(b);
+    }
+  }
+  if (message) kids.push(el('div', { class: 'err-inline', text: message }));
+  if (pair) {
+    const pairFn = deps.pairThisBrowser || pairThisBrowser;
+    const b = el('button', { class: 'btn btn-secondary', type: 'button', text: 'Pair this browser' });
+    b.addEventListener('click', async () => {
+      const out = await pairFn();
+      // Offer the button again only when pressing it could plausibly help.
+      // NO_WEBCRYPTO / NO_ED25519 mean this browser can never pair (a
+      // non-secure origin, or no Ed25519 support), and PENDING_APPROVAL means
+      // the operator has to act next — re-offering it in those three cases is a
+      // button that cannot work.
+      const retryable = !['PENDING_APPROVAL', 'NO_WEBCRYPTO', 'NO_ED25519'].includes(out.code);
+      renderActions(tr, a, out.ok ? {} : { message: out.error, pair: retryable }, deps);
+    });
+    kids.push(b);
+  }
+  cell.replaceChildren(...kids);
+}
+
+/**
+ * Answer one approval. Exported for tests; `deps` swaps the two network calls.
+ * Three outcomes and no others: resolved (buttons stay disabled, SSE drops the
+ * row), failed (buttons come back plus the reason — the agent is STILL blocked,
+ * so the row must not vanish), or not paired (the same, plus a pair button).
+ */
+export async function _decide(tr, a, id, decision, deps = {}) {
+  const resolve = deps.resolveApproval || resolveViaDevice;
+  const cell = tr.querySelector('[data-f="actions"]');
+  if (!cell) return;
+  cell.replaceChildren(el('span', { class: 'muted', text: decision === 'approve' ? 'Approving…' : 'Denying…' }));
+  let out;
+  try { out = await resolve(id, decision); }
+  catch (e) { out = { ok: false, code: 'RESOLVE_FAILED', error: e && e.message ? e.message : String(e) }; }
+  if (out && out.ok) {
+    renderActions(tr, a, { done: out.approved ? 'approved' : 'denied' }, deps);
+    return;
+  }
+  renderActions(tr, a, { message: out.error || 'the decision could not be delivered', pair: out.code === 'NOT_PAIRED' }, deps);
+}
+
 function createRow(a) {
-  // data-approval is a test hook only (no behaviour change). The Approve/Deny
-  // buttons below stay `disabled` — resolving one is gated on a paired
-  // device's Ed25519 token, which the dashboard is not (see the banner
-  // above) — so this hook lets a test find a pending row without implying
-  // the row is actionable from here.
   const tr = el('tr', { '--i': a.i, 'data-approval': a.id },
     el('td', {}, el('code', { text: a.tool || '' })),
     el('td', {}, a.agentId || ''),
     el('td', { class: 'mono' }, a.summary || ''),
     el('td', { 'data-f': 'remaining' }),
-    el('td', {},
-      el('button', { class: 'btn btn-secondary', type: 'button', disabled: true, text: 'Approve' }),
-      el('button', { class: 'btn btn-secondary', type: 'button', disabled: true, text: 'Deny' })));
+    el('td', { 'data-f': 'actions' }));
   updateRemaining(tr, a);
+  renderActions(tr, a);
   return tr;
 }
 
@@ -79,9 +136,11 @@ subscribe((type) => {
 
 export async function render(host) {
   host.append(phead('Approvals', 'Actions waiting on a human before an agent can proceed.'));
-  host.append(banner('warn', '!', el('b', { text: 'Read-only in this release. ' }),
-    'Resolving an approval is gated on a paired device’s Ed25519 token; the dashboard is not one yet. ',
-    'Approve from a paired device or with ', el('code', { text: 'pompos nodes' }), '.'));
+  host.append(banner('info', 'i', el('b', { text: 'Approving from here pairs this browser. ' }),
+    'The first decision generates an Ed25519 key for this browser and pairs it as a device; ',
+    'the private key never leaves the browser and cannot be exported. ',
+    'Only a paired device can answer one of these — there is no terminal command that does it. ',
+    el('code', { text: 'pompos nodes' }), ' manages devices, not approvals.'));
 
   const tbody = el('tbody', {});
   const tableWrap = el('div', { class: 'scroll' }, el('table', { class: 'tbl' },

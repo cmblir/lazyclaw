@@ -3,6 +3,7 @@
 // see daemon/routes/gateway_views.mjs for why.
 import { el, phead, chip, table, kvlist } from '../dom.mjs';
 import { api } from '../api.mjs';
+import { pairThisBrowser, unpairThisBrowser } from '../pairing.mjs';
 
 const REQUEST_COLS = [
   { key: 'deviceId', label: 'Device' },
@@ -60,6 +61,25 @@ export async function render(host) {
     el('code', { text: 'createGateway()' }), ', routed before the shared auth-token gate). ',
     el('code', { text: 'commands/gateway.mjs' }),
     ' is a separate long-lived process that runs the channels behind its own pidfile.'));
+
+  // This browser can be a device too. Pairing is idempotent, so the button is
+  // safe to press twice; forgetting only drops the LOCAL key — the server-side
+  // record stays until `pompos nodes revoke` removes it.
+  const status = el('span', { class: 'muted', text: '' });
+  const pairBtn = el('button', { class: 'btn btn-secondary', type: 'button', text: 'Pair this browser' });
+  pairBtn.addEventListener('click', async () => {
+    status.replaceChildren(el('span', { class: 'muted', text: 'Pairing…' }));
+    const out = await pairThisBrowser();
+    status.replaceChildren(out.ok
+      ? chip('paired: ' + out.deviceId.slice(7, 19), 'ok')
+      : el('span', { class: 'err-inline', text: out.error }));
+  });
+  const forgetBtn = el('button', { class: 'btn btn-secondary', type: 'button', text: "Forget this browser's key" });
+  forgetBtn.addEventListener('click', async () => {
+    await unpairThisBrowser();
+    status.replaceChildren(el('span', { class: 'muted', text: "this browser's key is gone; pairing again makes a new device. Revoke the old record with `pompos nodes revoke`." }));
+  });
+  host.append(el('div', { class: 'row-actions' }, pairBtn, forgetBtn, status));
 
   let shown = el('div', { class: 'empty', text: 'Loading…' });
   host.append(shown);

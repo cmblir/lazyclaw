@@ -108,7 +108,7 @@ export async function getOrCreateIdentity(deps) {
     try {
       pair = await subtle.generateKey('Ed25519', false, ['sign', 'verify']);
     } catch (err) {
-      throw new IdentityError('NO_ED25519', `this browser cannot generate an Ed25519 key (${err && err.message ? err.message : err}); pair from a browser that supports it, or approve with \`pompos nodes approve\``);
+      throw new IdentityError('NO_ED25519', `this browser cannot generate an Ed25519 key (${err && err.message ? err.message : err}); pair from a browser that supports Ed25519 — approvals can only be answered by a paired device`);
     }
     await store.put(pair);
   }
