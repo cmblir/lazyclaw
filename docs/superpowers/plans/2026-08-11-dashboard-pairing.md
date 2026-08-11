@@ -1120,7 +1120,7 @@ async function mintToken(d, identity) {
   if (conn.status === 403 && conn.body.status === 'pending') {
     return {
       ok: false, code: 'PENDING_APPROVAL', deviceId: identity.deviceId, requestId: conn.body.requestId,
-      error: 'this browser is waiting to be approved — run `pompos nodes approve <requestId>`, or approve it from an already-paired device',
+      error: 'this browser is waiting to be approved — run `pompos nodes approve <requestId>` in a terminal',
     };
   }
   return { ok: false, error: conn.body.reason || `the gateway refused the handshake (HTTP ${conn.status})`, code: 'PAIR_FAILED' };
@@ -1144,7 +1144,7 @@ export async function pairThisBrowser(deps) {
     return {
       ok: false, code: 'PENDING_APPROVAL', deviceId: pair.body.deviceId, requestId: pair.body.requestId,
       fingerprint: pair.body.fingerprint,
-      error: `this browser is waiting to be approved (${pair.body.fingerprint || pair.body.deviceId}) — run \`pompos nodes approve ${pair.body.requestId || ''}\`, or approve it from an already-paired device`,
+      error: `this browser is waiting to be approved (${pair.body.fingerprint || pair.body.deviceId}) — run \`pompos nodes approve ${pair.body.requestId || ''}\` in a terminal`,
     };
   }
   if (pair.status !== 200) {
@@ -1411,7 +1411,8 @@ Replace the `banner('warn', …)` block in `render()` with:
   host.append(banner('info', 'i', el('b', { text: 'Approving from here pairs this browser. ' }),
     'The first decision generates an Ed25519 key for this browser and pairs it as a device; ',
     'the private key never leaves the browser and cannot be exported. ',
-    'You can also approve with ', el('code', { text: 'pompos nodes' }), '.'));
+    'Only a paired device can answer one of these — there is no terminal command that does it. ',
+    el('code', { text: 'pompos nodes' }), ' manages devices, not approvals.'));
 ```
 
 Replace `createRow`'s action cell and add the handler. The whole cell is rebuilt by `_decide`, so `renderActions` is the single place its contents are defined:
@@ -1521,6 +1522,16 @@ import { pairThisBrowser, unpairThisBrowser } from '../pairing.mjs';
   });
   host.append(el('div', { class: 'row-actions' }, pairBtn, forgetBtn, status));
 ```
+
+- [ ] **Step 6: Correct one false instruction Task 1 shipped**
+
+`web/ui/device_identity.mjs`'s `NO_ED25519` error tells the operator to "approve with `pompos nodes approve`". That is false: `pompos nodes` approves a *device* pairing request, and nothing in the CLI resolves a gateway exec approval — the only resolver is a paired device (`POST /gateway/exec/resolve`). Verified by enumerating `commands/auth_nodes.mjs`'s subcommands (`list`, `pending`, `approve`, `revoke`, `rotate`, all device-scoped) and grepping the repo for any other caller of `exec/resolve` (only the gateway itself and two Playwright specs). Change the message's tail so it states what is actually available:
+
+```js
+      throw new IdentityError('NO_ED25519', `this browser cannot generate an Ed25519 key (${err && err.message ? err.message : err}); pair from a browser that supports Ed25519 — approvals can only be answered by a paired device`);
+```
+
+Leave the rest of that file alone.
 
 - [ ] **Step 6: Correct the stale comment in gateway_views.mjs**
 
@@ -1689,8 +1700,9 @@ pairs itself with the daemon.
 
 - The **first** device is approved automatically when it pairs over loopback —
   otherwise there would be no one to approve it.
-- Every device after that is `pending` until an already-paired device or
-  `pompos nodes approve <requestId>` approves it.
+- Every device after that is `pending` until `pompos nodes approve <requestId>`
+  approves it from a terminal. There is deliberately no way to approve a new
+  device from the dashboard — that would let one browser enrol another.
 - The private key cannot be exported, backed up, or moved to another browser.
   Pairing again from a new browser is the recovery path; drop the old record
   with `pompos nodes revoke <deviceId>`.
