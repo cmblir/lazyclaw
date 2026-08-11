@@ -185,6 +185,30 @@ test('a 401 that survives the re-mint reports NOT_PAIRED, never success', async 
   assert.equal(out.code, 'NOT_PAIRED');
 });
 
+test('a re-pair failure other than PENDING_APPROVAL keeps its own code across the 401 retry', async () => {
+  const nonce = 'a'.repeat(64);
+  const f = fakeFetch({
+    '/devices/pair': (b) => ({ status: 200, body: { ok: true, status: 'approved', deviceId: deviceIdFromPublicKey(Buffer.from(b.publicKey, 'base64')) } }),
+    '/gateway/connect/challenge': { status: 200, body: { nonce, ts: Date.now() } },
+    '/gateway/connect': (b) => ({ status: 200, body: { ok: true, deviceId: b.deviceId, token: 'tok' } }),
+    '/gateway/exec/resolve': { status: 401, body: { ok: false, reason: 'invalid device token' } },
+  });
+  const d = deps(f.fetch);
+  const { pairThisBrowser, resolveApproval } = await freshPairing();
+  await pairThisBrowser(d); // establishes a live `held` token with real WebCrypto
+
+  // Simulate this browser losing WebCrypto before the retry (e.g. the
+  // dashboard got reopened over plain HTTP): resolveApproval's internal
+  // re-pair attempt must fail with NO_WEBCRYPTO, not be collapsed to
+  // NOT_PAIRED — a "Pair this browser" retry can never succeed for that
+  // cause, so the UI must be told the real reason.
+  const noCrypto = { fetch: f.fetch, subtle: undefined, store: fakeStore() };
+  const out = await resolveApproval('ap_7', 'approve', noCrypto);
+  assert.equal(out.ok, false);
+  assert.equal(out.code, 'NO_WEBCRYPTO',
+    'a re-pair failure other than PENDING_APPROVAL must keep its own code, not collapse to NOT_PAIRED');
+});
+
 test('a resolved-or-expired approval reports APPROVAL_GONE', async () => {
   const nonce = 'a'.repeat(64);
   const f = fakeFetch({

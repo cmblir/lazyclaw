@@ -122,16 +122,18 @@ test('every dashboard request routes through the auth-aware fetch (no bare fetch
   // Walk web/ui/ recursively so a panel added in a later task can't
   // introduce a bare fetch( unnoticed.
   //
-  // web/ui/pairing.mjs is a deliberate, documented exception (see its header
-  // and the note in api.mjs's apiRaw comment): its /gateway/* calls carry the
-  // DEVICE token, not the dashboard bearer token, so routing them through
-  // apiRaw would attach the wrong credential. Its calls go through an
-  // injected `d.fetch(...)`, which this scan would otherwise flag.
-  const files = [DASHBOARD_JS, ...walkFiles(UI_DIR)].filter((f) => path.basename(f) !== 'pairing.mjs');
+  const files = [DASHBOARD_JS, ...walkFiles(UI_DIR)];
   let bareFetch = 0;
   for (const f of files) {
     const src = fs.readFileSync(f, 'utf8');
-    bareFetch += (src.match(/(?<!globalThis\.)\bfetch\(/g) || []).length;
+    // `globalThis.fetch(…)` is the one sanctioned direct call (api.mjs), and
+    // `d.fetch(…)` is the injected-deps form web/ui/pairing.mjs uses for its
+    // /gateway/* calls, which carry the DEVICE token rather than the dashboard
+    // bearer token (see pairing.mjs's header and api.mjs's apiRaw comment).
+    // Everything else — including a bare fetch( added to pairing.mjs later for
+    // a daemon route — must still be caught, which is why this narrows the
+    // PATTERN rather than exempting a file.
+    bareFetch += (src.match(/(?<!globalThis\.)(?<!\bd\.)\bfetch\(/g) || []).length;
   }
-  assert.equal(bareFetch, 0, 'no bare fetch( may bypass apiRaw; all calls must route through apiRaw/globalThis.fetch (checked across dashboard.js and web/ui/**, excluding the documented pairing.mjs exception)');
+  assert.equal(bareFetch, 0, 'no bare fetch( may bypass apiRaw/the injected device-fetch; all calls must route through apiRaw/globalThis.fetch or pairing.mjs\'s injected d.fetch (checked across dashboard.js and web/ui/**)');
 });

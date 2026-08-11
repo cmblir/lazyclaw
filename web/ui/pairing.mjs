@@ -156,6 +156,18 @@ export async function unpairThisBrowser(deps) {
   await forgetIdentity(idDeps(d));
 }
 
+// A failed pairThisBrowser() call reports its own precise cause (e.g.
+// NO_WEBCRYPTO, NO_ED25519, PAIR_FAILED); only PENDING_APPROVAL is folded
+// into NOT_PAIRED here, since "waiting for an operator to approve" and "not
+// paired at all" both mean resolveApproval cannot proceed. Every other code
+// must survive unchanged: Task 4's UI offers a "Pair this browser" retry
+// specifically on NOT_PAIRED, and that retry can never succeed for e.g.
+// NO_WEBCRYPTO (no secure-origin WebCrypto at all) — collapsing that into
+// NOT_PAIRED would dangle the operator on a button that cannot work.
+function pairFailureCode(paired) {
+  return paired.code === 'PENDING_APPROVAL' ? 'NOT_PAIRED' : paired.code;
+}
+
 function resolveFailure(status, body) {
   if (status === 403) {
     return { ok: false, code: 'READ_ONLY', error: body.reason || 'this device is read-only and cannot resolve approvals' };
@@ -180,7 +192,7 @@ export async function resolveApproval(id, decision, deps) {
     // A failed pair is the answer. Never fall through to a resolve that
     // cannot be authenticated — reporting anything but this failure would
     // tell the operator an agent was unblocked when it is still waiting.
-    if (!paired.ok) return { ok: false, error: paired.error, code: paired.code === 'PENDING_APPROVAL' ? 'NOT_PAIRED' : paired.code };
+    if (!paired.ok) return { ok: false, error: paired.error, code: pairFailureCode(paired) };
   }
   const send = () => postJson(d, '/gateway/exec/resolve', { id, decision }, {
     Authorization: `Bearer ${held.token}`, 'x-device-id': held.deviceId,
@@ -193,7 +205,7 @@ export async function resolveApproval(id, decision, deps) {
     // trusted (revoked), which is NOT_PAIRED from the operator's side.
     held = null;
     const again = await pairThisBrowser(deps);
-    if (!again.ok) return { ok: false, error: again.error, code: 'NOT_PAIRED' };
+    if (!again.ok) return { ok: false, error: again.error, code: pairFailureCode(again) };
     r = await send();
     if (r.status === 401) {
       return { ok: false, code: 'NOT_PAIRED', error: 'this browser is no longer a paired device — pair it again, or approve from the terminal with `pompos nodes`' };
