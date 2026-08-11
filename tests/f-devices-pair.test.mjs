@@ -1,0 +1,169 @@
+// tests/f-devices-pair.test.mjs — POST /devices/pair and the bootstrap rule.
+//
+// The rule under test: loopback auto-approve ONLY while no device is paired
+// at all. Without the "only while none" clause the non-extractable browser key
+// would be pointless — an attacker holding the bearer token could not steal
+// the paired device's identity, but could mint a fresh approver of their own.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { generateKeyPairSync } from 'node:crypto';
+import { PairingStore, deviceIdFromPublicKey } from '../gateway/device_auth.mjs';
+import { devicesPair } from '../daemon/routes/devices_pair.mjs';
+
+function tmpDir() {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-pair-'));
+  return d;
+}
+
+function freshKey() {
+  const { publicKey } = generateKeyPairSync('ed25519');
+  const der = publicKey.export({ type: 'spki', format: 'der' });
+  return { der, base64: der.toString('base64'), deviceId: deviceIdFromPublicKey(der) };
+}
+
+// Minimal req/res stand-ins. `remoteAddress` is the ONLY loopback signal the
+// route may read — a header would be attacker-controlled.
+function fakeReq(body, remoteAddress = '127.0.0.1') {
+  const raw = JSON.stringify(body);
+  return {
+    method: 'POST',
+    url: '/devices/pair',
+    headers: { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(raw)) },
+    socket: { remoteAddress },
+    async *[Symbol.asyncIterator]() { yield Buffer.from(raw); },
+    // readJson (daemon/lib/respond.mjs) calls req.setEncoding('utf8') before
+    // wiring 'data'/'end' — a real http.IncomingMessage has this (it's a
+    // Readable stream); this stand-in needs the no-op so readJson doesn't
+    // throw "req.setEncoding is not a function" on every call.
+    setEncoding() { return this; },
+    on(ev, fn) {
+      if (ev === 'data') fn(Buffer.from(raw));
+      if (ev === 'end') fn();
+      return this;
+    },
+  };
+}
+
+function fakeRes() {
+  return {
+    statusCode: 0, body: null, headers: null,
+    writeHead(status, headers) { this.statusCode = status; this.headers = headers; return this; },
+    end(payload) { this.body = payload ? JSON.parse(payload) : null; return this; },
+  };
+}
+
+async function call(gwConfigDir, body, remoteAddress) {
+  const req = fakeReq(body, remoteAddress);
+  const res = fakeRes();
+  await devicesPair({ req, res, gwConfigDir });
+  return res;
+}
+
+test('the FIRST device on loopback is approved with no operator action', async () => {
+  const dir = tmpDir();
+  const k = freshKey();
+  const res = await call(dir, { publicKey: k.base64, platform: 'browser', label: 'dashboard' });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body, { ok: true, status: 'approved', deviceId: k.deviceId });
+  assert.equal(new PairingStore(dir).isApproved(k.deviceId), true);
+});
+
+test('the SECOND device on loopback is pending — the bootstrap slot is used once', async () => {
+  const dir = tmpDir();
+  const first = freshKey();
+  const second = freshKey();
+  await call(dir, { publicKey: first.base64, platform: 'browser', label: 'one' });
+  const res = await call(dir, { publicKey: second.base64, platform: 'browser', label: 'two' });
+  assert.equal(res.statusCode, 202);
+  assert.equal(res.body.status, 'pending');
+  assert.equal(res.body.deviceId, second.deviceId);
+  assert.match(res.body.requestId, /.+/);
+  assert.equal(res.body.fingerprint, second.deviceId.slice(7, 19));
+  const store = new PairingStore(dir);
+  assert.equal(store.isApproved(second.deviceId), false);
+  assert.equal(store.isApproved(first.deviceId), true, 'approving nobody must not un-approve the device that is already paired');
+});
+
+test('a NON-loopback first device is pending — loopback is the whole bootstrap condition', async () => {
+  const dir = tmpDir();
+  const k = freshKey();
+  const res = await call(dir, { publicKey: k.base64, platform: 'browser', label: 'lan' }, '192.168.1.24');
+  assert.equal(res.statusCode, 202);
+  assert.equal(res.body.status, 'pending');
+  assert.equal(new PairingStore(dir).isApproved(k.deviceId), false);
+});
+
+test('a forwarded-for header cannot forge loopback', async () => {
+  const dir = tmpDir();
+  const k = freshKey();
+  const req = fakeReq({ publicKey: k.base64 }, '192.168.1.24');
+  req.headers['x-forwarded-for'] = '127.0.0.1';
+  req.headers['x-real-ip'] = '127.0.0.1';
+  const res = fakeRes();
+  await devicesPair({ req, res, gwConfigDir: dir });
+  assert.equal(res.statusCode, 202, 'the socket address is the only trustworthy signal');
+  assert.equal(new PairingStore(dir).isApproved(k.deviceId), false);
+});
+
+for (const remote of ['::1', '::ffff:127.0.0.1']) {
+  test(`IPv6 loopback ${remote} counts as loopback`, async () => {
+    const dir = tmpDir();
+    const k = freshKey();
+    const res = await call(dir, { publicKey: k.base64 }, remote);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.status, 'approved');
+  });
+}
+
+test('re-pairing an already-approved device is idempotent and mints no second request', async () => {
+  const dir = tmpDir();
+  const k = freshKey();
+  await call(dir, { publicKey: k.base64 });
+  const res = await call(dir, { publicKey: k.base64 });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.status, 'approved');
+  assert.equal(new PairingStore(dir).pending().length, 0);
+});
+
+test('a repeated pending request reuses its requestId', async () => {
+  const dir = tmpDir();
+  await call(dir, { publicKey: freshKey().base64 });          // consume the bootstrap slot
+  const k = freshKey();
+  const a = await call(dir, { publicKey: k.base64 });
+  const b = await call(dir, { publicKey: k.base64 });
+  assert.equal(a.body.requestId, b.body.requestId, 'a reload must not pile up duplicate pending requests');
+  assert.equal(new PairingStore(dir).pending().length, 1);
+});
+
+test('a malformed public key is a named 400, not a 500', async () => {
+  const dir = tmpDir();
+  const res = await call(dir, { publicKey: 'not-a-key' });
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.code, 'BAD_PUBLIC_KEY');
+  assert.equal(res.body.ok, false);
+});
+
+test('a missing public key is a named 400', async () => {
+  const dir = tmpDir();
+  const res = await call(dir, { platform: 'browser' });
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.body.code, 'BAD_BODY');
+});
+
+test('two concurrent first-pair requests approve EXACTLY ONE device', async () => {
+  const dir = tmpDir();
+  const a = freshKey();
+  const b = freshKey();
+  const [ra, rb] = await Promise.all([
+    call(dir, { publicKey: a.base64, label: 'a' }),
+    call(dir, { publicKey: b.base64, label: 'b' }),
+  ]);
+  const statuses = [ra.body.status, rb.body.status].sort();
+  assert.deepEqual(statuses, ['approved', 'pending'],
+    'both browsers seeing an empty roster and both auto-approving would mint two approvers from one bootstrap slot');
+  assert.equal(new PairingStore(dir).devicesList().length, 1,
+    'and the loser must still be on disk as a pending request, not have overwritten the winner');
+});

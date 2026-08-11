@@ -24,6 +24,7 @@ import * as ops from './routes/ops.mjs';
 import * as events from './routes/events.mjs';
 import * as scheduling from './routes/scheduling.mjs';
 import * as gatewayViews from './routes/gateway_views.mjs';
+import * as devicesPairRoute from './routes/devices_pair.mjs';
 import * as slash from './routes/slash.mjs';
 
 export const ROUTES = [
@@ -106,6 +107,7 @@ export const ROUTES = [
   { m: (c) => c.route === 'POST /index/rebuild', h: ops.indexRebuild },
   { m: (c) => c.route === 'GET /approvals', h: gatewayViews.approvalsList },
   { m: (c) => c.route === 'GET /devices', h: gatewayViews.devicesList },
+  { m: (c) => c.route === 'POST /devices/pair', h: devicesPairRoute.devicesPair },
   { m: (c) => c.route === 'POST /slash', h: slash.slashRun },
   { m: (c) => c.route === 'GET /slash/commands', h: slash.slashCommands },
 ];
