@@ -62,22 +62,18 @@
 //     a local stub sitting right next to it, untouched. 'anthropic' (a
 //     first-class provider, resolved with no such wrapper) sidesteps this
 //     entirely, and is what phase13 already uses for the same reason.
-//   - The Approvals panel cannot answer an approval request from the
-//     browser, for three independent reasons (each confirmed by reading
-//     source, not assumed): the task/team execution loop's own approval hook
-//     (tui/slash_dispatcher.mjs's _makeInkApprove, used by /task tick) and
-//     the gateway's exec-approval registry (what GET /approvals and this
-//     panel show) are two entirely unconnected systems, so nothing this
-//     scenario's task turn does can ever populate this panel in the first
-//     place; resolving an entry even if one existed requires a paired
-//     device's Ed25519 token, which the dashboard is not
-//     (daemon/routes/gateway_views.mjs's own comment: "Making the dashboard
-//     a properly paired device is future work"); and the panel's Approve/
-//     Deny buttons are hardcoded `disabled` in the markup regardless
-//     (web/ui/panels/approvals.mjs's createRow()). That step is attempted
-//     for real below, with `expect.soft`, so it fails honestly instead of
-//     being skipped, and the rest of the scenario — which does not depend on
-//     it — still runs and is checked in full.
+//   - The Approvals panel CAN now answer an approval request: this browser
+//     pairs itself as an Ed25519 device (web/ui/pairing.mjs) and posts the
+//     decision to the gateway's own device-gated resolve route. Two of the
+//     three former blockers are gone (the device gate, and the hardcoded
+//     `disabled` buttons). The third remains and is why step 3 raises its own
+//     approval: the task/team loop's approval hook (tui/slash_dispatcher.mjs's
+//     _makeInkApprove, used by /task tick) and the gateway's exec-approval
+//     registry (what GET /approvals and this panel show) are still entirely
+//     unconnected, so no task turn in this scenario can populate the panel.
+//     Step 3 therefore raises a real approval through POST /exec/request — the
+//     daemon's own approval path — and asserts the long-polling requester is
+//     released with the paired deviceId as `by`. Nothing is soft-asserted.
 //
 // Daemon startup follows tests/phase16-dashboard-browser.spec.ts's own
 // pattern (an explicit --port + matching --allow-origin, since a real
@@ -282,23 +278,41 @@ test.describe('Phase I — the operating-loop done bar', () => {
     await expect(row.locator('[data-f="status"]')).not.toContainText('pending');
     await expect(row.locator('[data-f="status"]')).toContainText('paused');
 
-    // 3. Answer the approval request inline — attempted for real, not
-    // skipped. This is expected to fail: see the file banner for the three
-    // independent, source-confirmed reasons. `expect.soft` lets the rest of
-    // the scenario (which does not depend on this step) keep running and be
-    // checked in full, while the test still honestly reports as failed.
+    // 3. Answer a real approval request from the browser. The approval is
+    // raised through POST /exec/request — the daemon's own approval path,
+    // which long-polls until a paired device decides — because the task/team
+    // loop's approval hook and the gateway's exec-approval registry are still
+    // two unconnected systems (see the file banner). Nothing is stubbed: the
+    // decision travels browser → device token → gateway → the waiting
+    // requester, and the requester's own answer is what this step asserts.
+    // No AUTH_TOKEN exists in this file — the daemon in this spec starts
+    // with no --auth-token (see startDaemon above), so the bearer gate is off.
+    const port = new URL(daemon.baseUrl).port;
+    const pending = fetch(`http://127.0.0.1:${port}/exec/request`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ tool: 'bash', args: { cmd: 'rm -rf ./build' }, agentId: 'dev', summary: 'delete the build directory' }),
+    }).then((r) => r.json());
+
     await nav(page, 'approvals');
     const approval = page.locator('[data-approval]').first();
-    await expect.soft(
-      approval,
-      'no task in this scenario ever calls a gated tool, and the exec-approval registry this panel reads is unconnected to the task/team loop entirely (see file banner)',
-    ).toBeVisible({ timeout: 5_000 });
-    // Even in the (unreachable) case a row did appear, its Approve button is
-    // hardcoded `disabled` in the markup (web/ui/panels/approvals.mjs) — no
-    // click here could ever answer it.
-    if (await approval.count()) {
-      await expect.soft(approval.getByRole('button', { name: 'Approve' })).toBeEnabled();
-    }
+    await expect(approval).toBeVisible({ timeout: 10_000 });
+    await expect(approval).toContainText('delete the build directory');
+
+    const approveBtn = approval.getByRole('button', { name: 'Approve', exact: true });
+    await expect(approveBtn).toBeEnabled();
+    await approveBtn.click();
+
+    // The requester is released with the decision AND the identity that made
+    // it — `by` is the paired deviceId, which is the proof the browser acted
+    // as a device rather than as a bearer-token holder.
+    const decision = await pending;
+    expect(decision.approved).toBe(true);
+    expect(decision.by).toMatch(/^sha256:[0-9a-f]{64}$/);
+
+    // And the browser really is on the device roster now.
+    await nav(page, 'gateway');
+    await expect(page.locator('#host')).toContainText(decision.by.slice(0, 19), { timeout: 5_000 });
 
     // 4. Read the result — a real, current status. 'paused', not 'done' yet:
     // one tick with no [[TASK_DONE]] never reaches it. Then change a
