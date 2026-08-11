@@ -213,5 +213,11 @@ export async function render(host) {
 
   activeLoad = load;
   await load();
-  return () => { clearInterval(timer); activeLoad = null; };
+  // Identity-checked: shell.mjs fires a stale mount's cleanup as soon as the
+  // operator navigates away before that mount's render settled (see
+  // shell.mjs's activationSeq handling). Without the check, that stale
+  // cleanup would null out a LATER mount's activeLoad the moment its own
+  // slow first load() resolves, silently disabling the SSE table refresh
+  // until the operator navigates away and back again.
+  return () => { clearInterval(timer); if (activeLoad === load) activeLoad = null; };
 }

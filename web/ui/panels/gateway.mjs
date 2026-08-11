@@ -82,17 +82,26 @@ export async function render(host) {
       const out = await pairThisBrowser();
       status.replaceChildren(out.ok
         ? chip('paired: ' + out.deviceId.slice(7, 19), 'ok')
-        : el('span', { class: 'err-inline', text: out.error }));
+        : el('span', { class: 'err-inline', 'aria-live': 'polite', text: out.error }));
     } catch (e) {
-      status.replaceChildren(el('span', { class: 'err-inline', text: e && e.message ? e.message : String(e) }));
+      status.replaceChildren(el('span', { class: 'err-inline', 'aria-live': 'polite', text: e && e.message ? e.message : String(e) }));
     } finally {
       pairBtn.disabled = false;
     }
   });
   const forgetBtn = el('button', { class: 'btn btn-secondary', type: 'button', text: "Forget this browser's key" });
   forgetBtn.addEventListener('click', async () => {
-    await unpairThisBrowser();
-    status.replaceChildren(el('span', { class: 'muted', text: "this browser's key is gone; pairing again makes a new device. Revoke the old record with `pompos nodes revoke`." }));
+    // Guarded the same way as pairBtn above: an IndexedDB error out of
+    // forgetIdentity() must render, not throw past a fire-and-forget handler.
+    forgetBtn.disabled = true;
+    try {
+      await unpairThisBrowser();
+      status.replaceChildren(el('span', { class: 'muted', text: "this browser's key is gone; pairing again makes a new device. Revoke the old record with `pompos nodes revoke`." }));
+    } catch (e) {
+      status.replaceChildren(el('span', { class: 'err-inline', 'aria-live': 'polite', text: e && e.message ? e.message : String(e) }));
+    } finally {
+      forgetBtn.disabled = false;
+    }
   });
   host.append(el('div', { class: 'row-actions' }, pairBtn, forgetBtn, status));
 

@@ -209,3 +209,33 @@ test('an exec.approval.resolved event refreshes the mounted panel, not just the 
     globalThis.fetch = originalFetch;
   }
 });
+
+test('a stale mount\'s cleanup cannot retract a LATER mount\'s SSE registration', async () => {
+  // shell.mjs fires a render's cleanup as soon as the operator navigates away
+  // before that render settled, even if a newer mount already took over
+  // activeLoad. The clear must be identity-checked so mount A's belated
+  // cleanup can only retract ITS OWN registration, never mount A2's.
+  const { render, _onStreamEvent } = await import('../web/ui/panels/approvals.mjs');
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = async () => { fetchCalls += 1; return { ok: true, status: 200, json: async () => ({ pending: [] }) }; };
+  const cleanupA = await render(new FakeNode('div'));   // mount A: activeLoad = loadA
+  const cleanupA2 = await render(new FakeNode('div'));  // mount A2: activeLoad = loadA2 (the live one)
+  try {
+    cleanupA(); // A's stale cleanup arrives late — must not touch A2's registration
+
+    const before = fetchCalls;
+    _onStreamEvent('exec.approval.resolved');
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(fetchCalls, before + 2,
+      'A2 must still be registered after A\'s stale cleanup: badge refresh AND A2\'s load() both fire');
+  } finally {
+    // Unconditional, regardless of the assertion above: each render() started
+    // its own setInterval(tick, 1000), which keeps the test process's event
+    // loop alive forever if never cleared — an assertion failure must not
+    // also hang the whole suite on top of failing honestly.
+    cleanupA2();
+    globalThis.fetch = originalFetch;
+  }
+});
