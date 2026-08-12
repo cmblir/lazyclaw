@@ -8,6 +8,18 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Security
 
+- **A companion device could opt itself out of the gateway's read-only gate by
+  spelling its role differently.** The exec-approval gate denied exactly one
+  string (`role === 'read-only'`), while the role itself comes from the
+  device's own signed connect payload and was stored and compared verbatim. A
+  device that signed `Read-Only`, `READ-ONLY`, `read_only` or `read-only ` was
+  therefore displayed to the operator as a harmless observer by both `pompos
+  nodes pending` and the Devices panel, yet could resolve any pending exec
+  approval — i.e. auto-approve a gated command for any agent. The role is now
+  normalized (trimmed, lower-cased) at the one place it enters the system, and
+  the gate is an allowlist: only the legacy/bootstrap `''` and the explicit
+  `approver` role may resolve, so an unrecognised or invented role is refused
+  instead of being treated as full authority.
 - **A registered custom or OpenAI-compatible provider's traffic could reach
   the wrong host, carrying the operator's real API key.** The OpenAI-compat
   adapter bound a provider's configured `baseUrl` with an object spread

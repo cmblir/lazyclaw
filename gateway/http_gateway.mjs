@@ -51,6 +51,22 @@ import { emit as emitEvent } from '../mas/events.mjs';
 // also keeps the `tick` heartbeat, which is pure keep-alive noise, off the bus.
 const DASHBOARD_MIRRORED = new Set(['exec.approval.requested', 'exec.approval.resolved']);
 
+// Device roles allowed to resolve an exec approval — an ALLOWLIST, not a
+// denylist, because the role string is chosen by the device itself (it rides
+// the signed connect payload). Denying only an explicit 'read-only' meant any
+// near-miss ('Read-Only', 'read_only', 'read-only ') or invented role ('admin')
+// was waved through with FULL approver authority while `pompos nodes pending`
+// and the Devices panel showed the operator a harmless-looking observer.
+//
+// These four are the whole device-role vocabulary this codebase issues: '' is a
+// legacy record and the bootstrap route's placeholder, 'owner' and 'node' are
+// what a companion node signs (see the device-auth and gateway specs), and
+// 'approver' is the explicit approver. 'read-only' is the one observer role and
+// is deliberately absent. Anything else — a typo, an invented role, or a
+// near-miss stored before the connect route normalized roles — is refused
+// rather than treated as full authority.
+const RESOLVE_ROLES = new Set(['', 'owner', 'node', 'approver']);
+
 // Matches the daemon's readTextBody cap (1 MiB) so the Content-Length
 // pre-check and the stream reader agree on the limit.
 const GATEWAY_MAX_BODY = 1_048_576;
@@ -255,15 +271,25 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
       // and always records role:'') gets re-stamped with the device's real
       // capability the moment it completes an actual signed connect —
       // otherwise that capability is silently discarded forever.
+      //
+      // NORMALIZED here, at the single ingest point: the role is persisted
+      // verbatim (PairingStore.requestPairing) and compared verbatim by the
+      // exec-resolve gate, and the device picks its own string — so without
+      // this, 'Read-Only' / 'read-only ' / 'READ-ONLY' each showed the operator
+      // a harmless observer in `pompos nodes pending` while sailing past that
+      // gate with full approver authority. Every writer below takes the role
+      // from this one variable, and nothing outside gateway/ calls
+      // requestPairing, so normalizing once here covers the whole surface.
       let role = '';
       let scopes = [];
       try {
         const parsed = parsePayload(payload);
         if (parsed) {
-          role = String(parsed.role || '');
-          scopes = typeof parsed.scopes === 'string' && parsed.scopes
-            ? parsed.scopes.split(',').filter(Boolean)
+          role = String(parsed.role || '').trim().toLowerCase();
+          const rawScopes = typeof parsed.scopes === 'string' && parsed.scopes
+            ? parsed.scopes.split(',')
             : (Array.isArray(parsed.scopes) ? parsed.scopes : []);
+          scopes = rawScopes.map((s) => String(s).trim().toLowerCase()).filter(Boolean);
         }
       } catch { /* fall back to no capability — default device */ }
 
@@ -312,12 +338,20 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
     if (m === 'POST' && p === '/gateway/exec/resolve') {
       const ident = authDevice(req);
       if (!ident) return writeJson(res, 401, { ok: false, reason: 'invalid device token' });
-      // Capability gate: a read-only device may observe (whoami/events/pending)
-      // but MUST NOT resolve an exec approval (the one mutating gateway action).
-      // Backward-compatible: only an EXPLICITLY read-only role is denied; legacy
-      // devices (role '') and approvers keep the prior behaviour.
-      if (ident.role === 'read-only') {
-        return writeJson(res, 403, { ok: false, reason: 'insufficient scope: a read-only device cannot resolve exec approvals' });
+      // Capability gate, fail-CLOSED (RESOLVE_ROLES above): a read-only device
+      // may observe (whoami/events/pending) but MUST NOT resolve an exec
+      // approval — the one mutating gateway action. Only a role this code
+      // actually recognises passes; an unrecognised one is refused instead of
+      // being treated as full authority. Backward-compatible for the records
+      // that exist: legacy/bootstrap ('') and 'approver' both still pass.
+      if (!RESOLVE_ROLES.has(ident.role)) {
+        return writeJson(res, 403, {
+          ok: false,
+          reason: ident.role === 'read-only'
+            ? 'insufficient scope: a read-only device cannot resolve exec approvals'
+            // Deliberately does not echo the role back: it is device-chosen text.
+            : 'insufficient scope: this device role cannot resolve exec approvals',
+        });
       }
       const body = await readJsonBody(req, readBody);
       if (body && body.__tooLarge) return writeJson(res, 413, { ok: false, reason: 'request body too large' });
