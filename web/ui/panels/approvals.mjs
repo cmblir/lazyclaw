@@ -165,7 +165,7 @@ export async function render(host) {
   host.append(phead('Approvals', 'Actions waiting on a human before an agent can proceed.'));
   host.append(banner('info', 'i', el('b', { text: 'Approving from here pairs this browser. ' }),
     'The first decision generates an Ed25519 key for this browser and pairs it as a device ',
-    '(or requests pairing, if another device is already paired); ',
+    '(or requests pairing, if this gateway has ever approved a device before); ',
     'the private key never leaves the browser and cannot be exported. ',
     'Only a paired device can answer one of these — there is no terminal command that does it. ',
     el('code', { text: 'pompos nodes' }), ' manages devices, not approvals.'));

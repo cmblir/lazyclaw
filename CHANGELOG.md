@@ -17,9 +17,10 @@ Versioning: [SemVer](https://semver.org/).
   nodes pending` and the Devices panel, yet could resolve any pending exec
   approval — i.e. auto-approve a gated command for any agent. The role is now
   normalized (trimmed, lower-cased) at the one place it enters the system, and
-  the gate is an allowlist: only the legacy/bootstrap `''` and the explicit
-  `approver` role may resolve, so an unrecognised or invented role is refused
-  instead of being treated as full authority.
+  the gate is an allowlist over the four roles this codebase issues — the
+  legacy/bootstrap `''`, a companion node's `owner` and `node`, and the explicit
+  `approver` — so an unrecognised or invented role is refused instead of being
+  treated as full authority.
 - **A registered custom or OpenAI-compatible provider's traffic could reach
   the wrong host, carrying the operator's real API key.** The OpenAI-compat
   adapter bound a provider's configured `baseUrl` with an object spread

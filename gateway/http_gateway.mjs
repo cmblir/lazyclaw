@@ -296,12 +296,21 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
         // because pairing again runs this identical handshake. The signature and
         // the single-use nonce were both verified above, so the device has just
         // re-proved possession of its private key — re-mint rather than lie.
-        // NOTE: rotate() with no ttlMs clears expiresAt; the store keeps only
-        // the absolute expiry, not the window it was minted with, so the fresh
-        // token does not expire again until an operator stamps a new TTL
-        // (`pompos nodes rotate <deviceId> --ttl <ms>`).
+        // The operator's TTL WINDOW is carried forward, not dropped: rotating
+        // with no ttlMs clears expiresAt, which would silently convert
+        // `pompos nodes rotate --ttl <ms>` into never-expires on the next
+        // reconnect — failing open, and permanently. The store keeps only the
+        // absolute expiry, so the window is re-derived from the timestamp of
+        // whichever call stamped it: an expiresAt can only exist because the
+        // most recent approve/rotate carried a ttlMs (a rotate without one
+        // deletes it, leaving no lapse to detect here), so rotatedAt ??
+        // approvedAt is that instant. An unparseable anchor makes ttlMs NaN,
+        // which rotate()'s own Number.isFinite guard rejects — falling back to
+        // clearing the expiry rather than inventing a window.
         if (info && typeof info.expiresAt === 'number' && now >= info.expiresAt) {
-          st.rotate(deviceId);
+          const rec = st._data.devices[deviceId];
+          const anchor = Date.parse((rec && (rec.rotatedAt || rec.approvedAt)) || '');
+          st.rotate(deviceId, { ttlMs: info.expiresAt - anchor, nowMs: now });
         }
         // Fill-once capability reconcile. The bootstrap route
         // (daemon/routes/devices_pair.mjs) approves its device outright with

@@ -482,19 +482,25 @@ test.describe('Phase 30 — gateway scope + TTL enforcement', () => {
     const da = await loadDeviceAuth();
     const { PairingStore, ChallengeRegistry } = da;
     const t0 = Date.now();
+    const TTL = 1000;
+    // The clock moves FORWARD past the expiry rather than the expiry being
+    // stamped in the past: approve() writes approvedAt from the wall clock, so
+    // a backdated nowMs would leave an incoherent record (expiresAt before
+    // approvedAt) that no production path can produce — and the TTL window
+    // asserted below is derived from exactly that pair.
+    const later = t0 + 5 * TTL;
     const keys = crypto.generateKeyPairSync('ed25519');
     const challengeRegistry = new ChallengeRegistry();
     const { nonce } = challengeRegistry.create();
-    const { deviceId, body } = signedConnect(da, keys, nonce, '', [], t0);
+    const { deviceId, body } = signedConnect(da, keys, nonce, '', [], later);
 
-    // Approved with a TTL that has already lapsed by t0.
     const store = new PairingStore(cfg);
     const { requestId } = store.requestPairing({ deviceId, role: '', scopes: [] });
-    const { token: dead } = store.approve(requestId, { ttlMs: 1000, nowMs: t0 - 60_000 });
-    expect(new PairingStore(cfg).verifyToken(deviceId, dead, t0)).toBe(false);
+    const { token: dead } = store.approve(requestId, { ttlMs: TTL, nowMs: t0 });
+    expect(new PairingStore(cfg).verifyToken(deviceId, dead, later)).toBe(false);
 
     const { createGateway } = await loadGateway();
-    const gw = createGateway({ configDir: cfg, challengeRegistry, nowFn: () => t0 });
+    const gw = createGateway({ configDir: cfg, challengeRegistry, nowFn: () => later });
     const res = mockRes();
     await gw.handle(connectReq(), res, { readBody: async () => body });
 
@@ -503,8 +509,20 @@ test.describe('Phase 30 — gateway scope + TTL enforcement', () => {
     expect(minted.ok).toBe(true);
     expect(minted.token).not.toBe(dead);
     const after = new PairingStore(cfg);
-    expect(after.verifyToken(deviceId, minted.token, t0)).toBe(true);
-    expect(after.verifyToken(deviceId, dead, t0)).toBe(false);
+    expect(after.verifyToken(deviceId, minted.token, later)).toBe(true);
+    expect(after.verifyToken(deviceId, dead, later)).toBe(false);
+
+    // The operator's TTL WINDOW survives the re-mint. Dropping it (a bare
+    // rotate()) would leave expiresAt undefined — a token that never expires
+    // again, which is a permanent fail-open, and the one thing a device could
+    // buy itself by simply letting its token lapse and reconnecting.
+    const fresh = after.deviceInfo(deviceId)?.expiresAt;
+    expect(typeof fresh).toBe('number');
+    // Roughly one original window ahead: the anchor is approve()'s wall-clock
+    // approvedAt, a few ms after t0, so the derived window is TTL minus that
+    // drift — never longer than the original.
+    expect(fresh! - later).toBeGreaterThan(TTL - 100);
+    expect(fresh! - later).toBeLessThanOrEqual(TTL);
     gw.close();
   });
 
