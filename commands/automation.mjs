@@ -39,7 +39,7 @@ export async function cmdCron(sub, positional, flags = {}) {
     }
     case 'show': {
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw cron show <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos cron show <name>'); process.exit(2); }
       const job = cron.getJob(cfg, name);
       if (!job) { console.error(`error: no job "${name}"`); process.exit(1); }
       console.log(JSON.stringify({ backend, name, ...job }, null, 2));
@@ -50,12 +50,13 @@ export async function cmdCron(sub, positional, flags = {}) {
       // [1]=spec, [2..]=cmd; the `--` was already consumed by parseArgs).
       const [name, schedule, ...rawCmd] = positional;
       if (!name || !schedule || !rawCmd.length) {
-        console.error('Usage: lazyclaw cron add <name> "<cron-spec>" -- <cmd> ...');
+        console.error('Usage: pompos cron add <name> "<cron-spec>" -- <cmd> ...');
         process.exit(2);
       }
-      // Stored command must start with `lazyclaw` (resolveCommand then makes it
-      // absolute); prepend it when the user wrote the shorter `-- agent "…"`.
-      // Either name counts as already-prefixed — resolveCommand knows both.
+      // Stored command must start with the CLI name (resolveCommand then makes
+      // it absolute); prepend it when the user wrote the shorter `-- agent "…"`.
+      // Either name counts as already-prefixed — a job stored before the rename
+      // still begins with `lazyclaw`, and resolveCommand knows both.
       const cmd = ['pompos', 'lazyclaw'].includes(rawCmd[0]) ? rawCmd : ['pompos', ...rawCmd];
       try {
         cron.upsertJob(cfg, name, schedule, cmd);
@@ -76,7 +77,7 @@ export async function cmdCron(sub, positional, flags = {}) {
     }
     case 'remove': {
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw cron remove <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos cron remove <name>'); process.exit(2); }
       try { cron.removeJob(cfg, name); } catch (e) { console.error(`error: ${e.message}`); process.exit(1); }
       writeConfig(cfg);
       try {
@@ -106,7 +107,7 @@ export async function cmdCron(sub, positional, flags = {}) {
     }
     case 'run': {
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw cron run <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos cron run <name>'); process.exit(2); }
       try {
         const code = cron.runJob(cfg, name);
         process.exit(code || 0);
@@ -114,12 +115,12 @@ export async function cmdCron(sub, positional, flags = {}) {
       return;
     }
     default:
-      console.error('Usage: lazyclaw cron <list|add|remove|show|sync|run> ...');
+      console.error('Usage: pompos cron <list|add|remove|show|sync|run> ...');
       process.exit(2);
   }
 }
 
-// `lazyclaw loop <prompt> [--max N] [--until "<regex>"] [--session ID]
+// `pompos loop <prompt> [--max N] [--until "<regex>"] [--session ID]
 //                 [--detach] [--provider NAME] [--model NAME]`
 //
 // Without --detach: runs the loop in the foreground using the engine
@@ -137,7 +138,7 @@ export async function cmdLoop(prompt, flags = {}) {
   const loopsMod = await import('../loops.mjs');
 
   if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
-    console.error('Usage: lazyclaw loop <prompt> [--max N] [--until "<regex>"] [--session ID] [--detach]');
+    console.error('Usage: pompos loop <prompt> [--max N] [--until "<regex>"] [--session ID] [--detach]');
     process.exit(2);
   }
   const max = flags.max !== undefined ? Number(flags.max) : loopEng.LOOP_MAX_DEFAULT;
@@ -266,14 +267,14 @@ export async function cmdLoop(prompt, flags = {}) {
   }
 }
 
-// `lazyclaw loops <list|show|kill|tail>` and its private _killLog/
+// `pompos loops <list|show|kill|tail>` and its private _killLog/
 // KILL_ESCALATE_MS escalation state live in a sibling module to keep this
 // file under the size gate. Re-exported so cli.mjs's named import keeps
 // resolving against ./commands/automation.mjs.
 export { cmdLoops } from './automation_loops.mjs';
 
 // Install (or refresh) the system scheduler entry that fires
-// `lazyclaw goal tick <name>` on a schedule. Writes to cfg.cron and to
+// `pompos goal tick <name>` on a schedule. Writes to cfg.cron and to
 // the OS backend (launchd / crontab). Tests set
 // POMPOS_SKIP_CRON_INSTALL=1 to skip the OS-side mutation but keep
 // the config-side wiring so `cron list` still reflects the entry.
@@ -307,7 +308,7 @@ export function _composeTickPrompt(goal) {
   return parts.join('\n\n');
 }
 
-// `lazyclaw goal <add|list|show|close|switch|tick|channel> ...`
+// `pompos goal <add|list|show|close|switch|tick|channel> ...`
 //
 // Pure registration in Phase 3 (no cron install, no channel delivery —
 // those land in Phase 4 / Phase 8). `switch` is a no-op for the
@@ -320,7 +321,7 @@ export async function cmdGoal(sub, positional, flags = {}) {
   switch (sub) {
     case 'add': {
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw goal add <name> [--desc "..."] [--cron "<spec>"] [--channel slack:<target>]'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos goal add <name> [--desc "..."] [--cron "<spec>"] [--channel slack:<target>]'); process.exit(2); }
       let g;
       const channels = flags.channel ? [String(flags.channel)] : [];
       try {
@@ -346,7 +347,7 @@ export async function cmdGoal(sub, positional, flags = {}) {
     }
     case 'show': {
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw goal show <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos goal show <name>'); process.exit(2); }
       const g = goalsMod.getGoal(name, cfgDir);
       if (!g) { console.error(`no goal "${name}"`); process.exit(1); }
       console.log(JSON.stringify(g, null, 2));
@@ -355,7 +356,7 @@ export async function cmdGoal(sub, positional, flags = {}) {
     case 'close': {
       const name = positional[0];
       const outcome = positional[1] || 'done';
-      if (!name) { console.error('Usage: lazyclaw goal close <name> [done|abandoned]'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos goal close <name> [done|abandoned]'); process.exit(2); }
       let g;
       try { g = goalsMod.closeGoal(name, outcome, cfgDir); }
       catch (e) { console.error(e?.message || e); process.exit(1); }
@@ -372,7 +373,7 @@ export async function cmdGoal(sub, positional, flags = {}) {
       // with --force). Exits 0 silently when the goal is not active so
       // a stale cron entry doesn't crash the scheduler.
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw goal tick <name> [--force]'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos goal tick <name> [--force]'); process.exit(2); }
       const g = goalsMod.getGoal(name, cfgDir);
       if (!g) {
         // No goal file at all — exit 0 silently. The scheduler may be
@@ -476,11 +477,11 @@ export async function cmdGoal(sub, positional, flags = {}) {
     }
     case 'switch': {
       const name = positional[0];
-      if (!name) { console.error('Usage: lazyclaw goal switch <name>'); process.exit(2); }
+      if (!name) { console.error('Usage: pompos goal switch <name>'); process.exit(2); }
       const g = goalsMod.getGoal(name, cfgDir);
       if (!g) { console.error(`no goal "${name}"`); process.exit(1); }
       // Non-interactive surface: print the session id so a caller can
-      // pipe it into `lazyclaw chat --session <id>`. The REPL slash form
+      // pipe it into `pompos chat --session <id>`. The REPL slash form
       // is what mutates state in a live chat.
       console.log(JSON.stringify({ name: g.name, sessionId: g.sessionId, status: g.status }));
       return;
@@ -489,19 +490,19 @@ export async function cmdGoal(sub, positional, flags = {}) {
       const op = positional[0];
       const name = positional[1];
       const target = positional[2];
-      if (!op || !name) { console.error('Usage: lazyclaw goal channel <add|remove> <name> [target]'); process.exit(2); }
+      if (!op || !name) { console.error('Usage: pompos goal channel <add|remove> <name> [target]'); process.exit(2); }
       const g = goalsMod.getGoal(name, cfgDir);
       if (!g) { console.error(`no goal "${name}"`); process.exit(1); }
       const cur = Array.isArray(g.channels) ? g.channels : [];
       let next;
       if (op === 'add') {
-        if (!target) { console.error('Usage: lazyclaw goal channel add <name> <target>'); process.exit(2); }
+        if (!target) { console.error('Usage: pompos goal channel add <name> <target>'); process.exit(2); }
         next = Array.from(new Set([...cur, target]));
       } else if (op === 'remove') {
-        if (!target) { console.error('Usage: lazyclaw goal channel remove <name> <target>'); process.exit(2); }
+        if (!target) { console.error('Usage: pompos goal channel remove <name> <target>'); process.exit(2); }
         next = cur.filter(t => t !== target);
       } else {
-        console.error('Usage: lazyclaw goal channel <add|remove> <name> <target>'); process.exit(2);
+        console.error('Usage: pompos goal channel <add|remove> <name> <target>'); process.exit(2);
         return;
       }
       const updated = goalsMod.patchGoal(name, { channels: next }, cfgDir);
@@ -509,7 +510,7 @@ export async function cmdGoal(sub, positional, flags = {}) {
       return;
     }
     default:
-      console.error('Usage: lazyclaw goal <add|list|show|close|switch> ...');
+      console.error('Usage: pompos goal <add|list|show|close|switch> ...');
       process.exit(2);
   }
 }
