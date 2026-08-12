@@ -55,7 +55,14 @@ function deviceRow(d) {
   };
 }
 
-export async function render(host) {
+/**
+ * Render the Devices panel. `deps` swaps the two pairing calls so the panel is
+ * testable without WebCrypto or IndexedDB (same convention as
+ * web/ui/panels/approvals.mjs's _decide).
+ */
+export async function render(host, deps = {}) {
+  const pairFn = deps.pairThisBrowser || pairThisBrowser;
+  const forgetFn = deps.unpairThisBrowser || unpairThisBrowser;
   host.append(phead('Devices', 'Devices paired to this gateway, and requests waiting on pompos nodes approve.'));
 
   host.append(el('div', { class: 'note-inline' },
@@ -79,10 +86,15 @@ export async function render(host) {
     pairBtn.disabled = true;
     status.replaceChildren(el('span', { class: 'muted', text: 'Pairing…' }));
     try {
-      const out = await pairThisBrowser();
+      const out = await pairFn();
       status.replaceChildren(out.ok
         ? chip('paired: ' + out.deviceId.slice(7, 19), 'ok')
         : el('span', { class: 'err-inline', 'aria-live': 'polite', text: out.error }));
+      // The tables below were rendered before this pair happened, so without a
+      // reload the panel says "paired: <fp>" next to "No devices paired yet." —
+      // a pending request also appears when this browser was not the first
+      // device. Reloaded on failure too: a 202/pending pair still added a row.
+      await loadDevices();
     } catch (e) {
       status.replaceChildren(el('span', { class: 'err-inline', 'aria-live': 'polite', text: e && e.message ? e.message : String(e) }));
     } finally {
@@ -95,8 +107,9 @@ export async function render(host) {
     // forgetIdentity() must render, not throw past a fire-and-forget handler.
     forgetBtn.disabled = true;
     try {
-      await unpairThisBrowser();
-      status.replaceChildren(el('span', { class: 'muted', text: "this browser's key is gone; pairing again makes a new device. Revoke the old record with `pompos nodes revoke`." }));
+      await forgetFn();
+      status.replaceChildren(el('span', { class: 'muted', text: "this browser's key is gone; pairing again makes a new device (pending, until `pompos nodes approve <requestId>`). Revoke the old record with `pompos nodes revoke`." }));
+      await loadDevices();
     } catch (e) {
       status.replaceChildren(el('span', { class: 'err-inline', 'aria-live': 'polite', text: e && e.message ? e.message : String(e) }));
     } finally {
@@ -108,37 +121,48 @@ export async function render(host) {
   let shown = el('div', { class: 'empty', text: 'Loading…' });
   host.append(shown);
 
-  try {
-    const data = await api('/devices');
-    const requests = Array.isArray(data.requests) ? data.requests : [];
-    const devices = Array.isArray(data.devices) ? data.devices : [];
-    const sse = data.sse || { open: 0, maxGlobal: 0, maxPerDevice: 0 };
-    const frac = sse.maxGlobal ? Math.max(0, Math.min(1, sse.open / sse.maxGlobal)) : 0;
+  // Re-runnable so pairing or forgetting this browser refreshes the tables it
+  // just changed, instead of leaving the panel showing the pre-pair state.
+  async function loadDevices() {
+    try {
+      const data = await api('/devices');
+      const requests = Array.isArray(data.requests) ? data.requests : [];
+      const devices = Array.isArray(data.devices) ? data.devices : [];
+      const sse = data.sse || { open: 0, maxGlobal: 0, maxPerDevice: 0 };
+      const frac = sse.maxGlobal ? Math.max(0, Math.min(1, sse.open / sse.maxGlobal)) : 0;
 
-    const body = el('div', {},
-      el('h3', { class: 'dim', style: 'margin:8px 0 4px;', text: 'Pending pairing requests' }),
-      requests.length
-        ? table(REQUEST_COLS, requests.map(requestRow))
-        : el('div', { class: 'empty' }, 'No pairing requests waiting. Pair one with ', el('code', { text: 'pompos nodes pair' }), '.'),
+      const body = el('div', {},
+        el('h3', { class: 'dim', style: 'margin:8px 0 4px;', text: 'Pending pairing requests' }),
+        requests.length
+          ? table(REQUEST_COLS, requests.map(requestRow))
+          // Nothing creates a pairing request from the CLI — one appears when a
+          // device runs the handshake. This browser pairs with the button
+          // above; a pending request is approved with `pompos nodes approve`.
+          : el('div', { class: 'empty' },
+            'No pairing requests waiting. One appears when a device runs the handshake — pair this browser with the button above, then approve any other device with ',
+            el('code', { text: 'pompos nodes approve <requestId>' }), '.'),
 
-      el('h3', { class: 'dim', style: 'margin:14px 0 4px;', text: 'Paired devices' }),
-      devices.length
-        ? table(DEVICE_COLS, devices.map(deviceRow))
-        : el('div', { class: 'empty', text: 'No devices paired yet.' }),
+        el('h3', { class: 'dim', style: 'margin:14px 0 4px;', text: 'Paired devices' }),
+        devices.length
+          ? table(DEVICE_COLS, devices.map(deviceRow))
+          : el('div', { class: 'empty', text: 'No devices paired yet.' }),
 
-      el('h3', { class: 'dim', style: 'margin:14px 0 4px;', text: 'Event-stream capacity' }),
-      el('div', { class: 'card' },
-        kvlist([
-          ['Open streams', `${sse.open} / ${sse.maxGlobal}`],
-          ['Per-device cap', String(sse.maxPerDevice)],
-        ]),
-        el('div', { class: 'meter' }, el('i', { class: frac > 0.85 ? 'warn' : '', style: `transform: scaleX(${frac})` }))));
+        el('h3', { class: 'dim', style: 'margin:14px 0 4px;', text: 'Event-stream capacity' }),
+        el('div', { class: 'card' },
+          kvlist([
+            ['Open streams', `${sse.open} / ${sse.maxGlobal}`],
+            ['Per-device cap', String(sse.maxPerDevice)],
+          ]),
+          el('div', { class: 'meter' }, el('i', { class: frac > 0.85 ? 'warn' : '', style: `transform: scaleX(${frac})` }))));
 
-    shown.replaceWith(body);
-    shown = body;
-  } catch (e) {
-    const errNode = el('div', { class: 'empty', text: 'Error: ' + e.message });
-    shown.replaceWith(errNode);
-    shown = errNode;
+      shown.replaceWith(body);
+      shown = body;
+    } catch (e) {
+      const errNode = el('div', { class: 'empty', text: 'Error: ' + e.message });
+      shown.replaceWith(errNode);
+      shown = errNode;
+    }
   }
+
+  await loadDevices();
 }

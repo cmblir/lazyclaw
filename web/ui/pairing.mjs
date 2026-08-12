@@ -130,7 +130,9 @@ async function mintToken(d, identity) {
   if (conn.status === 403 && conn.body.status === 'pending') {
     return {
       ok: false, code: 'PENDING_APPROVAL', deviceId: identity.deviceId, requestId: conn.body.requestId,
-      error: 'this browser is waiting to be approved — run `pompos nodes approve <requestId>` in a terminal',
+      // The id is in hand — print it, the way pairThisBrowser already does,
+      // rather than leaving the operator to guess what `<requestId>` means.
+      error: `this browser is waiting to be approved — run \`pompos nodes approve ${conn.body.requestId || ''}\` in a terminal`,
     };
   }
   return { ok: false, error: conn.body.reason || `the gateway refused the handshake (HTTP ${conn.status})`, code: 'PAIR_FAILED' };

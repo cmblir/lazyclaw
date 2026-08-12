@@ -95,7 +95,14 @@ test('a successful approve disables the buttons and never re-enables them', asyn
     resolveApproval: async () => ({ ok: true, id: 'ap_1', approved: true }),
   });
   const cell = tr.querySelector('[data-f="actions"]');
-  assert.match(cell.text, /approved/i);
+  // chipNode, not cell.text: the cell concatenates the chip with the
+  // "Approve"/"Deny" button labels, and /approved/i matches that concatenation
+  // ("...ApproveDeny...") even when the chip says "denied" — so scanning the
+  // whole cell here would pass for a success path that rendered the wrong word.
+  const chip = chipNode(cell);
+  assert.ok(chip, 'expected a status chip');
+  assert.match(chip.text, /approved/i);
+  assert.doesNotMatch(chip.text, /denied/i, 'an approve must never render as a denial');
   const buttons = cell.children.filter((c) => c.tagName === 'button');
   assert.equal(buttons.every((b) => b.disabled === true || b.getAttribute('disabled')), true);
 });

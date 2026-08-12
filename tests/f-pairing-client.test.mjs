@@ -83,6 +83,13 @@ test('a first-device pair yields a device token the gateway would accept', async
     'pair first, then handshake — the connect can only mint a token once the device is approved');
 });
 
+// Feeding the produced payload's own fields back into buildSignPayload would
+// pass for ANY 11-field `|`-join — a swapped field order or a wrong
+// CLIENT_ID/CLIENT_MODE/PLATFORM/DEVICE_FAMILY would round-trip identically.
+// The expected string is therefore built from the four constants this client is
+// contracted to send, and from the deviceId derived independently from the key
+// it actually presented. Only signedAtMs is read back out of the payload:
+// pairing.mjs stamps Date.now() internally, so the test cannot know it.
 test('the signed payload matches buildSignPayload field for field', async () => {
   const nonce = 'b'.repeat(64);
   let connected = null;
@@ -95,17 +102,29 @@ test('the signed payload matches buildSignPayload field for field', async () => 
   await pairThisBrowser(deps(f.fetch));
   const parts = connected.payload.split('|');
   assert.equal(parts.length, 11, 'buildSignPayload emits exactly 11 fields');
-  const rebuilt = buildSignPayload({
-    deviceId: parts[1], clientId: parts[2], clientMode: parts[3], role: parts[4],
-    scopes: parts[5] ? parts[5].split(',') : [], signedAtMs: parts[6], token: parts[7],
-    nonce: parts[8], platform: parts[9], deviceFamily: parts[10],
+  const signedAtMs = Number(parts[6]);
+  assert.ok(Number.isFinite(signedAtMs) && signedAtMs > 1_600_000_000_000,
+    `field 7 must be the epoch-ms sign time; got ${JSON.stringify(parts[6])}`);
+  const expected = buildSignPayload({
+    deviceId: deviceIdFromPublicKey(Buffer.from(connected.publicKey, 'base64')),
+    clientId: 'pompos-dashboard',
+    clientMode: 'dashboard',
+    role: '',
+    scopes: [],
+    signedAtMs,
+    token: '',
+    nonce,
+    platform: 'browser',
+    deviceFamily: 'dashboard',
   });
-  assert.equal(connected.payload, rebuilt);
+  assert.equal(connected.payload, expected);
 });
 
 test('a pending pair reports PENDING_APPROVAL with the operator instruction, and never claims success', async () => {
   const f = fakeFetch({
-    '/devices/pair': { status: 202, body: { ok: true, status: 'pending', deviceId: 'sha256:' + 'c'.repeat(64), requestId: 'pr_1', fingerprint: 'cccccccccccc' } },
+    // No `ok` on the 202 — daemon/routes/devices_pair.mjs deliberately omits it
+    // so a consumer testing body.ok cannot read "pending" as success.
+    '/devices/pair': { status: 202, body: { status: 'pending', deviceId: 'sha256:' + 'c'.repeat(64), requestId: 'pr_1', fingerprint: 'cccccccccccc' } },
   });
   const { pairThisBrowser } = await freshPairing();
   const out = await pairThisBrowser(deps(f.fetch));
@@ -138,7 +157,7 @@ test('resolveApproval sends the DEVICE token, not the dashboard bearer token', a
 
 test('resolving without a paired device reports NOT_PAIRED and sends no resolve at all', async () => {
   const f = fakeFetch({
-    '/devices/pair': { status: 202, body: { ok: true, status: 'pending', deviceId: 'sha256:' + 'e'.repeat(64), requestId: 'pr_2' } },
+    '/devices/pair': { status: 202, body: { status: 'pending', deviceId: 'sha256:' + 'e'.repeat(64), requestId: 'pr_2' } },
   });
   const { resolveApproval } = await freshPairing();
   const out = await resolveApproval('ap_2', 'approve', deps(f.fetch));
