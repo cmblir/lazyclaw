@@ -273,6 +273,7 @@ Sensitive tools deny by default unless an approval hook grants them; `config.jso
 ## Install / hack
 
 ```bash
+npm uninstall -g lazyclaw                     # only if you had the old package
 npm install -g @cmblir/pompos                 # install
 git clone https://github.com/cmblir/pompos && cd pompos && npm install && npm link    # hack
 node --test tests/*.test.mjs            # run the suite
@@ -288,6 +289,20 @@ This tool was `lazyclaw` through 6.10.0. Nothing you have set up needs changing:
 - **`LAZYCLAW_*` variables still work.** Each is mirrored to its `POMPOS_*` name at startup, so shell profiles, CI secrets and unit files keep taking effect. Whichever name you set explicitly wins.
 - **The `lazyclaw` command still works**, so installed launchd plists, systemd units and crontab lines that invoke it by name keep running, as do schedules created before the rename.
 - **The dashboard keeps you signed in** — a token saved under the old key is read and carried forward.
+
+**Uninstall the old global package first.** The new package provides a `lazyclaw`
+command of its own, and npm refuses to overwrite a binary another package owns, so
+a global install fails with `EEXIST: /usr/local/bin/lazyclaw` (or the equivalent
+path under nvm) while `lazyclaw` is still installed:
+
+```bash
+npm uninstall -g lazyclaw
+npm install -g @cmblir/pompos
+```
+
+This removes only the old package from the global `node_modules`; your
+`~/.lazyclaw` directory, schedules and shell profile are untouched. Afterwards
+both `pompos` and `lazyclaw` run the new version.
 
 `npm install -g @cmblir/pompos` installs both commands. Releases publish to
 `@cmblir/pompos`; the bare `pompos` name is unavailable on npm, which refuses it as

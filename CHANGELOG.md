@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **A global install failed for anyone who still had the old `lazyclaw` package.**
+  This package declares a `lazyclaw` binary of its own so pre-rename schedulers
+  keep working, but npm refuses to overwrite a binary another package owns, so
+  `npm install -g @cmblir/pompos` aborted with `EEXIST` on `bin/lazyclaw` while
+  the old package was installed. The behaviour is npm's and cannot be worked
+  around from the package, so the README now says to run `npm uninstall -g
+  lazyclaw` first, and states plainly that doing so touches only the global
+  `node_modules` — not `~/.lazyclaw`, schedules, or shell profiles.
+
 ## [6.12.0] - 2026-08-11
 
 ### Security
