@@ -51,6 +51,22 @@ import { emit as emitEvent } from '../mas/events.mjs';
 // also keeps the `tick` heartbeat, which is pure keep-alive noise, off the bus.
 const DASHBOARD_MIRRORED = new Set(['exec.approval.requested', 'exec.approval.resolved']);
 
+// Device roles allowed to resolve an exec approval — an ALLOWLIST, not a
+// denylist, because the role string is chosen by the device itself (it rides
+// the signed connect payload). Denying only an explicit 'read-only' meant any
+// near-miss ('Read-Only', 'read_only', 'read-only ') or invented role ('admin')
+// was waved through with FULL approver authority while `pompos nodes pending`
+// and the Devices panel showed the operator a harmless-looking observer.
+//
+// These four are the whole device-role vocabulary this codebase issues: '' is a
+// legacy record and the bootstrap route's placeholder, 'owner' and 'node' are
+// what a companion node signs (see the device-auth and gateway specs), and
+// 'approver' is the explicit approver. 'read-only' is the one observer role and
+// is deliberately absent. Anything else — a typo, an invented role, or a
+// near-miss stored before the connect route normalized roles — is refused
+// rather than treated as full authority.
+const RESOLVE_ROLES = new Set(['', 'owner', 'node', 'approver']);
+
 // Matches the daemon's readTextBody cap (1 MiB) so the Content-Length
 // pre-check and the stream reader agree on the limit.
 const GATEWAY_MAX_BODY = 1_048_576;
@@ -206,10 +222,24 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
       const body = await readJsonBody(req, readBody);
       if (body && body.__tooLarge) return writeJson(res, 413, { ok: false, reason: 'request body too large' });
       if (!body) return writeJson(res, 400, { ok: false, reason: 'malformed body' });
-      const { payload, signature, publicKey, nonce, platform = '', label = '' } = body;
-      if (!payload || !signature || !publicKey || !nonce) {
+      const { payload, signature, nonce, platform = '', label = '' } = body;
+      // Guarded the same way daemon/routes/devices_pair.mjs guards the
+      // identical field: a non-string is coerced to '' here so it falls
+      // into the very next check as a plain "required" 400, rather than
+      // reaching Buffer.from() below with (e.g.) a number or object and
+      // throwing a raw TypeError that escapes uncaught to daemon.mjs's
+      // outer catch as a 500 reflecting Node's internal error message.
+      const publicKeyIn = typeof body.publicKey === 'string' ? body.publicKey.trim() : '';
+      if (!payload || !signature || !publicKeyIn || !nonce) {
         return writeJson(res, 400, { ok: false, reason: 'payload, signature, publicKey and nonce are required' });
       }
+      // publicKey arrives over JSON as a base64 DER SPKI string (a browser's
+      // exportKey('spki') output, base64-encoded for transport — see
+      // web/ui/device_identity.mjs) or as a PEM string from other callers.
+      // Mirrors daemon/routes/devices_pair.mjs's own normalization: without
+      // it, deviceIdFromPublicKey/verifyConnect below try to parse the raw
+      // base64 text as PEM and fail every real (non-test-mocked) caller.
+      const publicKey = /-----BEGIN/.test(publicKeyIn) ? publicKeyIn : Buffer.from(publicKeyIn, 'base64');
       let deviceId;
       try {
         deviceId = deviceIdFromPublicKey(publicKey);
@@ -229,30 +259,107 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
         return writeJson(res, 401, { ok: false, reason: 'challenge expired or already used' });
       }
       const st = store();
+      // role + scopes come from the SIGNATURE-VERIFIED payload (tamper-
+      // evident), not the unsigned body fields, so a client can't forge its
+      // own capabilities. parsePayload is safe here — verifyConnect passed.
+      // Computed BEFORE the approved short-circuit below, because the
+      // already-approved branch needs it too (see the reconcile there).
+      //
+      // NORMALIZED here, at the single ingest point: the role is persisted
+      // verbatim (PairingStore.requestPairing) and compared verbatim by the
+      // exec-resolve gate, and the device picks its own string — so without
+      // this, 'Read-Only' / 'read-only ' / 'READ-ONLY' each showed the operator
+      // a harmless observer in `pompos nodes pending` while sailing past that
+      // gate with full approver authority. Every writer below takes the role
+      // from this one variable, and nothing outside gateway/ calls
+      // requestPairing, so normalizing once here covers the whole surface.
+      let role = '';
+      let scopes = [];
+      try {
+        const parsed = parsePayload(payload);
+        if (parsed) {
+          role = String(parsed.role || '').trim().toLowerCase();
+          const rawScopes = typeof parsed.scopes === 'string' && parsed.scopes
+            ? parsed.scopes.split(',')
+            : (Array.isArray(parsed.scopes) ? parsed.scopes : []);
+          scopes = rawScopes.map((s) => String(s).trim().toLowerCase()).filter(Boolean);
+        }
+      } catch { /* fall back to no capability — default device */ }
+
       if (st.isApproved(deviceId)) {
+        const info = st.deviceInfo(deviceId);
+        // isApproved() only tests that a token STRING exists — it never reads
+        // expiresAt (verifyToken does). So a device past its TTL is still
+        // "approved" here, and without this it got handed back the SAME dead
+        // token inside {ok:true}: the retry 401s, and the "pair it again to mint
+        // a new device token" recovery web/ui/pairing.mjs offers can never work,
+        // because pairing again runs this identical handshake. The signature and
+        // the single-use nonce were both verified above, so the device has just
+        // re-proved possession of its private key — re-mint rather than lie.
+        // The operator's TTL WINDOW is carried forward, not dropped: rotating
+        // with no ttlMs clears expiresAt, which would silently convert
+        // `pompos nodes rotate --ttl <ms>` into never-expires on the next
+        // reconnect — failing open, and permanently. The store keeps only the
+        // absolute expiry, so the window is re-derived from the timestamp of
+        // whichever call stamped it: an expiresAt can only exist because the
+        // most recent approve/rotate carried a ttlMs (a rotate without one
+        // deletes it, leaving no lapse to detect here), so rotatedAt ??
+        // approvedAt is that instant. An unparseable anchor makes ttlMs NaN,
+        // which rotate()'s own Number.isFinite guard rejects — falling back to
+        // clearing the expiry rather than inventing a window.
+        if (info && typeof info.expiresAt === 'number' && now >= info.expiresAt) {
+          const rec = st._data.devices[deviceId];
+          const anchor = Date.parse((rec && (rec.rotatedAt || rec.approvedAt)) || '');
+          st.rotate(deviceId, { ttlMs: info.expiresAt - anchor, nowMs: now });
+        }
+        // Fill-once capability reconcile. The bootstrap route
+        // (daemon/routes/devices_pair.mjs) approves its device outright with
+        // role:'', which moves the request OUT of `pending` — so the re-stamp
+        // further down never runs for that device and its signed capability
+        // would be discarded forever: a browser that declared itself read-only
+        // would hold full approver authority just for winning the bootstrap
+        // slot. Monotonic exactly like the pending path: only an EMPTY stored
+        // role is filled, and only from the signed payload, so a device can
+        // neither widen an operator-reviewed role nor clear one.
+        //
+        // Written through the store's own backing data because PairingStore
+        // exposes no capability setter; approve()/rotate() are the only writers
+        // and both would mint a new token (and rotate() would drop expiresAt),
+        // which must not be a side effect of a plain reconnect.
+        if (info && !info.role && role) {
+          const rec = st._data.devices[deviceId];
+          if (rec) {
+            rec.role = role;
+            if (scopes.length && !(Array.isArray(rec.scopes) && rec.scopes.length)) rec.scopes = scopes;
+            st._persist();
+          }
+        }
         return writeJson(res, 200, { ok: true, deviceId, token: st.tokenFor(deviceId) });
       }
+
       // Not approved — record intent once (don't pile up duplicates) and
       // tell the device to wait for the operator's approval.
       const existing = st.pendingForDevice(deviceId);
       let receipt;
       if (existing) {
+        // Fill-in-once, NEVER widen: only replace an EMPTY stored role/scopes
+        // with the signed payload's. Overwriting an already-set role would
+        // open a privilege-escalation window — the device holds the private
+        // key, so it could reconnect with role:'' AFTER the operator reviews
+        // "read-only" in `pompos nodes pending` but BEFORE they approve, and
+        // silently downgrade the stored role to '' (which the exec-resolve
+        // gate still admits — it is the legacy/bootstrap value, see
+        // RESOLVE_ROLES). This also blocks widening to some OTHER non-empty
+        // role the operator never saw. This re-stamp covers ONLY a request that
+        // is still pending: once a request is approved it leaves `pending`, so a
+        // role:'' placeholder on an ALREADY-APPROVED device (what the bootstrap
+        // route leaves behind) is reconciled in the isApproved() branch above,
+        // not here.
+        const nextRole = existing.role ? existing.role : role;
+        const nextScopes = Array.isArray(existing.scopes) && existing.scopes.length ? existing.scopes : scopes;
+        st.restampPending(existing.requestId, { role: nextRole, scopes: nextScopes });
         receipt = { requestId: existing.requestId };
       } else {
-        // role + scopes come from the SIGNATURE-VERIFIED payload (tamper-
-        // evident), not the unsigned body fields, so a client can't forge its
-        // own capabilities. parsePayload is safe here — verifyConnect passed.
-        let role = '';
-        let scopes = [];
-        try {
-          const parsed = parsePayload(payload);
-          if (parsed) {
-            role = String(parsed.role || '');
-            scopes = typeof parsed.scopes === 'string' && parsed.scopes
-              ? parsed.scopes.split(',').filter(Boolean)
-              : (Array.isArray(parsed.scopes) ? parsed.scopes : []);
-          }
-        } catch { /* fall back to no capability — default device */ }
         try {
           receipt = st.requestPairing({ deviceId, platform, label, role, scopes });
         } catch (err) {
@@ -277,12 +384,20 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
     if (m === 'POST' && p === '/gateway/exec/resolve') {
       const ident = authDevice(req);
       if (!ident) return writeJson(res, 401, { ok: false, reason: 'invalid device token' });
-      // Capability gate: a read-only device may observe (whoami/events/pending)
-      // but MUST NOT resolve an exec approval (the one mutating gateway action).
-      // Backward-compatible: only an EXPLICITLY read-only role is denied; legacy
-      // devices (role '') and approvers keep the prior behaviour.
-      if (ident.role === 'read-only') {
-        return writeJson(res, 403, { ok: false, reason: 'insufficient scope: a read-only device cannot resolve exec approvals' });
+      // Capability gate, fail-CLOSED (RESOLVE_ROLES above): a read-only device
+      // may observe (whoami/events/pending) but MUST NOT resolve an exec
+      // approval — the one mutating gateway action. Only a role this code
+      // actually recognises passes; an unrecognised one is refused instead of
+      // being treated as full authority. Backward-compatible for the records
+      // that exist: legacy/bootstrap ('') and 'approver' both still pass.
+      if (!RESOLVE_ROLES.has(ident.role)) {
+        return writeJson(res, 403, {
+          ok: false,
+          reason: ident.role === 'read-only'
+            ? 'insufficient scope: a read-only device cannot resolve exec approvals'
+            // Deliberately does not echo the role back: it is device-chosen text.
+            : 'insufficient scope: this device role cannot resolve exec approvals',
+        });
       }
       const body = await readJsonBody(req, readBody);
       if (body && body.__tooLarge) return writeJson(res, 413, { ok: false, reason: 'request body too large' });

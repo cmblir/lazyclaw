@@ -8,6 +8,19 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Security
 
+- **A companion device could opt itself out of the gateway's read-only gate by
+  spelling its role differently.** The exec-approval gate denied exactly one
+  string (`role === 'read-only'`), while the role itself comes from the
+  device's own signed connect payload and was stored and compared verbatim. A
+  device that signed `Read-Only`, `READ-ONLY`, `read_only` or `read-only ` was
+  therefore displayed to the operator as a harmless observer by both `pompos
+  nodes pending` and the Devices panel, yet could resolve any pending exec
+  approval — i.e. auto-approve a gated command for any agent. The role is now
+  normalized (trimmed, lower-cased) at the one place it enters the system, and
+  the gate is an allowlist over the four roles this codebase issues — the
+  legacy/bootstrap `''`, a companion node's `owner` and `node`, and the explicit
+  `approver` — so an unrecognised or invented role is refused instead of being
+  treated as full authority.
 - **A registered custom or OpenAI-compatible provider's traffic could reach
   the wrong host, carrying the operator's real API key.** The OpenAI-compat
   adapter bound a provider's configured `baseUrl` with an object spread
@@ -38,16 +51,23 @@ Versioning: [SemVer](https://semver.org/).
   command means. Authorization is unchanged: the existing bearer token
   carries the same authority it always did.
 
-  Two things stay out of reach from the browser: resolving an approval still
-  needs the terminal or a paired device (the Approvals panel's buttons are
-  disabled — approving is gated on an Ed25519-paired device, which a browser
-  is not), and creating an agent from the dashboard can't set a custom tool
-  list yet (`--tools` has no slash-command form; the agent is created with
-  the default tool set).
+  One thing still stays out of reach from the browser: creating an agent
+  from the dashboard can't set a custom tool list yet (`--tools` has no
+  slash-command form; the agent is created with the default tool set).
 - Three new slash commands, useful from the terminal too: `/workflow
   run|resume|clear`, `/team member add|remove`, and `--provider`/`--model` on
   `/agent add`. `/config set <key> <value>` and `/config unset <key>` now
   write directly — before, `/config` only opened the picker.
+- The dashboard can pair itself as an Ed25519 device and resolve exec approvals
+  from the browser. `POST /devices/pair` approves the first device
+  automatically over loopback and leaves every later one pending, so a stolen
+  auth token cannot enrol a second approver. That bootstrap slot is spent once
+  per install — revoking every device does not reopen it, so recovery on a
+  fully revoked install is `pompos nodes approve <requestId>`. The browser's
+  private key is non-extractable and never leaves the browser; its device token
+  is held in memory and re-minted on demand rather than stored (a device whose
+  token has expired gets a genuinely fresh one from the handshake, instead of
+  the same dead token back).
 
 ### Fixed
 
@@ -63,6 +83,10 @@ Versioning: [SemVer](https://semver.org/).
   fresh, so a first-time write is unaffected. An unreadable file (`EACCES` /
   `EISDIR`) gets the same refusal with an actionable message instead of
   failing silently.
+- `POST /gateway/connect` accepted a public key only as PEM, so a
+  browser-originated handshake — which sends `exportKey('spki')` output as
+  base64 DER — could never succeed. It now normalises base64 DER the same way
+  `POST /devices/pair` does.
 
 ## [6.11.0] - 2026-08-07
 

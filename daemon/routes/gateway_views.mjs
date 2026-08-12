@@ -5,10 +5,12 @@
 // which would 404 anything the route table added there. They sit behind the
 // daemon's normal auth-token gate instead.
 //
-// Read-only on purpose. resolveApproval() is an in-process function, so a
-// daemon route could call it — and would thereby bypass the Ed25519 device
-// gate that protects it over HTTP. Making the dashboard a properly paired
-// device is future work; until then this surface observes and does not act.
+// Read-only on purpose, and it stays that way. resolveApproval() is an
+// in-process function, so a daemon route could call it — and would thereby
+// bypass the Ed25519 device gate that protects it over HTTP. The dashboard
+// resolves approvals as a properly paired device instead, through the
+// gateway's own POST /gateway/exec/resolve (see web/ui/pairing.mjs); there is
+// deliberately no daemon-side twin of that route to drift from it.
 import { writeJson } from './_deps.mjs';
 import { PairingStore } from '../../gateway/device_auth.mjs';
 

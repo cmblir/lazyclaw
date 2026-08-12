@@ -50,9 +50,13 @@ export function promptForToken() {
 
 // Single auth-aware fetch primitive: adds the bearer token via withAuth,
 // prompts for a token + retries once on 401, returns the raw Response.
-// ALL dashboard requests route through this (api/apiSoft + the direct
-// export/delete/test/POST call sites) so none bypass the auth gate. Uses
-// globalThis.fetch so this is the only place that touches fetch directly.
+// Every request to a DAEMON route goes through here (api/apiSoft + the direct
+// export/delete/test/POST call sites) so none bypasses the auth gate. The one
+// deliberate exception is web/ui/pairing.mjs's /gateway/* calls: those are
+// routed in front of the daemon's bearer gate and their Authorization header
+// carries the DEVICE token, so sending the dashboard token there would be the
+// wrong credential. Uses globalThis.fetch so this is the only place that
+// touches fetch directly.
 export async function apiRaw(path, opts = {}) {
   let r = await globalThis.fetch(path, withAuth(opts));
   if (r.status === 401 && promptForToken()) {

@@ -24,7 +24,7 @@
 Three, each forced by something in the existing source. Implement the plan, not the spec, where they differ.
 
 1. **No `POST /approvals/:id/resolve`.** `POST /gateway/exec/resolve` (`gateway/http_gateway.mjs:277`) already does exactly what that route would do: `authDevice(req)` → `verifyToken(deviceId, token, now)` → a role gate refusing `read-only` → `resolveApproval(id, decision, deviceId)` → 200/404. Adding a daemon-side twin would duplicate the Ed25519 gate and create a second place for it to drift — the precise hazard `daemon/routes/gateway_views.mjs`'s own comment warns about. The browser calls the gateway route directly; `/gateway/*` is routed before the daemon's bearer gate (`daemon.mjs:268`), so a same-origin browser reaches it.
-2. **`DEVICE_REVOKED` and `TOKEN_EXPIRED` are not returned.** `PairingStore.revoke()` deletes the device record, so a revoked device is indistinguishable from one that never paired; and an expired token is re-minted by re-running the handshake, which then answers `pending` if the device is gone. Both collapse into `NOT_PAIRED`, which is also what the spec's own Testing section asks for ("`NOT_PAIRED` for a revoked device"). Shipping a code that can never be produced would be a lie in the contract.
+2. **`DEVICE_REVOKED` and `TOKEN_EXPIRED` are not returned.** `PairingStore.revoke()` deletes the device record, so a revoked device is indistinguishable from one that never paired: re-running the handshake answers `pending`, which the browser reports as `NOT_PAIRED`. An expired token is re-minted by re-running the handshake, but only because `POST /gateway/connect` now detects a lapsed `expiresAt` and calls `PairingStore.rotate()` before answering — `isApproved()` ignores `expiresAt`, so before that fix the route returned `200 {ok:true}` carrying the SAME already-dead token, and every retry 401'd forever. Both cases collapse into `NOT_PAIRED`, which is also what the spec's own Testing section asks for ("`NOT_PAIRED` for a revoked device"). Shipping a code that can never be produced would be a lie in the contract.
 3. **The device token is never persisted.** It lives in a module-level variable and is re-minted on demand. The spec only required it be kept separate from the dashboard bearer token; not storing it at all is strictly stronger, since the non-extractable key can always mint a fresh one.
 
 ## Facts already verified — do not re-derive
@@ -1120,7 +1120,7 @@ async function mintToken(d, identity) {
   if (conn.status === 403 && conn.body.status === 'pending') {
     return {
       ok: false, code: 'PENDING_APPROVAL', deviceId: identity.deviceId, requestId: conn.body.requestId,
-      error: 'this browser is waiting to be approved — run `pompos nodes approve <requestId>`, or approve it from an already-paired device',
+      error: 'this browser is waiting to be approved — run `pompos nodes approve <requestId>` in a terminal',
     };
   }
   return { ok: false, error: conn.body.reason || `the gateway refused the handshake (HTTP ${conn.status})`, code: 'PAIR_FAILED' };
@@ -1144,7 +1144,7 @@ export async function pairThisBrowser(deps) {
     return {
       ok: false, code: 'PENDING_APPROVAL', deviceId: pair.body.deviceId, requestId: pair.body.requestId,
       fingerprint: pair.body.fingerprint,
-      error: `this browser is waiting to be approved (${pair.body.fingerprint || pair.body.deviceId}) — run \`pompos nodes approve ${pair.body.requestId || ''}\`, or approve it from an already-paired device`,
+      error: `this browser is waiting to be approved (${pair.body.fingerprint || pair.body.deviceId}) — run \`pompos nodes approve ${pair.body.requestId || ''}\` in a terminal`,
     };
   }
   if (pair.status !== 200) {
@@ -1411,15 +1411,20 @@ Replace the `banner('warn', …)` block in `render()` with:
   host.append(banner('info', 'i', el('b', { text: 'Approving from here pairs this browser. ' }),
     'The first decision generates an Ed25519 key for this browser and pairs it as a device; ',
     'the private key never leaves the browser and cannot be exported. ',
-    'You can also approve with ', el('code', { text: 'pompos nodes' }), '.'));
+    'Only a paired device can answer one of these — there is no terminal command that does it. ',
+    el('code', { text: 'pompos nodes' }), ' manages devices, not approvals.'));
 ```
 
 Replace `createRow`'s action cell and add the handler. The whole cell is rebuilt by `_decide`, so `renderActions` is the single place its contents are defined:
 
 ```js
-// The action cell, rebuilt in place by _decide so success, failure and the
-// not-paired prompt all render through one function.
-function renderActions(cell, a, { message = '', pair = false, done = '' } = {}) {
+// The action cell, rebuilt in place so success, failure and the not-paired
+// prompt all render through one function. `deps` is threaded through rather
+// than reached for globally, so _decide's tests swap the two network calls
+// without any module-level state.
+function renderActions(tr, a, { message = '', pair = false, done = '' } = {}, deps = {}) {
+  const cell = tr.querySelector('[data-f="actions"]');
+  if (!cell) return;
   const kids = [];
   if (done) {
     kids.push(chip(done, done === 'approved' ? 'ok' : 'warn'));
@@ -1429,16 +1434,23 @@ function renderActions(cell, a, { message = '', pair = false, done = '' } = {}) 
   } else {
     for (const [label, decision] of [['Approve', 'approve'], ['Deny', 'deny']]) {
       const b = el('button', { class: 'btn btn-secondary', type: 'button', text: label });
-      b.addEventListener('click', () => { _decide(cell.parentNode || cell, a, a.id, decision); });
+      b.addEventListener('click', () => { _decide(tr, a, a.id, decision, deps); });
       kids.push(b);
     }
   }
   if (message) kids.push(el('div', { class: 'err-inline', text: message }));
   if (pair) {
+    const pairFn = deps.pairThisBrowser || pairThisBrowser;
     const b = el('button', { class: 'btn btn-secondary', type: 'button', text: 'Pair this browser' });
     b.addEventListener('click', async () => {
-      const out = await pairThisBrowser();
-      renderActions(cell, a, out.ok ? {} : { message: out.error, pair: out.code !== 'PENDING_APPROVAL' });
+      const out = await pairFn();
+      // Offer the button again only when pressing it could plausibly help.
+      // NO_WEBCRYPTO / NO_ED25519 mean this browser can never pair (a
+      // non-secure origin, or no Ed25519 support), and PENDING_APPROVAL means
+      // the operator has to act next — re-offering it in those three cases is a
+      // button that cannot work.
+      const retryable = !['PENDING_APPROVAL', 'NO_WEBCRYPTO', 'NO_ED25519'].includes(out.code);
+      renderActions(tr, a, out.ok ? {} : { message: out.error, pair: retryable }, deps);
     });
     kids.push(b);
   }
@@ -1453,7 +1465,6 @@ function renderActions(cell, a, { message = '', pair = false, done = '' } = {}) 
  */
 export async function _decide(tr, a, id, decision, deps = {}) {
   const resolve = deps.resolveApproval || resolveViaDevice;
-  const pair = deps.pairThisBrowser || pairThisBrowser;
   const cell = tr.querySelector('[data-f="actions"]');
   if (!cell) return;
   cell.replaceChildren(el('span', { class: 'muted', text: decision === 'approve' ? 'Approving…' : 'Denying…' }));
@@ -1461,22 +1472,12 @@ export async function _decide(tr, a, id, decision, deps = {}) {
   try { out = await resolve(id, decision); }
   catch (e) { out = { ok: false, code: 'RESOLVE_FAILED', error: e && e.message ? e.message : String(e) }; }
   if (out && out.ok) {
-    renderActionsWith(cell, a, pair, { done: out.approved ? 'approved' : 'denied' });
+    renderActions(tr, a, { done: out.approved ? 'approved' : 'denied' }, deps);
     return;
   }
-  renderActionsWith(cell, a, pair, { message: out.error || 'the decision could not be delivered', pair: out.code === 'NOT_PAIRED' });
+  renderActions(tr, a, { message: out.error || 'the decision could not be delivered', pair: out.code === 'NOT_PAIRED' }, deps);
 }
-
-// renderActions with the pair function injected, so _decide's tests can swap it.
-function renderActionsWith(cell, a, pairFn, opts) {
-  const prev = pairThisBrowserRef;
-  pairThisBrowserRef = pairFn;
-  try { renderActions(cell, a, opts); } finally { pairThisBrowserRef = prev; }
-}
-let pairThisBrowserRef = pairThisBrowser;
 ```
-
-Then in `renderActions`, call `pairThisBrowserRef()` rather than `pairThisBrowser()`.
 
 In `createRow`, replace the two hardcoded-`disabled` buttons with the live cell:
 
@@ -1489,7 +1490,7 @@ function createRow(a) {
     el('td', { 'data-f': 'remaining' }),
     el('td', { 'data-f': 'actions' }));
   updateRemaining(tr, a);
-  renderActions(tr.querySelector('[data-f="actions"]'), a);
+  renderActions(tr, a);
   return tr;
 }
 ```
@@ -1527,6 +1528,16 @@ import { pairThisBrowser, unpairThisBrowser } from '../pairing.mjs';
   });
   host.append(el('div', { class: 'row-actions' }, pairBtn, forgetBtn, status));
 ```
+
+- [ ] **Step 6: Correct one false instruction Task 1 shipped**
+
+`web/ui/device_identity.mjs`'s `NO_ED25519` error tells the operator to "approve with `pompos nodes approve`". That is false: `pompos nodes` approves a *device* pairing request, and nothing in the CLI resolves a gateway exec approval — the only resolver is a paired device (`POST /gateway/exec/resolve`). Verified by enumerating `commands/auth_nodes.mjs`'s subcommands (`list`, `pending`, `approve`, `revoke`, `rotate`, all device-scoped) and grepping the repo for any other caller of `exec/resolve` (only the gateway itself and two Playwright specs). Change the message's tail so it states what is actually available:
+
+```js
+      throw new IdentityError('NO_ED25519', `this browser cannot generate an Ed25519 key (${err && err.message ? err.message : err}); pair from a browser that supports Ed25519 — approvals can only be answered by a paired device`);
+```
+
+Leave the rest of that file alone.
 
 - [ ] **Step 6: Correct the stale comment in gateway_views.mjs**
 
@@ -1695,14 +1706,18 @@ pairs itself with the daemon.
 
 - The **first** device is approved automatically when it pairs over loopback —
   otherwise there would be no one to approve it.
-- Every device after that is `pending` until an already-paired device or
-  `pompos nodes approve <requestId>` approves it.
+- Every device after that is `pending` until `pompos nodes approve <requestId>`
+  approves it from a terminal. There is deliberately no way to approve a new
+  device from the dashboard — that would let one browser enrol another.
 - The private key cannot be exported, backed up, or moved to another browser.
   Pairing again from a new browser is the recovery path; drop the old record
   with `pompos nodes revoke <deviceId>`.
 - WebCrypto only exists on a secure origin, so pairing works on
   `http://localhost` / `http://127.0.0.1` and over HTTPS. On a plain-HTTP LAN
-  address the panel says so and points you at `pompos nodes`.
+  address the browser exposes no `crypto.subtle` at all, and the panel says so
+  and tells you to reopen the dashboard on its loopback address. There is no
+  terminal fallback: answering an approval requires a paired device, and
+  `pompos nodes` manages devices, not approvals.
 ```
 
 - [ ] **Step 2: Add the CHANGELOG entry**
@@ -1717,6 +1732,12 @@ Under the `Unreleased` heading (Keep a Changelog format, English):
   auth token cannot enrol a second approver. The browser's private key is
   non-extractable and never leaves the browser; its device token is held in
   memory and re-minted on demand rather than stored.
+
+### Fixed
+- `POST /gateway/connect` accepted a public key only as PEM, so a
+  browser-originated handshake — which sends `exportKey('spki')` output as
+  base64 DER — could never succeed. It now normalises base64 DER the same way
+  `POST /devices/pair` does.
 ```
 
 - [ ] **Step 3: Verify the docs match the code**
@@ -1740,4 +1761,4 @@ git commit -m "docs: how the dashboard pairs itself and approves"
 
 **Type consistency.** `getOrCreateIdentity` returns `{deviceId, publicKeyDerBase64}` everywhere it appears; `sign` takes and returns `Uint8Array` and is base64-encoded only at the call site; `pairThisBrowser`/`resolveApproval` return the `{ok:true,…}` / `{ok:false,error,code}` pair uniformly; the store contract is `{get,put,del}` in the module, the fake, and the doc block alike; `fingerprint` is `deviceId.slice(7, 19)` in the route, the route test, and the panel.
 
-**One thing the implementer of Task 4 must watch.** `renderActions` reads `pairThisBrowserRef`, which `renderActionsWith` swaps for the duration of a synchronous call. That is deliberate — it is the smallest way to make the pair button injectable without threading a deps object through every call site — but it only works because `renderActions` is synchronous. Do not make it async.
+**One thing the implementer of Task 4 must watch.** `renderActions` and `_decide` are mutually recursive by design: a button rendered by one calls the other, and `deps` is threaded through both so a test can substitute the network calls at any depth. Keep `deps` on every internal call — dropping it on one path is how a test passes while the real button reaches for the wrong function.
