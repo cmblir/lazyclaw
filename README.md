@@ -4,7 +4,7 @@
 
 Chat in the terminal. Let the background learning loop distil your conversations into reusable skills on `claude-cli` (your Pro/Max subscription — no API bill). Wire it to Slack, Telegram, Discord, Matrix, Email, Signal, WhatsApp, or Voice. Fan a hard task out to a planner + workers. One small, auditable Node core — no daemon you can't read.
 
-[![npm](https://img.shields.io/npm/v/pompos.svg)](https://www.npmjs.com/package/pompos)
+[![npm](https://img.shields.io/npm/v/@cmblir/pompos.svg)](https://www.npmjs.com/package/@cmblir/pompos)
 [![Node](https://img.shields.io/badge/node-%E2%89%A518-blue.svg)](https://nodejs.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
@@ -33,14 +33,15 @@ pompos                    # fresh install → guided setup, then chat
 
 The first run is a **phased wizard** (Hermes-style — get one clean chat working first, then layer the rest):
 
-1. **Provider + model** — arrow-key picker (`claude-cli` is keyless; gemini/openai/anthropic take an API key).
+1. **Provider + model** — arrow-key picker (`claude-cli` is keyless; gemini/openai/anthropic take an API key), then two un-numbered follow-ups that belong to the same step: the **context window** (how much history to keep per turn) and the **tool-permission mode** each `claude` spawn runs under.
 2. **Verify** — a one-token ping confirms the provider answers.
-3. **Context window** — how much history to keep per turn (optional).
-4. **Channel** — Slack / Telegram / Matrix / HTTP built in; Discord / Email / Voice / WhatsApp ship in-tree (need a runtime dep via `pompos channels install <name>`), Signal needs `signal-cli` (optional).
-5. **Workspace / skills / webhook** (optional).
-6. **Orchestration** — turn on the planner + workers pipeline (optional).
+3. **Channel** — Slack / Telegram / Matrix / HTTP built in; Discord / Email / WhatsApp ship in-tree (need a runtime dep via `pompos channels install <name>`), Voice ships in-tree and needs only an OpenAI key, Signal needs `signal-cli` (optional).
+4. **Workspace** — a folder of AGENTS.md / SOUL.md / TOOLS.md prompt files (optional).
+5. **Skills** — install a bundle from GitHub, `<user>/<repo>[@<ref>]` (optional).
+6. **Webhook** — an outbound webhook (optional).
+7. **Orchestration** — turn on the planner + workers pipeline (optional).
 
-Re-run it any time with `pompos setup`, or `/config` from inside chat.
+Re-run it any time with `pompos setup` (`--only <steps>` / `--skip <steps>` re-run part of it), or `/setup` from inside chat.
 
 <img src="docs/screenshots/onboard.png" alt="pompos provider picker" width="680">
 
@@ -67,7 +68,7 @@ After every turn, a fire-and-forget loop records the trajectory and distils reus
 
 ## Talk to it anywhere
 
-Connect a channel and **the same agent** answers there — every listener forwards into the always-on daemon's shared session store, so chat, the dashboard, and all channels are one agent with one memory (and context follows across channels). Slack, Telegram, Matrix, and HTTP are built in; Discord, Email, Voice, and WhatsApp ship in-tree and run once their runtime dependency is installed into the config dir (`pompos channels install <name>`), and Signal needs the external `signal-cli` binary on your PATH.
+Connect a channel and **the same agent** answers there — every listener forwards into the always-on daemon's shared session store, so chat, the dashboard, and all channels are one agent with one memory (and context follows across channels). Slack, Telegram, Matrix, and HTTP are built in; Discord, Email, and WhatsApp ship in-tree and run once their runtime dependency is installed into the config dir (`pompos channels install <name>`); Voice ships in-tree with no runtime package to install (it just needs an OpenAI key for Whisper), and Signal needs the external `signal-cli` binary on your PATH.
 
 ```bash
 pompos service install              # 1) the always-on daemon (the shared brain)
