@@ -111,10 +111,23 @@ export async function devicesPair(c) {
         ? existing.requestId
         : store.requestPairing({ deviceId, platform, label, role: '', scopes: [] }).requestId;
 
-      // The bootstrap rule: auto-approve only while NO device is paired at
-      // all, and only over loopback. Stopping at the first device is what
-      // keeps a stolen bearer token from minting a second approver.
-      if (store.devicesList().length === 0 && isLoopback(req)) {
+      // The bootstrap rule: auto-approve only while NO device has EVER been
+      // approved on this install, and only over loopback. Stopping at the first
+      // device is what keeps a stolen bearer token from minting a second
+      // approver.
+      //
+      // The marker is an approved REQUEST row, not the device roster:
+      // revoke() deletes the device record, so `devicesList().length === 0`
+      // reopened the slot every time the roster went empty — and the Devices
+      // panel's own copy walks the operator into exactly that ("Revoke the old
+      // record with `pompos nodes revoke`"), after which whichever loopback
+      // process reached this route first became the sole approver, browser or
+      // not. An approved request row is durable: _prunePending() ages out only
+      // rows still in 'pending'. Recovery for a fully revoked install is
+      // `pompos nodes approve <requestId>`, not a second free bootstrap.
+      const everApproved = Object.values(store._data.requests)
+        .some((r) => r && r.status === 'approved');
+      if (!everApproved && isLoopback(req)) {
         store.approve(requestId);
         return { status: 'approved', deviceId };
       }
@@ -140,7 +153,10 @@ export async function devicesPair(c) {
     return pairBusy(res);
   }
 
+  // No `ok` on the 202: a pending device can resolve nothing, so a consumer
+  // that checks `body.ok` must not read it as success. `status` is the field
+  // that carries the outcome (web/ui/pairing.mjs branches on it).
   return outcome.status === 'approved'
     ? writeJson(res, 200, { ok: true, ...outcome })
-    : writeJson(res, 202, { ok: true, ...outcome });
+    : writeJson(res, 202, { ...outcome });
 }

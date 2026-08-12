@@ -195,13 +195,17 @@ keypair, keeps the private half in the browser as a non-extractable key, and
 pairs itself with the daemon.
 
 - The **first** device is approved automatically when it pairs over loopback —
-  otherwise there would be no one to approve it.
+  otherwise there would be no one to approve it. That happens once per install:
+  the slot closes as soon as any device has been approved and does not reopen,
+  not even after you revoke every device.
 - Every device after that is `pending` until `pompos nodes approve <requestId>`
   approves it from a terminal. There is deliberately no way to approve a new
   device from the dashboard — that would let one browser enrol another.
 - The private key cannot be exported, backed up, or moved to another browser.
   Pairing again from a new browser is the recovery path; drop the old record
-  with `pompos nodes revoke <deviceId>`.
+  with `pompos nodes revoke <deviceId>`. Because the bootstrap slot is spent,
+  that new browser comes up `pending` — approve it with `pompos nodes approve
+  <requestId>` (the Devices panel and the pairing message both print the id).
 - WebCrypto only exists on a secure origin, so pairing works on
   `http://localhost` / `http://127.0.0.1` and over HTTPS. On a plain-HTTP LAN
   address the browser exposes no `crypto.subtle` at all, and the panel says so

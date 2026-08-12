@@ -60,9 +60,11 @@ Versioning: [SemVer](https://semver.org/).
 - The dashboard can pair itself as an Ed25519 device and resolve exec approvals
   from the browser. `POST /devices/pair` approves the first device
   automatically over loopback and leaves every later one pending, so a stolen
-  auth token cannot enrol a second approver. The browser's private key is
-  non-extractable and never leaves the browser; its device token is held in
-  memory and re-minted on demand rather than stored.
+  auth token cannot enrol a second approver. That bootstrap slot is spent once
+  per install — revoking every device does not reopen it, so recovery on a
+  fully revoked install is `pompos nodes approve <requestId>`. The browser's
+  private key is non-extractable and never leaves the browser; its device token
+  is held in memory and re-minted on demand rather than stored.
 
 ### Fixed
 

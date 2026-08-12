@@ -9,9 +9,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { generateKeyPairSync } from 'node:crypto';
-import { PairingStore, deviceIdFromPublicKey, devicesPath } from '../gateway/device_auth.mjs';
+import { generateKeyPairSync, sign as cryptoSign } from 'node:crypto';
+import { PairingStore, deviceIdFromPublicKey, devicesPath, ChallengeRegistry, buildSignPayload } from '../gateway/device_auth.mjs';
 import { devicesPair } from '../daemon/routes/devices_pair.mjs';
+import { createGateway } from '../gateway/http_gateway.mjs';
 
 function tmpDir() {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'pompos-pair-'));
@@ -294,4 +295,51 @@ test('an EACCES inside the critical section answers a named 500 PAIR_BUSY, no pa
     // failed assertion above can't leave a locked directory around.
     fs.chmodSync(dir, 0o700);
   }
+});
+
+// ── Final round, IMPORTANT — the bootstrap slot must be ONE-SHOT ─────────
+// The condition was `store.devicesList().length === 0`, and revoke() DELETES
+// the device record — so the slot reopened every time the roster went empty,
+// and the Devices panel's own copy walks the operator straight into it
+// ("Revoke the old record with `pompos nodes revoke`" after forgetting this
+// browser's key). Whichever loopback process reached /devices/pair first then
+// became the sole approver, and it need not be the browser. The marker is now
+// an approved REQUEST row, which revoke() never touches.
+
+test('the bootstrap slot does NOT reopen after the only device is revoked', async () => {
+  const dir = tmpDir();
+  const first = freshKey();
+  const other = freshKey();
+  assert.equal((await call(dir, { publicKey: first.base64 })).statusCode, 200);
+
+  new PairingStore(dir).revoke(first.deviceId);
+  assert.equal(new PairingStore(dir).devicesList().length, 0,
+    'the roster is empty again — this is exactly the pre-fix trigger');
+
+  const res = await call(dir, { publicKey: other.base64, label: 'not the browser' });
+  assert.equal(res.statusCode, 202,
+    'a different key on loopback must be pending, not the install\'s new sole approver');
+  assert.equal(res.body.status, 'pending');
+  assert.equal(new PairingStore(dir).isApproved(other.deviceId), false);
+  assert.equal(new PairingStore(dir).devicesList().length, 0);
+});
+
+test('the approved-request marker outlives the pending-request prune it shares a table with', async () => {
+  // The whole one-shot fix rests on an approved row being durable, so pin it:
+  // _prunePending() ages out rows whose status is still 'pending' only.
+  const dir = tmpDir();
+  const first = freshKey();
+  await call(dir, { publicKey: first.base64 });
+
+  // Backdate every row past the 24h pending TTL, then trigger a prune (any
+  // requestPairing call runs one) via a second, unrelated pairing attempt.
+  const p = devicesPath(dir);
+  const data = JSON.parse(fs.readFileSync(p, 'utf8'));
+  for (const r of Object.values(data.requests)) r.createdAt = '2000-01-01T00:00:00.000Z';
+  fs.writeFileSync(p, JSON.stringify(data));
+
+  const res = await call(dir, { publicKey: freshKey().base64 });
+  assert.equal(res.statusCode, 202, 'the approved marker must survive the prune and keep the slot shut');
+  const survived = Object.values(new PairingStore(dir)._data.requests).filter((r) => r.status === 'approved');
+  assert.equal(survived.length, 1, 'an approved request row is the roster, not the abuse surface');
 });
