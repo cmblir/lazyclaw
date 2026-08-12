@@ -343,3 +343,104 @@ test('the approved-request marker outlives the pending-request prune it shares a
   const survived = Object.values(new PairingStore(dir)._data.requests).filter((r) => r.status === 'approved');
   assert.equal(survived.length, 1, 'an approved request row is the roster, not the abuse surface');
 });
+
+// ── Final round, IMPORTANT — the bootstrap path never stamped a role ─────
+// A1-A4, the reviewer's exact sequence: the bootstrap route approves outright
+// with role:'' (it cannot see a signature), which moves the request OUT of
+// `pending` — so the connect handler's pending re-stamp never ran for it and
+// the device's own signed `read-only` declaration was silently discarded,
+// leaving a self-declared observer with full approver authority.
+
+const connectRes = () => fakeRes();
+
+test('a bootstrap-approved device is stamped with the role its signed connect declares, and then held to it', async () => {
+  const dir = tmpDir();
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const der = publicKey.export({ type: 'spki', format: 'der' });
+  const base64 = der.toString('base64');
+  const deviceId = deviceIdFromPublicKey(der);
+
+  // A1 — first device, loopback, empty roster: approved with no role.
+  const a1 = await call(dir, { publicKey: base64, platform: 'browser', label: 'dashboard' });
+  assert.equal(a1.statusCode, 200);
+  assert.equal(a1.body.status, 'approved');
+  assert.equal(new PairingStore(dir).deviceInfo(deviceId).role, '');
+
+  // A2 — the same device completes a real signed connect declaring read-only.
+  const challengeRegistry = new ChallengeRegistry();
+  const { nonce } = challengeRegistry.create();
+  const payload = buildSignPayload({
+    deviceId, clientId: 'pompos-dashboard', clientMode: 'dashboard', role: 'read-only',
+    scopes: ['exec:read'], signedAtMs: Date.now(), token: '', nonce,
+    platform: 'browser', deviceFamily: 'dashboard',
+  });
+  const signature = cryptoSign(null, Buffer.from(payload), privateKey).toString('base64');
+  const gw = createGateway({ configDir: dir, challengeRegistry });
+  try {
+    const conn = connectRes();
+    await gw.handle({ method: 'POST', url: '/gateway/connect', headers: {}, once() {} }, conn, {
+      readBody: async () => JSON.stringify({ payload, signature, publicKey: base64, nonce, platform: 'browser' }),
+    });
+    assert.equal(conn.statusCode, 200);
+    const token = conn.body.token;
+    assert.ok(token, 'an approved device still gets its token');
+
+    // A3 — the declared capability was NOT discarded.
+    const info = new PairingStore(dir).deviceInfo(deviceId);
+    assert.equal(info.role, 'read-only');
+    assert.deepEqual(info.scopes, ['exec:read']);
+
+    // A4 — and it is enforced: this device cannot resolve an exec approval.
+    const { id } = gw.requestApproval({ tool: 'bash', agentId: 'dev', summary: 'rm -rf /tmp/x' });
+    const res = connectRes();
+    await gw.handle({
+      method: 'POST', url: '/gateway/exec/resolve',
+      headers: { authorization: `Bearer ${token}`, 'x-device-id': deviceId }, once() {},
+    }, res, { readBody: async () => JSON.stringify({ id, decision: 'approve' }) });
+    assert.equal(res.statusCode, 403);
+    assert.match(res.body.reason, /insufficient scope/);
+    assert.deepEqual(gw.pendingApprovals().map((a) => a.id), [id],
+      'the agent must still be blocked on a human');
+  } finally {
+    gw.close();
+  }
+});
+
+test('the approved-device reconcile is fill-once: an already-stamped role is never overwritten', async () => {
+  const dir = tmpDir();
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const der = publicKey.export({ type: 'spki', format: 'der' });
+  const base64 = der.toString('base64');
+  const deviceId = deviceIdFromPublicKey(der);
+
+  // Approved WITH a role the operator reviewed.
+  const store = new PairingStore(dir);
+  const { requestId } = store.requestPairing({ deviceId, role: 'read-only', scopes: ['exec:read'] });
+  store.approve(requestId, {});
+
+  // The device holds the private key, so it can sign anything it likes on a
+  // later reconnect — including a role it was never approved for.
+  for (const claimed of ['', 'approver']) {
+    const challengeRegistry = new ChallengeRegistry();
+    const { nonce } = challengeRegistry.create();
+    const payload = buildSignPayload({
+      deviceId, clientId: 'pompos-dashboard', clientMode: 'dashboard', role: claimed,
+      scopes: claimed ? ['exec:write'] : [], signedAtMs: Date.now(), token: '', nonce,
+      platform: 'browser', deviceFamily: 'dashboard',
+    });
+    const signature = cryptoSign(null, Buffer.from(payload), privateKey).toString('base64');
+    const gw = createGateway({ configDir: dir, challengeRegistry });
+    try {
+      const conn = connectRes();
+      await gw.handle({ method: 'POST', url: '/gateway/connect', headers: {}, once() {} }, conn, {
+        readBody: async () => JSON.stringify({ payload, signature, publicKey: base64, nonce, platform: 'browser' }),
+      });
+      assert.equal(conn.statusCode, 200);
+      const info = new PairingStore(dir).deviceInfo(deviceId);
+      assert.equal(info.role, 'read-only', `a signed role:${JSON.stringify(claimed)} must not replace the approved one`);
+      assert.deepEqual(info.scopes, ['exec:read']);
+    } finally {
+      gw.close();
+    }
+  }
+});

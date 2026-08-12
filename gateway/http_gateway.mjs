@@ -259,18 +259,11 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
         return writeJson(res, 401, { ok: false, reason: 'challenge expired or already used' });
       }
       const st = store();
-      if (st.isApproved(deviceId)) {
-        return writeJson(res, 200, { ok: true, deviceId, token: st.tokenFor(deviceId) });
-      }
       // role + scopes come from the SIGNATURE-VERIFIED payload (tamper-
       // evident), not the unsigned body fields, so a client can't forge its
       // own capabilities. parsePayload is safe here — verifyConnect passed.
-      // Computed unconditionally (not just for a brand-new request) so a
-      // request that was pre-created WITHOUT a signed payload (e.g. the
-      // daemon's POST /devices/pair bootstrap route, which cannot see one
-      // and always records role:'') gets re-stamped with the device's real
-      // capability the moment it completes an actual signed connect —
-      // otherwise that capability is silently discarded forever.
+      // Computed BEFORE the approved short-circuit below, because the
+      // already-approved branch needs it too (see the reconcile there).
       //
       // NORMALIZED here, at the single ingest point: the role is persisted
       // verbatim (PairingStore.requestPairing) and compared verbatim by the
@@ -293,6 +286,48 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
         }
       } catch { /* fall back to no capability — default device */ }
 
+      if (st.isApproved(deviceId)) {
+        const info = st.deviceInfo(deviceId);
+        // isApproved() only tests that a token STRING exists — it never reads
+        // expiresAt (verifyToken does). So a device past its TTL is still
+        // "approved" here, and without this it got handed back the SAME dead
+        // token inside {ok:true}: the retry 401s, and the "pair it again to mint
+        // a new device token" recovery web/ui/pairing.mjs offers can never work,
+        // because pairing again runs this identical handshake. The signature and
+        // the single-use nonce were both verified above, so the device has just
+        // re-proved possession of its private key — re-mint rather than lie.
+        // NOTE: rotate() with no ttlMs clears expiresAt; the store keeps only
+        // the absolute expiry, not the window it was minted with, so the fresh
+        // token does not expire again until an operator stamps a new TTL
+        // (`pompos nodes rotate <deviceId> --ttl <ms>`).
+        if (info && typeof info.expiresAt === 'number' && now >= info.expiresAt) {
+          st.rotate(deviceId);
+        }
+        // Fill-once capability reconcile. The bootstrap route
+        // (daemon/routes/devices_pair.mjs) approves its device outright with
+        // role:'', which moves the request OUT of `pending` — so the re-stamp
+        // further down never runs for that device and its signed capability
+        // would be discarded forever: a browser that declared itself read-only
+        // would hold full approver authority just for winning the bootstrap
+        // slot. Monotonic exactly like the pending path: only an EMPTY stored
+        // role is filled, and only from the signed payload, so a device can
+        // neither widen an operator-reviewed role nor clear one.
+        //
+        // Written through the store's own backing data because PairingStore
+        // exposes no capability setter; approve()/rotate() are the only writers
+        // and both would mint a new token (and rotate() would drop expiresAt),
+        // which must not be a side effect of a plain reconnect.
+        if (info && !info.role && role) {
+          const rec = st._data.devices[deviceId];
+          if (rec) {
+            rec.role = role;
+            if (scopes.length && !(Array.isArray(rec.scopes) && rec.scopes.length)) rec.scopes = scopes;
+            st._persist();
+          }
+        }
+        return writeJson(res, 200, { ok: true, deviceId, token: st.tokenFor(deviceId) });
+      }
+
       // Not approved — record intent once (don't pile up duplicates) and
       // tell the device to wait for the operator's approval.
       const existing = st.pendingForDevice(deviceId);
@@ -304,11 +339,13 @@ export function createGateway({ configDir, challengeRegistry, nowFn = Date.now, 
         // key, so it could reconnect with role:'' AFTER the operator reviews
         // "read-only" in `pompos nodes pending` but BEFORE they approve, and
         // silently downgrade the stored role to '' (which the exec-resolve
-        // gate treats as full authority, since it denies only an explicit
-        // "read-only"). This also blocks widening to some OTHER non-empty
-        // role the operator never saw. The bootstrap route's role:'' placeholder
-        // still gets filled from the first signed connect, which is all
-        // finding 2 required.
+        // gate still admits — it is the legacy/bootstrap value, see
+        // RESOLVE_ROLES). This also blocks widening to some OTHER non-empty
+        // role the operator never saw. This re-stamp covers ONLY a request that
+        // is still pending: once a request is approved it leaves `pending`, so a
+        // role:'' placeholder on an ALREADY-APPROVED device (what the bootstrap
+        // route leaves behind) is reconciled in the isApproved() branch above,
+        // not here.
         const nextRole = existing.role ? existing.role : role;
         const nextScopes = Array.isArray(existing.scopes) && existing.scopes.length ? existing.scopes : scopes;
         st.restampPending(existing.requestId, { role: nextRole, scopes: nextScopes });

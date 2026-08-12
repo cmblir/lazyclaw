@@ -64,7 +64,9 @@ Versioning: [SemVer](https://semver.org/).
   per install — revoking every device does not reopen it, so recovery on a
   fully revoked install is `pompos nodes approve <requestId>`. The browser's
   private key is non-extractable and never leaves the browser; its device token
-  is held in memory and re-minted on demand rather than stored.
+  is held in memory and re-minted on demand rather than stored (a device whose
+  token has expired gets a genuinely fresh one from the handshake, instead of
+  the same dead token back).
 
 ### Fixed
 

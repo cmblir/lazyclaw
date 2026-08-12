@@ -469,6 +469,70 @@ test.describe('Phase 30 — gateway scope + TTL enforcement', () => {
     }
   });
 
+  // ── Final round, IMPORTANT — /gateway/connect used to answer
+  // `200 {ok:true, token}` with an ALREADY-EXPIRED token: isApproved() only
+  // tests that a token string exists, while verifyToken() enforces expiresAt.
+  // So the route handed back the same dead token the caller already had, every
+  // authenticated call 401'd, and web/ui/pairing.mjs's "pair it again to mint a
+  // new device token" advice was impossible to follow — pairing again runs this
+  // exact handshake. Reachable in production via `pompos nodes rotate <id>
+  // --ttl <ms>`. ─────────────────────────────────────────────────────────
+  test('a lapsed device token is re-minted by the handshake, not handed back dead', async () => {
+    const cfg = tmpDir('p30-expired-remint');
+    const da = await loadDeviceAuth();
+    const { PairingStore, ChallengeRegistry } = da;
+    const t0 = Date.now();
+    const keys = crypto.generateKeyPairSync('ed25519');
+    const challengeRegistry = new ChallengeRegistry();
+    const { nonce } = challengeRegistry.create();
+    const { deviceId, body } = signedConnect(da, keys, nonce, '', [], t0);
+
+    // Approved with a TTL that has already lapsed by t0.
+    const store = new PairingStore(cfg);
+    const { requestId } = store.requestPairing({ deviceId, role: '', scopes: [] });
+    const { token: dead } = store.approve(requestId, { ttlMs: 1000, nowMs: t0 - 60_000 });
+    expect(new PairingStore(cfg).verifyToken(deviceId, dead, t0)).toBe(false);
+
+    const { createGateway } = await loadGateway();
+    const gw = createGateway({ configDir: cfg, challengeRegistry, nowFn: () => t0 });
+    const res = mockRes();
+    await gw.handle(connectReq(), res, { readBody: async () => body });
+
+    expect(res.status).toBe(200);
+    const minted = (JSON.parse(res.body!) as { ok: boolean; token: string });
+    expect(minted.ok).toBe(true);
+    expect(minted.token).not.toBe(dead);
+    const after = new PairingStore(cfg);
+    expect(after.verifyToken(deviceId, minted.token, t0)).toBe(true);
+    expect(after.verifyToken(deviceId, dead, t0)).toBe(false);
+    gw.close();
+  });
+
+  test('a live device token is returned unchanged — the re-mint only fires on a lapse', async () => {
+    const cfg = tmpDir('p30-live-keeps-token');
+    const da = await loadDeviceAuth();
+    const { PairingStore, ChallengeRegistry } = da;
+    const t0 = Date.now();
+    const keys = crypto.generateKeyPairSync('ed25519');
+    const challengeRegistry = new ChallengeRegistry();
+    const { nonce } = challengeRegistry.create();
+    const { deviceId, body } = signedConnect(da, keys, nonce, '', [], t0);
+
+    const store = new PairingStore(cfg);
+    const { requestId } = store.requestPairing({ deviceId, role: '', scopes: [] });
+    const { token: live } = store.approve(requestId, { ttlMs: 60_000, nowMs: t0 });
+
+    const { createGateway } = await loadGateway();
+    const gw = createGateway({ configDir: cfg, challengeRegistry, nowFn: () => t0 });
+    const res = mockRes();
+    await gw.handle(connectReq(), res, { readBody: async () => body });
+
+    expect(res.status).toBe(200);
+    expect((JSON.parse(res.body!) as { token: string }).token).toBe(live);
+    expect(new PairingStore(cfg).deviceInfo(deviceId)?.expiresAt).toBe(t0 + 60_000);
+    gw.close();
+  });
+
   // ── Final round, IMPORTANT — the phase's headline security claim, asserted
   // SERVER-side: a dashboard bearer token without a device token resolves
   // nothing. The client-side test (tests/f-pairing-client.test.mjs) only proves
