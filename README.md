@@ -12,8 +12,6 @@ Chat in the terminal. Let the background learning loop distil your conversations
 npx @cmblir/pompos          # first run walks you through setup, then drops into chat
 ```
 
-<img width="1871" height="1146" alt="image" src="https://github.com/user-attachments/assets/365d05ac-cd24-4451-96b1-01fe82582a2b" />
-
 *한국어: [README.ko.md](./README.ko.md)*
 
 ---
@@ -43,7 +41,13 @@ The first run is a **phased wizard** (Hermes-style — get one clean chat workin
 
 Re-run it any time with `pompos setup` (`--only <steps>` / `--skip <steps>` re-run part of it), or `/setup` from inside chat.
 
-<img src="docs/screenshots/onboard.png" alt="pompos provider picker" width="680">
+For automation, `pompos onboard` takes the same values as flags and writes the
+config without prompting:
+
+```console
+$ pompos onboard --non-interactive --provider claude-cli
+{"ok":true,"written":"/tmp/pompos-demo/config.json","provider":"claude-cli","model":null,"hasApiKey":false}
+```
 
 ## $0 self-learning
 
@@ -225,7 +229,27 @@ pairs itself with the daemon.
 | `custom` | any OpenAI-compatible v1 endpoint (your base URL + key) |
 | `orchestrator` | meta-provider — planner + workers over any of the above |
 
-<img src="docs/screenshots/providers.png" alt="pompos providers info" width="680">
+`pompos providers info <name>` prints what a slot needs before you commit to it:
+
+```console
+$ pompos providers info anthropic
+{
+  "name": "anthropic",
+  "requiresApiKey": true,
+  "keyPrefix": "sk-ant-",
+  "docs": "Anthropic Messages API (pay-per-token, requires sk-ant- key). Supports streaming + extended thinking. For subscription billing, use the `claude-cli` provider instead.",
+  "endpoint": "https://api.anthropic.com/v1/messages",
+  "defaultModel": "claude-opus-4-8",
+  "suggestedModels": [
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
+    "claude-sonnet-4-5",
+    "claude-haiku-4-5"
+  ]
+}
+```
 
 ## What else it ships
 
